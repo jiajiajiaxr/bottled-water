@@ -1,0 +1,107 @@
+{
+    "folders": [
+        {
+            "path": "backend",
+            "name": "Backend"
+        },
+        {
+            "path": "frontend",
+            "name": "Frontend"
+        },
+        {
+            "path": "e2e",
+            "name": "E2E Tests"
+        },
+        {
+            "path": ".",
+            "name": "Root"
+        }
+    ],
+    "settings": {
+        "files.exclude": {
+            "**/__pycache__": true,
+            "**/.venv": true,
+            "**/node_modules": true,
+            "**/dist": true,
+            "**/.pytest_cache": true,
+            "**/.ruff_cache": true
+        }
+    },
+    "launch": {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "Debug Backend",
+                "type": "debugpy",
+                "request": "launch",
+                "module": "uvicorn",
+                "args": [
+                    "app.main:app",
+                    "--reload",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "8000"
+                ],
+                "cwd": "${workspaceFolder:Backend}",
+                "jinja": true,
+                "justMyCode": false
+            }
+        ]
+    },
+    "tasks": {
+        "version": "2.0.0",
+        "tasks": [
+            {
+                "label": "Start Backend",
+                "type": "shell",
+                "command": "uv run uvicorn app.main:app --reload",
+                "options": {
+                    "cwd": "${workspaceFolder:Backend}"
+                },
+                "problemMatcher": [],
+                "isBackground": true,
+                "presentation": {
+                    "panel": "dedicated",
+                    "group": "servers"
+                }
+            },
+            {
+                "label": "Start Frontend",
+                "type": "shell",
+                "command": "pnpm dev",
+                "options": {
+                    "cwd": "${workspaceFolder:Frontend}"
+                },
+                "problemMatcher": [],
+                "isBackground": true,
+                "presentation": {
+                    "panel": "dedicated",
+                    "group": "servers"
+                }
+            },
+            {
+                "label": "Start All",
+                "dependsOn": [
+                    "Start Backend",
+                    "Start Frontend"
+                ],
+                "dependsOrder": "parallel",
+                "problemMatcher": []
+            },
+            {
+                "label": "Backend Tests",
+                "type": "shell",
+                "command": "uv run pytest tests -q",
+                "options": {
+                    "cwd": "${workspaceFolder:Root}"
+                },
+                "problemMatcher": [],
+                "group": {
+                    "kind": "test",
+                    "isDefault": true
+                }
+            }
+        ]
+    }
+}
