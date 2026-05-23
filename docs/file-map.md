@@ -23,8 +23,9 @@ agenthub/
 - `backend/alembic.ini`：Alembic 配置。
 - `backend/alembic/env.py`：迁移运行环境，读取 SQLAlchemy metadata。
 - `backend/alembic/versions/*.py`：数据库迁移脚本。
-- `backend/requirements.txt`：运行依赖。
-- `backend/requirements-dev.txt`：测试和开发依赖。
+- `backend/pyproject.toml`：后端项目元数据、运行依赖和开发依赖。
+- `backend/uv.lock`：uv 锁文件，保证依赖解析可复现。
+- `backend/.python-version`：uv 使用的 Python 版本约束。
 
 ## 后端 core
 
@@ -146,4 +147,3 @@ agenthub/
 - `var/frontend.log`、`var/frontend.err.log`：前端运行日志。
 
 `var` 是本地运行数据目录，里面的内容不属于核心源码。
-

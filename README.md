@@ -307,11 +307,10 @@ DATABASE_URL=...
 
 ## 本地开发
 
-安装后端依赖：
+安装后端依赖。后端使用 `uv` 管理 Python 3.11 运行时和依赖锁定：
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -r backend\requirements.txt -r backend\requirements-dev.txt
+uv sync --project backend --extra dev
 ```
 
 安装前端依赖：
@@ -324,15 +323,13 @@ corepack pnpm install
 运行迁移：
 
 ```powershell
-cd backend
-..\.venv\Scripts\python -c "from alembic.config import main; main(argv=['upgrade','head'])"
+uv run --project backend --directory backend alembic upgrade head
 ```
 
 启动后端：
 
 ```powershell
-cd backend
-..\.venv\Scripts\python -m uvicorn app.main:app
+uv run --project backend --directory backend uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 启动前端：
@@ -347,7 +344,7 @@ corepack pnpm dev
 后端：
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q
+uv run --project backend pytest -q
 ```
 
 前端：

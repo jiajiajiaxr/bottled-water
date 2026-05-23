@@ -2799,6 +2799,7 @@ function PlatformControlDrawer({
   const [auditStats, setAuditStats] = useState<{ total: number; high_risk: number; by_action: Record<string, number> }>();
   const [modelTestResult, setModelTestResult] = useState("");
   const [skillTestResult, setSkillTestResult] = useState("");
+  const [skillSearch, setSkillSearch] = useState("");
   const [toolInvokeResult, setToolInvokeResult] = useState("");
   const [sandboxResult, setSandboxResult] = useState<SandboxCommandResult>();
   const [mcpInvocationResult, setMcpInvocationResult] = useState("");
@@ -2811,6 +2812,15 @@ function PlatformControlDrawer({
   const { message } = AntApp.useApp();
 
   const activeWorkspace = workspaces.find((item) => item.id === selectedWorkspace) ?? workspaces[0];
+  const filteredSkills = useMemo(() => {
+    const keyword = skillSearch.trim().toLowerCase();
+    if (!keyword) return skills;
+    return skills.filter((skill) =>
+      [skill.name, skill.description, skill.category, skill.scope, skill.source, ...(skill.tools ?? [])]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(keyword))
+    );
+  }, [skills, skillSearch]);
 
   const parseList = (value?: string) =>
     String(value ?? "")
@@ -3768,7 +3778,7 @@ function PlatformControlDrawer({
             label: "Skills",
             children: (
               <div className="workspace-grid">
-                <Card title="Skills 管理">
+                <Card title="创建 Skill">
                   <Form
                     form={skillForm}
                     layout="vertical"
@@ -3855,7 +3865,22 @@ function PlatformControlDrawer({
                     </Space>
                   </Form>
                 </Card>
-                <Card title="Skill 目录与 MCP 导入">
+                <Card title="Skill 目录">
+                  <Flex justify="space-between" align="center" wrap="wrap" gap={8} style={{ marginBottom: 12 }}>
+                    <Input.Search
+                      allowClear
+                      style={{ maxWidth: 340 }}
+                      placeholder="搜索 Skill 名称、分类或工具"
+                      value={skillSearch}
+                      onChange={(event) => setSkillSearch(event.target.value)}
+                    />
+                    <Space>
+                      <Tag>{filteredSkills.length}/{skills.length} Skills</Tag>
+                      <Button icon={<ReloadOutlined />} onClick={loadPlatformResources}>
+                        刷新
+                      </Button>
+                    </Space>
+                  </Flex>
                   <Form
                     form={skillImportForm}
                     layout="vertical"
@@ -3887,7 +3912,7 @@ function PlatformControlDrawer({
                   <Divider />
                   {skillTestResult && <div className="result-box">{skillTestResult}</div>}
                   <List
-                    dataSource={skills}
+                    dataSource={filteredSkills}
                     locale={{ emptyText: "暂无 Skills" }}
                     renderItem={(skill) => (
                       <List.Item
@@ -3902,27 +3927,33 @@ function PlatformControlDrawer({
                           >
                             测试
                           </Button>,
-                          skill.created_by && (
-                            <Button
-                              key="delete"
-                              size="small"
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={() => {
-                                Modal.confirm({
-                                  title: `删除 Skill：${skill.name}`,
-                                  content: "删除后将不再出现在当前工作区 Skill 目录。",
-                                  okText: "删除",
-                                  okButtonProps: { danger: true },
-                                  onOk: async () => {
+                          <Button
+                            key="delete"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => {
+                              Modal.confirm({
+                                title: `删除 Skill：${skill.name}`,
+                                content: "删除后将不再出现在当前工作区 Skill 目录，也不能再授权给 Agent 使用。",
+                                okText: "删除",
+                                okButtonProps: { danger: true },
+                                onOk: async () => {
+                                  try {
                                     await api.deleteSkill(skill.id);
                                     setSkills((current) => current.filter((item) => item.id !== skill.id));
+                                    setSkillTestResult("");
                                     message.success("Skill 已删除");
+                                  } catch (error) {
+                                    message.error(error instanceof Error ? error.message : "删除失败");
+                                    throw error;
                                   }
-                                });
-                              }}
-                            />
-                          )
+                                }
+                              });
+                            }}
+                          >
+                            删除
+                          </Button>
                         ]}
                       >
                         <List.Item.Meta
@@ -3939,7 +3970,7 @@ function PlatformControlDrawer({
                             <Space direction="vertical" size={4}>
                               <Text type="secondary">{skill.description || "暂无描述"}</Text>
                               <Space size={[4, 4]} wrap>
-                                {skill.tools.map((tool) => (
+                                {(skill.tools ?? []).map((tool) => (
                                   <Tag key={tool}>{tool}</Tag>
                                 ))}
                               </Space>

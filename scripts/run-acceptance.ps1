@@ -6,24 +6,24 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ($ApiBaseUrl) {
-  python -m pytest tests --live-base-url $ApiBaseUrl
+  uv run --project backend pytest tests --live-base-url $ApiBaseUrl
 } else {
-  python -m pytest tests
+  uv run --project backend pytest tests
 }
 
 if (Test-Path "frontend/package.json") {
   Push-Location frontend
   try {
-    npm test -- --run
+    corepack pnpm vitest run
   } finally {
     Pop-Location
   }
 }
 
 if ($WebBaseUrl) {
-  Push-Location e2e
+  Push-Location frontend
   try {
-    npx playwright test --config playwright.config.ts
+    corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
   } finally {
     Pop-Location
   }

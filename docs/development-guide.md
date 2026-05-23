@@ -31,11 +31,10 @@ ARK_API_KEY=...
 
 ## 2. 安装依赖
 
-后端：
+后端使用 `uv` 管理 Python 3.11 运行时、虚拟环境和依赖锁定：
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -r backend\requirements.txt -r backend\requirements-dev.txt
+uv sync --project backend --extra dev
 ```
 
 前端：
@@ -48,8 +47,7 @@ corepack pnpm install
 ## 3. 数据库迁移
 
 ```powershell
-cd backend
-..\.venv\Scripts\python -c "from alembic.config import main; main(argv=['upgrade','head'])"
+uv run --project backend --directory backend alembic upgrade head
 ```
 
 迁移脚本位于：
@@ -69,8 +67,7 @@ cd backend
 后端：
 
 ```powershell
-cd backend
-..\.venv\Scripts\python -m uvicorn app.main:app
+uv run --project backend --directory backend uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 前端：
@@ -87,7 +84,7 @@ corepack pnpm dev
 后端：
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q
+uv run --project backend pytest -q
 ```
 
 前端：
@@ -230,4 +227,3 @@ send message
 - 工作流节点配置丢失：查 `conversations.py` normalize 是否保留 `type/config`。
 - 产物打不开：查 `Artifact.content`、`artifact_exports.py` 和 `PreviewPanel`。
 - MCP 调用失败：先 probe，再看 `McpToolInvocation` 记录。
-

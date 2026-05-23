@@ -2,7 +2,7 @@
 name = "agenthub-backend"
 version = "0.1.0"
 description = "AgentHub multi-agent collaboration backend"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "alembic>=1.13.3",
     "email-validator>=2.2.0",
@@ -31,10 +31,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["..", "."]
 asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-
