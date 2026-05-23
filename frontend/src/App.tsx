@@ -369,7 +369,7 @@ function MarkdownContent({ text }: { text: string }) {
     paragraph.push(line.trim());
   }
   flushParagraph();
-  return <div className="markdown-content">{blocks.length ? blocks : <p className="typing-placeholder">Waiting for reply...</p>}</div>;
+  return <div className="markdown-content">{blocks.length ? blocks : <p className="typing-placeholder">正在组织回复...</p>}</div>;
 }
 
 function participantName(item: Conversation["participants"][number]) {
