@@ -61,7 +61,6 @@ import {
   UserAddOutlined,
 } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import {
   BrowserRouter,
   Navigate,
@@ -119,7 +118,7 @@ import {
   isLikelyArtifactRequest,
   participantName,
 } from "./lib/message";
-import { renderInlineMarkdown, MarkdownContent } from "./lib/markdown";
+import { MarkdownContent } from "./lib/markdown";
 import { buildPreviewDocument } from "./lib/preview";
 import { diffLines } from "./lib/diff";
 import {
