@@ -27,7 +27,7 @@ import {
   Tag,
   Tooltip,
   Typography,
-  Upload
+  Upload,
 } from "antd";
 import type { UploadRequestOption } from "rc-upload/lib/interface";
 import {
@@ -58,7 +58,7 @@ import {
   SendOutlined,
   TeamOutlined,
   ToolOutlined,
-  UserAddOutlined
+  UserAddOutlined,
 } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -70,7 +70,7 @@ import {
   useLocation,
   useNavigate,
   useParams,
-  useSearchParams
+  useSearchParams,
 } from "react-router-dom";
 import { api } from "./api";
 import type {
@@ -101,7 +101,7 @@ import type {
   User,
   Workspace,
   WorkflowRun,
-  WorkspaceArtifact
+  WorkspaceArtifact,
 } from "./types";
 
 const { Header, Sider, Content } = Layout;
@@ -109,21 +109,31 @@ const { Text, Title, Paragraph } = Typography;
 const { TextArea } = Input;
 
 const CONVERSATION_CATEGORY_OPTIONS = ["Default"];
-const LEGACY_DEFAULT_CONVERSATION_CATEGORIES = new Set(["工厂", "字节跳动", "项目", "个人", "Demo", "归档整理", "Factory"]);
+const LEGACY_DEFAULT_CONVERSATION_CATEGORIES = new Set([
+  "工厂",
+  "字节跳动",
+  "项目",
+  "个人",
+  "Demo",
+  "归档整理",
+  "Factory",
+]);
 
 function normalizeConversationCategory(value?: string) {
   const name = value?.trim();
   return name || "Default";
 }
 
-function mergeConversationCategories(...groups: Array<Array<string | undefined>>) {
+function mergeConversationCategories(
+  ...groups: Array<Array<string | undefined>>
+) {
   return Array.from(
     new Set(
       groups
         .flat()
         .map((name) => normalizeConversationCategory(name))
-        .filter(Boolean)
-    )
+        .filter(Boolean),
+    ),
   );
 }
 
@@ -133,7 +143,7 @@ const WORKFLOW_NODE_TYPE_OPTIONS = [
   { label: "Condition", value: "condition" },
   { label: "Loop", value: "loop" },
   { label: "Review", value: "review" },
-  { label: "Artifact", value: "artifact" }
+  { label: "Artifact", value: "artifact" },
 ];
 const WORKFLOW_NODE_TYPE_LABEL: Record<string, string> = {
   start: "Start",
@@ -145,11 +155,20 @@ const WORKFLOW_NODE_TYPE_LABEL: Record<string, string> = {
   loop: "Loop",
   review: "Review",
   artifact: "Artifact",
-  end: "End"
+  end: "End",
 };
 
 function workflowNodeType(node: WorkflowNode) {
-  return node.type || (node.role === "reviewer" ? "review" : node.role === "artifact" ? "artifact" : node.role === "input" ? "start" : "agent");
+  return (
+    node.type ||
+    (node.role === "reviewer"
+      ? "review"
+      : node.role === "artifact"
+        ? "artifact"
+        : node.role === "input"
+          ? "start"
+          : "agent")
+  );
 }
 
 function createWorkflowNode(type: string, agent?: Agent): WorkflowNode {
@@ -161,7 +180,7 @@ function createWorkflowNode(type: string, agent?: Agent): WorkflowNode {
     role: type === "review" ? "reviewer" : type,
     status: "ready",
     meta: "Manual step",
-    config: {}
+    config: {},
   };
   if (type === "agent" || type === "review") {
     base.agent_id = agent?.id;
@@ -171,7 +190,10 @@ function createWorkflowNode(type: string, agent?: Agent): WorkflowNode {
     base.config = { tool_name: "file.read" };
     base.meta = "Call an authorized tool";
   } else if (type === "condition") {
-    base.config = { expression: "input.includes('review')", branches: ["true", "false"] };
+    base.config = {
+      expression: "input.includes('review')",
+      branches: ["true", "false"],
+    };
     base.meta = "Route by expression";
   } else if (type === "loop") {
     base.config = { max_iterations: 3 };
@@ -189,15 +211,17 @@ function formatTime(value?: string) {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
   }).format(new Date(value));
 }
 
-function makeMessage(partial: Omit<ChatMessage, "id" | "createdAt">): ChatMessage {
+function makeMessage(
+  partial: Omit<ChatMessage, "id" | "createdAt">,
+): ChatMessage {
   return {
     ...partial,
     id: `local-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
   };
 }
 
@@ -211,11 +235,14 @@ function messageAttachments(message: ChatMessage): MessageAttachment[] {
   const rawAttachments = message.rawContent?.attachments;
   const items = [
     ...(message.attachments ?? []),
-    ...(Array.isArray(rawAttachments) ? (rawAttachments as MessageAttachment[]) : [])
+    ...(Array.isArray(rawAttachments)
+      ? (rawAttachments as MessageAttachment[])
+      : []),
   ];
   const seen = new Set<string>();
   return items.filter((item) => {
-    const key = item.file_id ?? item.id ?? item.filename ?? item.original_filename;
+    const key =
+      item.file_id ?? item.id ?? item.filename ?? item.original_filename;
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -223,22 +250,51 @@ function messageAttachments(message: ChatMessage): MessageAttachment[] {
 }
 
 function attachmentName(file: MessageAttachment) {
-  return file.original_filename ?? file.filename ?? file.file_id ?? file.id ?? "附件";
+  return (
+    file.original_filename ?? file.filename ?? file.file_id ?? file.id ?? "附件"
+  );
 }
 
 const INTERNAL_SECTION_TITLES = new Set(["任务拆解", "执行过程", "合规审查"]);
-const FINAL_SECTION_TITLES = new Set(["最终产物", "最终回答", "最终回复", "最终结果", "正式回复", "回复"]);
-const RUNNING_TASK_STATUSES = new Set(["PENDING", "QUEUED", "EXECUTING", "RUNNING", "REVIEW_PENDING", "REVIEWING", "STREAMING"]);
+const FINAL_SECTION_TITLES = new Set([
+  "最终产物",
+  "最终回答",
+  "最终回复",
+  "最终结果",
+  "正式回复",
+  "回复",
+]);
+const RUNNING_TASK_STATUSES = new Set([
+  "PENDING",
+  "QUEUED",
+  "EXECUTING",
+  "RUNNING",
+  "REVIEW_PENDING",
+  "REVIEWING",
+  "STREAMING",
+]);
 
 function sectionTitle(line: string): { title?: string; remainder: string } {
-  const clean = line.replace(/^\s*(?:#{1,6}\s*)?(?:\d+[.、)]\s*)?/, "").trim().replace(/^\*+|\*+$/g, "").trim();
+  const clean = line
+    .replace(/^\s*(?:#{1,6}\s*)?(?:\d+[.、)]\s*)?/, "")
+    .trim()
+    .replace(/^\*+|\*+$/g, "")
+    .trim();
   if (!clean) return { remainder: "" };
-  const separatorIndexes = [clean.indexOf("："), clean.indexOf(":")].filter((index) => index >= 0);
-  const separatorIndex = separatorIndexes.length ? Math.min(...separatorIndexes) : -1;
+  const separatorIndexes = [clean.indexOf("："), clean.indexOf(":")].filter(
+    (index) => index >= 0,
+  );
+  const separatorIndex = separatorIndexes.length
+    ? Math.min(...separatorIndexes)
+    : -1;
   if (separatorIndex >= 0) {
     return {
-      title: clean.slice(0, separatorIndex).trim().replace(/^\*+|\*+$/g, "").trim(),
-      remainder: clean.slice(separatorIndex + 1).trim()
+      title: clean
+        .slice(0, separatorIndex)
+        .trim()
+        .replace(/^\*+|\*+$/g, "")
+        .trim(),
+      remainder: clean.slice(separatorIndex + 1).trim(),
     };
   }
   return { title: clean, remainder: "" };
@@ -251,7 +307,10 @@ function stripInternalAgentOutput(raw: string) {
   for (let index = 0; index < lines.length; index += 1) {
     const { title, remainder } = sectionTitle(lines[index]);
     if (title && FINAL_SECTION_TITLES.has(title)) {
-      return [remainder, ...lines.slice(index + 1)].filter(Boolean).join("\n").trim();
+      return [remainder, ...lines.slice(index + 1)]
+        .filter(Boolean)
+        .join("\n")
+        .trim();
     }
   }
   const visible: string[] = [];
@@ -294,15 +353,17 @@ function isLikelyArtifactRequest(text: string) {
     "预览",
     "部署",
     "代码",
-    "项目"
+    "项目",
   ].some((keyword) => value.includes(keyword));
 }
 
 function renderInlineMarkdown(text: string): ReactNode[] {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
   return parts.map((part, index) => {
-    if (part.startsWith("`") && part.endsWith("`")) return <code key={index}>{part.slice(1, -1)}</code>;
-    if (part.startsWith("**") && part.endsWith("**")) return <strong key={index}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith("`") && part.endsWith("`"))
+      return <code key={index}>{part.slice(1, -1)}</code>;
+    if (part.startsWith("**") && part.endsWith("**"))
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
     return <span key={index}>{part}</span>;
   });
 }
@@ -314,7 +375,11 @@ function MarkdownContent({ text }: { text: string }) {
   const lines = visibleText.split(/\r?\n/);
   const flushParagraph = () => {
     if (!paragraph.length) return;
-    blocks.push(<p key={`p-${blocks.length}`}>{renderInlineMarkdown(paragraph.join(" "))}</p>);
+    blocks.push(
+      <p key={`p-${blocks.length}`}>
+        {renderInlineMarkdown(paragraph.join(" "))}
+      </p>,
+    );
     paragraph.length = 0;
   };
   for (let index = 0; index < lines.length; index += 1) {
@@ -327,7 +392,11 @@ function MarkdownContent({ text }: { text: string }) {
         code.push(lines[index]);
         index += 1;
       }
-      blocks.push(<pre key={`code-${blocks.length}`}><code>{code.join("\n")}</code></pre>);
+      blocks.push(
+        <pre key={`code-${blocks.length}`}>
+          <code>{code.join("\n")}</code>
+        </pre>,
+      );
       continue;
     }
     if (!line.trim()) {
@@ -339,9 +408,12 @@ function MarkdownContent({ text }: { text: string }) {
       flushParagraph();
       const level = Math.min(heading[1].length, 4);
       const content = renderInlineMarkdown(heading[2]);
-      if (level === 1) blocks.push(<h3 key={`h-${blocks.length}`}>{content}</h3>);
-      else if (level === 2) blocks.push(<h4 key={`h-${blocks.length}`}>{content}</h4>);
-      else if (level === 3) blocks.push(<h5 key={`h-${blocks.length}`}>{content}</h5>);
+      if (level === 1)
+        blocks.push(<h3 key={`h-${blocks.length}`}>{content}</h3>);
+      else if (level === 2)
+        blocks.push(<h4 key={`h-${blocks.length}`}>{content}</h4>);
+      else if (level === 3)
+        blocks.push(<h5 key={`h-${blocks.length}`}>{content}</h5>);
       else blocks.push(<h6 key={`h-${blocks.length}`}>{content}</h6>);
       continue;
     }
@@ -353,7 +425,13 @@ function MarkdownContent({ text }: { text: string }) {
         index += 1;
       }
       index -= 1;
-      blocks.push(<ul key={`ul-${blocks.length}`}>{listItems.map((item, itemIndex) => <li key={itemIndex}>{renderInlineMarkdown(item)}</li>)}</ul>);
+      blocks.push(
+        <ul key={`ul-${blocks.length}`}>
+          {listItems.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ul>,
+      );
       continue;
     }
     if (/^\s*\d+[.)]\s+/.test(line)) {
@@ -363,13 +441,27 @@ function MarkdownContent({ text }: { text: string }) {
         index += 1;
       }
       index -= 1;
-      blocks.push(<ol key={`ol-${blocks.length}`}>{listItems.map((item, itemIndex) => <li key={itemIndex}>{renderInlineMarkdown(item)}</li>)}</ol>);
+      blocks.push(
+        <ol key={`ol-${blocks.length}`}>
+          {listItems.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ol>,
+      );
       continue;
     }
     paragraph.push(line.trim());
   }
   flushParagraph();
-  return <div className="markdown-content">{blocks.length ? blocks : <p className="typing-placeholder">正在组织语言...</p>}</div>;
+  return (
+    <div className="markdown-content">
+      {blocks.length ? (
+        blocks
+      ) : (
+        <p className="typing-placeholder">正在组织语言...</p>
+      )}
+    </div>
+  );
 }
 
 function participantName(item: Conversation["participants"][number]) {
@@ -378,7 +470,13 @@ function participantName(item: Conversation["participants"][number]) {
 
 function buildPreviewDocument(code: string) {
   const escaped = code.replace(/[&<>"']/g, (char) => {
-    const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
+    const map: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;",
+    };
     return map[char];
   });
 
@@ -422,7 +520,12 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const { message } = AntApp.useApp();
 
-  const submit = async (values: { email?: string; username?: string; display_name?: string; password?: string }) => {
+  const submit = async (values: {
+    email?: string;
+    username?: string;
+    display_name?: string;
+    password?: string;
+  }) => {
     setLoading(true);
     try {
       if (mode === "register") {
@@ -430,13 +533,19 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
           await api.register({
             email: values.email ?? "",
             username: values.username || values.email?.split("@")[0] || "",
-            display_name: values.display_name || values.username || values.email,
-            password: values.password ?? ""
-          })
+            display_name:
+              values.display_name || values.username || values.email,
+            password: values.password ?? "",
+          }),
         );
         message.success("注册成功，已登录");
       } else {
-        onLogin(await api.login(values.email ?? "demo", values.password ?? "agenthub"));
+        onLogin(
+          await api.login(
+            values.email ?? "demo",
+            values.password ?? "agenthub",
+          ),
+        );
       }
     } catch (error) {
       message.error(error instanceof Error ? error.message : "登录失败");
@@ -460,7 +569,9 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
         <div>
           <Text type="secondary">AgentHub</Text>
           <Title level={1}>IM 多 Agent 工作台</Title>
-          <Paragraph>登录后进入会话、Agent、文件、知识库和部署一体化协作空间。</Paragraph>
+          <Paragraph>
+            登录后进入会话、Agent、文件、知识库和部署一体化协作空间。
+          </Paragraph>
         </div>
         <Segmented
           block
@@ -469,7 +580,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
           onChange={(value) => setMode(value as "login" | "register")}
           options={[
             { label: "登录", value: "login" },
-            { label: "注册", value: "register" }
+            { label: "注册", value: "register" },
           ]}
         />
         <Form key={mode} layout="vertical" onFinish={submit}>
@@ -477,13 +588,26 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
             label="Email"
             name="email"
             initialValue={mode === "login" ? "demo" : undefined}
-            rules={mode === "register" ? [{ required: true, type: "email", message: "请输入有效邮箱" }] : undefined}
+            rules={
+              mode === "register"
+                ? [{ required: true, type: "email", message: "请输入有效邮箱" }]
+                : undefined
+            }
           >
-            <Input size="large" prefix={<LoginOutlined />} placeholder="demo 或邮箱" aria-label="email" />
+            <Input
+              size="large"
+              prefix={<LoginOutlined />}
+              placeholder="demo 或邮箱"
+              aria-label="email"
+            />
           </Form.Item>
           {mode === "register" && (
             <>
-              <Form.Item label="用户名" name="username" rules={[{ required: true, message: "请输入用户名" }]}>
+              <Form.Item
+                label="用户名"
+                name="username"
+                rules={[{ required: true, message: "请输入用户名" }]}
+              >
                 <Input size="large" placeholder="agenthub-user" />
               </Form.Item>
               <Form.Item label="显示名称" name="display_name">
@@ -495,15 +619,35 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
             label="Password"
             name="password"
             initialValue={mode === "login" ? "agenthub" : undefined}
-            rules={mode === "register" ? [{ required: true, min: 6, message: "密码至少 6 位" }] : undefined}
+            rules={
+              mode === "register"
+                ? [{ required: true, min: 6, message: "密码至少 6 位" }]
+                : undefined
+            }
           >
-            <Input.Password size="large" placeholder="agenthub" aria-label="password" />
+            <Input.Password
+              size="large"
+              placeholder="agenthub"
+              aria-label="password"
+            />
           </Form.Item>
           <Space className="login-actions">
-            <Button type="primary" htmlType="submit" size="large" loading={loading}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              size="large"
+              loading={loading}
+            >
               {mode === "register" ? "注册并登录" : "登录"}
             </Button>
-            <Button size="large" icon={<ApiOutlined />} onClick={demo} loading={loading} data-testid="demo-login" disabled={mode === "register"}>
+            <Button
+              size="large"
+              icon={<ApiOutlined />}
+              onClick={demo}
+              loading={loading}
+              data-testid="demo-login"
+              disabled={mode === "register"}
+            >
               演示用户
             </Button>
           </Space>
@@ -524,7 +668,7 @@ function ConversationSidebar({
   onTogglePin,
   onToggleArchive,
   onDelete,
-  onEdit
+  onEdit,
 }: {
   conversations: Conversation[];
   activeId?: string;
@@ -547,21 +691,41 @@ function ConversationSidebar({
   const [editForm] = Form.useForm();
 
   const folders = useMemo(() => {
-    const names = conversations.map((item) => item.folder || item.category || "Default");
+    const names = conversations.map(
+      (item) => item.folder || item.category || "Default",
+    );
     return ["all", ...mergeConversationCategories(categoryOptions, names)];
   }, [categoryOptions, conversations]);
 
   const selectCategoryOptions = useMemo(() => {
-    const existing = conversations.map((item) => item.folder || item.category || "Default");
-    return mergeConversationCategories(categoryOptions, existing).map((name) => ({ label: name, value: name }));
+    const existing = conversations.map(
+      (item) => item.folder || item.category || "Default",
+    );
+    return mergeConversationCategories(categoryOptions, existing).map(
+      (name) => ({ label: name, value: name }),
+    );
   }, [categoryOptions, conversations]);
 
   const visible = useMemo(() => {
     return conversations
-      .filter((item) => (filter === "archived" ? item.archived : !item.archived))
-      .filter((item) => folder === "all" || (item.folder || item.category || "Default") === folder)
-      .filter((item) => `${item.title} ${item.lastMessage} ${item.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase()))
-      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || +new Date(b.updatedAt) - +new Date(a.updatedAt));
+      .filter((item) =>
+        filter === "archived" ? item.archived : !item.archived,
+      )
+      .filter(
+        (item) =>
+          folder === "all" ||
+          (item.folder || item.category || "Default") === folder,
+      )
+      .filter((item) =>
+        `${item.title} ${item.lastMessage} ${item.tags.join(" ")}`
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+      )
+      .sort(
+        (a, b) =>
+          Number(b.pinned) - Number(a.pinned) ||
+          +new Date(b.updatedAt) - +new Date(a.updatedAt),
+      );
   }, [conversations, filter, folder, query]);
 
   const submitNewFolder = () => {
@@ -582,10 +746,21 @@ function ConversationSidebar({
         </div>
         <Space>
           <Tooltip title="新建单聊">
-            <Button shape="circle" type="primary" icon={<UserAddOutlined />} onClick={() => onCreate(false)} data-testid="new-chat" />
+            <Button
+              shape="circle"
+              type="primary"
+              icon={<UserAddOutlined />}
+              onClick={() => onCreate(false)}
+              data-testid="new-chat"
+            />
           </Tooltip>
           <Tooltip title="新建群聊">
-            <Button shape="circle" icon={<TeamOutlined />} onClick={() => onCreate(true)} data-testid="new-group-chat" />
+            <Button
+              shape="circle"
+              icon={<TeamOutlined />}
+              onClick={() => onCreate(true)}
+              data-testid="new-group-chat"
+            />
           </Tooltip>
         </Space>
       </div>
@@ -602,14 +777,19 @@ function ConversationSidebar({
         onChange={(value) => setFilter(value as "active" | "archived")}
         options={[
           { label: "进行中", value: "active" },
-          { label: "归档", value: "archived" }
+          { label: "归档", value: "archived" },
         ]}
       />
       <div className="conversation-folders">
         <div className="folder-section-head">
           <Text type="secondary">文件夹</Text>
           <Tooltip title="新建分类">
-            <Button size="small" shape="circle" icon={<FolderAddOutlined />} onClick={() => setCreatingFolder((value) => !value)} />
+            <Button
+              size="small"
+              shape="circle"
+              icon={<FolderAddOutlined />}
+              onClick={() => setCreatingFolder((value) => !value)}
+            />
           </Tooltip>
         </div>
         {creatingFolder && (
@@ -625,7 +805,11 @@ function ConversationSidebar({
           />
         )}
         {folders.map((name) => (
-          <button key={name} className={`folder-item ${folder === name ? "is-active" : ""}`} onClick={() => setFolder(name)}>
+          <button
+            key={name}
+            className={`folder-item ${folder === name ? "is-active" : ""}`}
+            onClick={() => setFolder(name)}
+          >
             {name === "all" ? <InboxOutlined /> : <FolderOpenOutlined />}
             <span>{name === "all" ? "All" : name}</span>
           </button>
@@ -634,98 +818,120 @@ function ConversationSidebar({
       <List
         className="conversation-list"
         dataSource={visible}
-        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无会话" /> }}
+        locale={{
+          emptyText: (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="暂无会话"
+            />
+          ),
+        }}
         renderItem={(item) => {
           const running = runningConversationIds.has(item.id);
           return (
-          <div
-            role="button"
-            tabIndex={0}
-            className={`conversation-item ${item.id === activeId ? "is-active" : ""} ${running ? "is-running" : ""}`}
-            onClick={() => onSelect(item.id)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") onSelect(item.id);
-            }}
-          >
-            <div className="conversation-main">
-              <Flex justify="space-between" align="center">
-                <Text strong ellipsis>
-                  {item.title}
+            <div
+              role="button"
+              tabIndex={0}
+              className={`conversation-item ${item.id === activeId ? "is-active" : ""} ${running ? "is-running" : ""}`}
+              onClick={() => onSelect(item.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ")
+                  onSelect(item.id);
+              }}
+            >
+              <div className="conversation-main">
+                <Flex justify="space-between" align="center">
+                  <Text strong ellipsis>
+                    {item.title}
+                  </Text>
+                  <Text type="secondary" className="time">
+                    {formatTime(item.updatedAt)}
+                  </Text>
+                </Flex>
+                <Text type="secondary" ellipsis className="last-message">
+                  {item.lastMessage || (running ? "正在回答..." : "")}
                 </Text>
-                <Text type="secondary" className="time">
-                  {formatTime(item.updatedAt)}
-                </Text>
-              </Flex>
-              <Text type="secondary" ellipsis className="last-message">
-                {item.lastMessage || (running ? "正在回答..." : "")}
-              </Text>
-              <Space size={[4, 4]} wrap>
-                {running && <Tag color="processing">正在回答</Tag>}
-                <Tag icon={item.chat_type === "group" ? <TeamOutlined /> : <MessageOutlined />}>
-                  {item.chat_type === "group" ? `${item.agent_count ?? item.participants.length} Agent` : "单聊"}
-                </Tag>
-                {item.tags.map((tag) => (
-                  <Tag key={tag}>{tag}</Tag>
-                ))}
-                {(item.folder || item.category) && <Tag color="purple">{item.folder || item.category}</Tag>}
-                {item.unread > 0 && <Badge count={item.unread} size="small" />}
-              </Space>
-            </div>
-            <Space direction="vertical" size={6}>
-              <Tooltip title={item.pinned ? "取消置顶" : "置顶"}>
-                <Button
-                  size="small"
-                  shape="circle"
-                  icon={item.pinned ? <PushpinFilled /> : <PushpinOutlined />}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onTogglePin(item);
-                  }}
-                />
-              </Tooltip>
-              <Tooltip title={item.archived ? "移出归档" : "归档"}>
-                <Button
-                  size="small"
-                  shape="circle"
-                  icon={<InboxOutlined />}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onToggleArchive(item);
-                  }}
-                />
-              </Tooltip>
-              <Tooltip title="Edit">
-                <Button
-                  size="small"
-                  shape="circle"
-                  icon={<EditOutlined />}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setEditing(item);
-                    editForm.setFieldsValue({
-                      title: item.title,
-                      folder: item.folder || item.category || "Default",
-                      remark: item.remark || ""
-                    });
-                  }}
-                />
-              </Tooltip>
-              {item.archived && (
-                <Tooltip title="删除归档">
+                <Space size={[4, 4]} wrap>
+                  {running && <Tag color="processing">正在回答</Tag>}
+                  <Tag
+                    icon={
+                      item.chat_type === "group" ? (
+                        <TeamOutlined />
+                      ) : (
+                        <MessageOutlined />
+                      )
+                    }
+                  >
+                    {item.chat_type === "group"
+                      ? `${item.agent_count ?? item.participants.length} Agent`
+                      : "单聊"}
+                  </Tag>
+                  {item.tags.map((tag) => (
+                    <Tag key={tag}>{tag}</Tag>
+                  ))}
+                  {(item.folder || item.category) && (
+                    <Tag color="purple">{item.folder || item.category}</Tag>
+                  )}
+                  {item.unread > 0 && (
+                    <Badge count={item.unread} size="small" />
+                  )}
+                </Space>
+              </div>
+              <Space direction="vertical" size={6}>
+                <Tooltip title={item.pinned ? "取消置顶" : "置顶"}>
                   <Button
                     size="small"
-                    danger
                     shape="circle"
-                    icon={<DeleteOutlined />}
+                    icon={item.pinned ? <PushpinFilled /> : <PushpinOutlined />}
                     onClick={(event) => {
                       event.stopPropagation();
-                      onDelete(item);
+                      onTogglePin(item);
                     }}
                   />
                 </Tooltip>
-              )}
-            </Space>
-          </div>
+                <Tooltip title={item.archived ? "移出归档" : "归档"}>
+                  <Button
+                    size="small"
+                    shape="circle"
+                    icon={<InboxOutlined />}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onToggleArchive(item);
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title="Edit">
+                  <Button
+                    size="small"
+                    shape="circle"
+                    icon={<EditOutlined />}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setEditing(item);
+                      editForm.setFieldsValue({
+                        title: item.title,
+                        folder: item.folder || item.category || "Default",
+                        remark: item.remark || "",
+                      });
+                    }}
+                  />
+                </Tooltip>
+                {item.archived && (
+                  <Tooltip title="删除归档">
+                    <Button
+                      size="small"
+                      danger
+                      shape="circle"
+                      icon={<DeleteOutlined />}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDelete(item);
+                      }}
+                    />
+                  </Tooltip>
+                )}
+              </Space>
+            </div>
           );
         }}
       />
@@ -765,7 +971,7 @@ function MessageBubble({
   onQuote,
   onRegenerate,
   onCopy,
-  onPreview
+  onPreview,
 }: {
   message: ChatMessage;
   quoted?: ChatMessage;
@@ -775,16 +981,26 @@ function MessageBubble({
   onPreview: (message: ChatMessage) => void;
 }) {
   const isUser = message.role === "user";
-  const isEvent = message.kind === "event" || message.role === "system" || message.role === "tool";
+  const isEvent =
+    message.kind === "event" ||
+    message.role === "system" ||
+    message.role === "tool";
   const attachments = messageAttachments(message);
   const [previewAttachment, setPreviewAttachment] = useState<
-    (MessageAttachment & { previewUrl?: string; previewText?: string; contentType?: string; previewError?: string }) | undefined
+    | (MessageAttachment & {
+        previewUrl?: string;
+        previewText?: string;
+        contentType?: string;
+        previewError?: string;
+      })
+    | undefined
   >();
   const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
     return () => {
-      if (previewAttachment?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(previewAttachment.previewUrl);
+      if (previewAttachment?.previewUrl?.startsWith("blob:"))
+        URL.revokeObjectURL(previewAttachment.previewUrl);
     };
   }, [previewAttachment?.previewUrl]);
 
@@ -793,23 +1009,32 @@ function MessageBubble({
       ...attachment,
       contentType: attachment.content_type,
       previewText: attachment.extracted_text,
-      previewUrl: attachment.public_url ?? attachment.url
+      previewUrl: attachment.public_url ?? attachment.url,
     };
     setPreviewAttachment(next);
     const fileId = attachment.file_id ?? attachment.id;
-    if (!fileId || attachment.extracted_text || attachment.public_url || attachment.url) return;
+    if (
+      !fileId ||
+      attachment.extracted_text ||
+      attachment.public_url ||
+      attachment.url
+    )
+      return;
     setPreviewLoading(true);
     try {
       const preview = await api.previewFile(fileId);
-      setPreviewAttachment((current) => (current ? { ...current, ...preview } : current));
+      setPreviewAttachment((current) =>
+        current ? { ...current, ...preview } : current,
+      );
     } catch (error) {
       setPreviewAttachment((current) =>
         current
           ? {
               ...current,
-              previewError: error instanceof Error ? error.message : "附件预览失败"
+              previewError:
+                error instanceof Error ? error.message : "附件预览失败",
             }
-          : current
+          : current,
       );
     } finally {
       setPreviewLoading(false);
@@ -829,7 +1054,11 @@ function MessageBubble({
     return (
       <div className="message-row from-agent">
         <Avatar className="message-avatar">{message.author.slice(0, 1)}</Avatar>
-        <button className="message-card preview-message-card preview-card-button" data-testid="preview-card" onClick={() => onPreview(message)}>
+        <button
+          className="message-card preview-message-card preview-card-button"
+          data-testid="preview-card"
+          onClick={() => onPreview(message)}
+        >
           <Flex justify="space-between" align="center">
             <Space>
               <EyeOutlined />
@@ -837,111 +1066,173 @@ function MessageBubble({
             </Space>
             <Tag color="blue">预览产物</Tag>
           </Flex>
-          <Paragraph type="secondary">产物已生成，点击打开右侧预览、编辑、Diff 对比和部署。</Paragraph>
+          <Paragraph type="secondary">
+            产物已生成，点击打开右侧预览、编辑、Diff 对比和部署。
+          </Paragraph>
         </button>
       </div>
     );
   }
 
-  const previewType = previewAttachment?.contentType ?? previewAttachment?.content_type ?? "";
-  const previewUrl = previewAttachment?.previewUrl ?? previewAttachment?.public_url ?? previewAttachment?.url;
+  const previewType =
+    previewAttachment?.contentType ?? previewAttachment?.content_type ?? "";
+  const previewUrl =
+    previewAttachment?.previewUrl ??
+    previewAttachment?.public_url ??
+    previewAttachment?.url;
 
   return (
     <>
-    <div className={`message-row ${isUser ? "from-user" : "from-agent"}`}>
-      <Avatar className="message-avatar">{message.author.slice(0, 1)}</Avatar>
-      <div className="message-card">
-        <Flex justify="space-between" align="center" gap={12}>
-          <Space>
-            <Text strong>{message.author}</Text>
-            <Tag>{message.kind}</Tag>
-            {message.streamState === "streaming" && <Tag color="processing">流式生成中</Tag>}
-          </Space>
-          <Text type="secondary" className="time">
-            {formatTime(message.createdAt)}
-          </Text>
-        </Flex>
-        {quoted && <div className="quote-block">{quoted.content}</div>}
-        <div className="message-content">
-          <MarkdownContent text={message.content} />
-        </div>
-        {attachments.length > 0 && (
-          <div className="message-attachments" data-testid="message-attachments">
-            {attachments.map((file) => (
-              <button
-                type="button"
-                key={file.file_id ?? file.id ?? attachmentName(file)}
-                className="message-attachment"
-                onClick={() => openAttachment(file)}
-                data-testid="message-attachment-preview"
-              >
-                <CloudUploadOutlined />
-                <span className="message-attachment-name">{attachmentName(file)}</span>
-                <span className="message-attachment-meta">
-                  {formatFileSize(file.size)} · {file.parse_status ?? "stored"}
-                </span>
-              </button>
-            ))}
+      <div className={`message-row ${isUser ? "from-user" : "from-agent"}`}>
+        <Avatar className="message-avatar">{message.author.slice(0, 1)}</Avatar>
+        <div className="message-card">
+          <Flex justify="space-between" align="center" gap={12}>
+            <Space>
+              <Text strong>{message.author}</Text>
+              <Tag>{message.kind}</Tag>
+              {message.streamState === "streaming" && (
+                <Tag color="processing">流式生成中</Tag>
+              )}
+            </Space>
+            <Text type="secondary" className="time">
+              {formatTime(message.createdAt)}
+            </Text>
+          </Flex>
+          {quoted && <div className="quote-block">{quoted.content}</div>}
+          <div className="message-content">
+            <MarkdownContent text={message.content} />
           </div>
-        )}
-        <Space>
-          <Tooltip title="引用">
-            <Button size="small" icon={<MessageOutlined />} onClick={() => onQuote(message)} />
-          </Tooltip>
-          <Tooltip title="复制">
-            <Button size="small" icon={<CopyOutlined />} onClick={() => onCopy(stripInternalAgentOutput(message.content))} />
-          </Tooltip>
-          {!isUser && (
-            <Tooltip title="重新生成">
-              <Button size="small" icon={<ReloadOutlined />} onClick={() => onRegenerate(message)} />
+          {attachments.length > 0 && (
+            <div
+              className="message-attachments"
+              data-testid="message-attachments"
+            >
+              {attachments.map((file) => (
+                <button
+                  type="button"
+                  key={file.file_id ?? file.id ?? attachmentName(file)}
+                  className="message-attachment"
+                  onClick={() => openAttachment(file)}
+                  data-testid="message-attachment-preview"
+                >
+                  <CloudUploadOutlined />
+                  <span className="message-attachment-name">
+                    {attachmentName(file)}
+                  </span>
+                  <span className="message-attachment-meta">
+                    {formatFileSize(file.size)} ·{" "}
+                    {file.parse_status ?? "stored"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <Space>
+            <Tooltip title="引用">
+              <Button
+                size="small"
+                icon={<MessageOutlined />}
+                onClick={() => onQuote(message)}
+              />
             </Tooltip>
-          )}
-        </Space>
+            <Tooltip title="复制">
+              <Button
+                size="small"
+                icon={<CopyOutlined />}
+                onClick={() =>
+                  onCopy(stripInternalAgentOutput(message.content))
+                }
+              />
+            </Tooltip>
+            {!isUser && (
+              <Tooltip title="重新生成">
+                <Button
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  onClick={() => onRegenerate(message)}
+                />
+              </Tooltip>
+            )}
+          </Space>
+        </div>
       </div>
-    </div>
-    <Modal
-      title={previewAttachment ? `附件预览：${attachmentName(previewAttachment)}` : "附件预览"}
-      open={Boolean(previewAttachment)}
-      onCancel={() => setPreviewAttachment(undefined)}
-      footer={
-        <Space>
-          <Button onClick={() => setPreviewAttachment(undefined)} data-testid="attachment-preview-close">
-            关闭
-          </Button>
-          {previewUrl && (
-            <Button href={previewUrl} target="_blank">
-              打开原文件
+      <Modal
+        title={
+          previewAttachment
+            ? `附件预览：${attachmentName(previewAttachment)}`
+            : "附件预览"
+        }
+        open={Boolean(previewAttachment)}
+        onCancel={() => setPreviewAttachment(undefined)}
+        footer={
+          <Space>
+            <Button
+              onClick={() => setPreviewAttachment(undefined)}
+              data-testid="attachment-preview-close"
+            >
+              关闭
             </Button>
+            {previewUrl && (
+              <Button href={previewUrl} target="_blank">
+                打开原文件
+              </Button>
+            )}
+          </Space>
+        }
+      >
+        <div
+          className="attachment-preview"
+          data-testid="attachment-preview-modal"
+        >
+          {previewAttachment && (
+            <Space
+              direction="vertical"
+              size={2}
+              className="attachment-preview-meta"
+            >
+              <Text strong>{attachmentName(previewAttachment)}</Text>
+              <Text type="secondary">
+                {previewType || "未知类型"} ·{" "}
+                {formatFileSize(previewAttachment.size)}
+              </Text>
+            </Space>
           )}
-        </Space>
-      }
-    >
-      <div className="attachment-preview" data-testid="attachment-preview-modal">
-        {previewAttachment && (
-          <Space direction="vertical" size={2} className="attachment-preview-meta">
-            <Text strong>{attachmentName(previewAttachment)}</Text>
-            <Text type="secondary">{previewType || "未知类型"} · {formatFileSize(previewAttachment.size)}</Text>
-          </Space>
-        )}
-        {previewLoading ? (
-          <Spin />
-        ) : previewAttachment?.previewError ? (
-          <Text type="danger">{previewAttachment.previewError}</Text>
-        ) : previewAttachment?.previewText ? (
-          <pre>{previewAttachment.previewText}</pre>
-        ) : previewUrl && previewType.startsWith("image/") ? (
-          <img src={previewUrl} alt={previewAttachment ? attachmentName(previewAttachment) : "附件"} />
-        ) : previewUrl && previewType.includes("pdf") ? (
-          <iframe title={previewAttachment ? attachmentName(previewAttachment) : "附件"} src={previewUrl} />
-        ) : (
-          <Space direction="vertical">
-            <Text strong>{previewAttachment && attachmentName(previewAttachment)}</Text>
-            <Text type="secondary">{previewType || "未知类型"} · {formatFileSize(previewAttachment?.size)}</Text>
-            <Text type="secondary">后端未返回可直接渲染的内容，可从文件资产或原文件入口查看。</Text>
-          </Space>
-        )}
-      </div>
-    </Modal>
+          {previewLoading ? (
+            <Spin />
+          ) : previewAttachment?.previewError ? (
+            <Text type="danger">{previewAttachment.previewError}</Text>
+          ) : previewAttachment?.previewText ? (
+            <pre>{previewAttachment.previewText}</pre>
+          ) : previewUrl && previewType.startsWith("image/") ? (
+            <img
+              src={previewUrl}
+              alt={
+                previewAttachment ? attachmentName(previewAttachment) : "附件"
+              }
+            />
+          ) : previewUrl && previewType.includes("pdf") ? (
+            <iframe
+              title={
+                previewAttachment ? attachmentName(previewAttachment) : "附件"
+              }
+              src={previewUrl}
+            />
+          ) : (
+            <Space direction="vertical">
+              <Text strong>
+                {previewAttachment && attachmentName(previewAttachment)}
+              </Text>
+              <Text type="secondary">
+                {previewType || "未知类型"} ·{" "}
+                {formatFileSize(previewAttachment?.size)}
+              </Text>
+              <Text type="secondary">
+                后端未返回可直接渲染的内容，可从文件资产或原文件入口查看。
+              </Text>
+            </Space>
+          )}
+        </div>
+      </Modal>
     </>
   );
 }
@@ -958,14 +1249,18 @@ function ChatPanel({
   onOpenSettings,
   onUploadFile,
   onOpenPreview,
-  onStopStreaming
+  onStopStreaming,
 }: {
   user: User;
   active?: Conversation;
   messages: ChatMessage[];
   loading: boolean;
   streamState: "idle" | "streaming" | "done" | "error";
-  onSend: (text: string, quoted?: ChatMessage, attachments?: UploadedFile[]) => void;
+  onSend: (
+    text: string,
+    quoted?: ChatMessage,
+    attachments?: UploadedFile[],
+  ) => void;
   onRegenerate: (message: ChatMessage) => void;
   onOpenMembers: () => void;
   onOpenSettings: () => void;
@@ -979,7 +1274,8 @@ function ChatPanel({
   const { message } = AntApp.useApp();
 
   const submit = () => {
-    const value = text.trim() || (pendingFiles.length ? "请结合上传附件继续处理。" : "");
+    const value =
+      text.trim() || (pendingFiles.length ? "请结合上传附件继续处理。" : "");
     if (!value || !active) return;
     onSend(value, quoted, pendingFiles);
     setText("");
@@ -1000,23 +1296,46 @@ function ChatPanel({
         <div>
           <Space align="center" wrap>
             <Title level={3}>{active?.title ?? "选择会话"}</Title>
-            {active?.chat_type === "group" && <Tag color="blue">{active.agent_count ?? active.participants.length}/8 Agent</Tag>}
+            {active?.chat_type === "group" && (
+              <Tag color="blue">
+                {active.agent_count ?? active.participants.length}/8 Agent
+              </Tag>
+            )}
             {active?.master_enabled && <Tag color="green">主控调度</Tag>}
           </Space>
           <Space size={4} wrap className="participant-strip">
             {participantAvatars.map((item) => (
-              <Tooltip title={`${participantName(item)} · ${item.role ?? "member"}`} key={item.id ?? item.agent_id}>
-                <Avatar size="small" style={{ background: item.agent_status === "offline" ? "#9ca3af" : "#1677ff" }}>
+              <Tooltip
+                title={`${participantName(item)} · ${item.role ?? "member"}`}
+                key={item.id ?? item.agent_id}
+              >
+                <Avatar
+                  size="small"
+                  style={{
+                    background:
+                      item.agent_status === "offline" ? "#9ca3af" : "#1677ff",
+                  }}
+                >
                   {participantName(item).slice(0, 1)}
                 </Avatar>
               </Tooltip>
             ))}
             {active?.chat_type === "group" && (
               <>
-                <Button size="small" icon={<UserAddOutlined />} onClick={onOpenMembers} data-testid="conversation-members">
+                <Button
+                  size="small"
+                  icon={<UserAddOutlined />}
+                  onClick={onOpenMembers}
+                  data-testid="conversation-members"
+                >
                   成员
                 </Button>
-                <Button size="small" icon={<BranchesOutlined />} onClick={onOpenSettings} data-testid="conversation-settings">
+                <Button
+                  size="small"
+                  icon={<BranchesOutlined />}
+                  onClick={onOpenSettings}
+                  data-testid="conversation-settings"
+                >
                   群聊设置
                 </Button>
               </>
@@ -1036,7 +1355,9 @@ function ChatPanel({
             <MessageBubble
               key={item.id}
               message={item}
-              quoted={messages.find((messageItem) => messageItem.id === item.quotedMessageId)}
+              quoted={messages.find(
+                (messageItem) => messageItem.id === item.quotedMessageId,
+              )}
               onQuote={setQuoted}
               onRegenerate={onRegenerate}
               onCopy={copy}
@@ -1053,7 +1374,11 @@ function ChatPanel({
             <Text type="secondary" ellipsis>
               引用：{quoted.content}
             </Text>
-            <Button type="text" size="small" onClick={() => setQuoted(undefined)}>
+            <Button
+              type="text"
+              size="small"
+              onClick={() => setQuoted(undefined)}
+            >
               取消
             </Button>
           </div>
@@ -1065,9 +1390,14 @@ function ChatPanel({
                 key={file.id}
                 closable
                 icon={<CloudUploadOutlined />}
-                onClose={() => setPendingFiles((current) => current.filter((item) => item.id !== file.id))}
+                onClose={() =>
+                  setPendingFiles((current) =>
+                    current.filter((item) => item.id !== file.id),
+                  )
+                }
               >
-                {file.original_filename} · {Math.ceil(file.size / 1024)}KB · {file.parse_status}
+                {file.original_filename} · {Math.ceil(file.size / 1024)}KB ·{" "}
+                {file.parse_status}
               </Tag>
             ))}
           </div>
@@ -1106,9 +1436,15 @@ function ChatPanel({
               Stop
             </Button>
           ) : (
-          <Button type="primary" icon={<SendOutlined />} onClick={submit} disabled={!active} data-testid="send-message">
-            发送
-          </Button>
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              onClick={submit}
+              disabled={!active}
+              data-testid="send-message"
+            >
+              发送
+            </Button>
           )}
         </Flex>
       </div>
@@ -1124,7 +1460,7 @@ function AgentDirectoryDrawer({
   onCreateAgent,
   onUpdateAgent,
   onDeleteAgent,
-  onTestAgent
+  onTestAgent,
 }: {
   open: boolean;
   agents: Agent[];
@@ -1160,7 +1496,7 @@ function AgentDirectoryDrawer({
       api.modelConfigs().catch(() => []),
       api.tools().catch(() => []),
       api.skills().catch(() => []),
-      api.mcpServers().catch(() => [])
+      api.mcpServers().catch(() => []),
     ]).then(([configs, tools, nextSkills, servers]) => {
       setModelConfigs(configs);
       setToolCatalog(tools);
@@ -1171,31 +1507,45 @@ function AgentDirectoryDrawer({
 
   const toolOptions = toolCatalog.map((tool) => ({
     label: `${tool.display_name ?? tool.name} · ${tool.name}`,
-    value: tool.name
+    value: tool.name,
   }));
-  const skillOptions = skills.map((skill) => ({ label: `${skill.name} · ${skill.category}`, value: skill.id }));
-  const mcpOptions = mcpServers.map((server) => ({ label: `${server.name} · ${server.transport}`, value: server.id }));
+  const skillOptions = skills.map((skill) => ({
+    label: `${skill.name} · ${skill.category}`,
+    value: skill.id,
+  }));
+  const mcpOptions = mcpServers.map((server) => ({
+    label: `${server.name} · ${server.transport}`,
+    value: server.id,
+  }));
   const modelConfigOptions = modelConfigs.map((model) => ({
     label: `${model.name} · ${model.model_id}`,
-    value: model.id
+    value: model.id,
   }));
   const modelLabel = (modelConfigId?: string) => {
-    const model = modelConfigs.find((item) => item.id === modelConfigId) ?? (!modelConfigId ? modelConfigs[0] : undefined);
+    const model =
+      modelConfigs.find((item) => item.id === modelConfigId) ??
+      (!modelConfigId ? modelConfigs[0] : undefined);
     return model ? `${model.name} · ${model.model_id}` : "火山方舟默认模型";
   };
 
   const visible = agents.filter((agent) => {
-    const text = `${agent.name} ${agent.description} ${agent.capabilities.map((item) => item.label).join(" ")}`.toLowerCase();
+    const text =
+      `${agent.name} ${agent.description} ${agent.capabilities.map((item) => item.label).join(" ")}`.toLowerCase();
     return text.includes(query.toLowerCase());
   });
 
   const seedAgentDraftFromBrief = (brief: string) => {
     const value = brief.trim();
     if (!value) return;
-    const compact = value.replace(/\s+/g, "").replace(/[，。,.]/g, "").slice(0, 14);
+    const compact = value
+      .replace(/\s+/g, "")
+      .replace(/[，。,.]/g, "")
+      .slice(0, 14);
     const prompt = `你是${value}。请保持结构化、可验证、可执行，并在需要时调用已授权工具。`;
-    if (!form.getFieldValue("name")) form.setFieldsValue({ name: `${compact || "自定义"} Agent` });
-    if (!form.getFieldValue("description")) form.setFieldsValue({ description: value.slice(0, 180) });
+    if (!form.getFieldValue("name"))
+      form.setFieldsValue({ name: `${compact || "自定义"} Agent` });
+    if (!form.getFieldValue("description"))
+      form.setFieldsValue({ description: value.slice(0, 180) });
     if (!form.getFieldValue("system_prompt")) {
       setSystemPrompt(prompt);
       form.setFieldsValue({ system_prompt: prompt });
@@ -1203,13 +1553,15 @@ function AgentDirectoryDrawer({
     if (!capabilities.length) {
       setCapabilities([
         { label: "任务分析", category: "通用", proficiency: 4 },
-        { label: "结构化输出", category: "通用", proficiency: 4 }
+        { label: "结构化输出", category: "通用", proficiency: 4 },
       ]);
     }
   };
 
   const parseCapabilities = async () => {
-    const text = String(form.getFieldValue("capability_text") ?? capabilityText ?? "");
+    const text = String(
+      form.getFieldValue("capability_text") ?? capabilityText ?? "",
+    );
     const parsed = await api.parseCapabilities(text);
     setCapabilities(parsed.items);
     setSystemPrompt(parsed.system_prompt);
@@ -1219,13 +1571,21 @@ function AgentDirectoryDrawer({
   const generateAgentDraft = async () => {
     const name = String(form.getFieldValue("name") ?? "");
     const description = String(form.getFieldValue("description") ?? "");
-    const capabilityBrief = String(form.getFieldValue("capability_text") ?? capabilityText ?? "");
-    const brief = [name, description, capabilityBrief].filter(Boolean).join("\n");
+    const capabilityBrief = String(
+      form.getFieldValue("capability_text") ?? capabilityText ?? "",
+    );
+    const brief = [name, description, capabilityBrief]
+      .filter(Boolean)
+      .join("\n");
     if (!brief.trim()) {
       message.warning("先输入 Agent 目标或职责描述");
       return;
     }
-    const generated = await api.generateAgentConfig(brief, form.getFieldValue("base_agent_id"), form.getFieldValue("tools") ?? []);
+    const generated = await api.generateAgentConfig(
+      brief,
+      form.getFieldValue("base_agent_id"),
+      form.getFieldValue("tools") ?? [],
+    );
     setCapabilities(generated.capabilities);
     setSystemPrompt(generated.system_prompt);
     setCapabilityText(generated.capability_text ?? capabilityBrief);
@@ -1235,7 +1595,8 @@ function AgentDirectoryDrawer({
       capability_text: generated.capability_text ?? capabilityBrief,
       system_prompt: generated.system_prompt,
       tools: generated.tools,
-      temperature: generated.temperature ?? Number(generated.config?.temperature ?? 0.7)
+      temperature:
+        generated.temperature ?? Number(generated.config?.temperature ?? 0.7),
     });
     message.success("AI 已生成 Agent 配置草稿");
   };
@@ -1252,9 +1613,15 @@ function AgentDirectoryDrawer({
       tools: agent.config.tools ?? [],
       skill_ids: agent.config.skill_ids ?? [],
       mcp_server_ids: agent.config.mcp_server_ids ?? [],
-      agentic_loop_enabled: agent.config.agentic_loop?.enabled ?? Boolean((agent.config.tools ?? []).length || (agent.config.skill_ids ?? []).length || (agent.config.mcp_server_ids ?? []).length),
+      agentic_loop_enabled:
+        agent.config.agentic_loop?.enabled ??
+        Boolean(
+          (agent.config.tools ?? []).length ||
+          (agent.config.skill_ids ?? []).length ||
+          (agent.config.mcp_server_ids ?? []).length,
+        ),
       agentic_loop_steps: agent.config.agentic_loop?.max_steps ?? 2,
-      temperature: agent.config.temperature ?? 0.7
+      temperature: agent.config.temperature ?? 0.7,
     });
   };
 
@@ -1276,9 +1643,11 @@ function AgentDirectoryDrawer({
         agentic_loop: {
           enabled: Boolean(values.agentic_loop_enabled),
           max_steps: values.agentic_loop_steps ?? 2,
-          tool_policy: values.agentic_loop_enabled ? "agent_permissions" : "chat_only"
-        }
-      }
+          tool_policy: values.agentic_loop_enabled
+            ? "agent_permissions"
+            : "chat_only",
+        },
+      },
     });
     onUpdateAgent(updated);
     setEditingAgent(undefined);
@@ -1305,9 +1674,11 @@ function AgentDirectoryDrawer({
         agentic_loop: {
           enabled: Boolean(values.agentic_loop_enabled),
           max_steps: values.agentic_loop_steps ?? 2,
-          tool_policy: values.agentic_loop_enabled ? "agent_permissions" : "chat_only"
-        }
-      }
+          tool_policy: values.agentic_loop_enabled
+            ? "agent_permissions"
+            : "chat_only",
+        },
+      },
     });
     onCreateAgent(created);
     setCreatorOpen(false);
@@ -1316,12 +1687,27 @@ function AgentDirectoryDrawer({
 
   return (
     <>
-      <Drawer width={720} title="Agent 广场与通讯录" open={open} onClose={onClose}>
+      <Drawer
+        width={720}
+        title="Agent 广场与通讯录"
+        open={open}
+        onClose={onClose}
+      >
         <Flex justify="space-between" align="center" className="drawer-toolbar">
-          <Input prefix={<SearchOutlined />} placeholder="搜索名称、能力、描述" value={query} onChange={(event) => setQuery(event.target.value)} />
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="搜索名称、能力、描述"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
           <Space>
             <Button onClick={onRefresh}>刷新状态</Button>
-            <Button type="primary" icon={<RobotOutlined />} onClick={() => setCreatorOpen(true)} data-testid="create-agent">
+            <Button
+              type="primary"
+              icon={<RobotOutlined />}
+              onClick={() => setCreatorOpen(true)}
+              data-testid="create-agent"
+            >
               创建自定义 Agent
             </Button>
           </Space>
@@ -1334,8 +1720,21 @@ function AgentDirectoryDrawer({
               <Card className="agent-card">
                 <Flex justify="space-between" align="start">
                   <Space align="start">
-                    <Badge status={agent.status === "online" ? "success" : agent.status === "degraded" ? "warning" : "default"} dot>
-                      <Avatar style={{ background: agent.avatar_color ?? "#1677ff" }}>{agent.name.slice(0, 1)}</Avatar>
+                    <Badge
+                      status={
+                        agent.status === "online"
+                          ? "success"
+                          : agent.status === "degraded"
+                            ? "warning"
+                            : "default"
+                      }
+                      dot
+                    >
+                      <Avatar
+                        style={{ background: agent.avatar_color ?? "#1677ff" }}
+                      >
+                        {agent.name.slice(0, 1)}
+                      </Avatar>
                     </Badge>
                     <div>
                       <Space>
@@ -1348,25 +1747,47 @@ function AgentDirectoryDrawer({
                       </Paragraph>
                     </div>
                   </Space>
-                  <Tag color={agent.status === "online" ? "success" : "default"}>{agent.status}</Tag>
+                  <Tag
+                    color={agent.status === "online" ? "success" : "default"}
+                  >
+                    {agent.status}
+                  </Tag>
                 </Flex>
                 <Space size={[4, 4]} wrap>
                   {agent.capabilities.slice(0, 4).map((cap) => (
-                    <Tag key={cap.label}>{cap.label}·{cap.proficiency}</Tag>
+                    <Tag key={cap.label}>
+                      {cap.label}·{cap.proficiency}
+                    </Tag>
                   ))}
                 </Space>
                 <Space size={[4, 4]} wrap className="mt-8">
                   {(agent.config.tools ?? []).slice(0, 5).map((tool) => (
-                    <Tag key={tool} color="geekblue">{tool}</Tag>
+                    <Tag key={tool} color="geekblue">
+                      {tool}
+                    </Tag>
                   ))}
-                  {(agent.config.skill_ids ?? []).length > 0 && <Tag color="cyan">{agent.config.skill_ids?.length} Skills</Tag>}
-                  {(agent.config.mcp_server_ids ?? []).length > 0 && <Tag color="gold">{agent.config.mcp_server_ids?.length} MCP</Tag>}
-                  {agent.config.agentic_loop?.enabled === false && <Tag>纯对话</Tag>}
-                  <Tag color="purple">模型：{modelLabel(agent.config.model_config_id)}</Tag>
+                  {(agent.config.skill_ids ?? []).length > 0 && (
+                    <Tag color="cyan">
+                      {agent.config.skill_ids?.length} Skills
+                    </Tag>
+                  )}
+                  {(agent.config.mcp_server_ids ?? []).length > 0 && (
+                    <Tag color="gold">
+                      {agent.config.mcp_server_ids?.length} MCP
+                    </Tag>
+                  )}
+                  {agent.config.agentic_loop?.enabled === false && (
+                    <Tag>纯对话</Tag>
+                  )}
+                  <Tag color="purple">
+                    模型：{modelLabel(agent.config.model_config_id)}
+                  </Tag>
                 </Space>
                 <Divider />
                 <Flex justify="space-between">
-                  <Text type="secondary">{agent.response_latency_ms}ms · {agent.provider}</Text>
+                  <Text type="secondary">
+                    {agent.response_latency_ms}ms · {agent.provider}
+                  </Text>
                   <Space>
                     <Button
                       size="small"
@@ -1395,13 +1816,14 @@ function AgentDirectoryDrawer({
                         onClick={() => {
                           Modal.confirm({
                             title: `删除 Agent：${agent.name}`,
-                            content: "删除后不会再出现在 Agent 广场，也不能加入新会话。",
+                            content:
+                              "删除后不会再出现在 Agent 广场，也不能加入新会话。",
                             okText: "删除",
                             okButtonProps: { danger: true },
                             onOk: async () => {
                               await onDeleteAgent(agent);
                               message.success("Agent 已删除");
-                            }
+                            },
                           });
                         }}
                       />
@@ -1431,7 +1853,7 @@ function AgentDirectoryDrawer({
             { title: "能力解析" },
             { title: "提示词" },
             { title: "模型工具" },
-            { title: "测试发布" }
+            { title: "测试发布" },
           ]}
         />
         <Form
@@ -1444,17 +1866,27 @@ function AgentDirectoryDrawer({
             skill_ids: [],
             mcp_server_ids: [],
             agentic_loop_enabled: true,
-            agentic_loop_steps: 2
+            agentic_loop_steps: 2,
           }}
           onValuesChange={(changed) => {
-            if ("capability_text" in changed) setCapabilityText(String(changed.capability_text ?? ""));
-            if ("system_prompt" in changed) setSystemPrompt(String(changed.system_prompt ?? ""));
+            if ("capability_text" in changed)
+              setCapabilityText(String(changed.capability_text ?? ""));
+            if ("system_prompt" in changed)
+              setSystemPrompt(String(changed.system_prompt ?? ""));
           }}
         >
-          <Form.Item name="name" label="Agent 名称" rules={[{ required: true, message: "请输入 Agent 名称" }]}>
+          <Form.Item
+            name="name"
+            label="Agent 名称"
+            rules={[{ required: true, message: "请输入 Agent 名称" }]}
+          >
             <Input maxLength={30} placeholder="数据库设计专家" />
           </Form.Item>
-          <Form.Item name="description" label="描述" rules={[{ required: true, message: "请输入描述" }]}>
+          <Form.Item
+            name="description"
+            label="描述"
+            rules={[{ required: true, message: "请输入描述" }]}
+          >
             <TextArea rows={2} maxLength={500} />
           </Form.Item>
           <Form.Item name="capability_text" label="自然语言能力描述">
@@ -1474,21 +1906,42 @@ function AgentDirectoryDrawer({
               <Button icon={<ToolOutlined />} onClick={parseCapabilities}>
                 AI 解析能力标签
               </Button>
-              <Button icon={<RobotOutlined />} onClick={generateAgentDraft} data-testid="ai-generate-agent">
+              <Button
+                icon={<RobotOutlined />}
+                onClick={generateAgentDraft}
+                data-testid="ai-generate-agent"
+              >
                 AI 生成 Agent
               </Button>
             </Space>
           </Form.Item>
           <Space size={[4, 4]} wrap>
             {capabilities.map((cap) => (
-              <Tag key={cap.label}>{cap.label} · {cap.category} · {cap.proficiency}</Tag>
+              <Tag key={cap.label}>
+                {cap.label} · {cap.category} · {cap.proficiency}
+              </Tag>
             ))}
           </Space>
-          <Form.Item name="system_prompt" label="系统提示词" rules={[{ required: true, message: "请配置系统提示词" }]}>
-            <TextArea rows={5} value={systemPrompt} onChange={(event) => setSystemPrompt(event.target.value)} data-testid="agent-system-prompt" />
+          <Form.Item
+            name="system_prompt"
+            label="系统提示词"
+            rules={[{ required: true, message: "请配置系统提示词" }]}
+          >
+            <TextArea
+              rows={5}
+              value={systemPrompt}
+              onChange={(event) => setSystemPrompt(event.target.value)}
+              data-testid="agent-system-prompt"
+            />
           </Form.Item>
           <Form.Item name="base_agent_id" label="继承基础 Agent（可选）">
-            <Select allowClear options={agents.map((agent) => ({ label: agent.name, value: agent.id }))} />
+            <Select
+              allowClear
+              options={agents.map((agent) => ({
+                label: agent.name,
+                value: agent.id,
+              }))}
+            />
           </Form.Item>
           <Form.Item name="model_config_id" label="底层模型配置">
             <Select
@@ -1507,13 +1960,29 @@ function AgentDirectoryDrawer({
             />
           </Form.Item>
           <Form.Item name="skill_ids" label="Skill 权限">
-            <Select mode="multiple" showSearch placeholder="选择可调用的 Skills" optionFilterProp="label" options={skillOptions} />
+            <Select
+              mode="multiple"
+              showSearch
+              placeholder="选择可调用的 Skills"
+              optionFilterProp="label"
+              options={skillOptions}
+            />
           </Form.Item>
           <Form.Item name="mcp_server_ids" label="MCP 权限">
-            <Select mode="multiple" showSearch placeholder="选择可调用的 MCP 服务" optionFilterProp="label" options={mcpOptions} />
+            <Select
+              mode="multiple"
+              showSearch
+              placeholder="选择可调用的 MCP 服务"
+              optionFilterProp="label"
+              options={mcpOptions}
+            />
           </Form.Item>
           <Space align="start">
-            <Form.Item name="agentic_loop_enabled" label="小循环模式" valuePropName="checked">
+            <Form.Item
+              name="agentic_loop_enabled"
+              label="小循环模式"
+              valuePropName="checked"
+            >
               <Checkbox>允许短 Agentic Loop</Checkbox>
             </Form.Item>
             <Form.Item name="agentic_loop_steps" label="最大步数">
@@ -1522,7 +1991,7 @@ function AgentDirectoryDrawer({
                 options={[
                   { label: "1 步", value: 1 },
                   { label: "2 步", value: 2 },
-                  { label: "3 步", value: 3 }
+                  { label: "3 步", value: 3 },
                 ]}
               />
             </Form.Item>
@@ -1532,7 +2001,7 @@ function AgentDirectoryDrawer({
               options={[
                 { label: "0.2 稳定", value: 0.2 },
                 { label: "0.7 平衡", value: 0.7 },
-                { label: "1.2 发散", value: 1.2 }
+                { label: "1.2 发散", value: 1.2 },
               ]}
             />
           </Form.Item>
@@ -1548,16 +2017,28 @@ function AgentDirectoryDrawer({
         okText="保存"
       >
         <Form form={editForm} layout="vertical">
-          <Form.Item name="name" label="Agent 名称" rules={[{ required: true }]}>
+          <Form.Item
+            name="name"
+            label="Agent 名称"
+            rules={[{ required: true }]}
+          >
             <Input maxLength={30} />
           </Form.Item>
           <Form.Item name="display_name" label="显示名称">
             <Input maxLength={30} />
           </Form.Item>
-          <Form.Item name="description" label="描述" rules={[{ required: true }]}>
+          <Form.Item
+            name="description"
+            label="描述"
+            rules={[{ required: true }]}
+          >
             <TextArea rows={3} maxLength={500} />
           </Form.Item>
-          <Form.Item name="system_prompt" label="系统提示词" rules={[{ required: true }]}>
+          <Form.Item
+            name="system_prompt"
+            label="系统提示词"
+            rules={[{ required: true }]}
+          >
             <TextArea rows={5} />
           </Form.Item>
           <Form.Item name="status" label="状态">
@@ -1566,7 +2047,7 @@ function AgentDirectoryDrawer({
                 { label: "online", value: "online" },
                 { label: "offline", value: "offline" },
                 { label: "degraded", value: "degraded" },
-                { label: "maintenance", value: "maintenance" }
+                { label: "maintenance", value: "maintenance" },
               ]}
             />
           </Form.Item>
@@ -1589,13 +2070,29 @@ function AgentDirectoryDrawer({
             />
           </Form.Item>
           <Form.Item name="skill_ids" label="Skill 权限">
-            <Select mode="multiple" showSearch placeholder="选择可调用的 Skills" optionFilterProp="label" options={skillOptions} />
+            <Select
+              mode="multiple"
+              showSearch
+              placeholder="选择可调用的 Skills"
+              optionFilterProp="label"
+              options={skillOptions}
+            />
           </Form.Item>
           <Form.Item name="mcp_server_ids" label="MCP 权限">
-            <Select mode="multiple" showSearch placeholder="选择可调用的 MCP 服务" optionFilterProp="label" options={mcpOptions} />
+            <Select
+              mode="multiple"
+              showSearch
+              placeholder="选择可调用的 MCP 服务"
+              optionFilterProp="label"
+              options={mcpOptions}
+            />
           </Form.Item>
           <Space align="start">
-            <Form.Item name="agentic_loop_enabled" label="小循环模式" valuePropName="checked">
+            <Form.Item
+              name="agentic_loop_enabled"
+              label="小循环模式"
+              valuePropName="checked"
+            >
               <Checkbox>允许短 Agentic Loop</Checkbox>
             </Form.Item>
             <Form.Item name="agentic_loop_steps" label="最大步数">
@@ -1604,7 +2101,7 @@ function AgentDirectoryDrawer({
                 options={[
                   { label: "1 步", value: 1 },
                   { label: "2 步", value: 2 },
-                  { label: "3 步", value: 3 }
+                  { label: "3 步", value: 3 },
                 ]}
               />
             </Form.Item>
@@ -1614,16 +2111,25 @@ function AgentDirectoryDrawer({
               options={[
                 { label: "0.2 稳定", value: 0.2 },
                 { label: "0.7 平衡", value: 0.7 },
-                { label: "1.2 发散", value: 1.2 }
+                { label: "1.2 发散", value: 1.2 },
               ]}
             />
           </Form.Item>
         </Form>
       </Modal>
 
-      <Modal title={`测试 Agent：${testAgent?.name ?? ""}`} open={Boolean(testAgent)} onCancel={() => setTestAgent(undefined)} footer={null}>
+      <Modal
+        title={`测试 Agent：${testAgent?.name ?? ""}`}
+        open={Boolean(testAgent)}
+        onCancel={() => setTestAgent(undefined)}
+        footer={null}
+      >
         <Space direction="vertical" className="full-width">
-          <TextArea value={testText} onChange={(event) => setTestText(event.target.value)} rows={3} />
+          <TextArea
+            value={testText}
+            onChange={(event) => setTestText(event.target.value)}
+            rows={3}
+          />
           <Button
             type="primary"
             loading={testLoading}
@@ -1636,7 +2142,9 @@ function AgentDirectoryDrawer({
                 setTestResult(await onTestAgent(testAgent.id, testText));
               } catch (error) {
                 setTestResult("");
-                setTestError(error instanceof Error ? error.message : "连接失败");
+                setTestError(
+                  error instanceof Error ? error.message : "连接失败",
+                );
               } finally {
                 setTestLoading(false);
               }
@@ -1644,8 +2152,14 @@ function AgentDirectoryDrawer({
           >
             发送测试
           </Button>
-          {testLoading && <Text type="secondary">正在等待回复，真实模型可能需要几秒钟...</Text>}
-          {testError && <Card className="result-box error-box">连接失败：{testError}</Card>}
+          {testLoading && (
+            <Text type="secondary">
+              正在等待回复，真实模型可能需要几秒钟...
+            </Text>
+          )}
+          {testError && (
+            <Card className="result-box error-box">连接失败：{testError}</Card>
+          )}
           {testResult && <Card>{testResult}</Card>}
         </Space>
       </Modal>
@@ -1659,18 +2173,27 @@ function CreateConversationModal({
   agents,
   categoryOptions,
   onCancel,
-  onCreate
+  onCreate,
 }: {
   open: boolean;
   group: boolean;
   agents: Agent[];
   categoryOptions: string[];
   onCancel: () => void;
-  onCreate: (payload: { title?: string; agentIds: string[]; group: boolean; masterEnabled: boolean; folder: string }) => void;
+  onCreate: (payload: {
+    title?: string;
+    agentIds: string[];
+    group: boolean;
+    masterEnabled: boolean;
+    folder: string;
+  }) => void;
 }) {
   const [form] = Form.useForm();
   const onlineAgents = agents.filter((agent) => agent.status === "online");
-  const categorySelectOptions = categoryOptions.map((name) => ({ label: name, value: name }));
+  const categorySelectOptions = categoryOptions.map((name) => ({
+    label: name,
+    value: name,
+  }));
   const initializedRef = useRef(false);
 
   useEffect(() => {
@@ -1682,9 +2205,13 @@ function CreateConversationModal({
     if (initializedRef.current) return;
     initializedRef.current = true;
     form.setFieldsValue({
-      agentIds: group ? onlineAgents.slice(0, Math.min(4, onlineAgents.length)).map((agent) => agent.id) : [],
+      agentIds: group
+        ? onlineAgents
+            .slice(0, Math.min(4, onlineAgents.length))
+            .map((agent) => agent.id)
+        : [],
       masterEnabled: true,
-      folder: "Default"
+      folder: "Default",
     });
   }, [open, group, onlineAgents, form]);
 
@@ -1695,7 +2222,7 @@ function CreateConversationModal({
       agentIds: values.agentIds,
       group,
       masterEnabled: values.masterEnabled ?? true,
-      folder: normalizeConversationCategory(values.folder)
+      folder: normalizeConversationCategory(values.folder),
     });
     form.resetFields();
   };
@@ -1709,9 +2236,15 @@ function CreateConversationModal({
       okText="创建"
       okButtonProps={{ "data-testid": "create-conversation-confirm" }}
     >
-      <Form form={form} layout="vertical" initialValues={{ masterEnabled: true, folder: "Default" }}>
+      <Form
+        form={form}
+        layout="vertical"
+        initialValues={{ masterEnabled: true, folder: "Default" }}
+      >
         <Form.Item name="title" label="会话名称">
-          <Input placeholder={group ? "多 Agent 协作-答辩演示" : "Agent 单聊"} />
+          <Input
+            placeholder={group ? "多 Agent 协作-答辩演示" : "Agent 单聊"}
+          />
         </Form.Item>
         <Form.Item name="folder" label="分类/文件夹">
           <Select options={categorySelectOptions} placeholder="选择左侧分类" />
@@ -1723,10 +2256,12 @@ function CreateConversationModal({
             {
               validator: async (_, value?: string[]) => {
                 const count = value?.length ?? 0;
-                if (group && (count < 2 || count > 8)) throw new Error("群聊需要选择 2-8 个 Agent");
-                if (!group && count !== 1) throw new Error("单聊需要选择 1 个 Agent");
-              }
-            }
+                if (group && (count < 2 || count > 8))
+                  throw new Error("群聊需要选择 2-8 个 Agent");
+                if (!group && count !== 1)
+                  throw new Error("单聊需要选择 1 个 Agent");
+              },
+            },
           ]}
         >
           <Select
@@ -1735,8 +2270,11 @@ function CreateConversationModal({
             maxCount={group ? 8 : 1}
             placeholder="从 Agent 通讯录选择"
             options={onlineAgents.map((agent) => ({
-              label: `${agent.name} · ${agent.capabilities.slice(0, 2).map((cap) => cap.label).join("/")}`,
-              value: agent.id
+              label: `${agent.name} · ${agent.capabilities
+                .slice(0, 2)
+                .map((cap) => cap.label)
+                .join("/")}`,
+              value: agent.id,
             }))}
           />
         </Form.Item>
@@ -1756,26 +2294,39 @@ function MembersDrawer({
   agents,
   onClose,
   onAddAgents,
-  onRemoveParticipant
+  onRemoveParticipant,
 }: {
   open: boolean;
   active?: Conversation;
   agents: Agent[];
   onClose: () => void;
   onAddAgents: (ids: string[]) => void;
-  onRemoveParticipant: (participant: Conversation["participants"][number]) => Promise<void>;
+  onRemoveParticipant: (
+    participant: Conversation["participants"][number],
+  ) => Promise<void>;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const isGroup = active?.chat_type === "group";
-  const existing = new Set(active?.participants.map((item) => item.agent_id).filter(Boolean));
-  const removableAgentCount = active?.participants.filter((item) => item.participant_type === "agent").length ?? 0;
+  const existing = new Set(
+    active?.participants.map((item) => item.agent_id).filter(Boolean),
+  );
+  const removableAgentCount =
+    active?.participants.filter((item) => item.participant_type === "agent")
+      .length ?? 0;
   const options = agents
     .filter((agent) => !existing.has(agent.id) && agent.status === "online")
-    .map((agent) => ({ label: `${agent.name} · ${agent.type}`, value: agent.id }));
+    .map((agent) => ({
+      label: `${agent.name} · ${agent.type}`,
+      value: agent.id,
+    }));
 
   return (
     <Drawer title="群聊成员与邀请" width={460} open={open} onClose={onClose}>
-      <Statistic title="当前 Agent 人数" value={active?.agent_count ?? active?.participants.length ?? 0} suffix="/8" />
+      <Statistic
+        title="当前 Agent 人数"
+        value={active?.agent_count ?? active?.participants.length ?? 0}
+        suffix="/8"
+      />
       <List
         className="member-list"
         dataSource={active?.participants ?? []}
@@ -1784,7 +2335,12 @@ function MembersDrawer({
             actions={[
               item.participant_type === "agent" && removableAgentCount <= 1 ? (
                 <Tooltip key="last-agent" title="至少保留 1 个 Agent">
-                  <Button size="small" shape="circle" icon={<DeleteOutlined />} disabled />
+                  <Button
+                    size="small"
+                    shape="circle"
+                    icon={<DeleteOutlined />}
+                    disabled
+                  />
                 </Tooltip>
               ) : (
                 <Tooltip key="remove" title="移除成员">
@@ -1796,20 +2352,26 @@ function MembersDrawer({
                     onClick={() => {
                       Modal.confirm({
                         title: `移除成员：${participantName(item)}`,
-                        content: "移除后该 Agent 不再参与当前群聊，默认工作流也会同步刷新。",
+                        content:
+                          "移除后该 Agent 不再参与当前群聊，默认工作流也会同步刷新。",
                         okText: "移除",
                         okButtonProps: { danger: true },
-                        onOk: () => onRemoveParticipant(item)
+                        onOk: () => onRemoveParticipant(item),
                       });
                     }}
                   />
                 </Tooltip>
-              )
+              ),
             ]}
           >
             <List.Item.Meta
               avatar={<Avatar>{participantName(item).slice(0, 1)}</Avatar>}
-              title={<Space><Text strong>{participantName(item)}</Text><Tag>{item.role ?? "member"}</Tag></Space>}
+              title={
+                <Space>
+                  <Text strong>{participantName(item)}</Text>
+                  <Tag>{item.role ?? "member"}</Tag>
+                </Space>
+              }
               description={`${item.participant_type ?? "agent"} · ${item.agent_status ?? "active"}`}
             />
           </List.Item>
@@ -1819,7 +2381,14 @@ function MembersDrawer({
       {isGroup ? (
         <>
           <Text strong>邀请 Agent 加入</Text>
-          <Select mode="multiple" className="full-width mt-8" options={options} value={selected} onChange={setSelected} placeholder="选择要加入的 Agent" />
+          <Select
+            mode="multiple"
+            className="full-width mt-8"
+            options={options}
+            value={selected}
+            onChange={setSelected}
+            placeholder="选择要加入的 Agent"
+          />
           <Button
             className="mt-8"
             type="primary"
@@ -1833,7 +2402,9 @@ function MembersDrawer({
           </Button>
         </>
       ) : (
-        <Text type="secondary">单聊只保留一个 Agent；需要多人协作时请创建多 Agent 群聊。</Text>
+        <Text type="secondary">
+          单聊只保留一个 Agent；需要多人协作时请创建多 Agent 群聊。
+        </Text>
       )}
     </Drawer>
   );
@@ -1845,14 +2416,17 @@ function ConversationSettingsDrawer({
   agents,
   categoryOptions,
   onClose,
-  onSaveConversation
+  onSaveConversation,
 }: {
   open: boolean;
   active?: Conversation;
   agents: Agent[];
   categoryOptions: string[];
   onClose: () => void;
-  onSaveConversation: (conversation: Conversation, patch: Partial<Conversation>) => Promise<void>;
+  onSaveConversation: (
+    conversation: Conversation,
+    patch: Partial<Conversation>,
+  ) => Promise<void>;
 }) {
   const [form] = Form.useForm();
   const [nodeForm] = Form.useForm();
@@ -1869,23 +2443,51 @@ function ConversationSettingsDrawer({
   const { message } = AntApp.useApp();
   const conversationCategoryOptions = useMemo(
     () =>
-      mergeConversationCategories(categoryOptions, [active?.folder || active?.category || "Default"]).map((name) => ({
+      mergeConversationCategories(categoryOptions, [
+        active?.folder || active?.category || "Default",
+      ]).map((name) => ({
         label: name,
-        value: name
+        value: name,
       })),
-    [active?.category, active?.folder, categoryOptions]
+    [active?.category, active?.folder, categoryOptions],
   );
 
   const workflowNodes = workflow?.nodes ?? [];
   const workflowEdges = workflow?.edges ?? [];
-  const activeAgentIds = new Set(active?.participants.map((item) => item.agent_id).filter(Boolean) as string[]);
+  const activeAgentIds = new Set(
+    active?.participants
+      .map((item) => item.agent_id)
+      .filter(Boolean) as string[],
+  );
   const agentOptions = agents
     .filter((agent) => !activeAgentIds.size || activeAgentIds.has(agent.id))
-    .map((agent) => ({ label: `${agent.name} · ${agent.type}`, value: agent.id }));
-  const toolOptions = Array.from(new Set(["file.read", "file.write", "file.extract_text", "artifact.create_html", ...toolCatalog.map((tool) => tool.name)])).map((name) => ({ label: name, value: name }));
-  const skillOptions = skills.map((skill) => ({ label: `${skill.name} · ${skill.category}`, value: skill.id }));
-  const mcpServerOptions = mcpServers.map((server) => ({ label: `${server.name} · ${server.transport}`, value: server.id }));
-  const mcpToolOptions = mcpServers.flatMap((server) => (server.tools ?? []).map((tool) => ({ label: `${server.name} · ${tool.name}`, value: tool.name })));
+    .map((agent) => ({
+      label: `${agent.name} · ${agent.type}`,
+      value: agent.id,
+    }));
+  const toolOptions = Array.from(
+    new Set([
+      "file.read",
+      "file.write",
+      "file.extract_text",
+      "artifact.create_html",
+      ...toolCatalog.map((tool) => tool.name),
+    ]),
+  ).map((name) => ({ label: name, value: name }));
+  const skillOptions = skills.map((skill) => ({
+    label: `${skill.name} · ${skill.category}`,
+    value: skill.id,
+  }));
+  const mcpServerOptions = mcpServers.map((server) => ({
+    label: `${server.name} · ${server.transport}`,
+    value: server.id,
+  }));
+  const mcpToolOptions = mcpServers.flatMap((server) =>
+    (server.tools ?? []).map((tool) => ({
+      label: `${server.name} · ${tool.name}`,
+      value: tool.name,
+    })),
+  );
   const editingNode = workflowNodes.find((node) => node.id === editingNodeId);
 
   const setWorkflowDraft = (next: ConversationWorkflow) => {
@@ -1900,16 +2502,19 @@ function ConversationSettingsDrawer({
       setWorkflowRuns([]);
       return;
     }
-    const [nextWorkflow, runs, nextTools, nextSkills, nextMcpServers] = await Promise.all([
-      api.conversationWorkflow(active.id),
-      api.workflowRuns(active.id).catch(() => []),
-      api.tools(active.workspace_id).catch(() => []),
-      api.skills(active.workspace_id).catch(() => []),
-      api.mcpServers(active.workspace_id).catch(() => [])
-    ]);
+    const [nextWorkflow, runs, nextTools, nextSkills, nextMcpServers] =
+      await Promise.all([
+        api.conversationWorkflow(active.id),
+        api.workflowRuns(active.id).catch(() => []),
+        api.tools(active.workspace_id).catch(() => []),
+        api.skills(active.workspace_id).catch(() => []),
+        api.mcpServers(active.workspace_id).catch(() => []),
+      ]);
     setWorkflow(nextWorkflow);
     setWorkflowJson(JSON.stringify(nextWorkflow, null, 2));
-    setWorkflowInstruction(String(nextWorkflow.settings?.generation_instruction ?? ""));
+    setWorkflowInstruction(
+      String(nextWorkflow.settings?.generation_instruction ?? ""),
+    );
     setWorkflowRuns(runs);
     setToolCatalog(nextTools);
     setSkills(nextSkills);
@@ -1921,7 +2526,7 @@ function ConversationSettingsDrawer({
     form.setFieldsValue({
       title: active?.title,
       folder: active?.folder || active?.category || "Default",
-      remark: active?.remark || ""
+      remark: active?.remark || "",
     });
     loadWorkflow();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1929,10 +2534,14 @@ function ConversationSettingsDrawer({
 
   const workflowIcon = (type?: string, role?: string) => {
     if (type === "start") return <MessageOutlined />;
-    if (type === "tool" || type === "mcp" || type === "skill") return <ToolOutlined />;
-    if (type === "condition" || type === "loop" || role === "master") return <BranchesOutlined />;
-    if (type === "review" || role === "reviewer") return <CheckCircleOutlined />;
-    if (type === "artifact" || type === "end" || role === "artifact") return <RocketOutlined />;
+    if (type === "tool" || type === "mcp" || type === "skill")
+      return <ToolOutlined />;
+    if (type === "condition" || type === "loop" || role === "master")
+      return <BranchesOutlined />;
+    if (type === "review" || role === "reviewer")
+      return <CheckCircleOutlined />;
+    if (type === "artifact" || type === "end" || role === "artifact")
+      return <RocketOutlined />;
     return <RobotOutlined />;
   };
 
@@ -1949,9 +2558,14 @@ function ConversationSettingsDrawer({
 
   const addWorkflowNode = (type: string) => {
     if (!workflow) return;
-    const node = createWorkflowNode(type, agents.find((agent) => activeAgentIds.has(agent.id)) ?? agents[0]);
+    const node = createWorkflowNode(
+      type,
+      agents.find((agent) => activeAgentIds.has(agent.id)) ?? agents[0],
+    );
     const nodes = [...workflow.nodes];
-    const endIndex = nodes.findIndex((item) => workflowNodeType(item) === "end");
+    const endIndex = nodes.findIndex(
+      (item) => workflowNodeType(item) === "end",
+    );
     const insertIndex = endIndex >= 0 ? endIndex : nodes.length;
     nodes.splice(insertIndex, 0, node);
     const previous = nodes[Math.max(0, insertIndex - 1)];
@@ -1972,7 +2586,7 @@ function ConversationSettingsDrawer({
       expression: node.config?.expression,
       max_iterations: node.config?.max_iterations,
       artifact_type: node.config?.artifact_type,
-      meta: node.meta
+      meta: node.meta,
     });
   };
 
@@ -1990,7 +2604,7 @@ function ConversationSettingsDrawer({
       expression: config.expression,
       max_iterations: config.max_iterations ?? 3,
       artifact_type: config.artifact_type ?? "html",
-      meta: node.meta
+      meta: node.meta,
     });
   };
 
@@ -1999,7 +2613,8 @@ function ConversationSettingsDrawer({
     const values = await nodeForm.validateFields();
     const type = values.type;
     const config: Record<string, unknown> = {};
-    if (type === "agent" || type === "review") config.agent_id = values.agent_id;
+    if (type === "agent" || type === "review")
+      config.agent_id = values.agent_id;
     if (type === "tool") config.tool_name = values.tool_name;
     if (type === "skill") config.skill_id = values.skill_id;
     if (type === "mcp") {
@@ -2010,8 +2625,10 @@ function ConversationSettingsDrawer({
       config.expression = values.expression || "true";
       config.branches = ["true", "false"];
     }
-    if (type === "loop") config.max_iterations = Number(values.max_iterations || 3);
-    if (type === "artifact") config.artifact_type = values.artifact_type || "html";
+    if (type === "loop")
+      config.max_iterations = Number(values.max_iterations || 3);
+    if (type === "artifact")
+      config.artifact_type = values.artifact_type || "html";
     const nodes = workflow.nodes.map((node) =>
       node.id === editingNodeId
         ? {
@@ -2021,9 +2638,9 @@ function ConversationSettingsDrawer({
             role: type === "review" ? "reviewer" : type,
             agent_id: config.agent_id ? String(config.agent_id) : undefined,
             config,
-            meta: values.meta || node.meta
+            meta: values.meta || node.meta,
           }
-        : node
+        : node,
     );
     setWorkflowDraft({ ...workflow, nodes });
     setEditingNodeId(undefined);
@@ -2060,12 +2677,16 @@ function ConversationSettingsDrawer({
                     title: values.title,
                     folder: values.folder,
                     category: values.folder,
-                    remark: values.remark
+                    remark: values.remark,
                   });
                   message.success("群聊信息已保存");
                 }}
               >
-                <Form.Item name="title" label="群聊名称" rules={[{ required: true }]}>
+                <Form.Item
+                  name="title"
+                  label="群聊名称"
+                  rules={[{ required: true }]}
+                >
                   <Input maxLength={80} />
                 </Form.Item>
                 <Form.Item name="folder" label="分类/文件夹">
@@ -2081,7 +2702,7 @@ function ConversationSettingsDrawer({
                   保存信息
                 </Button>
               </Form>
-            )
+            ),
           },
           {
             key: "workflow",
@@ -2099,17 +2720,26 @@ function ConversationSettingsDrawer({
                         onDragStart={() => setDraggingNodeId(node.id)}
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={() => {
-                          if (draggingNodeId) reorderWorkflowNode(draggingNodeId, node.id);
+                          if (draggingNodeId)
+                            reorderWorkflowNode(draggingNodeId, node.id);
                           setDraggingNodeId(undefined);
                         }}
                       >
-                        <div className="workflow-node-icon">{workflowIcon(workflowNodeType(node), node.role)}</div>
+                        <div className="workflow-node-icon">
+                          {workflowIcon(workflowNodeType(node), node.role)}
+                        </div>
                         <div className="workflow-node-body">
                           <Space size={4} wrap>
                             <Text strong>{node.title}</Text>
-                            <Tag>{WORKFLOW_NODE_TYPE_LABEL[workflowNodeType(node)] ?? workflowNodeType(node)}</Tag>
+                            <Tag>
+                              {WORKFLOW_NODE_TYPE_LABEL[
+                                workflowNodeType(node)
+                              ] ?? workflowNodeType(node)}
+                            </Tag>
                           </Space>
-                          <Text type="secondary" ellipsis>{node.meta || node.role}</Text>
+                          <Text type="secondary" ellipsis>
+                            {node.meta || node.role}
+                          </Text>
                         </div>
                       </div>
                     ))
@@ -2120,7 +2750,11 @@ function ConversationSettingsDrawer({
                 <div className="workflow-side">
                   <Space direction="vertical" className="full-width">
                     <Space wrap>
-                      <Button icon={<ReloadOutlined />} disabled={!active} onClick={loadWorkflow}>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        disabled={!active}
+                        onClick={loadWorkflow}
+                      >
                         重新载入
                       </Button>
                       <Button
@@ -2128,7 +2762,11 @@ function ConversationSettingsDrawer({
                         disabled={!active}
                         onClick={async () => {
                           if (!active) return;
-                          const generated = await api.generateConversationWorkflow(active.id, workflowInstruction);
+                          const generated =
+                            await api.generateConversationWorkflow(
+                              active.id,
+                              workflowInstruction,
+                            );
                           setWorkflowDraft(generated);
                           message.success("AI 已按当前群聊 Agent 生成工作流");
                         }}
@@ -2142,7 +2780,12 @@ function ConversationSettingsDrawer({
                       >
                         添加节点
                       </Button>
-                      <Button type="primary" icon={<CheckCircleOutlined />} disabled={!workflowJson.trim()} onClick={saveWorkflow}>
+                      <Button
+                        type="primary"
+                        icon={<CheckCircleOutlined />}
+                        disabled={!workflowJson.trim()}
+                        onClick={saveWorkflow}
+                      >
                         保存画布
                       </Button>
                       <Button
@@ -2150,7 +2793,10 @@ function ConversationSettingsDrawer({
                         disabled={!active || !workflow}
                         onClick={async () => {
                           if (!active || !workflow) return;
-                          const run = await api.startWorkflowRun(active.id, workflow);
+                          const run = await api.startWorkflowRun(
+                            active.id,
+                            workflow,
+                          );
                           setWorkflowRuns((current) => [run, ...current]);
                           message.success("工作流运行已创建");
                         }}
@@ -2161,7 +2807,9 @@ function ConversationSettingsDrawer({
                     <TextArea
                       rows={3}
                       value={workflowInstruction}
-                      onChange={(event) => setWorkflowInstruction(event.target.value)}
+                      onChange={(event) =>
+                        setWorkflowInstruction(event.target.value)
+                      }
                       placeholder="给 AI 的画布编排意见，例如：前后端并行，Reviewer 最后审查；这个群聊只做日常问答时跳过 Master。"
                     />
                     <Select
@@ -2170,20 +2818,41 @@ function ConversationSettingsDrawer({
                       options={WORKFLOW_NODE_TYPE_OPTIONS}
                       className="full-width"
                     />
-                    <TextArea rows={12} value={workflowJson} onChange={(event) => setWorkflowJson(event.target.value)} />
+                    <TextArea
+                      rows={12}
+                      value={workflowJson}
+                      onChange={(event) => setWorkflowJson(event.target.value)}
+                    />
                     <Card title="连线与运行态">
                       <Space direction="vertical" className="full-width">
                         <Space size={[4, 4]} wrap>
-                          {workflowEdges.length ? workflowEdges.map(([from, to]) => <Tag key={`${from}-${to}`}>{from} → {to}</Tag>) : <Tag>默认并行独立回复</Tag>}
+                          {workflowEdges.length ? (
+                            workflowEdges.map(([from, to]) => (
+                              <Tag key={`${from}-${to}`}>
+                                {from} → {to}
+                              </Tag>
+                            ))
+                          ) : (
+                            <Tag>默认并行独立回复</Tag>
+                          )}
                         </Space>
-                        {workflowRuns[0] && <Progress percent={workflowRuns[0].progress} status={workflowRuns[0].status === "failed" ? "exception" : "active"} />}
+                        {workflowRuns[0] && (
+                          <Progress
+                            percent={workflowRuns[0].progress}
+                            status={
+                              workflowRuns[0].status === "failed"
+                                ? "exception"
+                                : "active"
+                            }
+                          />
+                        )}
                       </Space>
                     </Card>
                   </Space>
                 </div>
               </div>
-            )
-          }
+            ),
+          },
         ]}
       />
       <Modal
@@ -2198,7 +2867,15 @@ function ConversationSettingsDrawer({
             <Input maxLength={80} />
           </Form.Item>
           <Form.Item name="type" label="节点类型" rules={[{ required: true }]}>
-            <Select options={[{ label: "Start", value: "start" }, ...WORKFLOW_NODE_TYPE_OPTIONS, { label: "Skill", value: "skill" }, { label: "MCP", value: "mcp" }, { label: "End", value: "end" }]} />
+            <Select
+              options={[
+                { label: "Start", value: "start" },
+                ...WORKFLOW_NODE_TYPE_OPTIONS,
+                { label: "Skill", value: "skill" },
+                { label: "MCP", value: "mcp" },
+                { label: "End", value: "end" },
+              ]}
+            />
           </Form.Item>
           <Form.Item shouldUpdate noStyle>
             {({ getFieldValue }) => {
@@ -2207,17 +2884,29 @@ function ConversationSettingsDrawer({
                 <>
                   {(type === "agent" || type === "review") && (
                     <Form.Item name="agent_id" label="Agent">
-                      <Select allowClear options={agentOptions} placeholder="选择群聊内 Agent" />
+                      <Select
+                        allowClear
+                        options={agentOptions}
+                        placeholder="选择群聊内 Agent"
+                      />
                     </Form.Item>
                   )}
                   {type === "tool" && (
                     <Form.Item name="tool_name" label="工具名">
-                      <Select showSearch options={toolOptions} placeholder="file.read / artifact.create_html" />
+                      <Select
+                        showSearch
+                        options={toolOptions}
+                        placeholder="file.read / artifact.create_html"
+                      />
                     </Form.Item>
                   )}
                   {type === "skill" && (
                     <Form.Item name="skill_id" label="Skill">
-                      <Select showSearch options={skillOptions} placeholder="选择 Skill" />
+                      <Select
+                        showSearch
+                        options={skillOptions}
+                        placeholder="选择 Skill"
+                      />
                     </Form.Item>
                   )}
                   {type === "mcp" && (
@@ -2232,7 +2921,10 @@ function ConversationSettingsDrawer({
                   )}
                   {type === "condition" && (
                     <Form.Item name="expression" label="条件表达式">
-                      <TextArea rows={2} placeholder="input.includes('需要审查')" />
+                      <TextArea
+                        rows={2}
+                        placeholder="input.includes('需要审查')"
+                      />
                     </Form.Item>
                   )}
                   {type === "loop" && (
@@ -2242,7 +2934,11 @@ function ConversationSettingsDrawer({
                   )}
                   {type === "artifact" && (
                     <Form.Item name="artifact_type" label="产物类型">
-                      <Select options={["html", "pdf", "docx", "xlsx", "pptx"].map((value) => ({ label: value, value }))} />
+                      <Select
+                        options={["html", "pdf", "docx", "xlsx", "pptx"].map(
+                          (value) => ({ label: value, value }),
+                        )}
+                      />
                     </Form.Item>
                   )}
                 </>
@@ -2262,7 +2958,7 @@ function GlobalSettingsDrawer({
   open,
   user,
   onClose,
-  onUserUpdated
+  onUserUpdated,
 }: {
   open: boolean;
   user: User;
@@ -2280,7 +2976,10 @@ function GlobalSettingsDrawer({
   const { message } = AntApp.useApp();
 
   const loadModels = async () => {
-    const [providers, configs] = await Promise.all([api.modelProviders(), api.modelConfigs()]);
+    const [providers, configs] = await Promise.all([
+      api.modelProviders(),
+      api.modelConfigs(),
+    ]);
     setModelProviders(providers);
     setModelConfigs(configs);
   };
@@ -2306,15 +3005,23 @@ function GlobalSettingsDrawer({
                     form={profileForm}
                     layout="vertical"
                     onFinish={async (values) => {
-                      const updated = await api.updateProfile({ display_name: values.display_name });
+                      const updated = await api.updateProfile({
+                        display_name: values.display_name,
+                      });
                       onUserUpdated(updated);
                       message.success("个人资料已更新");
                     }}
                   >
-                    <Form.Item name="display_name" label="显示名称" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="display_name"
+                      label="显示名称"
+                      rules={[{ required: true }]}
+                    >
                       <Input />
                     </Form.Item>
-                    <Button type="primary" htmlType="submit">保存资料</Button>
+                    <Button type="primary" htmlType="submit">
+                      保存资料
+                    </Button>
                   </Form>
                 </Card>
                 <Card title="修改密码">
@@ -2322,22 +3029,33 @@ function GlobalSettingsDrawer({
                     form={passwordForm}
                     layout="vertical"
                     onFinish={async (values) => {
-                      await api.changePassword({ current_password: values.current_password, new_password: values.new_password });
+                      await api.changePassword({
+                        current_password: values.current_password,
+                        new_password: values.new_password,
+                      });
                       passwordForm.resetFields();
                       message.success("密码已更新");
                     }}
                   >
-                    <Form.Item name="current_password" label="当前密码" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="current_password"
+                      label="当前密码"
+                      rules={[{ required: true }]}
+                    >
                       <Input.Password />
                     </Form.Item>
-                    <Form.Item name="new_password" label="新密码" rules={[{ required: true, min: 6 }]}>
+                    <Form.Item
+                      name="new_password"
+                      label="新密码"
+                      rules={[{ required: true, min: 6 }]}
+                    >
                       <Input.Password />
                     </Form.Item>
                     <Button htmlType="submit">更新密码</Button>
                   </Form>
                 </Card>
               </div>
-            )
+            ),
           },
           {
             key: "models",
@@ -2352,13 +3070,15 @@ function GlobalSettingsDrawer({
                       provider_type: "openai-compatible",
                       base_url: "https://ark.cn-beijing.volces.com/api/v3",
                       default_model: "doubao-seed-2-0-lite",
-                      supports_streaming: true
+                      supports_streaming: true,
                     }}
                     onFinish={async (values) => {
                       const provider = await api.createModelProvider({
                         ...values,
                         supports_streaming: Boolean(values.supports_streaming),
-                        supports_embeddings: Boolean(values.supports_embeddings)
+                        supports_embeddings: Boolean(
+                          values.supports_embeddings,
+                        ),
                       });
                       setModelProviders((current) => [provider, ...current]);
                       providerForm.resetFields(["name", "api_key"]);
@@ -2366,37 +3086,70 @@ function GlobalSettingsDrawer({
                       message.success("模型供应商已保存");
                     }}
                   >
-                    <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="name"
+                      label="名称"
+                      rules={[{ required: true }]}
+                    >
                       <Input placeholder="我的豆包 / OpenAI 兼容模型" />
                     </Form.Item>
                     <Form.Item name="provider_type" label="类型">
-                      <Select options={[{ label: "OpenAI Compatible", value: "openai-compatible" }, { label: "Volcengine Ark", value: "ark" }]} />
+                      <Select
+                        options={[
+                          {
+                            label: "OpenAI Compatible",
+                            value: "openai-compatible",
+                          },
+                          { label: "Volcengine Ark", value: "ark" },
+                        ]}
+                      />
                     </Form.Item>
-                    <Form.Item name="base_url" label="Base URL" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="base_url"
+                      label="Base URL"
+                      rules={[{ required: true }]}
+                    >
                       <Input />
                     </Form.Item>
                     <Form.Item name="api_key" label="API Key">
                       <Input.Password placeholder="只提交到后端，不在前端回显" />
                     </Form.Item>
-                    <Form.Item name="default_model" label="默认模型" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="default_model"
+                      label="默认模型"
+                      rules={[{ required: true }]}
+                    >
                       <Input />
                     </Form.Item>
                     <Space>
-                      <Form.Item name="supports_streaming" valuePropName="checked">
+                      <Form.Item
+                        name="supports_streaming"
+                        valuePropName="checked"
+                      >
                         <Checkbox>流式</Checkbox>
                       </Form.Item>
-                      <Form.Item name="supports_embeddings" valuePropName="checked">
+                      <Form.Item
+                        name="supports_embeddings"
+                        valuePropName="checked"
+                      >
                         <Checkbox>Embedding</Checkbox>
                       </Form.Item>
                     </Space>
-                    <Button type="primary" htmlType="submit">保存供应商</Button>
+                    <Button type="primary" htmlType="submit">
+                      保存供应商
+                    </Button>
                   </Form>
                 </Card>
                 <Card title="模型配置与真实测试">
                   <Form
                     form={modelForm}
                     layout="vertical"
-                    initialValues={{ purpose: "chat", context_window: 128000, max_output_tokens: 4096, temperature_default: 0.4 }}
+                    initialValues={{
+                      purpose: "chat",
+                      context_window: 128000,
+                      max_output_tokens: 4096,
+                      temperature_default: 0.4,
+                    }}
                     onFinish={async (values) => {
                       const model = await api.createModelConfig(values);
                       setModelConfigs((current) => [model, ...current]);
@@ -2404,14 +3157,31 @@ function GlobalSettingsDrawer({
                       message.success("模型配置已创建");
                     }}
                   >
-                    <Form.Item name="provider_id" label="供应商" rules={[{ required: true }]}>
-                      <Select options={modelProviders.map((provider) => ({ label: provider.name, value: provider.id }))} />
+                    <Form.Item
+                      name="provider_id"
+                      label="供应商"
+                      rules={[{ required: true }]}
+                    >
+                      <Select
+                        options={modelProviders.map((provider) => ({
+                          label: provider.name,
+                          value: provider.id,
+                        }))}
+                      />
                     </Form.Item>
                     <Space align="start">
-                      <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                      <Form.Item
+                        name="name"
+                        label="名称"
+                        rules={[{ required: true }]}
+                      >
                         <Input placeholder="Master/Reviewer 模型" />
                       </Form.Item>
-                      <Form.Item name="model_id" label="模型 ID" rules={[{ required: true }]}>
+                      <Form.Item
+                        name="model_id"
+                        label="模型 ID"
+                        rules={[{ required: true }]}
+                      >
                         <Input placeholder="doubao-seed-2-0-lite" />
                       </Form.Item>
                     </Space>
@@ -2424,7 +3194,7 @@ function GlobalSettingsDrawer({
                             { label: "主控", value: "master" },
                             { label: "Worker", value: "worker" },
                             { label: "Reviewer", value: "reviewer" },
-                            { label: "摘要", value: "summary" }
+                            { label: "摘要", value: "summary" },
                           ]}
                         />
                       </Form.Item>
@@ -2432,7 +3202,9 @@ function GlobalSettingsDrawer({
                         <Input type="number" step="0.1" />
                       </Form.Item>
                     </Space>
-                    <Button htmlType="submit" disabled={!modelProviders.length}>新增模型</Button>
+                    <Button htmlType="submit" disabled={!modelProviders.length}>
+                      新增模型
+                    </Button>
                   </Form>
                   <Divider />
                   <Input.Search
@@ -2444,16 +3216,25 @@ function GlobalSettingsDrawer({
                       setModelTesting(true);
                       setModelTestResult("正在等待模型回复...");
                       try {
-                        const result = await api.testModel(prompt || "请回复模型已就绪。", currentModel?.id);
-                        setModelTestResult(`${result.model}: ${result.response}`);
+                        const result = await api.testModel(
+                          prompt || "请回复模型已就绪。",
+                          currentModel?.id,
+                        );
+                        setModelTestResult(
+                          `${result.model}: ${result.response}`,
+                        );
                       } catch (error) {
-                        setModelTestResult(`连接失败：${error instanceof Error ? error.message : "unknown"}`);
+                        setModelTestResult(
+                          `连接失败：${error instanceof Error ? error.message : "unknown"}`,
+                        );
                       } finally {
                         setModelTesting(false);
                       }
                     }}
                   />
-                  {modelTestResult && <div className="result-box">{modelTestResult}</div>}
+                  {modelTestResult && (
+                    <div className="result-box">{modelTestResult}</div>
+                  )}
                   <List
                     size="small"
                     dataSource={modelConfigs}
@@ -2461,7 +3242,13 @@ function GlobalSettingsDrawer({
                       <List.Item>
                         <List.Item.Meta
                           avatar={<Avatar icon={<ApiOutlined />} />}
-                          title={<Space><Text strong>{model.name}</Text><Tag>{model.purpose}</Tag><Tag>{model.status}</Tag></Space>}
+                          title={
+                            <Space>
+                              <Text strong>{model.name}</Text>
+                              <Tag>{model.purpose}</Tag>
+                              <Tag>{model.status}</Tag>
+                            </Space>
+                          }
                           description={`${model.provider_name ?? model.provider_id} / ${model.model_id} / ${model.context_window} tokens`}
                         />
                       </List.Item>
@@ -2469,7 +3256,7 @@ function GlobalSettingsDrawer({
                   />
                 </Card>
               </div>
-            )
+            ),
           },
           {
             key: "general",
@@ -2479,11 +3266,13 @@ function GlobalSettingsDrawer({
                 <Space direction="vertical">
                   <Checkbox defaultChecked>发送消息后自动滚动到底部</Checkbox>
                   <Checkbox defaultChecked>流式回复时显示运行状态</Checkbox>
-                  <Checkbox defaultChecked>产物卡片点击后再打开右侧预览</Checkbox>
+                  <Checkbox defaultChecked>
+                    产物卡片点击后再打开右侧预览
+                  </Checkbox>
                 </Space>
               </Card>
-            )
-          }
+            ),
+          },
         ]}
       />
     </Drawer>
@@ -2495,12 +3284,20 @@ function FilesKnowledgePanel({
   knowledgeBases,
   onCreateKb,
   onImportText,
-  onRetrieve
+  onRetrieve,
 }: {
   files: UploadedFile[];
   knowledgeBases: KnowledgeBase[];
-  onCreateKb: (payload: { name: string; description: string; scope: string; visibility: string }) => Promise<void>;
-  onImportText: (kbId: string, payload: { title: string; content: string }) => Promise<void>;
+  onCreateKb: (payload: {
+    name: string;
+    description: string;
+    scope: string;
+    visibility: string;
+  }) => Promise<void>;
+  onImportText: (
+    kbId: string,
+    payload: { title: string; content: string },
+  ) => Promise<void>;
   onRetrieve: (kbId: string, query: string) => Promise<string>;
 }) {
   const [kbForm] = Form.useForm();
@@ -2523,64 +3320,121 @@ function FilesKnowledgePanel({
               rowKey="id"
               columns={[
                 { title: "文件名", dataIndex: "original_filename" },
-                { title: "大小", dataIndex: "size", render: (value: number) => `${Math.ceil(value / 1024)}KB` },
-                { title: "状态", dataIndex: "parse_status", render: (value: string) => <Tag>{value}</Tag> }
+                {
+                  title: "大小",
+                  dataIndex: "size",
+                  render: (value: number) => `${Math.ceil(value / 1024)}KB`,
+                },
+                {
+                  title: "状态",
+                  dataIndex: "parse_status",
+                  render: (value: string) => <Tag>{value}</Tag>,
+                },
               ]}
             />
-          )
+          ),
         },
         {
           key: "knowledge",
           label: "知识库",
           children: (
             <Space direction="vertical" className="full-width">
-              <Form form={kbForm} layout="vertical" onFinish={onCreateKb} initialValues={{ scope: "personal", visibility: "private" }}>
-                <Form.Item name="name" label="知识库名称" rules={[{ required: true }]}>
-                  <Input placeholder="项目需求知识库" data-testid="knowledge-create" />
+              <Form
+                form={kbForm}
+                layout="vertical"
+                onFinish={onCreateKb}
+                initialValues={{ scope: "personal", visibility: "private" }}
+              >
+                <Form.Item
+                  name="name"
+                  label="知识库名称"
+                  rules={[{ required: true }]}
+                >
+                  <Input
+                    placeholder="项目需求知识库"
+                    data-testid="knowledge-create"
+                  />
                 </Form.Item>
                 <Form.Item name="description" label="描述">
                   <Input />
                 </Form.Item>
                 <Space>
                   <Form.Item name="scope" label="范围">
-                    <Select style={{ width: 140 }} options={[{ label: "个人", value: "personal" }, { label: "工作区", value: "workspace" }, { label: "平台", value: "platform" }]} />
+                    <Select
+                      style={{ width: 140 }}
+                      options={[
+                        { label: "个人", value: "personal" },
+                        { label: "工作区", value: "workspace" },
+                        { label: "平台", value: "platform" },
+                      ]}
+                    />
                   </Form.Item>
                   <Form.Item name="visibility" label="可见性">
-                    <Select style={{ width: 140 }} options={[{ label: "私有", value: "private" }, { label: "公开", value: "public" }]} />
+                    <Select
+                      style={{ width: 140 }}
+                      options={[
+                        { label: "私有", value: "private" },
+                        { label: "公开", value: "public" },
+                      ]}
+                    />
                   </Form.Item>
                 </Space>
-                <Button htmlType="submit" type="primary">创建知识库</Button>
+                <Button htmlType="submit" type="primary">
+                  创建知识库
+                </Button>
               </Form>
               <Divider />
               <Select
                 placeholder="选择知识库"
                 value={selectedKb}
                 onChange={setSelectedKb}
-                options={knowledgeBases.map((kb) => ({ label: `${kb.name} · ${kb.document_count} 文档`, value: kb.id }))}
+                options={knowledgeBases.map((kb) => ({
+                  label: `${kb.name} · ${kb.document_count} 文档`,
+                  value: kb.id,
+                }))}
                 className="full-width"
               />
-              <Form form={docForm} layout="vertical" onFinish={(values) => selectedKb && onImportText(selectedKb, values)}>
-                <Form.Item name="title" label="导入文档标题" rules={[{ required: true }]}>
+              <Form
+                form={docForm}
+                layout="vertical"
+                onFinish={(values) =>
+                  selectedKb && onImportText(selectedKb, values)
+                }
+              >
+                <Form.Item
+                  name="title"
+                  label="导入文档标题"
+                  rules={[{ required: true }]}
+                >
                   <Input />
                 </Form.Item>
-                <Form.Item name="content" label="文档内容" rules={[{ required: true }]}>
+                <Form.Item
+                  name="content"
+                  label="文档内容"
+                  rules={[{ required: true }]}
+                >
                   <TextArea rows={4} />
                 </Form.Item>
-                <Button disabled={!selectedKb} htmlType="submit">导入并索引</Button>
+                <Button disabled={!selectedKb} htmlType="submit">
+                  导入并索引
+                </Button>
               </Form>
               <Divider />
               <Input.Search
                 placeholder="检索知识库"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                onSearch={async () => selectedKb && setRetrieveResult(await onRetrieve(selectedKb, query))}
+                onSearch={async () =>
+                  selectedKb &&
+                  setRetrieveResult(await onRetrieve(selectedKb, query))
+                }
                 enterButton="检索"
                 disabled={!selectedKb}
               />
               {retrieveResult && <Card>{retrieveResult}</Card>}
             </Space>
-          )
-        }
+          ),
+        },
       ]}
     />
   );
@@ -2593,15 +3447,27 @@ function WorkspacesDrawer({
   onCreateWorkspace,
   onCreateProject,
   onLoadProjects,
-  onSaveProjectFile
+  onSaveProjectFile,
 }: {
   open: boolean;
   workspaces: Workspace[];
   onClose: () => void;
-  onCreateWorkspace: (payload: { name: string; description: string; type: string; tags: string[]; config?: Record<string, unknown> }) => Promise<void>;
-  onCreateProject: (workspaceId: string, payload: { name: string; description: string; type: string }) => Promise<Project>;
+  onCreateWorkspace: (payload: {
+    name: string;
+    description: string;
+    type: string;
+    tags: string[];
+    config?: Record<string, unknown>;
+  }) => Promise<void>;
+  onCreateProject: (
+    workspaceId: string,
+    payload: { name: string; description: string; type: string },
+  ) => Promise<Project>;
   onLoadProjects: (workspaceId: string) => Promise<Project[]>;
-  onSaveProjectFile: (projectId: string, payload: { path: string; language: string; content: string }) => Promise<void>;
+  onSaveProjectFile: (
+    projectId: string,
+    payload: { path: string; language: string; content: string },
+  ) => Promise<void>;
 }) {
   const [workspaceForm] = Form.useForm();
   const [projectForm] = Form.useForm();
@@ -2615,10 +3481,12 @@ function WorkspacesDrawer({
     onLoadProjects(selectedWorkspace).then(setProjects);
   }, [selectedWorkspace, onLoadProjects]);
 
-  const activeWorkspace = workspaces.find((item) => item.id === selectedWorkspace) ?? workspaces[0];
+  const activeWorkspace =
+    workspaces.find((item) => item.id === selectedWorkspace) ?? workspaces[0];
 
   useEffect(() => {
-    if (!selectedWorkspace && workspaces[0]) setSelectedWorkspace(workspaces[0].id);
+    if (!selectedWorkspace && workspaces[0])
+      setSelectedWorkspace(workspaces[0].id);
   }, [workspaces, selectedWorkspace]);
 
   return (
@@ -2628,7 +3496,11 @@ function WorkspacesDrawer({
           <Form
             form={workspaceForm}
             layout="vertical"
-            initialValues={{ type: "vertical", tags: "全链路开发", template_id: "fullstack-delivery" }}
+            initialValues={{
+              type: "vertical",
+              tags: "全链路开发",
+              template_id: "fullstack-delivery",
+            }}
             onFinish={async (values) => {
               await onCreateWorkspace({
                 name: values.name,
@@ -2638,7 +3510,7 @@ function WorkspacesDrawer({
                   .split(",")
                   .map((item) => item.trim())
                   .filter(Boolean),
-                config: { template_id: values.template_id }
+                config: { template_id: values.template_id },
               });
               workspaceForm.resetFields();
             }}
@@ -2656,7 +3528,7 @@ function WorkspacesDrawer({
                   options={[
                     { label: "垂直类", value: "vertical" },
                     { label: "跨类", value: "cross" },
-                    { label: "自定义", value: "custom" }
+                    { label: "自定义", value: "custom" },
                   ]}
                 />
               </Form.Item>
@@ -2666,7 +3538,7 @@ function WorkspacesDrawer({
                   options={[
                     { label: "全链路开发", value: "fullstack-delivery" },
                     { label: "数据分析", value: "data-analysis" },
-                    { label: "自定义实验", value: "custom-lab" }
+                    { label: "自定义实验", value: "custom-lab" },
                   ]}
                 />
               </Form.Item>
@@ -2674,7 +3546,9 @@ function WorkspacesDrawer({
             <Form.Item name="tags" label="标签">
               <Input placeholder="逗号分隔" />
             </Form.Item>
-            <Button type="primary" htmlType="submit">创建工作区</Button>
+            <Button type="primary" htmlType="submit">
+              创建工作区
+            </Button>
           </Form>
         </Card>
         <Card title="资源概览">
@@ -2682,12 +3556,24 @@ function WorkspacesDrawer({
             dataSource={workspaces}
             renderItem={(workspace) => (
               <List.Item
-                className={workspace.id === activeWorkspace?.id ? "workspace-active" : ""}
+                className={
+                  workspace.id === activeWorkspace?.id ? "workspace-active" : ""
+                }
                 onClick={() => setSelectedWorkspace(workspace.id)}
               >
                 <List.Item.Meta
-                  avatar={<Avatar style={{ background: "#1677ff" }}>{workspace.name.slice(0, 1)}</Avatar>}
-                  title={<Space><Text strong>{workspace.name}</Text><Tag>{workspace.type}</Tag><Tag>{workspace.status}</Tag></Space>}
+                  avatar={
+                    <Avatar style={{ background: "#1677ff" }}>
+                      {workspace.name.slice(0, 1)}
+                    </Avatar>
+                  }
+                  title={
+                    <Space>
+                      <Text strong>{workspace.name}</Text>
+                      <Tag>{workspace.type}</Tag>
+                      <Tag>{workspace.status}</Tag>
+                    </Space>
+                  }
                   description={`${workspace.member_count} 成员 · ${workspace.project_count} 项目 · ${workspace.tags.join("/")}`}
                 />
               </List.Item>
@@ -2698,7 +3584,9 @@ function WorkspacesDrawer({
       <Divider />
       <Flex justify="space-between" align="center">
         <Title level={4}>{activeWorkspace?.name ?? "项目资产"}</Title>
-        <Text type="secondary">工作区隔离项目、知识库、Agent 编排和快捷指令</Text>
+        <Text type="secondary">
+          工作区隔离项目、知识库、Agent 编排和快捷指令
+        </Text>
       </Flex>
       <div className="workspace-grid">
         <Card title="创建项目">
@@ -2714,14 +3602,24 @@ function WorkspacesDrawer({
               projectForm.resetFields();
             }}
           >
-            <Form.Item name="name" label="项目名称" rules={[{ required: true }]}>
+            <Form.Item
+              name="name"
+              label="项目名称"
+              rules={[{ required: true }]}
+            >
               <Input placeholder="agenthub-preview" />
             </Form.Item>
             <Form.Item name="description" label="描述">
               <Input />
             </Form.Item>
             <Form.Item name="type" label="项目类型">
-              <Select options={[{ label: "代码工程", value: "code_project" }, { label: "业务文档", value: "document" }, { label: "交互页面", value: "web_app" }]} />
+              <Select
+                options={[
+                  { label: "代码工程", value: "code_project" },
+                  { label: "业务文档", value: "document" },
+                  { label: "交互页面", value: "web_app" },
+                ]}
+              />
             </Form.Item>
             <Button htmlType="submit">创建项目</Button>
           </Form>
@@ -2732,13 +3630,20 @@ function WorkspacesDrawer({
             placeholder="选择项目"
             value={selectedProject}
             onChange={setSelectedProject}
-            options={projects.map((project) => ({ label: `${project.name} · v${project.current_version}`, value: project.id }))}
+            options={projects.map((project) => ({
+              label: `${project.name} · v${project.current_version}`,
+              value: project.id,
+            }))}
           />
           <Form
             className="mt-8"
             form={fileForm}
             layout="vertical"
-            initialValues={{ path: "src/main.ts", language: "typescript", content: "export const demo = true;" }}
+            initialValues={{
+              path: "src/main.ts",
+              language: "typescript",
+              content: "export const demo = true;",
+            }}
             onFinish={async (values) => {
               if (!selectedProject) return;
               await onSaveProjectFile(selectedProject, values);
@@ -2754,7 +3659,9 @@ function WorkspacesDrawer({
             <Form.Item name="content" label="内容">
               <TextArea rows={4} />
             </Form.Item>
-            <Button disabled={!selectedProject} htmlType="submit">保存文件版本</Button>
+            <Button disabled={!selectedProject} htmlType="submit">
+              保存文件版本
+            </Button>
           </Form>
         </Card>
       </div>
@@ -2770,16 +3677,28 @@ function PlatformControlDrawer({
   onCreateWorkspace,
   onCreateProject,
   onLoadProjects,
-  onSaveProjectFile
+  onSaveProjectFile,
 }: {
   open: boolean;
   workspaces: Workspace[];
   activeConversation?: Conversation;
   onClose: () => void;
-  onCreateWorkspace: (payload: { name: string; description: string; type: string; tags: string[]; config?: Record<string, unknown> }) => Promise<void>;
-  onCreateProject: (workspaceId: string, payload: { name: string; description: string; type: string }) => Promise<Project>;
+  onCreateWorkspace: (payload: {
+    name: string;
+    description: string;
+    type: string;
+    tags: string[];
+    config?: Record<string, unknown>;
+  }) => Promise<void>;
+  onCreateProject: (
+    workspaceId: string,
+    payload: { name: string; description: string; type: string },
+  ) => Promise<Project>;
   onLoadProjects: (workspaceId: string) => Promise<Project[]>;
-  onSaveProjectFile: (projectId: string, payload: { path: string; language: string; content: string }) => Promise<void>;
+  onSaveProjectFile: (
+    projectId: string,
+    payload: { path: string; language: string; content: string },
+  ) => Promise<void>;
 }) {
   const [workspaceForm] = Form.useForm();
   const [projectForm] = Form.useForm();
@@ -2806,11 +3725,17 @@ function PlatformControlDrawer({
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [sandboxes, setSandboxes] = useState<SandboxSession[]>([]);
   const [selectedSandbox, setSelectedSandbox] = useState<string>();
-  const [remoteConnections, setRemoteConnections] = useState<RemoteConnection[]>([]);
+  const [remoteConnections, setRemoteConnections] = useState<
+    RemoteConnection[]
+  >([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [securityRoles, setSecurityRoles] = useState<SecurityRole[]>([]);
   const [securityUsers, setSecurityUsers] = useState<SecurityUser[]>([]);
-  const [auditStats, setAuditStats] = useState<{ total: number; high_risk: number; by_action: Record<string, number> }>();
+  const [auditStats, setAuditStats] = useState<{
+    total: number;
+    high_risk: number;
+    by_action: Record<string, number>;
+  }>();
   const [modelTestResult, setModelTestResult] = useState("");
   const [skillTestResult, setSkillTestResult] = useState("");
   const [skillSearch, setSkillSearch] = useState("");
@@ -2819,20 +3744,29 @@ function PlatformControlDrawer({
   const [mcpInvocationResult, setMcpInvocationResult] = useState("");
   const [routingMode, setRoutingMode] = useState("auto");
   const [workflowStatus, setWorkflowStatus] = useState("ready");
-  const [conversationWorkflow, setConversationWorkflow] = useState<ConversationWorkflow>();
+  const [conversationWorkflow, setConversationWorkflow] =
+    useState<ConversationWorkflow>();
   const [workflowJson, setWorkflowJson] = useState("");
   const [draggingNodeId, setDraggingNodeId] = useState<string>();
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
   const { message } = AntApp.useApp();
 
-  const activeWorkspace = workspaces.find((item) => item.id === selectedWorkspace) ?? workspaces[0];
+  const activeWorkspace =
+    workspaces.find((item) => item.id === selectedWorkspace) ?? workspaces[0];
   const filteredSkills = useMemo(() => {
     const keyword = skillSearch.trim().toLowerCase();
     if (!keyword) return skills;
     return skills.filter((skill) =>
-      [skill.name, skill.description, skill.category, skill.scope, skill.source, ...(skill.tools ?? [])]
+      [
+        skill.name,
+        skill.description,
+        skill.category,
+        skill.scope,
+        skill.source,
+        ...(skill.tools ?? []),
+      ]
         .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(keyword))
+        .some((value) => String(value).toLowerCase().includes(keyword)),
     );
   }, [skills, skillSearch]);
 
@@ -2848,7 +3782,20 @@ function PlatformControlDrawer({
   };
 
   const loadPlatformResources = async () => {
-    const [providers, configs, servers, nextSkills, nextTools, sessions, remotes, invocations, logs, roles, users, stats] = await Promise.all([
+    const [
+      providers,
+      configs,
+      servers,
+      nextSkills,
+      nextTools,
+      sessions,
+      remotes,
+      invocations,
+      logs,
+      roles,
+      users,
+      stats,
+    ] = await Promise.all([
       api.modelProviders(),
       api.modelConfigs(),
       api.mcpServers(activeWorkspace?.id),
@@ -2860,7 +3807,7 @@ function PlatformControlDrawer({
       api.auditLogs().catch(() => []),
       api.securityRoles().catch(() => []),
       api.securityUsers().catch(() => []),
-      api.auditStats().catch(() => undefined)
+      api.auditStats().catch(() => undefined),
     ]);
     setModelProviders(providers);
     setModelConfigs(configs);
@@ -2891,7 +3838,8 @@ function PlatformControlDrawer({
   };
 
   useEffect(() => {
-    if (!selectedWorkspace && workspaces[0]) setSelectedWorkspace(workspaces[0].id);
+    if (!selectedWorkspace && workspaces[0])
+      setSelectedWorkspace(workspaces[0].id);
   }, [workspaces, selectedWorkspace]);
 
   useEffect(() => {
@@ -2926,12 +3874,19 @@ function PlatformControlDrawer({
     if (from < 0 || to < 0) return;
     const [moved] = nodes.splice(from, 1);
     nodes.splice(to, 0, moved);
-    const edges = nodes.slice(1).map((node, index) => [nodes[index].id, node.id]);
+    const edges = nodes
+      .slice(1)
+      .map((node, index) => [nodes[index].id, node.id]);
     setWorkflowDraft({ ...conversationWorkflow, nodes, edges });
   };
 
   return (
-    <Drawer title="工作区与平台控制面" width={1040} open={open} onClose={onClose}>
+    <Drawer
+      title="工作区与平台控制面"
+      width={1040}
+      open={open}
+      onClose={onClose}
+    >
       <Flex justify="space-between" align="center" className="drawer-toolbar">
         <Space wrap>
           <Select
@@ -2939,7 +3894,10 @@ function PlatformControlDrawer({
             placeholder="选择工作区"
             value={activeWorkspace?.id}
             onChange={setSelectedWorkspace}
-            options={workspaces.map((workspace) => ({ label: workspace.name, value: workspace.id }))}
+            options={workspaces.map((workspace) => ({
+              label: workspace.name,
+              value: workspace.id,
+            }))}
           />
           {activeWorkspace && (
             <>
@@ -2955,7 +3913,7 @@ function PlatformControlDrawer({
         </Button>
       </Flex>
       <Tabs
-        items={([
+        items={[
           {
             key: "assets",
             label: "资产",
@@ -2966,19 +3924,27 @@ function PlatformControlDrawer({
                     <Form
                       form={workspaceForm}
                       layout="vertical"
-                      initialValues={{ type: "vertical", tags: "fullstack,demo", template_id: "fullstack-delivery" }}
+                      initialValues={{
+                        type: "vertical",
+                        tags: "fullstack,demo",
+                        template_id: "fullstack-delivery",
+                      }}
                       onFinish={async (values) => {
                         await onCreateWorkspace({
                           name: values.name,
                           description: values.description ?? "",
                           type: values.type,
                           tags: parseList(values.tags),
-                          config: { template_id: values.template_id }
+                          config: { template_id: values.template_id },
                         });
                         workspaceForm.resetFields();
                       }}
                     >
-                      <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                      <Form.Item
+                        name="name"
+                        label="名称"
+                        rules={[{ required: true }]}
+                      >
                         <Input placeholder="业务增长工作区" />
                       </Form.Item>
                       <Form.Item name="description" label="描述">
@@ -2991,7 +3957,7 @@ function PlatformControlDrawer({
                             options={[
                               { label: "垂直业务", value: "vertical" },
                               { label: "跨团队", value: "cross" },
-                              { label: "自定义", value: "custom" }
+                              { label: "自定义", value: "custom" },
                             ]}
                           />
                         </Form.Item>
@@ -2999,9 +3965,12 @@ function PlatformControlDrawer({
                           <Select
                             style={{ width: 180 }}
                             options={[
-                              { label: "全链路开发", value: "fullstack-delivery" },
+                              {
+                                label: "全链路开发",
+                                value: "fullstack-delivery",
+                              },
                               { label: "数据分析", value: "data-analysis" },
-                              { label: "自定义实验", value: "custom-lab" }
+                              { label: "自定义实验", value: "custom-lab" },
                             ]}
                           />
                         </Form.Item>
@@ -3019,11 +3988,19 @@ function PlatformControlDrawer({
                       dataSource={workspaces}
                       renderItem={(workspace) => (
                         <List.Item
-                          className={workspace.id === activeWorkspace?.id ? "workspace-active" : ""}
+                          className={
+                            workspace.id === activeWorkspace?.id
+                              ? "workspace-active"
+                              : ""
+                          }
                           onClick={() => setSelectedWorkspace(workspace.id)}
                         >
                           <List.Item.Meta
-                            avatar={<Avatar style={{ background: "#1677ff" }}>{workspace.name.slice(0, 1)}</Avatar>}
+                            avatar={
+                              <Avatar style={{ background: "#1677ff" }}>
+                                {workspace.name.slice(0, 1)}
+                              </Avatar>
+                            }
                             title={
                               <Space>
                                 <Text strong>{workspace.name}</Text>
@@ -3047,13 +4024,20 @@ function PlatformControlDrawer({
                       initialValues={{ type: "code_project" }}
                       onFinish={async (values) => {
                         if (!activeWorkspace) return;
-                        const project = await onCreateProject(activeWorkspace.id, values);
+                        const project = await onCreateProject(
+                          activeWorkspace.id,
+                          values,
+                        );
                         setProjects((current) => [project, ...current]);
                         setSelectedProject(project.id);
                         projectForm.resetFields();
                       }}
                     >
-                      <Form.Item name="name" label="项目名称" rules={[{ required: true }]}>
+                      <Form.Item
+                        name="name"
+                        label="项目名称"
+                        rules={[{ required: true }]}
+                      >
                         <Input placeholder="agenthub-preview" />
                       </Form.Item>
                       <Form.Item name="description" label="描述">
@@ -3064,7 +4048,7 @@ function PlatformControlDrawer({
                           options={[
                             { label: "代码工程", value: "code_project" },
                             { label: "业务文档", value: "document" },
-                            { label: "交互页面", value: "web_app" }
+                            { label: "交互页面", value: "web_app" },
                           ]}
                         />
                       </Form.Item>
@@ -3079,20 +4063,31 @@ function PlatformControlDrawer({
                       placeholder="选择项目"
                       value={selectedProject}
                       onChange={setSelectedProject}
-                      options={projects.map((project) => ({ label: `${project.name} · v${project.current_version}`, value: project.id }))}
+                      options={projects.map((project) => ({
+                        label: `${project.name} · v${project.current_version}`,
+                        value: project.id,
+                      }))}
                     />
                     <Form
                       className="mt-8"
                       form={fileForm}
                       layout="vertical"
-                      initialValues={{ path: "src/main.ts", language: "typescript", content: "export const demo = true;" }}
+                      initialValues={{
+                        path: "src/main.ts",
+                        language: "typescript",
+                        content: "export const demo = true;",
+                      }}
                       onFinish={async (values) => {
                         if (!selectedProject) return;
                         await onSaveProjectFile(selectedProject, values);
                         fileForm.resetFields();
                       }}
                     >
-                      <Form.Item name="path" label="路径" rules={[{ required: true }]}>
+                      <Form.Item
+                        name="path"
+                        label="路径"
+                        rules={[{ required: true }]}
+                      >
                         <Input />
                       </Form.Item>
                       <Form.Item name="language" label="语言">
@@ -3108,7 +4103,7 @@ function PlatformControlDrawer({
                   </Card>
                 </div>
               </>
-            )
+            ),
           },
           {
             key: "workflow",
@@ -3116,38 +4111,54 @@ function PlatformControlDrawer({
             children: (
               <div className="workflow-board">
                 <div className="workflow-canvas">
-                  {workflowNodes.length ? workflowNodes.map((node, index) => (
-                    <div
-                      key={node.id}
-                      className={`workflow-node workflow-node-${node.status}`}
-                      draggable
-                      onDragStart={() => setDraggingNodeId(node.id)}
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={() => {
-                        if (draggingNodeId) reorderWorkflowNode(draggingNodeId, node.id);
-                        setDraggingNodeId(undefined);
-                      }}
-                    >
-                      <div className="workflow-node-icon">{workflowIcon(node.role)}</div>
-                      <div className="workflow-node-body">
-                        <Text strong>{node.title}</Text>
-                        <Text type="secondary">{node.meta}</Text>
+                  {workflowNodes.length ? (
+                    workflowNodes.map((node, index) => (
+                      <div
+                        key={node.id}
+                        className={`workflow-node workflow-node-${node.status}`}
+                        draggable
+                        onDragStart={() => setDraggingNodeId(node.id)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() => {
+                          if (draggingNodeId)
+                            reorderWorkflowNode(draggingNodeId, node.id);
+                          setDraggingNodeId(undefined);
+                        }}
+                      >
+                        <div className="workflow-node-icon">
+                          {workflowIcon(node.role)}
+                        </div>
+                        <div className="workflow-node-body">
+                          <Text strong>{node.title}</Text>
+                          <Text type="secondary">{node.meta}</Text>
+                        </div>
+                        {index < workflowNodes.length - 1 && (
+                          <div className="workflow-arrow">→</div>
+                        )}
                       </div>
-                      {index < workflowNodes.length - 1 && <div className="workflow-arrow">→</div>}
-                    </div>
-                  )) : <Empty description="选择一个会话后，可按群聊 Agent 自动生成工作流" />}
+                    ))
+                  ) : (
+                    <Empty description="选择一个会话后，可按群聊 Agent 自动生成工作流" />
+                  )}
                 </div>
                 <div className="workflow-side">
                   <Card title="会话工作流">
                     <Space direction="vertical" className="full-width">
-                      <Text type="secondary">{activeConversation ? activeConversation.title : "暂无选中会话"}</Text>
+                      <Text type="secondary">
+                        {activeConversation
+                          ? activeConversation.title
+                          : "暂无选中会话"}
+                      </Text>
                       <Space wrap>
                         <Button
                           icon={<RobotOutlined />}
                           disabled={!activeConversation}
                           onClick={async () => {
                             if (!activeConversation) return;
-                            const workflow = await api.generateConversationWorkflow(activeConversation.id);
+                            const workflow =
+                              await api.generateConversationWorkflow(
+                                activeConversation.id,
+                              );
                             setConversationWorkflow(workflow);
                             setWorkflowJson(JSON.stringify(workflow, null, 2));
                             message.success("AI 已按当前群聊 Agent 生成工作流");
@@ -3162,12 +4173,17 @@ function PlatformControlDrawer({
                             if (!activeConversation) return;
                             let workflow: ConversationWorkflow;
                             try {
-                              workflow = JSON.parse(workflowJson) as ConversationWorkflow;
+                              workflow = JSON.parse(
+                                workflowJson,
+                              ) as ConversationWorkflow;
                             } catch {
                               message.error("工作流 JSON 格式不正确");
                               return;
                             }
-                            const saved = await api.saveConversationWorkflow(activeConversation.id, workflow);
+                            const saved = await api.saveConversationWorkflow(
+                              activeConversation.id,
+                              workflow,
+                            );
                             setConversationWorkflow(saved);
                             setWorkflowJson(JSON.stringify(saved, null, 2));
                             message.success("工作流已保存");
@@ -3176,35 +4192,56 @@ function PlatformControlDrawer({
                           保存
                         </Button>
                       </Space>
-                        <Button
-                          icon={<PlusOutlined />}
-                          disabled={!conversationWorkflow}
-                          onClick={() => {
-                            if (!conversationWorkflow) return;
-                            const id = `node-${Date.now().toString(36)}`;
-                            const nodes = [...conversationWorkflow.nodes, { id, title: "New node", role: "worker", status: "ready", meta: "Manual step" }];
-                            const edges = nodes.slice(1).map((node, index) => [nodes[index].id, node.id]);
-                            setWorkflowDraft({ ...conversationWorkflow, nodes, edges });
-                          }}
-                        >
-                          Add node
-                        </Button>
-                        <Button
-                          icon={<BranchesOutlined />}
-                          disabled={!activeConversation || !conversationWorkflow}
-                          onClick={async () => {
-                            if (!activeConversation || !conversationWorkflow) return;
-                            const run = await api.startWorkflowRun(activeConversation.id, conversationWorkflow);
-                            setWorkflowRuns((current) => [run, ...current]);
-                            message.success("Workflow run started");
-                          }}
-                        >
-                          Run
-                        </Button>
+                      <Button
+                        icon={<PlusOutlined />}
+                        disabled={!conversationWorkflow}
+                        onClick={() => {
+                          if (!conversationWorkflow) return;
+                          const id = `node-${Date.now().toString(36)}`;
+                          const nodes = [
+                            ...conversationWorkflow.nodes,
+                            {
+                              id,
+                              title: "New node",
+                              role: "worker",
+                              status: "ready",
+                              meta: "Manual step",
+                            },
+                          ];
+                          const edges = nodes
+                            .slice(1)
+                            .map((node, index) => [nodes[index].id, node.id]);
+                          setWorkflowDraft({
+                            ...conversationWorkflow,
+                            nodes,
+                            edges,
+                          });
+                        }}
+                      >
+                        Add node
+                      </Button>
+                      <Button
+                        icon={<BranchesOutlined />}
+                        disabled={!activeConversation || !conversationWorkflow}
+                        onClick={async () => {
+                          if (!activeConversation || !conversationWorkflow)
+                            return;
+                          const run = await api.startWorkflowRun(
+                            activeConversation.id,
+                            conversationWorkflow,
+                          );
+                          setWorkflowRuns((current) => [run, ...current]);
+                          message.success("Workflow run started");
+                        }}
+                      >
+                        Run
+                      </Button>
                       <TextArea
                         rows={10}
                         value={workflowJson}
-                        onChange={(event) => setWorkflowJson(event.target.value)}
+                        onChange={(event) =>
+                          setWorkflowJson(event.target.value)
+                        }
                         placeholder="工作流 JSON：nodes / edges / settings"
                       />
                     </Space>
@@ -3218,15 +4255,18 @@ function PlatformControlDrawer({
                         options={[
                           { label: "自动", value: "auto" },
                           { label: "人工确认", value: "human" },
-                          { label: "成本优先", value: "cost" }
+                          { label: "成本优先", value: "cost" },
                         ]}
                       />
                       <Select
                         defaultValue="review-required"
                         options={[
-                          { label: "Reviewer 必须通过", value: "review-required" },
+                          {
+                            label: "Reviewer 必须通过",
+                            value: "review-required",
+                          },
                           { label: "低风险跳过", value: "risk-based" },
-                          { label: "双 Reviewer", value: "dual-review" }
+                          { label: "双 Reviewer", value: "dual-review" },
                         ]}
                       />
                       <Select
@@ -3234,7 +4274,7 @@ function PlatformControlDrawer({
                         options={[
                           { label: "摘要滚动窗口", value: "summary-window" },
                           { label: "全量上下文", value: "full-context" },
-                          { label: "知识库优先", value: "kb-first" }
+                          { label: "知识库优先", value: "kb-first" },
                         ]}
                       />
                       <Button
@@ -3247,10 +4287,12 @@ function PlatformControlDrawer({
                               ? {
                                   ...current,
                                   nodes: current.nodes.map((node) =>
-                                    node.role === "master" ? { ...node, status: "running" } : node
-                                  )
+                                    node.role === "master"
+                                      ? { ...node, status: "running" }
+                                      : node,
+                                  ),
                                 }
-                              : current
+                              : current,
                           );
                           window.setTimeout(() => {
                             setWorkflowStatus("ready");
@@ -3259,10 +4301,12 @@ function PlatformControlDrawer({
                                 ? {
                                     ...current,
                                     nodes: current.nodes.map((node) =>
-                                      node.role === "master" ? { ...node, status: "ready" } : node
-                                    )
+                                      node.role === "master"
+                                        ? { ...node, status: "ready" }
+                                        : node,
+                                    ),
                                   }
-                                : current
+                                : current,
                             );
                           }, 1200);
                           message.success(`调度演练已触发：${routingMode}`);
@@ -3287,7 +4331,7 @@ function PlatformControlDrawer({
                   </Card>
                 </div>
               </div>
-            )
+            ),
           },
           {
             key: "models",
@@ -3302,39 +4346,67 @@ function PlatformControlDrawer({
                       provider_type: "openai-compatible",
                       base_url: "https://ark.cn-beijing.volces.com/api/v3",
                       default_model: "doubao-seed-2-0-lite",
-                      supports_streaming: true
+                      supports_streaming: true,
                     }}
                     onFinish={async (values) => {
                       const provider = await api.createModelProvider({
                         ...values,
                         supports_streaming: Boolean(values.supports_streaming),
-                        supports_embeddings: Boolean(values.supports_embeddings)
+                        supports_embeddings: Boolean(
+                          values.supports_embeddings,
+                        ),
                       });
                       setModelProviders((current) => [provider, ...current]);
                       providerForm.resetFields(["name", "api_key"]);
                       message.success("模型供应商已创建");
                     }}
                   >
-                    <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="name"
+                      label="名称"
+                      rules={[{ required: true }]}
+                    >
                       <Input placeholder="我的 OpenAI 兼容模型" />
                     </Form.Item>
                     <Form.Item name="provider_type" label="类型">
-                      <Select options={[{ label: "OpenAI Compatible", value: "openai-compatible" }, { label: "火山方舟", value: "ark" }]} />
+                      <Select
+                        options={[
+                          {
+                            label: "OpenAI Compatible",
+                            value: "openai-compatible",
+                          },
+                          { label: "火山方舟", value: "ark" },
+                        ]}
+                      />
                     </Form.Item>
-                    <Form.Item name="base_url" label="Base URL" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="base_url"
+                      label="Base URL"
+                      rules={[{ required: true }]}
+                    >
                       <Input />
                     </Form.Item>
                     <Form.Item name="api_key" label="API Key">
                       <Input.Password placeholder="仅提交到后端保存，前端不回显" />
                     </Form.Item>
-                    <Form.Item name="default_model" label="默认模型" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="default_model"
+                      label="默认模型"
+                      rules={[{ required: true }]}
+                    >
                       <Input />
                     </Form.Item>
                     <Space>
-                      <Form.Item name="supports_streaming" valuePropName="checked">
+                      <Form.Item
+                        name="supports_streaming"
+                        valuePropName="checked"
+                      >
                         <Checkbox>流式</Checkbox>
                       </Form.Item>
-                      <Form.Item name="supports_embeddings" valuePropName="checked">
+                      <Form.Item
+                        name="supports_embeddings"
+                        valuePropName="checked"
+                      >
                         <Checkbox>Embedding</Checkbox>
                       </Form.Item>
                     </Space>
@@ -3347,7 +4419,12 @@ function PlatformControlDrawer({
                   <Form
                     form={modelForm}
                     layout="vertical"
-                    initialValues={{ purpose: "chat", context_window: 128000, max_output_tokens: 4096, temperature_default: 0.4 }}
+                    initialValues={{
+                      purpose: "chat",
+                      context_window: 128000,
+                      max_output_tokens: 4096,
+                      temperature_default: 0.4,
+                    }}
                     onFinish={async (values) => {
                       const model = await api.createModelConfig(values);
                       setModelConfigs((current) => [model, ...current]);
@@ -3355,14 +4432,31 @@ function PlatformControlDrawer({
                       message.success("模型配置已创建");
                     }}
                   >
-                    <Form.Item name="provider_id" label="供应商" rules={[{ required: true }]}>
-                      <Select options={modelProviders.map((provider) => ({ label: provider.name, value: provider.id }))} />
+                    <Form.Item
+                      name="provider_id"
+                      label="供应商"
+                      rules={[{ required: true }]}
+                    >
+                      <Select
+                        options={modelProviders.map((provider) => ({
+                          label: provider.name,
+                          value: provider.id,
+                        }))}
+                      />
                     </Form.Item>
                     <Space align="start">
-                      <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                      <Form.Item
+                        name="name"
+                        label="名称"
+                        rules={[{ required: true }]}
+                      >
                         <Input placeholder="Reviewer 模型" />
                       </Form.Item>
-                      <Form.Item name="model_id" label="模型 ID" rules={[{ required: true }]}>
+                      <Form.Item
+                        name="model_id"
+                        label="模型 ID"
+                        rules={[{ required: true }]}
+                      >
                         <Input placeholder="doubao-seed-1-6" />
                       </Form.Item>
                     </Space>
@@ -3375,7 +4469,7 @@ function PlatformControlDrawer({
                             { label: "主控", value: "master" },
                             { label: "Worker", value: "worker" },
                             { label: "Reviewer", value: "reviewer" },
-                            { label: "摘要", value: "summary" }
+                            { label: "摘要", value: "summary" },
                           ]}
                         />
                       </Form.Item>
@@ -3393,11 +4487,16 @@ function PlatformControlDrawer({
                     enterButton="测试"
                     onSearch={async (prompt) => {
                       const currentModel = modelConfigs[0];
-                      const result = await api.testModel(prompt || "请回复模型已就绪。", currentModel?.id);
+                      const result = await api.testModel(
+                        prompt || "请回复模型已就绪。",
+                        currentModel?.id,
+                      );
                       setModelTestResult(`${result.model}: ${result.response}`);
                     }}
                   />
-                  {modelTestResult && <div className="result-box">{modelTestResult}</div>}
+                  {modelTestResult && (
+                    <div className="result-box">{modelTestResult}</div>
+                  )}
                   <List
                     size="small"
                     dataSource={modelConfigs}
@@ -3419,7 +4518,7 @@ function PlatformControlDrawer({
                   />
                 </Card>
               </div>
-            )
+            ),
           },
           {
             key: "mcp",
@@ -3430,21 +4529,36 @@ function PlatformControlDrawer({
                   <Form
                     form={mcpForm}
                     layout="vertical"
-                    initialValues={{ transport: "stdio", command: "agenthub-mcp-sandbox", enabled: true, timeout_ms: 30000, retry: 1 }}
+                    initialValues={{
+                      transport: "stdio",
+                      command: "agenthub-mcp-sandbox",
+                      enabled: true,
+                      timeout_ms: 30000,
+                      retry: 1,
+                    }}
                     onFinish={async (values) => {
                       const server = await api.createMcpServer({
                         workspace_id: activeWorkspace?.id,
                         ...values,
                         args: parseList(values.args),
                         tool_filter: parseList(values.tool_filter),
-                        enabled: Boolean(values.enabled)
+                        enabled: Boolean(values.enabled),
                       });
                       setMcpServers((current) => [server, ...current]);
-                      mcpForm.resetFields(["name", "url", "args", "tool_filter"]);
+                      mcpForm.resetFields([
+                        "name",
+                        "url",
+                        "args",
+                        "tool_filter",
+                      ]);
                       message.success("MCP 服务已注册");
                     }}
                   >
-                    <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="name"
+                      label="名称"
+                      rules={[{ required: true }]}
+                    >
                       <Input placeholder="文件系统 MCP" />
                     </Form.Item>
                     <Form.Item name="transport" label="传输">
@@ -3453,7 +4567,7 @@ function PlatformControlDrawer({
                           { label: "stdio", value: "stdio" },
                           { label: "SSE", value: "sse" },
                           { label: "HTTP Stream", value: "httpStream" },
-                          { label: "WebSocket", value: "ws" }
+                          { label: "WebSocket", value: "ws" },
                         ]}
                       />
                     </Form.Item>
@@ -3477,7 +4591,11 @@ function PlatformControlDrawer({
                         <Input type="number" />
                       </Form.Item>
                     </Space>
-                    <Button type="primary" htmlType="submit" disabled={!activeWorkspace}>
+                    <Button
+                      type="primary"
+                      htmlType="submit"
+                      disabled={!activeWorkspace}
+                    >
                       注册服务
                     </Button>
                   </Form>
@@ -3494,8 +4612,14 @@ function PlatformControlDrawer({
                             size="small"
                             icon={<ToolOutlined />}
                             onClick={async () => {
-                              const updated = await api.probeMcpServer(server.id);
-                              setMcpServers((current) => current.map((item) => (item.id === server.id ? updated : item)));
+                              const updated = await api.probeMcpServer(
+                                server.id,
+                              );
+                              setMcpServers((current) =>
+                                current.map((item) =>
+                                  item.id === server.id ? updated : item,
+                                ),
+                              );
                             }}
                           >
                             探测
@@ -3503,13 +4627,34 @@ function PlatformControlDrawer({
                           <Button
                             key="invoke"
                             size="small"
-                            disabled={!(server.tools?.[0]?.name || server.tool_filter?.[0])}
+                            disabled={
+                              !(
+                                server.tools?.[0]?.name ||
+                                server.tool_filter?.[0]
+                              )
+                            }
                             onClick={async () => {
-                              const toolName = server.tools?.[0]?.name || server.tool_filter?.[0];
+                              const toolName =
+                                server.tools?.[0]?.name ||
+                                server.tool_filter?.[0];
                               if (!toolName) return;
-                              const result = await api.invokeMcpTool(server.id, toolName, { input: "ping" }, activeConversation?.id);
-                              setMcpInvocations((current) => [result, ...current]);
-                              setMcpInvocationResult(JSON.stringify(result.result || result.error_message, null, 2));
+                              const result = await api.invokeMcpTool(
+                                server.id,
+                                toolName,
+                                { input: "ping" },
+                                activeConversation?.id,
+                              );
+                              setMcpInvocations((current) => [
+                                result,
+                                ...current,
+                              ]);
+                              setMcpInvocationResult(
+                                JSON.stringify(
+                                  result.result || result.error_message,
+                                  null,
+                                  2,
+                                ),
+                              );
                             }}
                           >
                             Invoke
@@ -3522,22 +4667,33 @@ function PlatformControlDrawer({
                             onClick={() => {
                               Modal.confirm({
                                 title: `删除 MCP 服务：${server.name}`,
-                                content: "删除后该服务、关联工具调用入口将从当前目录移除。",
+                                content:
+                                  "删除后该服务、关联工具调用入口将从当前目录移除。",
                                 okText: "删除",
                                 okButtonProps: { danger: true },
                                 onOk: async () => {
                                   await api.deleteMcpServer(server.id);
-                                  setMcpServers((current) => current.filter((item) => item.id !== server.id));
+                                  setMcpServers((current) =>
+                                    current.filter(
+                                      (item) => item.id !== server.id,
+                                    ),
+                                  );
                                   message.success("MCP 服务已删除");
-                                }
+                                },
                               });
                             }}
-                          />
+                          />,
                         ]}
                       >
                         <List.Item.Meta
                           avatar={
-                            <Badge color={server.health_status === "online" ? "green" : "orange"}>
+                            <Badge
+                              color={
+                                server.health_status === "online"
+                                  ? "green"
+                                  : "orange"
+                              }
+                            >
                               <Avatar icon={<ToolOutlined />} />
                             </Badge>
                           }
@@ -3551,7 +4707,12 @@ function PlatformControlDrawer({
                           description={
                             <Space wrap>
                               {(server.tools ?? []).map((tool) => (
-                                <Tag key={tool.name} color={tool.enabled === false ? "default" : "blue"}>
+                                <Tag
+                                  key={tool.name}
+                                  color={
+                                    tool.enabled === false ? "default" : "blue"
+                                  }
+                                >
                                   {tool.name}
                                 </Tag>
                               ))}
@@ -3571,7 +4732,7 @@ function PlatformControlDrawer({
                       const server = await api.importMcpServer({
                         workspace_id: activeWorkspace?.id,
                         source_type: values.source_type,
-                        source: values.source
+                        source: values.source,
                       });
                       setMcpServers((current) => [server, ...current]);
                       mcpImportForm.resetFields(["source"]);
@@ -3582,20 +4743,32 @@ function PlatformControlDrawer({
                       <Select
                         options={[
                           { label: "Manifest URL", value: "manifest_url" },
-                          { label: "JSON 配置", value: "json" }
+                          { label: "JSON 配置", value: "json" },
                         ]}
                       />
                     </Form.Item>
-                    <Form.Item name="source" label="URL / JSON" rules={[{ required: true }]}>
-                      <TextArea rows={5} placeholder="https://example.com/mcp.json 或 {&quot;name&quot;:&quot;filesystem&quot;,&quot;transport&quot;:&quot;stdio&quot;}" />
+                    <Form.Item
+                      name="source"
+                      label="URL / JSON"
+                      rules={[{ required: true }]}
+                    >
+                      <TextArea
+                        rows={5}
+                        placeholder='https://example.com/mcp.json 或 {"name":"filesystem","transport":"stdio"}'
+                      />
                     </Form.Item>
-                    <Button type="primary" htmlType="submit" icon={<CloudUploadOutlined />} disabled={!activeWorkspace}>
+                    <Button
+                      type="primary"
+                      htmlType="submit"
+                      icon={<CloudUploadOutlined />}
+                      disabled={!activeWorkspace}
+                    >
                       导入 MCP
                     </Button>
                   </Form>
                 </Card>
               </div>
-            )
+            ),
           },
           {
             key: "tools",
@@ -3610,7 +4783,7 @@ function PlatformControlDrawer({
                       category: "custom",
                       type: "custom_python",
                       permissions: "tool:invoke",
-                      code: "text = str(arguments.get('input') or '')\nresult = {'echo': text, 'length': len(text)}"
+                      code: "text = str(arguments.get('input') or '')\nresult = {'echo': text, 'length': len(text)}",
                     }}
                     onFinish={async (values) => {
                       const tool = await api.createTool({
@@ -3621,17 +4794,31 @@ function PlatformControlDrawer({
                         category: values.category,
                         type: values.type,
                         permissions: parseList(values.permissions),
-                        implementation: { language: "python", code: values.code },
-                        runtime: { mode: "restricted_python", workspace: "var/ai-tools" },
-                        tags: parseList(values.tags)
+                        implementation: {
+                          language: "python",
+                          code: values.code,
+                        },
+                        runtime: {
+                          mode: "restricted_python",
+                          workspace: "var/ai-tools",
+                        },
+                        tags: parseList(values.tags),
                       });
                       setTools((current) => [tool, ...current]);
-                      toolForm.resetFields(["name", "display_name", "description"]);
+                      toolForm.resetFields([
+                        "name",
+                        "display_name",
+                        "description",
+                      ]);
                       message.success("工具已创建");
                     }}
                   >
                     <Space align="start">
-                      <Form.Item name="name" label="工具名" rules={[{ required: true }]}>
+                      <Form.Item
+                        name="name"
+                        label="工具名"
+                        rules={[{ required: true }]}
+                      >
                         <Input placeholder="custom_release_notes" />
                       </Form.Item>
                       <Form.Item name="display_name" label="显示名">
@@ -3646,7 +4833,12 @@ function PlatformControlDrawer({
                         <Input style={{ width: 150 }} />
                       </Form.Item>
                       <Form.Item name="type" label="运行时">
-                        <Select style={{ width: 170 }} options={[{ label: "受限 Python", value: "custom_python" }]} />
+                        <Select
+                          style={{ width: 170 }}
+                          options={[
+                            { label: "受限 Python", value: "custom_python" },
+                          ]}
+                        />
                       </Form.Item>
                     </Space>
                     <Form.Item name="permissions" label="权限">
@@ -3658,7 +4850,11 @@ function PlatformControlDrawer({
                     <Form.Item name="tags" label="标签">
                       <Input placeholder="逗号分隔" />
                     </Form.Item>
-                    <Button type="primary" htmlType="submit" disabled={!activeWorkspace}>
+                    <Button
+                      type="primary"
+                      htmlType="submit"
+                      disabled={!activeWorkspace}
+                    >
                       保存工具
                     </Button>
                   </Form>
@@ -3667,7 +4863,10 @@ function PlatformControlDrawer({
                   <Form
                     form={toolGenerateForm}
                     layout="vertical"
-                    initialValues={{ category: "custom", allowed_permissions: "tool:invoke" }}
+                    initialValues={{
+                      category: "custom",
+                      allowed_permissions: "tool:invoke",
+                    }}
                     onFinish={async (values) => {
                       const tool = await api.generateTool({
                         workspace_id: activeWorkspace?.id,
@@ -3675,22 +4874,38 @@ function PlatformControlDrawer({
                         intent: values.intent,
                         requirements: values.requirements,
                         category: values.category,
-                        allowed_permissions: parseList(values.allowed_permissions),
-                        tags: parseList(values.tags)
+                        allowed_permissions: parseList(
+                          values.allowed_permissions,
+                        ),
+                        tags: parseList(values.tags),
                       });
                       setTools((current) => [tool, ...current]);
-                      toolGenerateForm.resetFields(["name", "intent", "requirements"]);
+                      toolGenerateForm.resetFields([
+                        "name",
+                        "intent",
+                        "requirements",
+                      ]);
                       message.success("AI 已构建工具并写入后端工具工作区");
                     }}
                   >
                     <Form.Item name="name" label="工具名">
                       <Input placeholder="留空由 AI 命名" />
                     </Form.Item>
-                    <Form.Item name="intent" label="工具目标" rules={[{ required: true }]}>
-                      <TextArea rows={3} placeholder="例如：把输入的需求整理成验收清单 JSON" />
+                    <Form.Item
+                      name="intent"
+                      label="工具目标"
+                      rules={[{ required: true }]}
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="例如：把输入的需求整理成验收清单 JSON"
+                      />
                     </Form.Item>
                     <Form.Item name="requirements" label="实现约束">
-                      <TextArea rows={3} placeholder="输入输出格式、权限边界、异常处理要求" />
+                      <TextArea
+                        rows={3}
+                        placeholder="输入输出格式、权限边界、异常处理要求"
+                      />
                     </Form.Item>
                     <Space align="start">
                       <Form.Item name="category" label="分类">
@@ -3703,13 +4918,20 @@ function PlatformControlDrawer({
                     <Form.Item name="tags" label="标签">
                       <Input placeholder="ai-generated,workflow" />
                     </Form.Item>
-                    <Button icon={<RobotOutlined />} type="primary" htmlType="submit" disabled={!activeWorkspace}>
+                    <Button
+                      icon={<RobotOutlined />}
+                      type="primary"
+                      htmlType="submit"
+                      disabled={!activeWorkspace}
+                    >
                       AI 创建工具
                     </Button>
                   </Form>
                 </Card>
                 <Card title="工具目录">
-                  {toolInvokeResult && <div className="result-box">{toolInvokeResult}</div>}
+                  {toolInvokeResult && (
+                    <div className="result-box">{toolInvokeResult}</div>
+                  )}
                   <List
                     dataSource={tools}
                     locale={{ emptyText: "暂无工具" }}
@@ -3720,7 +4942,10 @@ function PlatformControlDrawer({
                             key="invoke"
                             size="small"
                             onClick={async () => {
-                              if (tool.name.startsWith("artifact.create") && !activeConversation?.id) {
+                              if (
+                                tool.name.startsWith("artifact.create") &&
+                                !activeConversation?.id
+                              ) {
                                 message.warning("先选择一个会话再测试产物工具");
                                 return;
                               }
@@ -3728,10 +4953,20 @@ function PlatformControlDrawer({
                                 tool.name === "db.inspect"
                                   ? {}
                                   : tool.name.startsWith("artifact.create")
-                                    ? { conversation_id: activeConversation?.id, title: "工具调用产物", body: "这是由 AgentHub 工具层生成的产物。" }
+                                    ? {
+                                        conversation_id: activeConversation?.id,
+                                        title: "工具调用产物",
+                                        body: "这是由 AgentHub 工具层生成的产物。",
+                                      }
                                     : { input: "ping" };
-                              const result = await api.invokeTool(tool.name, args, activeWorkspace?.id);
-                              setToolInvokeResult(JSON.stringify(result.result, null, 2));
+                              const result = await api.invokeTool(
+                                tool.name,
+                                args,
+                                activeWorkspace?.id,
+                              );
+                              setToolInvokeResult(
+                                JSON.stringify(result.result, null, 2),
+                              );
                             }}
                           >
                             测试
@@ -3745,37 +4980,50 @@ function PlatformControlDrawer({
                               onClick={() => {
                                 Modal.confirm({
                                   title: `删除工具：${tool.display_name ?? tool.name}`,
-                                  content: "删除后该工具不会再出现在工具目录，也不能被 Agent 授权使用。",
+                                  content:
+                                    "删除后该工具不会再出现在工具目录，也不能被 Agent 授权使用。",
                                   okText: "删除",
                                   okButtonProps: { danger: true },
                                   onOk: async () => {
                                     await api.deleteTool(tool.id);
-                                    setTools((current) => current.filter((item) => item.id !== tool.id));
+                                    setTools((current) =>
+                                      current.filter(
+                                        (item) => item.id !== tool.id,
+                                      ),
+                                    );
                                     message.success("工具已删除");
-                                  }
+                                  },
                                 });
                               }}
                             />
-                          )
+                          ),
                         ]}
                       >
                         <List.Item.Meta
                           avatar={<Avatar icon={<ToolOutlined />} />}
                           title={
                             <Space wrap>
-                              <Text strong>{tool.display_name ?? tool.name}</Text>
+                              <Text strong>
+                                {tool.display_name ?? tool.name}
+                              </Text>
                               <Tag>{tool.category}</Tag>
-                              <Tag color={tool.is_builtin ? "blue" : "purple"}>{tool.is_builtin ? "内置" : "自定义"}</Tag>
+                              <Tag color={tool.is_builtin ? "blue" : "purple"}>
+                                {tool.is_builtin ? "内置" : "自定义"}
+                              </Tag>
                               <Tag>{tool.status}</Tag>
                             </Space>
                           }
                           description={
                             <Space direction="vertical" size={4}>
-                              <Text type="secondary">{tool.name} · {tool.description}</Text>
+                              <Text type="secondary">
+                                {tool.name} · {tool.description}
+                              </Text>
                               <Space size={[4, 4]} wrap>
-                                {tool.permissions.slice(0, 6).map((permission) => (
-                                  <Tag key={permission}>{permission}</Tag>
-                                ))}
+                                {tool.permissions
+                                  .slice(0, 6)
+                                  .map((permission) => (
+                                    <Tag key={permission}>{permission}</Tag>
+                                  ))}
                               </Space>
                             </Space>
                           }
@@ -3785,7 +5033,7 @@ function PlatformControlDrawer({
                   />
                 </Card>
               </div>
-            )
+            ),
           },
           {
             key: "skills",
@@ -3796,7 +5044,11 @@ function PlatformControlDrawer({
                   <Form
                     form={skillForm}
                     layout="vertical"
-                    initialValues={{ scope: "workspace", category: "workflow", tools: "file.read,browser.open" }}
+                    initialValues={{
+                      scope: "workspace",
+                      category: "workflow",
+                      tools: "file.read,browser.open",
+                    }}
                     onFinish={async (values) => {
                       const skill = await api.createSkill({
                         workspace_id: activeWorkspace?.id,
@@ -3806,14 +5058,22 @@ function PlatformControlDrawer({
                         scope: values.scope,
                         prompt_template: values.prompt_template,
                         tools: parseList(values.tools),
-                        enabled: true
+                        enabled: true,
                       });
                       setSkills((current) => [skill, ...current]);
-                      skillForm.resetFields(["name", "description", "prompt_template"]);
+                      skillForm.resetFields([
+                        "name",
+                        "description",
+                        "prompt_template",
+                      ]);
                       message.success("Skill 已创建");
                     }}
                   >
-                    <Form.Item name="name" label="Skill 名称" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="name"
+                      label="Skill 名称"
+                      rules={[{ required: true }]}
+                    >
                       <Input placeholder="前端审查 Skill" />
                     </Form.Item>
                     <Form.Item name="description" label="描述">
@@ -3829,7 +5089,7 @@ function PlatformControlDrawer({
                           options={[
                             { label: "工作区", value: "workspace" },
                             { label: "平台", value: "platform" },
-                            { label: "个人", value: "personal" }
+                            { label: "个人", value: "personal" },
                           ]}
                         />
                       </Form.Item>
@@ -3841,7 +5101,11 @@ function PlatformControlDrawer({
                       <Input placeholder="逗号分隔，如 file.read,browser.open" />
                     </Form.Item>
                     <Space>
-                      <Button type="primary" htmlType="submit" disabled={!activeWorkspace}>
+                      <Button
+                        type="primary"
+                        htmlType="submit"
+                        disabled={!activeWorkspace}
+                      >
                         保存 Skill
                       </Button>
                       <Button
@@ -3850,7 +5114,13 @@ function PlatformControlDrawer({
                         disabled={!activeWorkspace}
                         onClick={async () => {
                           const values = skillForm.getFieldsValue();
-                          const intent = [values.name, values.description, values.prompt_template].filter(Boolean).join("\n");
+                          const intent = [
+                            values.name,
+                            values.description,
+                            values.prompt_template,
+                          ]
+                            .filter(Boolean)
+                            .join("\n");
                           if (!intent.trim()) {
                             message.warning("先输入 Skill 名称、描述或目标");
                             return;
@@ -3861,7 +5131,7 @@ function PlatformControlDrawer({
                             intent,
                             requirements: values.prompt_template ?? "",
                             category: values.category || "ai",
-                            tags: parseList(values.tools)
+                            tags: parseList(values.tools),
                           });
                           setSkills((current) => [skill, ...current]);
                           skillForm.setFieldsValue({
@@ -3869,7 +5139,7 @@ function PlatformControlDrawer({
                             description: skill.description,
                             category: skill.category,
                             prompt_template: skill.prompt_template,
-                            tools: skill.tools.join(",")
+                            tools: skill.tools.join(","),
                           });
                           message.success("AI 已创建 Skill");
                         }}
@@ -3880,7 +5150,13 @@ function PlatformControlDrawer({
                   </Form>
                 </Card>
                 <Card title="Skill 目录">
-                  <Flex justify="space-between" align="center" wrap="wrap" gap={8} style={{ marginBottom: 12 }}>
+                  <Flex
+                    justify="space-between"
+                    align="center"
+                    wrap="wrap"
+                    gap={8}
+                    style={{ marginBottom: 12 }}
+                  >
                     <Input.Search
                       allowClear
                       style={{ maxWidth: 340 }}
@@ -3889,8 +5165,13 @@ function PlatformControlDrawer({
                       onChange={(event) => setSkillSearch(event.target.value)}
                     />
                     <Space>
-                      <Tag>{filteredSkills.length}/{skills.length} Skills</Tag>
-                      <Button icon={<ReloadOutlined />} onClick={loadPlatformResources}>
+                      <Tag>
+                        {filteredSkills.length}/{skills.length} Skills
+                      </Tag>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={loadPlatformResources}
+                      >
                         刷新
                       </Button>
                     </Space>
@@ -3903,28 +5184,41 @@ function PlatformControlDrawer({
                         workspace_id: activeWorkspace?.id,
                         mcp_server_id: values.mcp_server_id,
                         name: values.name,
-                        category: "mcp"
+                        category: "mcp",
                       });
                       setSkills((current) => [skill, ...current]);
                       skillImportForm.resetFields(["name"]);
                       message.success("已从 MCP 导入 Skill");
                     }}
                   >
-                    <Form.Item name="mcp_server_id" label="MCP 服务" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="mcp_server_id"
+                      label="MCP 服务"
+                      rules={[{ required: true }]}
+                    >
                       <Select
                         placeholder="选择已注册 MCP"
-                        options={mcpServers.map((server) => ({ label: `${server.name} · ${server.transport}`, value: server.id }))}
+                        options={mcpServers.map((server) => ({
+                          label: `${server.name} · ${server.transport}`,
+                          value: server.id,
+                        }))}
                       />
                     </Form.Item>
                     <Form.Item name="name" label="Skill 名称">
                       <Input placeholder="留空则使用 MCP 名称" />
                     </Form.Item>
-                    <Button htmlType="submit" icon={<ToolOutlined />} disabled={!mcpServers.length}>
+                    <Button
+                      htmlType="submit"
+                      icon={<ToolOutlined />}
+                      disabled={!mcpServers.length}
+                    >
                       从 MCP 导入 Skill
                     </Button>
                   </Form>
                   <Divider />
-                  {skillTestResult && <div className="result-box">{skillTestResult}</div>}
+                  {skillTestResult && (
+                    <div className="result-box">{skillTestResult}</div>
+                  )}
                   <List
                     dataSource={filteredSkills}
                     locale={{ emptyText: "暂无 Skills" }}
@@ -3935,41 +5229,57 @@ function PlatformControlDrawer({
                             key="test"
                             size="small"
                             onClick={async () => {
-                              const result = await api.testSkill(skill.id, `请测试 ${skill.name} 是否可用，并用一句话说明。`);
-                              setSkillTestResult(`${result.model}: ${result.response}`);
+                              const result = await api.testSkill(
+                                skill.id,
+                                `请测试 ${skill.name} 是否可用，并用一句话说明。`,
+                              );
+                              setSkillTestResult(
+                                `${result.model}: ${result.response}`,
+                              );
                             }}
                           >
                             测试
                           </Button>,
-                          (skill.created_by || skill.workspace_id === activeWorkspace?.id) && !Boolean(skill.config?.builtin) && (
-                            <Button
-                              key="delete"
-                              size="small"
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={() => {
-                                Modal.confirm({
-                                  title: `删除 Skill：${skill.name}`,
-                                  content: "删除后将不再出现在当前工作区 Skill 目录，也不能再授权给 Agent 使用。",
-                                  okText: "删除",
-                                  okButtonProps: { danger: true },
-                                  onOk: async () => {
-                                    try {
-                                      await api.deleteSkill(skill.id);
-                                      setSkills((current) => current.filter((item) => item.id !== skill.id));
-                                      setSkillTestResult("");
-                                      message.success("Skill 已删除");
-                                    } catch (error) {
-                                      message.error(error instanceof Error ? error.message : "删除失败");
-                                      throw error;
-                                    }
-                                  }
-                                });
-                              }}
-                            >
-                              删除
-                            </Button>
-                          )
+                          (skill.created_by ||
+                            skill.workspace_id === activeWorkspace?.id) &&
+                            !Boolean(skill.config?.builtin) && (
+                              <Button
+                                key="delete"
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={() => {
+                                  Modal.confirm({
+                                    title: `删除 Skill：${skill.name}`,
+                                    content:
+                                      "删除后将不再出现在当前工作区 Skill 目录，也不能再授权给 Agent 使用。",
+                                    okText: "删除",
+                                    okButtonProps: { danger: true },
+                                    onOk: async () => {
+                                      try {
+                                        await api.deleteSkill(skill.id);
+                                        setSkills((current) =>
+                                          current.filter(
+                                            (item) => item.id !== skill.id,
+                                          ),
+                                        );
+                                        setSkillTestResult("");
+                                        message.success("Skill 已删除");
+                                      } catch (error) {
+                                        message.error(
+                                          error instanceof Error
+                                            ? error.message
+                                            : "删除失败",
+                                        );
+                                        throw error;
+                                      }
+                                    },
+                                  });
+                                }}
+                              >
+                                删除
+                              </Button>
+                            ),
                         ]}
                       >
                         <List.Item.Meta
@@ -3978,15 +5288,29 @@ function PlatformControlDrawer({
                             <Space>
                               <Text strong>{skill.name}</Text>
                               <Tag>{skill.category}</Tag>
-                              <Tag color={skill.workspace_id ? "purple" : "blue"}>{skill.workspace_id ? "工作区" : "全局"}</Tag>
-                              {Boolean(skill.config?.builtin) && <Tag color="geekblue">内置</Tag>}
-                              <Tag color={skill.enabled ? "success" : "default"}>{skill.enabled ? "enabled" : "disabled"}</Tag>
-                              {skill.source === "mcp" && <Tag color="blue">MCP</Tag>}
+                              <Tag
+                                color={skill.workspace_id ? "purple" : "blue"}
+                              >
+                                {skill.workspace_id ? "工作区" : "全局"}
+                              </Tag>
+                              {Boolean(skill.config?.builtin) && (
+                                <Tag color="geekblue">内置</Tag>
+                              )}
+                              <Tag
+                                color={skill.enabled ? "success" : "default"}
+                              >
+                                {skill.enabled ? "enabled" : "disabled"}
+                              </Tag>
+                              {skill.source === "mcp" && (
+                                <Tag color="blue">MCP</Tag>
+                              )}
                             </Space>
                           }
                           description={
                             <Space direction="vertical" size={4}>
-                              <Text type="secondary">{skill.description || "暂无描述"}</Text>
+                              <Text type="secondary">
+                                {skill.description || "暂无描述"}
+                              </Text>
                               <Space size={[4, 4]} wrap>
                                 {(skill.tools ?? []).map((tool) => (
                                   <Tag key={tool}>{tool}</Tag>
@@ -4000,7 +5324,7 @@ function PlatformControlDrawer({
                   />
                 </Card>
               </div>
-            )
+            ),
           },
           {
             key: "security",
@@ -4009,8 +5333,14 @@ function PlatformControlDrawer({
               <div className="workspace-grid">
                 <Card title="Audit">
                   <Space className="mb-8" wrap>
-                    <Statistic title="Events" value={auditStats?.total ?? auditLogs.length} />
-                    <Statistic title="High risk" value={auditStats?.high_risk ?? 0} />
+                    <Statistic
+                      title="Events"
+                      value={auditStats?.total ?? auditLogs.length}
+                    />
+                    <Statistic
+                      title="High risk"
+                      value={auditStats?.high_risk ?? 0}
+                    />
                   </Space>
                   <Table
                     size="small"
@@ -4019,9 +5349,17 @@ function PlatformControlDrawer({
                     pagination={{ pageSize: 6 }}
                     columns={[
                       { title: "Action", dataIndex: "action" },
-                      { title: "Target", render: (_, row: AuditLog) => `${row.target_type}:${row.target_id ?? "-"}` },
+                      {
+                        title: "Target",
+                        render: (_, row: AuditLog) =>
+                          `${row.target_type}:${row.target_id ?? "-"}`,
+                      },
                       { title: "Risk", dataIndex: "risk_score" },
-                      { title: "Time", dataIndex: "created_at", render: (value?: string) => formatTime(value) }
+                      {
+                        title: "Time",
+                        dataIndex: "created_at",
+                        render: (value?: string) => formatTime(value),
+                      },
                     ]}
                   />
                 </Card>
@@ -4032,7 +5370,12 @@ function PlatformControlDrawer({
                     renderItem={(role) => (
                       <List.Item>
                         <List.Item.Meta
-                          title={<Space><Text strong>{role.code}</Text><Tag>{role.permissions.length} perms</Tag></Space>}
+                          title={
+                            <Space>
+                              <Text strong>{role.code}</Text>
+                              <Tag>{role.permissions.length} perms</Tag>
+                            </Space>
+                          }
                           description={role.description}
                         />
                       </List.Item>
@@ -4045,8 +5388,15 @@ function PlatformControlDrawer({
                     renderItem={(item) => (
                       <List.Item>
                         <List.Item.Meta
-                          avatar={<Avatar>{item.display_name.slice(0, 1)}</Avatar>}
-                          title={<Space><Text strong>{item.display_name}</Text><Tag>{item.role}</Tag></Space>}
+                          avatar={
+                            <Avatar>{item.display_name.slice(0, 1)}</Avatar>
+                          }
+                          title={
+                            <Space>
+                              <Text strong>{item.display_name}</Text>
+                              <Tag>{item.role}</Tag>
+                            </Space>
+                          }
                           description={`${item.email} · ${item.roles.join(", ") || "ROLE_USER"}`}
                         />
                       </List.Item>
@@ -4054,7 +5404,7 @@ function PlatformControlDrawer({
                   />
                 </Card>
               </div>
-            )
+            ),
           },
           {
             key: "sandbox",
@@ -4067,14 +5417,21 @@ function PlatformControlDrawer({
                     layout="vertical"
                     initialValues={{ image: "python:3.11-node20" }}
                     onFinish={async (values) => {
-                      const sandbox = await api.createSandbox({ workspace_id: activeWorkspace?.id, ...values });
+                      const sandbox = await api.createSandbox({
+                        workspace_id: activeWorkspace?.id,
+                        ...values,
+                      });
                       setSandboxes((current) => [sandbox, ...current]);
                       setSelectedSandbox(sandbox.id);
                       sandboxForm.resetFields(["name"]);
                       message.success("沙箱已创建");
                     }}
                   >
-                    <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="name"
+                      label="名称"
+                      rules={[{ required: true }]}
+                    >
                       <Input placeholder="前端构建沙箱" />
                     </Form.Item>
                     <Form.Item name="image" label="镜像">
@@ -4090,27 +5447,48 @@ function PlatformControlDrawer({
                     placeholder="选择沙箱"
                     value={selectedSandbox}
                     onChange={setSelectedSandbox}
-                    options={sandboxes.map((sandbox) => ({ label: `${sandbox.name} · ${sandbox.status}`, value: sandbox.id }))}
+                    options={sandboxes.map((sandbox) => ({
+                      label: `${sandbox.name} · ${sandbox.status}`,
+                      value: sandbox.id,
+                    }))}
                   />
                   <Form
                     className="mt-8"
                     form={commandForm}
                     layout="vertical"
-                    initialValues={{ command: "pytest -q", timeout_seconds: 120 }}
+                    initialValues={{
+                      command: "pytest -q",
+                      timeout_seconds: 120,
+                    }}
                     onFinish={async (values) => {
                       if (!selectedSandbox) return;
-                      const result = await api.runSandboxCommand(selectedSandbox, values);
+                      const result = await api.runSandboxCommand(
+                        selectedSandbox,
+                        values,
+                      );
                       setSandboxResult(result.result);
-                      setSandboxes((current) => current.map((item) => (item.id === selectedSandbox ? result.sandbox : item)));
+                      setSandboxes((current) =>
+                        current.map((item) =>
+                          item.id === selectedSandbox ? result.sandbox : item,
+                        ),
+                      );
                     }}
                   >
-                    <Form.Item name="command" label="命令" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="command"
+                      label="命令"
+                      rules={[{ required: true }]}
+                    >
                       <Input />
                     </Form.Item>
                     <Form.Item name="timeout_seconds" label="超时秒数">
                       <Input type="number" />
                     </Form.Item>
-                    <Button type="primary" htmlType="submit" disabled={!selectedSandbox}>
+                    <Button
+                      type="primary"
+                      htmlType="submit"
+                      disabled={!selectedSandbox}
+                    >
                       执行
                     </Button>
                   </Form>
@@ -4125,19 +5503,27 @@ function PlatformControlDrawer({
                   <Form
                     form={remoteForm}
                     layout="vertical"
-                    initialValues={{ connection_type: "browser", endpoint: "http://127.0.0.1:5173", capabilities: "open,screenshot,inspect" }}
+                    initialValues={{
+                      connection_type: "browser",
+                      endpoint: "http://127.0.0.1:5173",
+                      capabilities: "open,screenshot,inspect",
+                    }}
                     onFinish={async (values) => {
                       const remote = await api.createRemoteConnection({
                         workspace_id: activeWorkspace?.id,
                         ...values,
-                        capabilities: parseList(values.capabilities)
+                        capabilities: parseList(values.capabilities),
                       });
                       setRemoteConnections((current) => [remote, ...current]);
                       remoteForm.resetFields(["name"]);
                       message.success("远程连接已创建");
                     }}
                   >
-                    <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="name"
+                      label="名称"
+                      rules={[{ required: true }]}
+                    >
                       <Input placeholder="预览浏览器" />
                     </Form.Item>
                     <Form.Item name="connection_type" label="类型">
@@ -4146,11 +5532,15 @@ function PlatformControlDrawer({
                           { label: "Browser", value: "browser" },
                           { label: "SSH", value: "ssh" },
                           { label: "VNC", value: "vnc" },
-                          { label: "RDP", value: "rdp" }
+                          { label: "RDP", value: "rdp" },
                         ]}
                       />
                     </Form.Item>
-                    <Form.Item name="endpoint" label="Endpoint" rules={[{ required: true }]}>
+                    <Form.Item
+                      name="endpoint"
+                      label="Endpoint"
+                      rules={[{ required: true }]}
+                    >
                       <Input />
                     </Form.Item>
                     <Form.Item name="capabilities" label="能力">
@@ -4172,17 +5562,29 @@ function PlatformControlDrawer({
                             size="small"
                             icon={<CloudUploadOutlined />}
                             onClick={async () => {
-                              const updated = await api.connectRemote(remote.id);
-                              setRemoteConnections((current) => current.map((item) => (item.id === remote.id ? updated : item)));
+                              const updated = await api.connectRemote(
+                                remote.id,
+                              );
+                              setRemoteConnections((current) =>
+                                current.map((item) =>
+                                  item.id === remote.id ? updated : item,
+                                ),
+                              );
                             }}
                           >
                             连接
-                          </Button>
+                          </Button>,
                         ]}
                       >
                         <List.Item.Meta
                           avatar={
-                            <Badge status={remote.status === "connected" ? "success" : "default"}>
+                            <Badge
+                              status={
+                                remote.status === "connected"
+                                  ? "success"
+                                  : "default"
+                              }
+                            >
                               <Avatar icon={<CloudUploadOutlined />} />
                             </Badge>
                           }
@@ -4200,9 +5602,9 @@ function PlatformControlDrawer({
                   />
                 </Card>
               </div>
-            )
-          }
-        ].filter((item) => !["workflow", "models"].includes(String(item.key))))}
+            ),
+          },
+        ].filter((item) => !["workflow", "models"].includes(String(item.key)))}
       />
     </Drawer>
   );
@@ -4218,7 +5620,7 @@ function PreviewPanel({
   onDeploy,
   onCreateKb,
   onImportText,
-  onRetrieve
+  onRetrieve,
 }: {
   artifact?: WorkspaceArtifact;
   deployment?: Deployment;
@@ -4227,13 +5629,26 @@ function PreviewPanel({
   onClose: () => void;
   onSave: (artifact: WorkspaceArtifact) => void;
   onDeploy: () => void;
-  onCreateKb: (payload: { name: string; description: string; scope: string; visibility: string }) => Promise<void>;
-  onImportText: (kbId: string, payload: { title: string; content: string }) => Promise<void>;
+  onCreateKb: (payload: {
+    name: string;
+    description: string;
+    scope: string;
+    visibility: string;
+  }) => Promise<void>;
+  onImportText: (
+    kbId: string,
+    payload: { title: string; content: string },
+  ) => Promise<void>;
   onRetrieve: (kbId: string, query: string) => Promise<string>;
 }) {
   const [tab, setTab] = useState("preview");
   const [draft, setDraft] = useState("");
-  const [exportResult, setExportResult] = useState<{ previewUrl?: string; previewText?: string; contentType: string; filename?: string }>();
+  const [exportResult, setExportResult] = useState<{
+    previewUrl?: string;
+    previewText?: string;
+    contentType: string;
+    filename?: string;
+  }>();
 
   useEffect(() => {
     setDraft(artifact?.code ?? "");
@@ -4241,7 +5656,11 @@ function PreviewPanel({
 
   if (!artifact) {
     return (
-      <Sider width={460} className="preview-panel" data-testid="artifact-preview-panel">
+      <Sider
+        width={460}
+        className="preview-panel"
+        data-testid="artifact-preview-panel"
+      >
         <Empty description="点击聊天流中的预览产物卡片后展开预览、编辑、Diff、部署和资产面板" />
       </Sider>
     );
@@ -4250,7 +5669,11 @@ function PreviewPanel({
   const previewDocument = buildPreviewDocument(draft);
 
   return (
-    <Sider width={470} className="preview-panel" data-testid="artifact-preview-panel">
+    <Sider
+      width={470}
+      className="preview-panel"
+      data-testid="artifact-preview-panel"
+    >
       <Flex justify="space-between" align="center" className="preview-head">
         <div>
           <Text type="secondary">Artifact</Text>
@@ -4258,33 +5681,59 @@ function PreviewPanel({
         </div>
         <Space>
           <Button onClick={onClose}>Close</Button>
-          <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => onSave({ ...artifact, code: draft })} data-testid="save-artifact">
-          保存
+          <Button
+            type="primary"
+            icon={<CheckCircleOutlined />}
+            onClick={() => onSave({ ...artifact, code: draft })}
+            data-testid="save-artifact"
+          >
+            保存
           </Button>
         </Space>
       </Flex>
       <Space wrap className="artifact-export-bar">
-        {["zip", "html", "markdown", "json", "docx", "xlsx", "pptx"].map((format) => (
-          <Button
-            key={format}
-            size="small"
-            onClick={async () => {
-              const exported = await api.exportArtifact(artifact.id, format);
-              setExportResult(exported);
-              if (exported.previewUrl) window.open(exported.previewUrl, "_blank", "noopener,noreferrer");
-            }}
-          >
-            {format.toUpperCase()}
-          </Button>
-        ))}
-        {exportResult?.filename && <Tag color="blue">{exportResult.filename}</Tag>}
+        {["zip", "html", "markdown", "json", "docx", "xlsx", "pptx"].map(
+          (format) => (
+            <Button
+              key={format}
+              size="small"
+              onClick={async () => {
+                const exported = await api.exportArtifact(artifact.id, format);
+                setExportResult(exported);
+                if (exported.previewUrl)
+                  window.open(
+                    exported.previewUrl,
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+              }}
+            >
+              {format.toUpperCase()}
+            </Button>
+          ),
+        )}
+        {exportResult?.filename && (
+          <Tag color="blue">{exportResult.filename}</Tag>
+        )}
       </Space>
       <Tabs
         data-testid="artifact-tabs"
         activeKey={tab}
         onChange={setTab}
         items={[
-          { key: "preview", label: <EyeOutlined />, children: <div className="preview-frame-wrap"><iframe title="artifact preview" sandbox="allow-scripts" srcDoc={previewDocument} /></div> },
+          {
+            key: "preview",
+            label: <EyeOutlined />,
+            children: (
+              <div className="preview-frame-wrap">
+                <iframe
+                  title="artifact preview"
+                  sandbox="allow-scripts"
+                  srcDoc={previewDocument}
+                />
+              </div>
+            ),
+          },
           {
             key: "code",
             label: <CodeOutlined />,
@@ -4294,9 +5743,15 @@ function PreviewPanel({
                   <Tag icon={<EditOutlined />}>Textarea fallback</Tag>
                   <Text type="secondary">{artifact.language}</Text>
                 </Flex>
-                <TextArea value={draft} onChange={(event) => setDraft(event.target.value)} className="code-editor" data-testid="artifact-code-editor" aria-label="artifact-code-editor" />
+                <TextArea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  className="code-editor"
+                  data-testid="artifact-code-editor"
+                  aria-label="artifact-code-editor"
+                />
               </div>
-            )
+            ),
           },
           {
             key: "diff",
@@ -4304,13 +5759,24 @@ function PreviewPanel({
             children: (
               <div className="diff-pane">
                 {diffLines(artifact.previousCode, draft).map((line, index) => (
-                  <div key={`${line.type}-${index}`} className={`diff-line diff-${line.type}`}>
-                    <span>{line.type === "add" ? "+" : line.type === "remove" ? "-" : line.type === "change" ? "~" : " "}</span>
+                  <div
+                    key={`${line.type}-${index}`}
+                    className={`diff-line diff-${line.type}`}
+                  >
+                    <span>
+                      {line.type === "add"
+                        ? "+"
+                        : line.type === "remove"
+                          ? "-"
+                          : line.type === "change"
+                            ? "~"
+                            : " "}
+                    </span>
                     <code>{line.text}</code>
                   </div>
                 ))}
               </div>
-            )
+            ),
           },
           {
             key: "deploy",
@@ -4318,18 +5784,33 @@ function PreviewPanel({
             children: (
               <Card className="deploy-card" data-testid="deployment-card">
                 <Space direction="vertical" size={14}>
-                  <Tag color={deployment?.status === "ready" || deployment?.status === "deployed" ? "success" : "processing"} icon={<RocketOutlined />}>
+                  <Tag
+                    color={
+                      deployment?.status === "ready" ||
+                      deployment?.status === "deployed"
+                        ? "success"
+                        : "processing"
+                    }
+                    icon={<RocketOutlined />}
+                  >
                     {deployment?.status ?? "idle"}
                   </Tag>
                   <Text strong>{deployment?.url ?? "尚未部署"}</Text>
-                  <Text type="secondary">Commit: {deployment?.commit ?? "pending"}</Text>
+                  <Text type="secondary">
+                    Commit: {deployment?.commit ?? "pending"}
+                  </Text>
                   <Progress percent={deployment ? 100 : 0} size="small" />
-                  <Button type="primary" icon={<RocketOutlined />} onClick={onDeploy} data-testid="deploy-artifact">
+                  <Button
+                    type="primary"
+                    icon={<RocketOutlined />}
+                    onClick={onDeploy}
+                    data-testid="deploy-artifact"
+                  >
                     部署当前版本
                   </Button>
                 </Space>
               </Card>
-            )
+            ),
           },
           {
             key: "assets",
@@ -4342,8 +5823,8 @@ function PreviewPanel({
                 onImportText={onImportText}
                 onRetrieve={onRetrieve}
               />
-            )
-          }
+            ),
+          },
         ]}
       />
     </Sider>
@@ -4357,7 +5838,7 @@ function BackgroundTasksButton({
   onOpenConversation,
   onCreate,
   onCancel,
-  onRefresh
+  onRefresh,
 }: {
   tasks: AgentTask[];
   conversations: Conversation[];
@@ -4370,7 +5851,10 @@ function BackgroundTasksButton({
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
-  const conversationMap = useMemo(() => new Map(conversations.map((item) => [item.id, item.title])), [conversations]);
+  const conversationMap = useMemo(
+    () => new Map(conversations.map((item) => [item.id, item.title])),
+    [conversations],
+  );
   const running = tasks.filter((task) => isTaskRunning(task.status));
   const recent = tasks.slice(0, 8);
 
@@ -4388,8 +5872,15 @@ function BackgroundTasksButton({
   };
 
   const content = (
-    <div className="background-task-popover" data-testid="background-task-popover">
-      <Flex justify="space-between" align="center" className="background-task-head">
+    <div
+      className="background-task-popover"
+      data-testid="background-task-popover"
+    >
+      <Flex
+        justify="space-between"
+        align="center"
+        className="background-task-head"
+      >
         <Text type="secondary">后台任务</Text>
         <Text type="secondary">进行 {running.length}</Text>
       </Flex>
@@ -4400,35 +5891,57 @@ function BackgroundTasksButton({
           renderItem={(task) => (
             <List.Item
               actions={
-                isTaskRunning(task.status) ? [
-                  <Button
-                    key="cancel"
-                    size="small"
-                    danger
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onCancel(task);
-                    }}
-                  >
-                    停止
-                  </Button>
-                ] : []
+                isTaskRunning(task.status)
+                  ? [
+                      <Button
+                        key="cancel"
+                        size="small"
+                        danger
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onCancel(task);
+                        }}
+                      >
+                        停止
+                      </Button>,
+                    ]
+                  : []
               }
             >
               <button
                 type="button"
                 className="background-task-item"
-                onClick={() => task.conversation_id && onOpenConversation(task.conversation_id)}
+                onClick={() =>
+                  task.conversation_id &&
+                  onOpenConversation(task.conversation_id)
+                }
               >
                 <Flex justify="space-between" gap={10} align="center">
-                  <Text strong ellipsis>{task.title}</Text>
-                  <Tag color={isTaskRunning(task.status) ? "processing" : task.status === "COMPLETED" ? "success" : "default"}>
+                  <Text strong ellipsis>
+                    {task.title}
+                  </Text>
+                  <Tag
+                    color={
+                      isTaskRunning(task.status)
+                        ? "processing"
+                        : task.status === "COMPLETED"
+                          ? "success"
+                          : "default"
+                    }
+                  >
                     {task.status}
                   </Tag>
                 </Flex>
-                <Progress percent={Math.min(100, task.progress ?? 0)} size="small" showInfo={false} />
+                <Progress
+                  percent={Math.min(100, task.progress ?? 0)}
+                  size="small"
+                  showInfo={false}
+                />
                 <Text type="secondary" ellipsis>
-                  {task.conversation_id ? conversationMap.get(task.conversation_id) ?? "关联会话" : "独立任务"} · {formatTime(task.updated_at ?? task.created_at)}
+                  {task.conversation_id
+                    ? (conversationMap.get(task.conversation_id) ?? "关联会话")
+                    : "独立任务"}{" "}
+                  · {formatTime(task.updated_at ?? task.created_at)}
                 </Text>
               </button>
             </List.Item>
@@ -4454,7 +5967,12 @@ function BackgroundTasksButton({
         />
         <Flex justify="space-between" gap={8}>
           <Button onClick={onRefresh}>刷新</Button>
-          <Button type="primary" loading={creating} disabled={!draft.trim() || !activeConversationId} onClick={create}>
+          <Button
+            type="primary"
+            loading={creating}
+            disabled={!draft.trim() || !activeConversationId}
+            onClick={create}
+          >
             创建后台任务
           </Button>
         </Flex>
@@ -4463,7 +5981,13 @@ function BackgroundTasksButton({
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen} trigger="click" placement="bottomRight" content={content}>
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      trigger="click"
+      placement="bottomRight"
+      content={content}
+    >
       <Badge count={running.length} size="small">
         <Button icon={<ApiOutlined />} data-testid="background-tasks">
           后台任务
@@ -4480,15 +6004,22 @@ function Workbench({
   routeConversationId,
   routeTab = "chat",
   onRouteChange,
-  onRouteTabChange
+  onRouteTabChange,
 }: {
   user: User;
   onLogout: () => void;
   routeWorkspaceId?: string;
   routeConversationId?: string;
   routeTab?: string;
-  onRouteChange: (workspaceId?: string, conversationId?: string, options?: { replace?: boolean }) => void;
-  onRouteTabChange: (tab: "chat" | "agents" | "workspace" | "settings", options?: { replace?: boolean }) => void;
+  onRouteChange: (
+    workspaceId?: string,
+    conversationId?: string,
+    options?: { replace?: boolean },
+  ) => void;
+  onRouteTabChange: (
+    tab: "chat" | "agents" | "workspace" | "settings",
+    options?: { replace?: boolean },
+  ) => void;
 }) {
   const [currentUser, setCurrentUser] = useState(user);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -4501,45 +6032,70 @@ function Workbench({
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [backgroundTasks, setBackgroundTasks] = useState<AgentTask[]>([]);
-  const [localRunningConversationIds, setLocalRunningConversationIds] = useState<Set<string>>(() => new Set());
+  const [localRunningConversationIds, setLocalRunningConversationIds] =
+    useState<Set<string>>(() => new Set());
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>();
-  const [conversationCategories, setConversationCategories] = useState<string[]>(CONVERSATION_CATEGORY_OPTIONS);
+  const [conversationCategories, setConversationCategories] = useState<
+    string[]
+  >(CONVERSATION_CATEGORY_OPTIONS);
   const [loadingMessages, setLoadingMessages] = useState(false);
-  const [streamState, setStreamState] = useState<"idle" | "streaming" | "done" | "error">("idle");
+  const [streamState, setStreamState] = useState<
+    "idle" | "streaming" | "done" | "error"
+  >("idle");
   const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
   const [workspacesOpen, setWorkspacesOpen] = useState(false);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
-  const [conversationSettingsOpen, setConversationSettingsOpen] = useState(false);
+  const [conversationSettingsOpen, setConversationSettingsOpen] =
+    useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState<{ open: boolean; group: boolean }>({ open: false, group: false });
+  const [createOpen, setCreateOpen] = useState<{
+    open: boolean;
+    group: boolean;
+  }>({ open: false, group: false });
   const stopStreamRef = useRef<(() => void) | undefined>();
   const { message } = AntApp.useApp();
 
   const active = conversations.find((item) => item.id === activeId);
-  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
-  const currentConversationIds = useMemo(() => new Set(conversations.map((item) => item.id)), [conversations]);
+  const activeWorkspace =
+    workspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
+    workspaces[0];
+  const currentConversationIds = useMemo(
+    () => new Set(conversations.map((item) => item.id)),
+    [conversations],
+  );
   const visibleBackgroundTasks = useMemo(
-    () => backgroundTasks.filter((task) => !task.conversation_id || currentConversationIds.has(task.conversation_id)),
-    [backgroundTasks, currentConversationIds]
+    () =>
+      backgroundTasks.filter(
+        (task) =>
+          !task.conversation_id ||
+          currentConversationIds.has(task.conversation_id),
+      ),
+    [backgroundTasks, currentConversationIds],
   );
   const runningConversationIds = useMemo(() => {
     const next = new Set(localRunningConversationIds);
     backgroundTasks.forEach((task) => {
-      if (task.conversation_id && isTaskRunning(task.status)) next.add(task.conversation_id);
+      if (task.conversation_id && isTaskRunning(task.status))
+        next.add(task.conversation_id);
     });
     return next;
   }, [backgroundTasks, localRunningConversationIds]);
   const categoryStorageKey = useMemo(
     () => `agenthub:conversation-categories:${activeWorkspaceId ?? "default"}`,
-    [activeWorkspaceId]
+    [activeWorkspaceId],
   );
   const categoryNamesFromConversations = useMemo(
-    () => conversations.map((item) => item.folder || item.category || "Default"),
-    [conversations]
+    () =>
+      conversations.map((item) => item.folder || item.category || "Default"),
+    [conversations],
   );
 
-  const navigateToConversation = (workspaceId?: string, conversationId?: string, replace = false) => {
+  const navigateToConversation = (
+    workspaceId?: string,
+    conversationId?: string,
+    replace = false,
+  ) => {
     onRouteChange(workspaceId, conversationId, { replace });
   };
 
@@ -4553,7 +6109,8 @@ function Workbench({
   const selectConversation = (conversationId?: string, replace = false) => {
     if (!conversationId) return;
     const target = conversations.find((item) => item.id === conversationId);
-    const workspaceId = target?.workspace_id || activeWorkspaceId || activeWorkspace?.id;
+    const workspaceId =
+      target?.workspace_id || activeWorkspaceId || activeWorkspace?.id;
     setActiveId(conversationId);
     navigateToConversation(workspaceId, conversationId, replace);
   };
@@ -4573,9 +6130,15 @@ function Workbench({
   };
 
   const saveConversationCategories = (nextCategories: string[]) => {
-    const merged = mergeConversationCategories(CONVERSATION_CATEGORY_OPTIONS, nextCategories);
+    const merged = mergeConversationCategories(
+      CONVERSATION_CATEGORY_OPTIONS,
+      nextCategories,
+    );
     setConversationCategories(merged);
-    window.localStorage.setItem(categoryStorageKey, JSON.stringify({ version: 2, items: merged }));
+    window.localStorage.setItem(
+      categoryStorageKey,
+      JSON.stringify({ version: 2, items: merged }),
+    );
   };
 
   const addConversationCategory = (name: string) => {
@@ -4599,40 +6162,55 @@ function Workbench({
       const raw = window.localStorage.getItem(categoryStorageKey);
       const parsed = raw ? JSON.parse(raw) : [];
       if (Array.isArray(parsed)) {
-        stored = parsed.map(String).filter((name) => !LEGACY_DEFAULT_CONVERSATION_CATEGORIES.has(name));
+        stored = parsed
+          .map(String)
+          .filter((name) => !LEGACY_DEFAULT_CONVERSATION_CATEGORIES.has(name));
       } else if (parsed && Array.isArray(parsed.items)) {
         stored = parsed.items.map(String);
       }
     } catch {
       stored = [];
     }
-    setConversationCategories(mergeConversationCategories(CONVERSATION_CATEGORY_OPTIONS, stored));
+    setConversationCategories(
+      mergeConversationCategories(CONVERSATION_CATEGORY_OPTIONS, stored),
+    );
   }, [categoryStorageKey]);
 
   useEffect(() => {
     setConversationCategories((current) =>
-      mergeConversationCategories(CONVERSATION_CATEGORY_OPTIONS, current, categoryNamesFromConversations)
+      mergeConversationCategories(
+        CONVERSATION_CATEGORY_OPTIONS,
+        current,
+        categoryNamesFromConversations,
+      ),
     );
   }, [categoryNamesFromConversations]);
 
   useEffect(() => {
-    Promise.all([api.agents(), api.knowledgeBases(), api.workspaces()]).then(([nextAgents, kbs, nextWorkspaces]) => {
-      setAgents(nextAgents);
-      setKnowledgeBases(kbs);
-      setWorkspaces(nextWorkspaces);
-      const routeWorkspace = nextWorkspaces.find((workspace) => workspace.id === routeWorkspaceId);
-      const nextWorkspaceId = routeWorkspace?.id ?? nextWorkspaces[0]?.id;
-      if (nextWorkspaceId) {
-        setActiveWorkspaceId(nextWorkspaceId);
-        if (!routeWorkspaceId || routeWorkspaceId !== nextWorkspaceId) navigateToConversation(nextWorkspaceId, undefined, true);
-      }
-    });
+    Promise.all([api.agents(), api.knowledgeBases(), api.workspaces()]).then(
+      ([nextAgents, kbs, nextWorkspaces]) => {
+        setAgents(nextAgents);
+        setKnowledgeBases(kbs);
+        setWorkspaces(nextWorkspaces);
+        const routeWorkspace = nextWorkspaces.find(
+          (workspace) => workspace.id === routeWorkspaceId,
+        );
+        const nextWorkspaceId = routeWorkspace?.id ?? nextWorkspaces[0]?.id;
+        if (nextWorkspaceId) {
+          setActiveWorkspaceId(nextWorkspaceId);
+          if (!routeWorkspaceId || routeWorkspaceId !== nextWorkspaceId)
+            navigateToConversation(nextWorkspaceId, undefined, true);
+        }
+      },
+    );
     loadBackgroundTasks().catch(() => undefined);
   }, []);
 
   useEffect(() => {
     if (!workspaces.length) return;
-    const routeWorkspace = routeWorkspaceId ? workspaces.find((workspace) => workspace.id === routeWorkspaceId) : undefined;
+    const routeWorkspace = routeWorkspaceId
+      ? workspaces.find((workspace) => workspace.id === routeWorkspaceId)
+      : undefined;
     if (routeWorkspace) {
       if (activeWorkspaceId !== routeWorkspace.id) {
         setActiveWorkspaceId(routeWorkspace.id);
@@ -4640,9 +6218,11 @@ function Workbench({
       }
       return;
     }
-    const fallbackId = activeWorkspaceId && workspaces.some((workspace) => workspace.id === activeWorkspaceId)
-      ? activeWorkspaceId
-      : workspaces[0]?.id;
+    const fallbackId =
+      activeWorkspaceId &&
+      workspaces.some((workspace) => workspace.id === activeWorkspaceId)
+        ? activeWorkspaceId
+        : workspaces[0]?.id;
     if (fallbackId) {
       if (activeWorkspaceId !== fallbackId) setActiveWorkspaceId(fallbackId);
       navigateToConversation(fallbackId, undefined, true);
@@ -4680,30 +6260,52 @@ function Workbench({
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
-    const scopedConversations = conversations.filter((item) => (item.workspace_id || undefined) === activeWorkspaceId);
+    const scopedConversations = conversations.filter(
+      (item) => (item.workspace_id || undefined) === activeWorkspaceId,
+    );
     if (!scopedConversations.length) {
       setActiveId(undefined);
-      if (routeConversationId) navigateToConversation(activeWorkspaceId, undefined, true);
+      if (routeConversationId)
+        navigateToConversation(activeWorkspaceId, undefined, true);
       return;
     }
     const routeConversation = routeConversationId
       ? scopedConversations.find((item) => item.id === routeConversationId)
       : undefined;
-    const currentConversation = activeId ? scopedConversations.find((item) => item.id === activeId) : undefined;
-    const nextConversation = routeConversation ?? currentConversation ?? scopedConversations.find((item) => !item.archived) ?? scopedConversations[0];
+    const currentConversation = activeId
+      ? scopedConversations.find((item) => item.id === activeId)
+      : undefined;
+    const nextConversation =
+      routeConversation ??
+      currentConversation ??
+      scopedConversations.find((item) => !item.archived) ??
+      scopedConversations[0];
     if (!nextConversation) return;
     if (activeId !== nextConversation.id) setActiveId(nextConversation.id);
     const workspaceId = nextConversation.workspace_id || activeWorkspaceId;
-    if (routeWorkspaceId !== workspaceId || routeConversationId !== nextConversation.id) {
+    if (
+      routeWorkspaceId !== workspaceId ||
+      routeConversationId !== nextConversation.id
+    ) {
       navigateToConversation(workspaceId, nextConversation.id, true);
     }
-  }, [activeWorkspaceId, activeId, conversations, routeConversationId, routeWorkspaceId]);
+  }, [
+    activeWorkspaceId,
+    activeId,
+    conversations,
+    routeConversationId,
+    routeWorkspaceId,
+  ]);
 
   useEffect(() => {
     if (!activeId) return;
     setArtifactPanelOpen(false);
     setLoadingMessages(true);
-    Promise.all([api.messages(activeId), api.artifact(activeId), api.files(activeId)])
+    Promise.all([
+      api.messages(activeId),
+      api.artifact(activeId),
+      api.files(activeId),
+    ])
       .then(([nextMessages, nextArtifact, nextFiles]) => {
         setMessages(nextMessages);
         setArtifact(nextArtifact);
@@ -4712,14 +6314,31 @@ function Workbench({
       .finally(() => setLoadingMessages(false));
   }, [activeId]);
 
-  const patchConversation = async (item: Conversation, patch: Partial<Conversation>) => {
+  const patchConversation = async (
+    item: Conversation,
+    patch: Partial<Conversation>,
+  ) => {
     const updated = await api.updateConversation(item.id, patch);
-    const nextCategory = patch.folder || patch.category || updated.folder || updated.category;
-    if (nextCategory) saveConversationCategories([...conversationCategories, nextCategory]);
-    setConversations((current) => current.map((conversation) => (conversation.id === item.id ? { ...conversation, ...updated } : conversation)));
+    const nextCategory =
+      patch.folder || patch.category || updated.folder || updated.category;
+    if (nextCategory)
+      saveConversationCategories([...conversationCategories, nextCategory]);
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === item.id
+          ? { ...conversation, ...updated }
+          : conversation,
+      ),
+    );
   };
 
-  const createConversation = async (payload: { title?: string; agentIds: string[]; group: boolean; masterEnabled: boolean; folder: string }) => {
+  const createConversation = async (payload: {
+    title?: string;
+    agentIds: string[];
+    group: boolean;
+    masterEnabled: boolean;
+    folder: string;
+  }) => {
     const created = await api.createConversationWithAgents({
       chat_type: payload.group ? "group" : "single",
       title: payload.title,
@@ -4727,25 +6346,31 @@ function Workbench({
       master_enabled: payload.masterEnabled,
       folder: payload.folder,
       category: payload.folder,
-      workspace_id: activeWorkspaceId
+      workspace_id: activeWorkspaceId,
     });
     saveConversationCategories([...conversationCategories, payload.folder]);
     setConversations((current) => [created, ...current]);
     setActiveId(created.id);
-    navigateToConversation(created.workspace_id || activeWorkspaceId, created.id);
+    navigateToConversation(
+      created.workspace_id || activeWorkspaceId,
+      created.id,
+    );
     setMessages([]);
     setCreateOpen({ open: false, group: false });
     message.success(payload.group ? "群聊已创建" : "会话已创建");
   };
 
-  const appendAssistantStream = async (conversationId: string, prompt: string) => {
+  const appendAssistantStream = async (
+    conversationId: string,
+    prompt: string,
+  ) => {
     const assistant = makeMessage({
       conversationId,
       role: "assistant",
       kind: "text",
       author: "Master Agent",
       content: "",
-      streamState: "streaming"
+      streamState: "streaming",
     });
     setMessages((current) => [...current, assistant]);
     setStreamState("streaming");
@@ -4756,8 +6381,10 @@ function Workbench({
     });
     setConversations((current) =>
       current.map((item) =>
-        item.id === conversationId ? { ...item, updatedAt: new Date().toISOString(), unread: 0 } : item
-      )
+        item.id === conversationId
+          ? { ...item, updatedAt: new Date().toISOString(), unread: 0 }
+          : item,
+      ),
     );
     stopStreamRef.current = undefined;
 
@@ -4769,26 +6396,44 @@ function Workbench({
         (delta) => {
           rawBuffer += delta;
           const visible = stripInternalAgentOutput(rawBuffer);
-          setMessages((current) => current.map((item) => (item.id === assistant.id ? { ...item, content: visible } : item)));
+          setMessages((current) =>
+            current.map((item) =>
+              item.id === assistant.id ? { ...item, content: visible } : item,
+            ),
+          );
         },
         () => {
-          setMessages((current) => current.map((item) => (item.id === assistant.id ? { ...item, streamState: "done" } : item)));
+          setMessages((current) =>
+            current.map((item) =>
+              item.id === assistant.id
+                ? { ...item, streamState: "done" }
+                : item,
+            ),
+          );
         },
         (stop) => {
           stopStreamRef.current = stop;
-        }
+        },
       );
-      setMessages((current) => current.map((item) => (item.id === assistant.id ? { ...item, streamState: "done" } : item)));
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === assistant.id ? { ...item, streamState: "done" } : item,
+        ),
+      );
       setStreamState("done");
-      const [freshMessages, freshArtifact] = await Promise.all([api.messages(conversationId), api.artifact(conversationId)]).catch(() => [
-        undefined,
-        undefined
-      ]);
+      const [freshMessages, freshArtifact] = await Promise.all([
+        api.messages(conversationId),
+        api.artifact(conversationId),
+      ]).catch(() => [undefined, undefined]);
       if (freshMessages) {
         const cleanMessages = freshMessages.map((item) =>
-          item.role === "assistant" && item.kind === "text" ? { ...item, content: stripInternalAgentOutput(item.content) } : item
+          item.role === "assistant" && item.kind === "text"
+            ? { ...item, content: stripInternalAgentOutput(item.content) }
+            : item,
         );
-        const hasPreviewCard = cleanMessages.some((item) => item.kind === "preview_card");
+        const hasPreviewCard = cleanMessages.some(
+          (item) => item.kind === "preview_card",
+        );
         setMessages(
           hasPreviewCard || !freshArtifact
             ? cleanMessages
@@ -4800,30 +6445,46 @@ function Workbench({
                   kind: "preview_card",
                   author: "Artifact Agent",
                   content: `预览产物：${freshArtifact.title}`,
-                  streamState: "done"
-                })
-              ]
+                  streamState: "done",
+                }),
+              ],
         );
-        const lastAssistant = [...cleanMessages].reverse().find((item) => item.role === "assistant" && item.kind === "text");
-        const previewText = stripInternalAgentOutput(lastAssistant?.content ?? rawBuffer) || "已完成";
+        const lastAssistant = [...cleanMessages]
+          .reverse()
+          .find((item) => item.role === "assistant" && item.kind === "text");
+        const previewText =
+          stripInternalAgentOutput(lastAssistant?.content ?? rawBuffer) ||
+          "已完成";
         completedPreview = previewText.slice(0, 120);
         setConversations((current) =>
           current.map((item) =>
-            item.id === conversationId ? { ...item, lastMessage: completedPreview, updatedAt: new Date().toISOString() } : item
-          )
+            item.id === conversationId
+              ? {
+                  ...item,
+                  lastMessage: completedPreview,
+                  updatedAt: new Date().toISOString(),
+                }
+              : item,
+          ),
         );
       }
       if (freshArtifact) setArtifact(freshArtifact);
     } catch (error) {
-      const fallbackPreview = stripInternalAgentOutput(rawBuffer).slice(0, 120) || "回复暂未完成，请稍后刷新。";
+      const fallbackPreview =
+        stripInternalAgentOutput(rawBuffer).slice(0, 120) ||
+        "回复暂未完成，请稍后刷新。";
       completedPreview = fallbackPreview;
       setStreamState("error");
       setMessages((current) =>
         current.map((item) =>
           item.id === assistant.id
-            ? { ...item, streamState: "error", content: stripInternalAgentOutput(rawBuffer) || fallbackPreview }
-            : item
-        )
+            ? {
+                ...item,
+                streamState: "error",
+                content: stripInternalAgentOutput(rawBuffer) || fallbackPreview,
+              }
+            : item,
+        ),
       );
       throw error;
     } finally {
@@ -4836,37 +6497,69 @@ function Workbench({
         setConversations((current) =>
           current.map((item) =>
             item.id === conversationId && item.lastMessage === "正在回答..."
-              ? { ...item, lastMessage: completedPreview, updatedAt: new Date().toISOString() }
-              : item
-          )
+              ? {
+                  ...item,
+                  lastMessage: completedPreview,
+                  updatedAt: new Date().toISOString(),
+                }
+              : item,
+          ),
         );
       }
       loadBackgroundTasks().catch(() => undefined);
     }
   };
 
-  const appendConversationStream = async (conversationId: string, prompt: string) => {
-    const targetConversation = conversations.find((item) => item.id === conversationId) ?? active;
+  const appendConversationStream = async (
+    conversationId: string,
+    prompt: string,
+  ) => {
+    const targetConversation =
+      conversations.find((item) => item.id === conversationId) ?? active;
     const agentParticipants =
-      targetConversation?.participants.filter((item) => item.participant_type === "agent" && item.agent_id) ?? [];
+      targetConversation?.participants.filter(
+        (item) => item.participant_type === "agent" && item.agent_id,
+      ) ?? [];
     const tempIdsByAgentId = new Map<string, string>();
     const tempIdsByAuthor = new Map<string, string>();
 
     const normalizeIncomingMessage = (incoming: ChatMessage): ChatMessage => ({
       ...incoming,
-      conversationId: incoming.conversationId ?? (incoming as ChatMessage & { conversation_id?: string }).conversation_id ?? conversationId,
+      conversationId:
+        incoming.conversationId ??
+        (incoming as ChatMessage & { conversation_id?: string })
+          .conversation_id ??
+        conversationId,
       role: incoming.role ?? "assistant",
       kind: incoming.kind ?? "text",
-      author: incoming.author || (incoming as ChatMessage & { sender_name?: string }).sender_name || "Agent",
-      content: incoming.role === "assistant" && incoming.kind === "text" ? stripInternalAgentOutput(incoming.content) : incoming.content,
-      createdAt: incoming.createdAt ?? (incoming as ChatMessage & { created_at?: string }).created_at ?? new Date().toISOString(),
-      streamState: incoming.role === "assistant" && incoming.kind === "text" ? "done" : incoming.streamState
+      author:
+        incoming.author ||
+        (incoming as ChatMessage & { sender_name?: string }).sender_name ||
+        "Agent",
+      content:
+        incoming.role === "assistant" && incoming.kind === "text"
+          ? stripInternalAgentOutput(incoming.content)
+          : incoming.content,
+      createdAt:
+        incoming.createdAt ??
+        (incoming as ChatMessage & { created_at?: string }).created_at ??
+        new Date().toISOString(),
+      streamState:
+        incoming.role === "assistant" && incoming.kind === "text"
+          ? "done"
+          : incoming.streamState,
     });
 
-    const ensureStreamingMessage = (messageId: string, author: string, agentId?: string) => {
+    const ensureStreamingMessage = (
+      messageId: string,
+      author: string,
+      agentId?: string,
+    ) => {
       setMessages((current) => {
         if (current.some((item) => item.id === messageId)) return current;
-        const tempId = (agentId && tempIdsByAgentId.get(agentId)) || tempIdsByAuthor.get(author);
+        const tempId =
+          (agentId && tempIdsByAgentId.get(agentId)) ||
+          tempIdsByAuthor.get(author);
         if (tempId) {
           if (agentId) tempIdsByAgentId.set(agentId, messageId);
           tempIdsByAuthor.set(author, messageId);
@@ -4878,9 +6571,9 @@ function Workbench({
                   sender_id: agentId,
                   author,
                   rawContent: { ...(item.rawContent ?? {}), agent_id: agentId },
-                  streamState: "streaming"
+                  streamState: "streaming",
                 }
-              : item
+              : item,
           );
         }
         return [
@@ -4892,24 +6585,38 @@ function Workbench({
             author,
             content: "",
             rawContent: agentId ? { agent_id: agentId } : {},
-            streamState: "streaming"
-          })
-        ].map((item) => (item.id.startsWith("local-") && item.author === author && !item.content ? { ...item, id: messageId } : item));
+            streamState: "streaming",
+          }),
+        ].map((item) =>
+          item.id.startsWith("local-") &&
+          item.author === author &&
+          !item.content
+            ? { ...item, id: messageId }
+            : item,
+        );
       });
     };
 
     const upsertFinalMessage = (incoming: ChatMessage) => {
       const normalized = normalizeIncomingMessage(incoming);
-      const agentId = normalized.sender_id || (normalized.rawContent?.agent_id as string | undefined);
+      const agentId =
+        normalized.sender_id ||
+        (normalized.rawContent?.agent_id as string | undefined);
       setMessages((current) => {
         if (current.some((item) => item.id === normalized.id)) {
-          return current.map((item) => (item.id === normalized.id ? { ...item, ...normalized } : item));
+          return current.map((item) =>
+            item.id === normalized.id ? { ...item, ...normalized } : item,
+          );
         }
-        const tempId = (agentId && tempIdsByAgentId.get(agentId)) || tempIdsByAuthor.get(normalized.author);
+        const tempId =
+          (agentId && tempIdsByAgentId.get(agentId)) ||
+          tempIdsByAuthor.get(normalized.author);
         if (tempId) {
           if (agentId) tempIdsByAgentId.set(agentId, normalized.id);
           tempIdsByAuthor.set(normalized.author, normalized.id);
-          return current.map((item) => (item.id === tempId ? { ...item, ...normalized } : item));
+          return current.map((item) =>
+            item.id === tempId ? { ...item, ...normalized } : item,
+          );
         }
         return [...current, normalized];
       });
@@ -4925,8 +6632,11 @@ function Workbench({
         kind: "text",
         author,
         content: "",
-        rawContent: { agent_id: participant.agent_id, participant_id: participant.id },
-        streamState: "streaming"
+        rawContent: {
+          agent_id: participant.agent_id,
+          participant_id: participant.id,
+        },
+        streamState: "streaming",
       });
       tempIdsByAgentId.set(agentId, placeholder.id);
       tempIdsByAuthor.set(author, placeholder.id);
@@ -4940,7 +6650,11 @@ function Workbench({
       return next;
     });
     setConversations((current) =>
-      current.map((item) => (item.id === conversationId ? { ...item, updatedAt: new Date().toISOString(), unread: 0 } : item))
+      current.map((item) =>
+        item.id === conversationId
+          ? { ...item, updatedAt: new Date().toISOString(), unread: 0 }
+          : item,
+      ),
     );
     stopStreamRef.current = undefined;
 
@@ -4949,22 +6663,44 @@ function Workbench({
     try {
       await api.streamAssistantReply(conversationId, {
         onMessageStart: (payload) => {
-          const messageId = String(payload.agent_message_id || payload.message_id || `stream-${Date.now()}`);
-          const agentId = payload.agent_id ? String(payload.agent_id) : undefined;
-          const author = String(payload.agent_name || payload.sender_name || (agentId ? "Agent" : "Assistant"));
+          const messageId = String(
+            payload.agent_message_id ||
+              payload.message_id ||
+              `stream-${Date.now()}`,
+          );
+          const agentId = payload.agent_id
+            ? String(payload.agent_id)
+            : undefined;
+          const author = String(
+            payload.agent_name ||
+              payload.sender_name ||
+              (agentId ? "Agent" : "Assistant"),
+          );
           ensureStreamingMessage(messageId, author, agentId);
         },
         onDelta: (delta, payload) => {
           rawBuffer += delta;
-          const messageId = String(payload.agent_message_id || payload.message_id || "");
+          const messageId = String(
+            payload.agent_message_id || payload.message_id || "",
+          );
           if (!messageId) return;
-          ensureStreamingMessage(messageId, String(payload.agent_name || "Agent"), payload.agent_id ? String(payload.agent_id) : undefined);
+          ensureStreamingMessage(
+            messageId,
+            String(payload.agent_name || "Agent"),
+            payload.agent_id ? String(payload.agent_id) : undefined,
+          );
           setMessages((current) =>
             current.map((item) =>
               item.id === messageId
-                ? { ...item, content: stripInternalAgentOutput(`${item.content}${delta}`), streamState: "streaming" }
-                : item
-            )
+                ? {
+                    ...item,
+                    content: stripInternalAgentOutput(
+                      `${item.content}${delta}`,
+                    ),
+                    streamState: "streaming",
+                  }
+                : item,
+            ),
           );
         },
         onMessageUpdated: upsertFinalMessage,
@@ -4973,23 +6709,35 @@ function Workbench({
         },
         onDone: () => {
           setMessages((current) =>
-            current.map((item) => (item.streamState === "streaming" ? { ...item, streamState: "done" } : item))
+            current.map((item) =>
+              item.streamState === "streaming"
+                ? { ...item, streamState: "done" }
+                : item,
+            ),
           );
         },
         onControl: (stop) => {
           stopStreamRef.current = stop;
-        }
+        },
       });
       setStreamState("done");
-      const [freshMessages, freshArtifact] = await Promise.all([api.messages(conversationId), api.artifact(conversationId)]).catch(() => [
-        undefined,
-        undefined
-      ]);
+      const [freshMessages, freshArtifact] = await Promise.all([
+        api.messages(conversationId),
+        api.artifact(conversationId),
+      ]).catch(() => [undefined, undefined]);
       if (freshMessages) {
         const cleanMessages = freshMessages.map((item) =>
-          item.role === "assistant" && item.kind === "text" ? { ...item, content: stripInternalAgentOutput(item.content), streamState: "done" as const } : item
+          item.role === "assistant" && item.kind === "text"
+            ? {
+                ...item,
+                content: stripInternalAgentOutput(item.content),
+                streamState: "done" as const,
+              }
+            : item,
         );
-        const hasPreviewCard = cleanMessages.some((item) => item.kind === "preview_card");
+        const hasPreviewCard = cleanMessages.some(
+          (item) => item.kind === "preview_card",
+        );
         setMessages(
           hasPreviewCard || !freshArtifact
             ? cleanMessages
@@ -5001,27 +6749,46 @@ function Workbench({
                   kind: "preview_card",
                   author: "Artifact Agent",
                   content: `预览产物：${freshArtifact.title}`,
-                  streamState: "done"
-                })
-              ]
+                  streamState: "done",
+                }),
+              ],
         );
-        const lastAssistant = [...cleanMessages].reverse().find((item) => item.role === "assistant" && item.kind === "text");
-        completedPreview = (lastAssistant?.content || stripInternalAgentOutput(rawBuffer) || "done").slice(0, 120);
+        const lastAssistant = [...cleanMessages]
+          .reverse()
+          .find((item) => item.role === "assistant" && item.kind === "text");
+        completedPreview = (
+          lastAssistant?.content ||
+          stripInternalAgentOutput(rawBuffer) ||
+          "done"
+        ).slice(0, 120);
         setConversations((current) =>
           current.map((item) =>
-            item.id === conversationId ? { ...item, lastMessage: completedPreview, updatedAt: new Date().toISOString() } : item
-          )
+            item.id === conversationId
+              ? {
+                  ...item,
+                  lastMessage: completedPreview,
+                  updatedAt: new Date().toISOString(),
+                }
+              : item,
+          ),
         );
       }
       if (freshArtifact) setArtifact(freshArtifact);
     } catch (error) {
-      const fallbackPreview = stripInternalAgentOutput(rawBuffer).slice(0, 120) || "reply failed";
+      const fallbackPreview =
+        stripInternalAgentOutput(rawBuffer).slice(0, 120) || "reply failed";
       completedPreview = fallbackPreview;
       setStreamState("error");
       setMessages((current) =>
         current.map((item) =>
-          item.streamState === "streaming" ? { ...item, streamState: "error", content: item.content || fallbackPreview } : item
-        )
+          item.streamState === "streaming"
+            ? {
+                ...item,
+                streamState: "error",
+                content: item.content || fallbackPreview,
+              }
+            : item,
+        ),
       );
       throw error;
     } finally {
@@ -5034,9 +6801,13 @@ function Workbench({
         setConversations((current) =>
           current.map((item) =>
             item.id === conversationId && item.lastMessage === "正在回答..."
-              ? { ...item, lastMessage: completedPreview, updatedAt: new Date().toISOString() }
-              : item
-          )
+              ? {
+                  ...item,
+                  lastMessage: completedPreview,
+                  updatedAt: new Date().toISOString(),
+                }
+              : item,
+          ),
         );
       }
       loadBackgroundTasks().catch(() => undefined);
@@ -5054,21 +6825,37 @@ function Workbench({
       return next;
     });
     setConversations((current) =>
-      current.map((item) => (item.id === activeId ? { ...item, lastMessage: "已停止本次响应。", updatedAt: new Date().toISOString() } : item))
+      current.map((item) =>
+        item.id === activeId
+          ? {
+              ...item,
+              lastMessage: "已停止本次响应。",
+              updatedAt: new Date().toISOString(),
+            }
+          : item,
+      ),
     );
     setMessages((current) =>
       current.map((item) =>
         item.streamState === "streaming"
-          ? { ...item, streamState: "done", content: item.content || "已停止接收本次回复。" }
-          : item
-      )
+          ? {
+              ...item,
+              streamState: "done",
+              content: item.content || "已停止接收本次回复。",
+            }
+          : item,
+      ),
     );
     await api.cancelAssistantReply(activeId).catch(() => undefined);
     await loadBackgroundTasks().catch(() => undefined);
     message.info("已停止本次响应");
   };
 
-  const send = async (content: string, quoted?: ChatMessage, attachments: UploadedFile[] = []) => {
+  const send = async (
+    content: string,
+    quoted?: ChatMessage,
+    attachments: UploadedFile[] = [],
+  ) => {
     if (!activeId) return;
     const conversationId = activeId;
     const localAttachments: MessageAttachment[] = attachments.map((file) => ({
@@ -5079,7 +6866,7 @@ function Workbench({
       content_type: file.content_type,
       size: file.size,
       parse_status: file.parse_status,
-      public_url: file.public_url
+      public_url: file.public_url,
     }));
     const localMessage = makeMessage({
       conversationId,
@@ -5089,25 +6876,48 @@ function Workbench({
       content,
       rawContent: { text: content, attachments: localAttachments },
       attachments: localAttachments,
-      quotedMessageId: quoted?.id
+      quotedMessageId: quoted?.id,
     });
     setMessages((current) => [...current, localMessage]);
     setConversations((current) =>
       current.map((item) =>
-        item.id === conversationId ? { ...item, lastMessage: content, updatedAt: new Date().toISOString(), unread: 0 } : item
-      )
+        item.id === conversationId
+          ? {
+              ...item,
+              lastMessage: content,
+              updatedAt: new Date().toISOString(),
+              unread: 0,
+            }
+          : item,
+      ),
     );
-    const streamPromise = appendConversationStream(conversationId, content).catch(() => setStreamState("error"));
+    const streamPromise = appendConversationStream(
+      conversationId,
+      content,
+    ).catch(() => setStreamState("error"));
     try {
-      const userMessage = await api.sendMessage(conversationId, content, quoted?.id, attachments);
-      setMessages((current) => current.map((item) => (item.id === localMessage.id ? userMessage : item)));
+      const userMessage = await api.sendMessage(
+        conversationId,
+        content,
+        quoted?.id,
+        attachments,
+      );
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === localMessage.id ? userMessage : item,
+        ),
+      );
       if (isLikelyArtifactRequest(content)) {
-        const freshArtifact = await api.artifact(conversationId).catch(() => undefined);
+        const freshArtifact = await api
+          .artifact(conversationId)
+          .catch(() => undefined);
         if (freshArtifact) {
           setArtifact(freshArtifact);
           setMessages((current) => {
             const exists = current.some(
-              (item) => item.kind === "preview_card" && item.rawContent?.artifact_id === freshArtifact.id
+              (item) =>
+                item.kind === "preview_card" &&
+                item.rawContent?.artifact_id === freshArtifact.id,
             );
             if (exists) return current;
             return [
@@ -5119,16 +6929,21 @@ function Workbench({
                 author: "Artifact Agent",
                 content: `预览产物：${freshArtifact.title}`,
                 rawContent: { artifact_id: freshArtifact.id },
-                streamState: "done"
-              })
+                streamState: "done",
+              }),
             ];
           });
           setConversations((current) =>
             current.map((item) =>
               item.id === conversationId
-                ? { ...item, lastMessage: "已生成产物卡片，可点击后在右侧预览、编辑和部署。", updatedAt: new Date().toISOString() }
-                : item
-            )
+                ? {
+                    ...item,
+                    lastMessage:
+                      "已生成产物卡片，可点击后在右侧预览、编辑和部署。",
+                    updatedAt: new Date().toISOString(),
+                  }
+                : item,
+            ),
           );
         }
       }
@@ -5138,9 +6953,13 @@ function Workbench({
       setMessages((current) =>
         current.map((item) =>
           item.id === localMessage.id
-            ? { ...item, kind: "error", content: `${content}\n\n发送失败：${error instanceof Error ? error.message : "网络异常"}` }
-            : item
-        )
+            ? {
+                ...item,
+                kind: "error",
+                content: `${content}\n\n发送失败：${error instanceof Error ? error.message : "网络异常"}`,
+              }
+            : item,
+        ),
       );
       message.error("消息发送失败");
     }
@@ -5148,7 +6967,10 @@ function Workbench({
 
   const regenerate = (source: ChatMessage) => {
     if (!activeId) return;
-    appendConversationStream(activeId, `请重新生成这条回复：${source.content}`).catch(() => setStreamState("error"));
+    appendConversationStream(
+      activeId,
+      `请重新生成这条回复：${source.content}`,
+    ).catch(() => setStreamState("error"));
   };
 
   const saveArtifact = async (next: WorkspaceArtifact) => {
@@ -5159,7 +6981,12 @@ function Workbench({
 
   const deploy = async () => {
     if (!activeId) return;
-    setDeployment({ id: "pending", status: "building", commit: "pending", updatedAt: new Date().toISOString() });
+    setDeployment({
+      id: "pending",
+      status: "building",
+      commit: "pending",
+      updatedAt: new Date().toISOString(),
+    });
     const result = await api.deploy(activeId, artifact?.id);
     setDeployment(result);
     message.success("部署任务已提交");
@@ -5174,19 +7001,27 @@ function Workbench({
 
   const openArtifactPreview = async (source?: ChatMessage) => {
     if (!activeId) return;
-    const artifactId = typeof source?.rawContent?.artifact_id === "string" ? source.rawContent.artifact_id : undefined;
-    const current = (artifactId ? await api.artifactById(artifactId) : undefined) ?? artifact ?? (await api.artifact(activeId));
+    const artifactId =
+      typeof source?.rawContent?.artifact_id === "string"
+        ? source.rawContent.artifact_id
+        : undefined;
+    const current =
+      (artifactId ? await api.artifactById(artifactId) : undefined) ??
+      artifact ??
+      (await api.artifact(activeId));
     const nextArtifact =
       current ??
       (source?.kind === "preview_card"
         ? {
             id: artifactId ?? `local-${activeId}`,
             conversationId: activeId,
-            title: source.content.replace(/^预览产物[:：]\s*/, "") || "AgentHub artifact",
+            title:
+              source.content.replace(/^预览产物[:：]\s*/, "") ||
+              "AgentHub artifact",
             language: "html",
             code: "<main><h1>Artifact preview</h1><p>产物索引已恢复，请刷新或重新生成以查看完整文件。</p></main>",
             previousCode: "",
-            updatedAt: new Date().toISOString()
+            updatedAt: new Date().toISOString(),
           }
         : undefined);
     if (!nextArtifact) {
@@ -5207,8 +7042,12 @@ function Workbench({
         onSelect={selectConversation}
         onCreate={(group) => setCreateOpen({ open: true, group })}
         onCreateCategory={addConversationCategory}
-        onTogglePin={(item) => patchConversation(item, { pinned: !item.pinned })}
-        onToggleArchive={(item) => patchConversation(item, { archived: !item.archived })}
+        onTogglePin={(item) =>
+          patchConversation(item, { pinned: !item.pinned })
+        }
+        onToggleArchive={(item) =>
+          patchConversation(item, { archived: !item.archived })
+        }
         onEdit={(item, patch) => patchConversation(item, patch)}
         onDelete={(item) => {
           Modal.confirm({
@@ -5218,25 +7057,37 @@ function Workbench({
             okButtonProps: { danger: true },
             onOk: async () => {
               await api.deleteConversation(item.id);
-              setConversations((current) => current.filter((conversation) => conversation.id !== item.id));
+              setConversations((current) =>
+                current.filter((conversation) => conversation.id !== item.id),
+              );
               if (activeId === item.id) {
-                const nextConversation = conversations.find((conversation) => conversation.id !== item.id);
+                const nextConversation = conversations.find(
+                  (conversation) => conversation.id !== item.id,
+                );
                 setActiveId(nextConversation?.id);
-                navigateToConversation(nextConversation?.workspace_id || activeWorkspaceId, nextConversation?.id, true);
+                navigateToConversation(
+                  nextConversation?.workspace_id || activeWorkspaceId,
+                  nextConversation?.id,
+                  true,
+                );
               }
               message.success("归档会话已删除");
-            }
+            },
           });
         }}
       />
       <Layout className="center-layout">
         <div className="topbar">
           <Space>
-            <Avatar>{currentUser.avatar ?? currentUser.name.slice(0, 1)}</Avatar>
+            <Avatar>
+              {currentUser.avatar ?? currentUser.name.slice(0, 1)}
+            </Avatar>
             <div>
               <Text strong>{currentUser.name}</Text>
               <br />
-              <Text type="secondary">{currentUser.role === "demo" ? "演示用户" : "成员"}</Text>
+              <Text type="secondary">
+                {currentUser.role === "demo" ? "演示用户" : "成员"}
+              </Text>
             </div>
           </Space>
           <Space>
@@ -5245,9 +7096,16 @@ function Workbench({
               value={activeWorkspace?.id}
               placeholder="选择工作区"
               onChange={(value) => selectWorkspace(value)}
-              options={workspaces.map((workspace) => ({ label: workspace.name, value: workspace.id }))}
+              options={workspaces.map((workspace) => ({
+                label: workspace.name,
+                value: workspace.id,
+              }))}
             />
-            <Button icon={<AppstoreOutlined />} onClick={() => openMainTab("workspace")} data-testid="workspace-panel">
+            <Button
+              icon={<AppstoreOutlined />}
+              onClick={() => openMainTab("workspace")}
+              data-testid="workspace-panel"
+            >
               工作区
             </Button>
             <BackgroundTasksButton
@@ -5262,7 +7120,9 @@ function Workbench({
               onCancel={async (task) => {
                 await api.cancelTask(task.id);
                 if (task.conversation_id) {
-                  await api.cancelAssistantReply(task.conversation_id).catch(() => undefined);
+                  await api
+                    .cancelAssistantReply(task.conversation_id)
+                    .catch(() => undefined);
                   setLocalRunningConversationIds((current) => {
                     const next = new Set(current);
                     if (task.conversation_id) next.delete(task.conversation_id);
@@ -5274,10 +7134,18 @@ function Workbench({
               }}
               onRefresh={loadBackgroundTasks}
             />
-            <Button icon={<ToolOutlined />} onClick={() => openMainTab("settings")} data-testid="global-settings">
+            <Button
+              icon={<ToolOutlined />}
+              onClick={() => openMainTab("settings")}
+              data-testid="global-settings"
+            >
               设置
             </Button>
-            <Button icon={<RobotOutlined />} onClick={() => openMainTab("agents")} data-testid="agent-directory">
+            <Button
+              icon={<RobotOutlined />}
+              onClick={() => openMainTab("agents")}
+              data-testid="agent-directory"
+            >
               Agent 广场
             </Button>
             <Button onClick={onLogout}>退出</Button>
@@ -5329,12 +7197,20 @@ function Workbench({
         onClose={() => closeMainTab("agents")}
         onRefresh={loadAgents}
         onCreateAgent={(agent) => setAgents((current) => [agent, ...current])}
-        onUpdateAgent={(agent) => setAgents((current) => current.map((item) => (item.id === agent.id ? agent : item)))}
+        onUpdateAgent={(agent) =>
+          setAgents((current) =>
+            current.map((item) => (item.id === agent.id ? agent : item)),
+          )
+        }
         onDeleteAgent={async (agent) => {
           await api.deleteAgent(agent.id);
-          setAgents((current) => current.filter((item) => item.id !== agent.id));
+          setAgents((current) =>
+            current.filter((item) => item.id !== agent.id),
+          );
         }}
-        onTestAgent={async (agentId, text) => (await api.testAgent(agentId, text)).response}
+        onTestAgent={async (agentId, text) =>
+          (await api.testAgent(agentId, text)).response
+        }
       />
       <MembersDrawer
         open={membersOpen}
@@ -5345,16 +7221,22 @@ function Workbench({
           if (!activeId) return;
           try {
             const updated = await api.addParticipants(activeId, ids);
-            setConversations((current) => current.map((item) => (item.id === activeId ? updated : item)));
+            setConversations((current) =>
+              current.map((item) => (item.id === activeId ? updated : item)),
+            );
             message.success("成员已加入");
           } catch (error) {
-            message.error(error instanceof Error ? error.message : "成员加入失败");
+            message.error(
+              error instanceof Error ? error.message : "成员加入失败",
+            );
           }
         }}
         onRemoveParticipant={async (participant) => {
           if (!activeId || !participant.id) return;
           const updated = await api.removeParticipant(activeId, participant.id);
-          setConversations((current) => current.map((item) => (item.id === activeId ? updated : item)));
+          setConversations((current) =>
+            current.map((item) => (item.id === activeId ? updated : item)),
+          );
           message.success("成员已移除");
         }}
       />
@@ -5398,8 +7280,10 @@ function Workbench({
           const project = await api.createProject(workspaceId, payload);
           setWorkspaces((current) =>
             current.map((workspace) =>
-              workspace.id === workspaceId ? { ...workspace, project_count: workspace.project_count + 1 } : workspace
-            )
+              workspace.id === workspaceId
+                ? { ...workspace, project_count: workspace.project_count + 1 }
+                : workspace,
+            ),
           );
           message.success("项目已创建");
           return project;
@@ -5416,11 +7300,21 @@ function Workbench({
 
 const MAIN_TABS = new Set(["chat", "agents", "workspace", "settings"]);
 
-function normalizeMainTab(value: string | null): "chat" | "agents" | "workspace" | "settings" {
-  return MAIN_TABS.has(value ?? "") ? (value as "chat" | "agents" | "workspace" | "settings") : "chat";
+function normalizeMainTab(
+  value: string | null,
+): "chat" | "agents" | "workspace" | "settings" {
+  return MAIN_TABS.has(value ?? "")
+    ? (value as "chat" | "agents" | "workspace" | "settings")
+    : "chat";
 }
 
-function LoginRoute({ user, onLogin }: { user?: User; onLogin: (user: User) => void }) {
+function LoginRoute({
+  user,
+  onLogin,
+}: {
+  user?: User;
+  onLogin: (user: User) => void;
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   if (user) return <Navigate to="/app" replace />;
@@ -5428,15 +7322,28 @@ function LoginRoute({ user, onLogin }: { user?: User; onLogin: (user: User) => v
     <LoginScreen
       onLogin={(nextUser) => {
         onLogin(nextUser);
-        const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from;
-        const target = from?.pathname && from.pathname !== "/login" ? `${from.pathname}${from.search ?? ""}` : "/app";
+        const from = (
+          location.state as {
+            from?: { pathname?: string; search?: string };
+          } | null
+        )?.from;
+        const target =
+          from?.pathname && from.pathname !== "/login"
+            ? `${from.pathname}${from.search ?? ""}`
+            : "/app";
         navigate(target, { replace: true });
       }}
     />
   );
 }
 
-function WorkbenchRoute({ user, onLogout }: { user?: User; onLogout: () => void }) {
+function WorkbenchRoute({
+  user,
+  onLogout,
+}: {
+  user?: User;
+  onLogout: () => void;
+}) {
   const params = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -5445,9 +7352,14 @@ function WorkbenchRoute({ user, onLogout }: { user?: User; onLogout: () => void 
   if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
 
   const routeTab = normalizeMainTab(searchParams.get("tab"));
-  const routeWorkspaceId = params.workspaceId ? decodeURIComponent(params.workspaceId) : undefined;
-  const routeConversationId = params.conversationId ? decodeURIComponent(params.conversationId) : undefined;
-  const buildSearch = (tab = routeTab) => (tab && tab !== "chat" ? `?tab=${encodeURIComponent(tab)}` : "");
+  const routeWorkspaceId = params.workspaceId
+    ? decodeURIComponent(params.workspaceId)
+    : undefined;
+  const routeConversationId = params.conversationId
+    ? decodeURIComponent(params.conversationId)
+    : undefined;
+  const buildSearch = (tab = routeTab) =>
+    tab && tab !== "chat" ? `?tab=${encodeURIComponent(tab)}` : "";
 
   return (
     <Workbench
@@ -5465,7 +7377,9 @@ function WorkbenchRoute({ user, onLogout }: { user?: User; onLogout: () => void 
         navigate(`${path}${buildSearch()}`, { replace: options?.replace });
       }}
       onRouteTabChange={(tab, options) => {
-        navigate(`${location.pathname}${buildSearch(tab)}`, { replace: options?.replace });
+        navigate(`${location.pathname}${buildSearch(tab)}`, {
+          replace: options?.replace,
+        });
       }}
     />
   );
@@ -5481,7 +7395,8 @@ function RoutedApp() {
       setAuthReady(true);
       return;
     }
-    api.me()
+    api
+      .me()
       .then(setUser)
       .catch(() => window.localStorage.removeItem("agenthub_token"))
       .finally(() => setAuthReady(true));
@@ -5500,7 +7415,10 @@ function RoutedApp() {
   return (
     <AntApp>
       <Routes>
-        <Route path="/login" element={<LoginRoute user={user} onLogin={setUser} />} />
+        <Route
+          path="/login"
+          element={<LoginRoute user={user} onLogin={setUser} />}
+        />
         <Route
           path="/app"
           element={
@@ -5534,7 +7452,10 @@ function RoutedApp() {
             />
           }
         />
-        <Route path="*" element={<Navigate to={user ? "/app" : "/login"} replace />} />
+        <Route
+          path="*"
+          element={<Navigate to={user ? "/app" : "/login"} replace />}
+        />
       </Routes>
     </AntApp>
   );
