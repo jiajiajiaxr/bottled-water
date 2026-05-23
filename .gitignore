@@ -1,0 +1,39 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.template
+!.env.sample
+.venv/
+venv/
+
+# Python caches and local databases
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+
+# Frontend dependencies and build output
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
+coverage/
+
+# Local runtime data
+var/
+test-results/
+*.log
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
