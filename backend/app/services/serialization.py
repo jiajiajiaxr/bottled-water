@@ -169,12 +169,13 @@ def participant_to_dict(participant: ConversationParticipant) -> dict[str, Any]:
 
 
 def conversation_to_dict(conversation: Conversation) -> dict[str, Any]:
-    participants = [participant_to_dict(item) for item in conversation.participants]
+    active_participants = [item for item in conversation.participants if item.left_at is None]
+    participants = [participant_to_dict(item) for item in active_participants]
     participant_names = [
         item["agent_name"] for item in participants if isinstance(item.get("agent_name"), str)
     ]
     tags = []
-    for item in conversation.participants:
+    for item in active_participants:
         if item.agent:
             for cap in (item.agent.capabilities or [])[:2]:
                 if isinstance(cap, dict):

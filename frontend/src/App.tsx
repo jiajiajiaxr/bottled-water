@@ -62,6 +62,16 @@ import {
 } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams
+} from "react-router-dom";
 import { api } from "./api";
 import type {
   Agent,
@@ -1001,7 +1011,7 @@ function ChatPanel({
                 </Avatar>
               </Tooltip>
             ))}
-            <Button size="small" icon={<UserAddOutlined />} onClick={onOpenMembers}>
+            <Button size="small" icon={<UserAddOutlined />} onClick={onOpenMembers} data-testid="conversation-members">
               成员
             </Button>
             {active?.chat_type === "group" && (
@@ -1750,6 +1760,7 @@ function MembersDrawer({
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const existing = new Set(active?.participants.map((item) => item.agent_id).filter(Boolean));
+  const removableAgentCount = active?.participants.filter((item) => item.participant_type === "agent").length ?? 0;
   const options = agents
     .filter((agent) => !existing.has(agent.id) && agent.status === "online")
     .map((agent) => ({ label: `${agent.name} · ${agent.type}`, value: agent.id }));
@@ -1763,8 +1774,8 @@ function MembersDrawer({
         renderItem={(item) => (
           <List.Item
             actions={[
-              item.role === "owner" ? (
-                <Tooltip key="owner" title="群主不能直接移除">
+              item.participant_type === "agent" && removableAgentCount <= 1 ? (
+                <Tooltip key="last-agent" title="至少保留 1 个 Agent">
                   <Button size="small" shape="circle" icon={<DeleteOutlined />} disabled />
                 </Tooltip>
               ) : (
@@ -4413,7 +4424,23 @@ function BackgroundTasksButton({
   );
 }
 
-function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
+function Workbench({
+  user,
+  onLogout,
+  routeWorkspaceId,
+  routeConversationId,
+  routeTab = "chat",
+  onRouteChange,
+  onRouteTabChange
+}: {
+  user: User;
+  onLogout: () => void;
+  routeWorkspaceId?: string;
+  routeConversationId?: string;
+  routeTab?: string;
+  onRouteChange: (workspaceId?: string, conversationId?: string, options?: { replace?: boolean }) => void;
+  onRouteTabChange: (tab: "chat" | "agents" | "workspace" | "settings", options?: { replace?: boolean }) => void;
+}) {
   const [currentUser, setCurrentUser] = useState(user);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string>();
@@ -4463,6 +4490,39 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
     [conversations]
   );
 
+  const navigateToConversation = (workspaceId?: string, conversationId?: string, replace = false) => {
+    onRouteChange(workspaceId, conversationId, { replace });
+  };
+
+  const selectWorkspace = (workspaceId?: string, replace = false) => {
+    if (!workspaceId) return;
+    setActiveWorkspaceId(workspaceId);
+    setActiveId(undefined);
+    navigateToConversation(workspaceId, undefined, replace);
+  };
+
+  const selectConversation = (conversationId?: string, replace = false) => {
+    if (!conversationId) return;
+    const target = conversations.find((item) => item.id === conversationId);
+    const workspaceId = target?.workspace_id || activeWorkspaceId || activeWorkspace?.id;
+    setActiveId(conversationId);
+    navigateToConversation(workspaceId, conversationId, replace);
+  };
+
+  const openMainTab = (tab: "agents" | "workspace" | "settings") => {
+    setAgentDrawerOpen(tab === "agents");
+    setWorkspacesOpen(tab === "workspace");
+    setGlobalSettingsOpen(tab === "settings");
+    onRouteTabChange(tab);
+  };
+
+  const closeMainTab = (tab: "agents" | "workspace" | "settings") => {
+    if (tab === "agents") setAgentDrawerOpen(false);
+    if (tab === "workspace") setWorkspacesOpen(false);
+    if (tab === "settings") setGlobalSettingsOpen(false);
+    if (routeTab === tab) onRouteTabChange("chat");
+  };
+
   const saveConversationCategories = (nextCategories: string[]) => {
     const merged = mergeConversationCategories(CONVERSATION_CATEGORY_OPTIONS, nextCategories);
     setConversationCategories(merged);
@@ -4511,10 +4571,40 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
       setAgents(nextAgents);
       setKnowledgeBases(kbs);
       setWorkspaces(nextWorkspaces);
-      setActiveWorkspaceId(nextWorkspaces[0]?.id);
+      const routeWorkspace = nextWorkspaces.find((workspace) => workspace.id === routeWorkspaceId);
+      const nextWorkspaceId = routeWorkspace?.id ?? nextWorkspaces[0]?.id;
+      if (nextWorkspaceId) {
+        setActiveWorkspaceId(nextWorkspaceId);
+        if (!routeWorkspaceId || routeWorkspaceId !== nextWorkspaceId) navigateToConversation(nextWorkspaceId, undefined, true);
+      }
     });
     loadBackgroundTasks().catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!workspaces.length) return;
+    const routeWorkspace = routeWorkspaceId ? workspaces.find((workspace) => workspace.id === routeWorkspaceId) : undefined;
+    if (routeWorkspace) {
+      if (activeWorkspaceId !== routeWorkspace.id) {
+        setActiveWorkspaceId(routeWorkspace.id);
+        setActiveId(undefined);
+      }
+      return;
+    }
+    const fallbackId = activeWorkspaceId && workspaces.some((workspace) => workspace.id === activeWorkspaceId)
+      ? activeWorkspaceId
+      : workspaces[0]?.id;
+    if (fallbackId) {
+      if (activeWorkspaceId !== fallbackId) setActiveWorkspaceId(fallbackId);
+      navigateToConversation(fallbackId, undefined, true);
+    }
+  }, [routeWorkspaceId, workspaces, activeWorkspaceId]);
+
+  useEffect(() => {
+    setAgentDrawerOpen(routeTab === "agents");
+    setWorkspacesOpen(routeTab === "workspace");
+    setGlobalSettingsOpen(routeTab === "settings");
+  }, [routeTab]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -4530,9 +4620,28 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
     setArtifactPanelOpen(false);
     api.conversations(activeWorkspaceId).then((items) => {
       setConversations(items);
-      setActiveId(items.find((item) => !item.archived)?.id ?? items[0]?.id);
     });
   }, [activeWorkspaceId, workspaces.length]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    if (!conversations.length) {
+      setActiveId(undefined);
+      if (routeConversationId) navigateToConversation(activeWorkspaceId, undefined, true);
+      return;
+    }
+    const routeConversation = routeConversationId
+      ? conversations.find((item) => item.id === routeConversationId)
+      : undefined;
+    const currentConversation = activeId ? conversations.find((item) => item.id === activeId) : undefined;
+    const nextConversation = routeConversation ?? currentConversation ?? conversations.find((item) => !item.archived) ?? conversations[0];
+    if (!nextConversation) return;
+    if (activeId !== nextConversation.id) setActiveId(nextConversation.id);
+    const workspaceId = nextConversation.workspace_id || activeWorkspaceId;
+    if (routeWorkspaceId !== workspaceId || routeConversationId !== nextConversation.id) {
+      navigateToConversation(workspaceId, nextConversation.id, true);
+    }
+  }, [activeWorkspaceId, activeId, conversations, routeConversationId, routeWorkspaceId]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -4567,6 +4676,7 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
     saveConversationCategories([...conversationCategories, payload.folder]);
     setConversations((current) => [created, ...current]);
     setActiveId(created.id);
+    navigateToConversation(created.workspace_id || activeWorkspaceId, created.id);
     setMessages([]);
     setCreateOpen({ open: false, group: false });
     message.success(payload.group ? "群聊已创建" : "会话已创建");
@@ -4838,7 +4948,7 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
         activeId={activeId}
         runningConversationIds={runningConversationIds}
         categoryOptions={conversationCategories}
-        onSelect={setActiveId}
+        onSelect={selectConversation}
         onCreate={(group) => setCreateOpen({ open: true, group })}
         onCreateCategory={addConversationCategory}
         onTogglePin={(item) => patchConversation(item, { pinned: !item.pinned })}
@@ -4853,7 +4963,11 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
             onOk: async () => {
               await api.deleteConversation(item.id);
               setConversations((current) => current.filter((conversation) => conversation.id !== item.id));
-              if (activeId === item.id) setActiveId(conversations.find((conversation) => conversation.id !== item.id)?.id);
+              if (activeId === item.id) {
+                const nextConversation = conversations.find((conversation) => conversation.id !== item.id);
+                setActiveId(nextConversation?.id);
+                navigateToConversation(nextConversation?.workspace_id || activeWorkspaceId, nextConversation?.id, true);
+              }
               message.success("归档会话已删除");
             }
           });
@@ -4874,17 +4988,17 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
               style={{ width: 220 }}
               value={activeWorkspace?.id}
               placeholder="选择工作区"
-              onChange={setActiveWorkspaceId}
+              onChange={(value) => selectWorkspace(value)}
               options={workspaces.map((workspace) => ({ label: workspace.name, value: workspace.id }))}
             />
-            <Button icon={<AppstoreOutlined />} onClick={() => setWorkspacesOpen(true)} data-testid="workspace-panel">
+            <Button icon={<AppstoreOutlined />} onClick={() => openMainTab("workspace")} data-testid="workspace-panel">
               工作区
             </Button>
             <BackgroundTasksButton
               tasks={visibleBackgroundTasks}
               conversations={conversations}
               activeConversationId={activeId}
-              onOpenConversation={setActiveId}
+              onOpenConversation={selectConversation}
               onCreate={async (prompt) => {
                 await send(prompt);
                 await loadBackgroundTasks().catch(() => undefined);
@@ -4904,10 +5018,10 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
               }}
               onRefresh={loadBackgroundTasks}
             />
-            <Button icon={<ToolOutlined />} onClick={() => setGlobalSettingsOpen(true)} data-testid="global-settings">
+            <Button icon={<ToolOutlined />} onClick={() => openMainTab("settings")} data-testid="global-settings">
               设置
             </Button>
-            <Button icon={<RobotOutlined />} onClick={() => setAgentDrawerOpen(true)} data-testid="agent-directory">
+            <Button icon={<RobotOutlined />} onClick={() => openMainTab("agents")} data-testid="agent-directory">
               Agent 广场
             </Button>
             <Button onClick={onLogout}>退出</Button>
@@ -4956,7 +5070,7 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
       <AgentDirectoryDrawer
         open={agentDrawerOpen}
         agents={agents}
-        onClose={() => setAgentDrawerOpen(false)}
+        onClose={() => closeMainTab("agents")}
         onRefresh={loadAgents}
         onCreateAgent={(agent) => setAgents((current) => [agent, ...current])}
         onUpdateAgent={(agent) => setAgents((current) => current.map((item) => (item.id === agent.id ? agent : item)))}
@@ -5003,7 +5117,7 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
       <GlobalSettingsDrawer
         open={globalSettingsOpen}
         user={currentUser}
-        onClose={() => setGlobalSettingsOpen(false)}
+        onClose={() => closeMainTab("settings")}
         onUserUpdated={(nextUser) => {
           setCurrentUser(nextUser);
         }}
@@ -5012,11 +5126,12 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
         open={workspacesOpen}
         workspaces={workspaces}
         activeConversation={active}
-        onClose={() => setWorkspacesOpen(false)}
+        onClose={() => closeMainTab("workspace")}
         onCreateWorkspace={async (payload) => {
           const created = await api.createWorkspace(payload);
           setWorkspaces((current) => [created, ...current]);
           setActiveWorkspaceId(created.id);
+          navigateToConversation(created.id);
           message.success("工作区已创建");
         }}
         onCreateProject={async (workspaceId, payload) => {
@@ -5039,12 +5154,136 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
   );
 }
 
-export default function App() {
+const MAIN_TABS = new Set(["chat", "agents", "workspace", "settings"]);
+
+function normalizeMainTab(value: string | null): "chat" | "agents" | "workspace" | "settings" {
+  return MAIN_TABS.has(value ?? "") ? (value as "chat" | "agents" | "workspace" | "settings") : "chat";
+}
+
+function LoginRoute({ user, onLogin }: { user?: User; onLogin: (user: User) => void }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  if (user) return <Navigate to="/app" replace />;
+  return (
+    <LoginScreen
+      onLogin={(nextUser) => {
+        onLogin(nextUser);
+        const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from;
+        const target = from?.pathname && from.pathname !== "/login" ? `${from.pathname}${from.search ?? ""}` : "/app";
+        navigate(target, { replace: true });
+      }}
+    />
+  );
+}
+
+function WorkbenchRoute({ user, onLogout }: { user?: User; onLogout: () => void }) {
+  const params = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+
+  if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
+
+  const routeTab = normalizeMainTab(searchParams.get("tab"));
+  const routeWorkspaceId = params.workspaceId ? decodeURIComponent(params.workspaceId) : undefined;
+  const routeConversationId = params.conversationId ? decodeURIComponent(params.conversationId) : undefined;
+  const buildSearch = (tab = routeTab) => (tab && tab !== "chat" ? `?tab=${encodeURIComponent(tab)}` : "");
+
+  return (
+    <Workbench
+      user={user}
+      onLogout={onLogout}
+      routeWorkspaceId={routeWorkspaceId}
+      routeConversationId={routeConversationId}
+      routeTab={routeTab}
+      onRouteChange={(workspaceId, conversationId, options) => {
+        const path = workspaceId
+          ? conversationId
+            ? `/app/${encodeURIComponent(workspaceId)}/c/${encodeURIComponent(conversationId)}`
+            : `/app/${encodeURIComponent(workspaceId)}`
+          : "/app";
+        navigate(`${path}${buildSearch()}`, { replace: options?.replace });
+      }}
+      onRouteTabChange={(tab, options) => {
+        navigate(`${location.pathname}${buildSearch(tab)}`, { replace: options?.replace });
+      }}
+    />
+  );
+}
+
+function RoutedApp() {
   const [user, setUser] = useState<User>();
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    const token = window.localStorage.getItem("agenthub_token");
+    if (!token) {
+      setAuthReady(true);
+      return;
+    }
+    api.me()
+      .then(setUser)
+      .catch(() => window.localStorage.removeItem("agenthub_token"))
+      .finally(() => setAuthReady(true));
+  }, []);
+
+  if (!authReady) {
+    return (
+      <AntApp>
+        <main className="login-shell">
+          <Spin tip="Restoring session..." />
+        </main>
+      </AntApp>
+    );
+  }
 
   return (
     <AntApp>
-      {user ? <Workbench user={user} onLogout={() => setUser(undefined)} /> : <LoginScreen onLogin={setUser} />}
+      <Routes>
+        <Route path="/login" element={<LoginRoute user={user} onLogin={setUser} />} />
+        <Route
+          path="/app"
+          element={
+            <WorkbenchRoute
+              user={user}
+              onLogout={() => {
+                api.logout().finally(() => setUser(undefined));
+              }}
+            />
+          }
+        />
+        <Route
+          path="/app/:workspaceId"
+          element={
+            <WorkbenchRoute
+              user={user}
+              onLogout={() => {
+                api.logout().finally(() => setUser(undefined));
+              }}
+            />
+          }
+        />
+        <Route
+          path="/app/:workspaceId/c/:conversationId"
+          element={
+            <WorkbenchRoute
+              user={user}
+              onLogout={() => {
+                api.logout().finally(() => setUser(undefined));
+              }}
+            />
+          }
+        />
+        <Route path="*" element={<Navigate to={user ? "/app" : "/login"} replace />} />
+      </Routes>
     </AntApp>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <RoutedApp />
+    </BrowserRouter>
   );
 }

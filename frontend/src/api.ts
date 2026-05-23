@@ -185,6 +185,18 @@ export const api = {
     }
   },
 
+  async me(): Promise<User> {
+    return await request<User>("/auth/me");
+  },
+
+  async logout(): Promise<void> {
+    try {
+      await request<{ ok: boolean }>("/auth/logout", { method: "POST" });
+    } finally {
+      window.localStorage.removeItem("agenthub_token");
+    }
+  },
+
   async conversations(workspaceId?: string): Promise<Conversation[]> {
     try {
       const query = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";

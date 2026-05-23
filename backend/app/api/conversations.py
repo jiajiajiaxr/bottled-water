@@ -125,7 +125,7 @@ def _create(db: Session, user: User, payload: dict) -> Conversation:
                 conversation_id=conversation.id,
                 participant_type="agent",
                 agent_id=agent.id,
-                role="owner" if index == 0 else "member",
+                role="member",
             )
         )
     db.add(
@@ -320,6 +320,7 @@ def _fallback_workflow(conversation: Conversation) -> dict:
 
 def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
     fallback = _fallback_workflow(conversation)
+    active_agent_ids = {item.agent_id for item in _active_participants(conversation) if item.agent_id}
     nodes = value.get("nodes") if isinstance(value.get("nodes"), list) else fallback["nodes"]
     edges = value.get("edges") if isinstance(value.get("edges"), list) else fallback["edges"]
     normalized_nodes = []
@@ -335,6 +336,8 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
             raw_meta = ", ".join(str(item) for item in raw_meta[:4])
         config = _node_config_defaults(node_type, node)
         agent_id = node.get("agent_id") or config.get("agent_id")
+        if node_type in {"agent", "review"} and agent_id and str(agent_id) not in active_agent_ids:
+            continue
         normalized_nodes.append(
             {
                 "id": str(node.get("id") or f"node-{index + 1}"),
@@ -888,7 +891,10 @@ async def remove_participant(
     participant = next((item for item in conversation.participants if item.id == participant_id and item.left_at is None), None)
     if not participant:
         raise NotFoundError("成员不存在")
-    if participant.role == "owner":
+    active_agents = [item for item in _active_participants(conversation) if item.participant_type == "agent"]
+    if participant.participant_type == "agent" and len(active_agents) <= 1:
+        raise ValidationAppError("群聊至少需要保留 1 个 Agent")
+    if participant.participant_type != "agent" and participant.role == "owner":
         raise ValidationAppError("不能直接移除群主，请先转让群主")
     participant.left_at = utcnow()
     extra = dict(conversation.extra or {})

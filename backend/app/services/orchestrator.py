@@ -341,6 +341,7 @@ def _fallback_workflow_for_agents(conversation: Conversation, agents: list[Agent
 
 def _sanitize_workflow(conversation: Conversation, agents: list[Agent], value: dict[str, Any] | None) -> dict[str, Any]:
     fallback = _fallback_workflow_for_agents(conversation, agents)
+    active_agent_ids = {agent.id for agent in agents}
     source = value if isinstance(value, dict) else fallback
     raw_nodes = source.get("nodes") if isinstance(source.get("nodes"), list) else fallback["nodes"]
     nodes: list[dict[str, Any]] = []
@@ -350,6 +351,8 @@ def _sanitize_workflow(conversation: Conversation, agents: list[Agent], value: d
         node_type = _workflow_node_type(node)
         config = _node_config(node)
         agent_id = node.get("agent_id") or config.get("agent_id")
+        if node_type in {"agent", "review"} and agent_id and str(agent_id) not in active_agent_ids:
+            continue
         nodes.append(
             {
                 "id": str(node.get("id") or f"node-{index + 1}"),
@@ -713,6 +716,97 @@ async def _run_direct_agent(
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
 
+async def _run_canvas_agent_reply(
+    db: Session,
+    *,
+    conversation: Conversation,
+    agent: Agent,
+    prompt: str,
+    channel: str,
+    tool_context: dict[str, Any],
+) -> str:
+    assistant = Message(
+        conversation_id=conversation.id,
+        sender_type="agent",
+        sender_id=agent.id,
+        sender_name=agent.name,
+        content_type="text",
+        content={"text": ""},
+        status="streaming",
+    )
+    db.add(assistant)
+    db.commit()
+    db.refresh(assistant)
+    await event_bus.publish(channel, "message_start", {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name})
+    await event_bus.publish(
+        channel,
+        "content_block_delta",
+        {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": f"\n\n{agent.name}\n"}},
+    )
+
+    stream_text = ""
+    system_prompt = (agent.config or {}).get("system_prompt") or agent.description or f"You are {agent.name}."
+    system_prompt += (
+        "\nYou are replying as yourself in an AgentHub group chat. "
+        "Do not pretend to be Master Agent unless your own name/type is Master. "
+        "Use only your authorized tools, skills, MCP results, and role expertise. "
+        "Return a concise, user-facing answer without internal planning sections."
+    )
+    tool_summary = json.dumps(tool_context, ensure_ascii=False)[:6000]
+    model_config_id = (agent.config or {}).get("model_config_id")
+    if model_config_id:
+        try:
+            result = await test_model_config(
+                db,
+                str(model_config_id),
+                f"{system_prompt}\n\nTool context:\n{tool_summary}\n\nUser:\n{prompt}",
+            )
+            for index in range(0, len(result.text), 24):
+                chunk = result.text[index : index + 24]
+                stream_text += chunk
+                await event_bus.publish(
+                    channel,
+                    "content_block_delta",
+                    {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": chunk}},
+                )
+                await asyncio.sleep(0.02)
+        except Exception as exc:
+            stream_text = f"{agent.name} model call failed and fell back: {exc}"
+            await event_bus.publish(
+                channel,
+                "content_block_delta",
+                {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": stream_text}},
+            )
+    else:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": f"Tool context:\n{tool_summary}"},
+            {"role": "user", "content": prompt},
+        ]
+        async for event in ark_client.stream_chat(messages, purpose=f"group_agent:{agent.type}"):
+            if event.type == "delta":
+                stream_text += event.text
+                await event_bus.publish(
+                    channel,
+                    "content_block_delta",
+                    {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": event.text}},
+                )
+            elif event.type == "error":
+                stream_text += f"\nModel call failed and fell back: {event.error}"
+
+    display_text = strip_internal_agent_output(stream_text)
+    assistant.content = {"text": display_text or f"{agent.name} completed this turn."}
+    assistant.status = "completed"
+    conversation.last_message_preview = assistant.content["text"][:300]
+    conversation.last_message_sender = agent.name
+    conversation.last_message_at = utcnow()
+    conversation.activity_score = min(100, conversation.activity_score + 4)
+    conversation.message_count += 1
+    db.commit()
+    await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+    return assistant.content["text"]
+
+
 async def run_orchestration(message_id: str) -> None:
     db = SessionLocal()
     task: Task | None = None
@@ -766,6 +860,8 @@ async def run_orchestration(message_id: str) -> None:
             workflow=workflow,
             channel=channel,
         )
+        independent_group_mode = conversation.chat_type == "group" and str(workflow.get("mode") or "") == "all_agents_independent"
+        independent_agent_replies: list[dict[str, str]] = []
         plan = _workflow_plan(prompt, workflow)
         task = create_task_for_prompt(db, conversation, prompt, plan=plan)
         workflow_run = WorkflowRun(
@@ -865,6 +961,18 @@ async def run_orchestration(message_id: str) -> None:
                     }
                 )
                 await _publish_tool_artifacts(db, channel, worker_context)
+                if independent_group_mode:
+                    reply_text = await _run_canvas_agent_reply(
+                        db,
+                        conversation=conversation,
+                        agent=worker_agent,
+                        prompt=f"{prompt}\n\nCanvas node: {subtask.title}\n{subtask.description}",
+                        channel=channel,
+                        tool_context=worker_context,
+                    )
+                    independent_agent_replies.append(
+                        {"agent_id": worker_agent.id, "agent_name": worker_agent.name, "text": reply_text[:1000]}
+                    )
             elif node_type == "condition":
                 branches = node_config.get("branches") if isinstance(node_config.get("branches"), list) else ["true", "false"]
                 matched = branches[0] if branches else "default"
@@ -927,6 +1035,39 @@ async def run_orchestration(message_id: str) -> None:
             db.refresh(preview_message)
             await event_bus.publish(channel, "artifact:created", artifact_to_dict(artifact))
             await event_bus.publish(channel, "message:new", message_to_dict(preview_message))
+
+        if independent_group_mode and independent_agent_replies:
+            summary = "\n\n".join(f"{item['agent_name']}: {item['text']}" for item in independent_agent_replies)
+            for subtask in subtasks:
+                subtask.status = "COMPLETED"
+            task.status = "COMPLETED"
+            task.progress = 100
+            task.output = {
+                **(task.output or {}),
+                "mode": "all_agents_independent",
+                "summary": summary,
+                "agent_replies": independent_agent_replies,
+            }
+            task.completed_at = utcnow()
+            if workflow_run:
+                for state in workflow_run.node_states or []:
+                    if state.get("type") == "end":
+                        state["status"] = "completed"
+                        state["progress"] = 100
+                        state["started_at"] = state.get("started_at") or utcnow().isoformat()
+                        state["completed_at"] = utcnow().isoformat()
+                workflow_run.node_states = list(workflow_run.node_states or [])
+                workflow_run.status = "completed"
+                workflow_run.progress = 100
+                workflow_run.completed_at = utcnow()
+                workflow_run.events = [*(workflow_run.events or []), {"type": "run.completed", "at": utcnow().isoformat()}][-200:]
+                _sync_workflow_run(conversation, workflow_run)
+            db.commit()
+            await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+            if workflow_run:
+                await event_bus.publish(channel, "workflow:run_updated", {"run_id": workflow_run.id, "status": workflow_run.status, "progress": workflow_run.progress})
+            await event_bus.publish(channel, "message_stop", {"stop_reason": "all_agents_completed"})
+            return
 
         assistant = Message(
             conversation_id=conversation.id,

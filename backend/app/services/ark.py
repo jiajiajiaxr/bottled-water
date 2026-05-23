@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -82,6 +83,11 @@ class ArkClient:
             value = value.split(":", 1)[1].strip()
         if value.lower().startswith("bearer "):
             value = value[7:].strip()
+        value = re.split(
+            r"(?=(?:ARK_BASE_URL|ARK_ENDPOINT_ID|ARK_MODEL|ARK_API_KEY|LLM_PROVIDER|DATABASE_URL|REDIS_URL|SECRET_KEY)=)",
+            value,
+            maxsplit=1,
+        )[0].strip()
         return value
 
     def _auth_error_hint(self, status_code: int, data: Any) -> str:
