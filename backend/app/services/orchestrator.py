@@ -644,7 +644,11 @@ async def _run_direct_agent(
     db.add(assistant)
     db.commit()
     db.refresh(assistant)
-    await event_bus.publish(channel, "message_start", {"agent_message_id": assistant.id})
+    await event_bus.publish(
+        channel,
+        "message_start",
+        {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name},
+    )
 
     stream_text = ""
     system_prompt = (agent.config or {}).get("system_prompt") or agent.description or f"你是 {agent.name}。"
@@ -667,7 +671,7 @@ async def _run_direct_agent(
                 await event_bus.publish(
                     channel,
                     "content_block_delta",
-                    {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": chunk}},
+                    {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "text_delta", "text": chunk}},
                 )
                 await asyncio.sleep(0.02)
         except Exception as exc:
@@ -675,7 +679,7 @@ async def _run_direct_agent(
             await event_bus.publish(
                 channel,
                 "content_block_delta",
-                {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": stream_text}},
+                {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "text_delta", "text": stream_text}},
             )
     else:
         messages = [
@@ -689,7 +693,7 @@ async def _run_direct_agent(
                 await event_bus.publish(
                     channel,
                     "content_block_delta",
-                    {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": event.text}},
+                    {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "text_delta", "text": event.text}},
                 )
             elif event.type == "error":
                 stream_text += f"\n模型调用异常，已降级：{event.error}"

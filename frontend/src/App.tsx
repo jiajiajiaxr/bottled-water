@@ -369,7 +369,7 @@ function MarkdownContent({ text }: { text: string }) {
     paragraph.push(line.trim());
   }
   flushParagraph();
-  return <div className="markdown-content">{blocks.length ? blocks : <p className="typing-placeholder">正在组织回复...</p>}</div>;
+  return <div className="markdown-content">{blocks.length ? blocks : <p className="typing-placeholder">正在组织语言...</p>}</div>;
 }
 
 function participantName(item: Conversation["participants"][number]) {
@@ -1011,13 +1011,15 @@ function ChatPanel({
                 </Avatar>
               </Tooltip>
             ))}
-            <Button size="small" icon={<UserAddOutlined />} onClick={onOpenMembers} data-testid="conversation-members">
-              成员
-            </Button>
             {active?.chat_type === "group" && (
-              <Button size="small" icon={<BranchesOutlined />} onClick={onOpenSettings} data-testid="conversation-settings">
-                群聊设置
-              </Button>
+              <>
+                <Button size="small" icon={<UserAddOutlined />} onClick={onOpenMembers} data-testid="conversation-members">
+                  成员
+                </Button>
+                <Button size="small" icon={<BranchesOutlined />} onClick={onOpenSettings} data-testid="conversation-settings">
+                  群聊设置
+                </Button>
+              </>
             )}
           </Space>
         </div>
@@ -1669,15 +1671,20 @@ function CreateConversationModal({
   const [form] = Form.useForm();
   const onlineAgents = agents.filter((agent) => agent.status === "online");
   const categorySelectOptions = categoryOptions.map((name) => ({ label: name, value: name }));
+  const initializedRef = useRef(false);
 
   useEffect(() => {
-    if (!open || !onlineAgents.length) return;
-    const current = form.getFieldValue("agentIds") as string[] | undefined;
-    if (current?.length) return;
+    if (!open) {
+      initializedRef.current = false;
+      form.resetFields();
+      return;
+    }
+    if (initializedRef.current) return;
+    initializedRef.current = true;
     form.setFieldsValue({
-      agentIds: onlineAgents.slice(0, group ? Math.min(4, onlineAgents.length) : 1).map((agent) => agent.id),
+      agentIds: group ? onlineAgents.slice(0, Math.min(4, onlineAgents.length)).map((agent) => agent.id) : [],
       masterEnabled: true,
-      folder: form.getFieldValue("folder") || "Default"
+      folder: "Default"
     });
   }, [open, group, onlineAgents, form]);
 
@@ -1759,6 +1766,7 @@ function MembersDrawer({
   onRemoveParticipant: (participant: Conversation["participants"][number]) => Promise<void>;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
+  const isGroup = active?.chat_type === "group";
   const existing = new Set(active?.participants.map((item) => item.agent_id).filter(Boolean));
   const removableAgentCount = active?.participants.filter((item) => item.participant_type === "agent").length ?? 0;
   const options = agents
@@ -1808,19 +1816,25 @@ function MembersDrawer({
         )}
       />
       <Divider />
-      <Text strong>邀请 Agent 加入</Text>
-      <Select mode="multiple" className="full-width mt-8" options={options} value={selected} onChange={setSelected} placeholder="选择要加入的 Agent" />
-      <Button
-        className="mt-8"
-        type="primary"
-        disabled={!selected.length}
-        onClick={() => {
-          onAddAgents(selected);
-          setSelected([]);
-        }}
-      >
-        加入群聊
-      </Button>
+      {isGroup ? (
+        <>
+          <Text strong>邀请 Agent 加入</Text>
+          <Select mode="multiple" className="full-width mt-8" options={options} value={selected} onChange={setSelected} placeholder="选择要加入的 Agent" />
+          <Button
+            className="mt-8"
+            type="primary"
+            disabled={!selected.length}
+            onClick={() => {
+              onAddAgents(selected);
+              setSelected([]);
+            }}
+          >
+            加入群聊
+          </Button>
+        </>
+      ) : (
+        <Text type="secondary">单聊只保留一个 Agent；需要多人协作时请创建多 Agent 群聊。</Text>
+      )}
     </Drawer>
   );
 }
@@ -4650,26 +4664,33 @@ function Workbench({
 
   useEffect(() => {
     if (!activeWorkspaceId && workspaces.length) return;
+    let cancelled = false;
+    setConversations([]);
+    setActiveId(undefined);
     setMessages([]);
     setArtifact(undefined);
     setArtifactPanelOpen(false);
     api.conversations(activeWorkspaceId).then((items) => {
-      setConversations(items);
+      if (!cancelled) setConversations(items);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [activeWorkspaceId, workspaces.length]);
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
-    if (!conversations.length) {
+    const scopedConversations = conversations.filter((item) => (item.workspace_id || undefined) === activeWorkspaceId);
+    if (!scopedConversations.length) {
       setActiveId(undefined);
       if (routeConversationId) navigateToConversation(activeWorkspaceId, undefined, true);
       return;
     }
     const routeConversation = routeConversationId
-      ? conversations.find((item) => item.id === routeConversationId)
+      ? scopedConversations.find((item) => item.id === routeConversationId)
       : undefined;
-    const currentConversation = activeId ? conversations.find((item) => item.id === activeId) : undefined;
-    const nextConversation = routeConversation ?? currentConversation ?? conversations.find((item) => !item.archived) ?? conversations[0];
+    const currentConversation = activeId ? scopedConversations.find((item) => item.id === activeId) : undefined;
+    const nextConversation = routeConversation ?? currentConversation ?? scopedConversations.find((item) => !item.archived) ?? scopedConversations[0];
     if (!nextConversation) return;
     if (activeId !== nextConversation.id) setActiveId(nextConversation.id);
     const workspaceId = nextConversation.workspace_id || activeWorkspaceId;
@@ -4894,24 +4915,22 @@ function Workbench({
       });
     };
 
-    if (agentParticipants.length > 1) {
-      const placeholders = agentParticipants.map((participant) => {
-        const author = participantName(participant);
-        const agentId = participant.agent_id ?? participant.id ?? author;
-        const placeholder = makeMessage({
-          conversationId,
-          role: "assistant",
-          kind: "text",
-          author,
-          content: "",
-          rawContent: { agent_id: participant.agent_id, participant_id: participant.id },
-          streamState: "streaming"
-        });
-        tempIdsByAgentId.set(agentId, placeholder.id);
-        tempIdsByAuthor.set(author, placeholder.id);
-        return placeholder;
+    if (agentParticipants.length === 1) {
+      const participant = agentParticipants[0];
+      const author = participantName(participant);
+      const agentId = participant.agent_id ?? participant.id ?? author;
+      const placeholder = makeMessage({
+        conversationId,
+        role: "assistant",
+        kind: "text",
+        author,
+        content: "",
+        rawContent: { agent_id: participant.agent_id, participant_id: participant.id },
+        streamState: "streaming"
       });
-      setMessages((current) => [...current, ...placeholders]);
+      tempIdsByAgentId.set(agentId, placeholder.id);
+      tempIdsByAuthor.set(author, placeholder.id);
+      setMessages((current) => [...current, placeholder]);
     }
 
     setStreamState("streaming");
@@ -5078,6 +5097,7 @@ function Workbench({
         item.id === conversationId ? { ...item, lastMessage: content, updatedAt: new Date().toISOString(), unread: 0 } : item
       )
     );
+    const streamPromise = appendConversationStream(conversationId, content).catch(() => setStreamState("error"));
     try {
       const userMessage = await api.sendMessage(conversationId, content, quoted?.id, attachments);
       setMessages((current) => current.map((item) => (item.id === localMessage.id ? userMessage : item)));
@@ -5112,8 +5132,9 @@ function Workbench({
           );
         }
       }
-      appendConversationStream(conversationId, content).catch(() => setStreamState("error"));
     } catch (error) {
+      stopStreamRef.current?.();
+      void streamPromise;
       setMessages((current) =>
         current.map((item) =>
           item.id === localMessage.id
@@ -5322,9 +5343,13 @@ function Workbench({
         onClose={() => setMembersOpen(false)}
         onAddAgents={async (ids) => {
           if (!activeId) return;
-          const updated = await api.addParticipants(activeId, ids);
-          setConversations((current) => current.map((item) => (item.id === activeId ? updated : item)));
-          message.success("成员已加入");
+          try {
+            const updated = await api.addParticipants(activeId, ids);
+            setConversations((current) => current.map((item) => (item.id === activeId ? updated : item)));
+            message.success("成员已加入");
+          } catch (error) {
+            message.error(error instanceof Error ? error.message : "成员加入失败");
+          }
         }}
         onRemoveParticipant={async (participant) => {
           if (!activeId || !participant.id) return;
