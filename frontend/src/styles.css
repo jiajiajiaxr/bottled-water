@@ -67,6 +67,8 @@ button {
   background: #f9fbfe !important;
   border-right: 1px solid #dbe3ef;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar-head,
@@ -83,7 +85,9 @@ button {
 }
 
 .conversation-list {
-  height: calc(100vh - 172px);
+  flex: 1;
+  min-height: 0;
+  height: auto;
   overflow: auto;
   margin-top: 12px;
   padding-right: 2px;
@@ -751,6 +755,21 @@ button {
   display: grid;
   gap: 4px;
   margin: 10px 0;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.folder-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 4px;
+}
+
+.folder-create-input {
+  margin-bottom: 4px;
 }
 
 .folder-item {

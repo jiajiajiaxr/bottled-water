@@ -241,6 +241,8 @@ export const api = {
     participant_agent_ids: string[];
     master_enabled?: boolean;
     workspace_id?: string;
+    folder?: string;
+    category?: string;
   }): Promise<Conversation> {
     try {
       return await request<Conversation>("/conversations", {
@@ -272,6 +274,8 @@ export const api = {
         archived: false,
         unread: 0,
         tags: payload.chat_type === "group" ? ["群聊"] : ["单聊"],
+        folder: payload.folder || payload.category || "Default",
+        category: payload.category || payload.folder || "Default",
         lastMessage: "会话已创建，可以发送任务开始协作。"
       };
     }

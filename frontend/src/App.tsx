@@ -43,6 +43,8 @@ import {
   DiffOutlined,
   EditOutlined,
   EyeOutlined,
+  FolderAddOutlined,
+  FolderOpenOutlined,
   InboxOutlined,
   LoginOutlined,
   MessageOutlined,
@@ -97,6 +99,22 @@ const { Text, Title, Paragraph } = Typography;
 const { TextArea } = Input;
 
 const CONVERSATION_CATEGORY_OPTIONS = ["Default", "工厂", "字节跳动", "项目", "个人", "Demo", "归档整理"];
+
+function normalizeConversationCategory(value?: string) {
+  const name = value?.trim();
+  return name || "Default";
+}
+
+function mergeConversationCategories(...groups: Array<Array<string | undefined>>) {
+  return Array.from(
+    new Set(
+      groups
+        .flat()
+        .map((name) => normalizeConversationCategory(name))
+        .filter(Boolean)
+    )
+  );
+}
 
 const WORKFLOW_NODE_TYPE_OPTIONS = [
   { label: "Agent", value: "agent" },
@@ -488,8 +506,10 @@ function ConversationSidebar({
   conversations,
   activeId,
   runningConversationIds,
+  categoryOptions,
   onSelect,
   onCreate,
+  onCreateCategory,
   onTogglePin,
   onToggleArchive,
   onDelete,
@@ -498,8 +518,10 @@ function ConversationSidebar({
   conversations: Conversation[];
   activeId?: string;
   runningConversationIds: Set<string>;
+  categoryOptions: string[];
   onSelect: (id: string) => void;
   onCreate: (group: boolean) => void;
+  onCreateCategory: (name: string) => void;
   onTogglePin: (item: Conversation) => void;
   onToggleArchive: (item: Conversation) => void;
   onDelete: (item: Conversation) => void;
@@ -508,20 +530,20 @@ function ConversationSidebar({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"active" | "archived">("active");
   const [folder, setFolder] = useState("all");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
   const [editing, setEditing] = useState<Conversation>();
   const [editForm] = Form.useForm();
 
   const folders = useMemo(() => {
-    const names = conversations
-      .filter((item) => (filter === "archived" ? item.archived : !item.archived))
-      .map((item) => item.folder || item.category || "Default");
-    return ["all", ...Array.from(new Set(names))];
-  }, [conversations, filter]);
+    const names = conversations.map((item) => item.folder || item.category || "Default");
+    return ["all", ...mergeConversationCategories(categoryOptions, names)];
+  }, [categoryOptions, conversations]);
 
-  const categoryOptions = useMemo(() => {
+  const selectCategoryOptions = useMemo(() => {
     const existing = conversations.map((item) => item.folder || item.category || "Default");
-    return Array.from(new Set([...CONVERSATION_CATEGORY_OPTIONS, ...existing])).map((name) => ({ label: name, value: name }));
-  }, [conversations]);
+    return mergeConversationCategories(categoryOptions, existing).map((name) => ({ label: name, value: name }));
+  }, [categoryOptions, conversations]);
 
   const visible = useMemo(() => {
     return conversations
@@ -530,6 +552,15 @@ function ConversationSidebar({
       .filter((item) => `${item.title} ${item.lastMessage} ${item.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase()))
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || +new Date(b.updatedAt) - +new Date(a.updatedAt));
   }, [conversations, filter, folder, query]);
+
+  const submitNewFolder = () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    onCreateCategory(name);
+    setFolder(name);
+    setNewFolderName("");
+    setCreatingFolder(false);
+  };
 
   return (
     <Sider width={320} className="sidebar">
@@ -540,7 +571,7 @@ function ConversationSidebar({
         </div>
         <Space>
           <Tooltip title="新建单聊">
-            <Button shape="circle" type="primary" icon={<PlusOutlined />} onClick={() => onCreate(false)} data-testid="new-chat" />
+            <Button shape="circle" type="primary" icon={<UserAddOutlined />} onClick={() => onCreate(false)} data-testid="new-chat" />
           </Tooltip>
           <Tooltip title="新建群聊">
             <Button shape="circle" icon={<TeamOutlined />} onClick={() => onCreate(true)} data-testid="new-group-chat" />
@@ -564,9 +595,27 @@ function ConversationSidebar({
         ]}
       />
       <div className="conversation-folders">
+        <div className="folder-section-head">
+          <Text type="secondary">文件夹</Text>
+          <Tooltip title="新建分类">
+            <Button size="small" shape="circle" icon={<FolderAddOutlined />} onClick={() => setCreatingFolder((value) => !value)} />
+          </Tooltip>
+        </div>
+        {creatingFolder && (
+          <Input.Search
+            className="folder-create-input"
+            size="small"
+            autoFocus
+            placeholder="新建分类名称"
+            value={newFolderName}
+            enterButton="添加"
+            onChange={(event) => setNewFolderName(event.target.value)}
+            onSearch={submitNewFolder}
+          />
+        )}
         {folders.map((name) => (
           <button key={name} className={`folder-item ${folder === name ? "is-active" : ""}`} onClick={() => setFolder(name)}>
-            <InboxOutlined />
+            {name === "all" ? <InboxOutlined /> : <FolderOpenOutlined />}
             <span>{name === "all" ? "All" : name}</span>
           </button>
         ))}
@@ -601,7 +650,7 @@ function ConversationSidebar({
               </Text>
               <Space size={[4, 4]} wrap>
                 {running && <Tag color="processing">正在回答</Tag>}
-                <Tag icon={item.chat_type === "group" ? <TeamOutlined /> : <RobotOutlined />}>
+                <Tag icon={item.chat_type === "group" ? <TeamOutlined /> : <MessageOutlined />}>
                   {item.chat_type === "group" ? `${item.agent_count ?? item.participants.length} Agent` : "单聊"}
                 </Tag>
                 {item.tags.map((tag) => (
@@ -688,7 +737,7 @@ function ConversationSidebar({
             <Input />
           </Form.Item>
           <Form.Item name="folder" label="Folder / category">
-            <Select options={categoryOptions} placeholder="选择分类" />
+            <Select options={selectCategoryOptions} placeholder="选择分类" />
           </Form.Item>
           <Form.Item name="remark" label="Remark">
             <TextArea rows={3} />
@@ -1577,17 +1626,20 @@ function CreateConversationModal({
   open,
   group,
   agents,
+  categoryOptions,
   onCancel,
   onCreate
 }: {
   open: boolean;
   group: boolean;
   agents: Agent[];
+  categoryOptions: string[];
   onCancel: () => void;
-  onCreate: (payload: { title?: string; agentIds: string[]; group: boolean; masterEnabled: boolean }) => void;
+  onCreate: (payload: { title?: string; agentIds: string[]; group: boolean; masterEnabled: boolean; folder: string }) => void;
 }) {
   const [form] = Form.useForm();
   const onlineAgents = agents.filter((agent) => agent.status === "online");
+  const categorySelectOptions = categoryOptions.map((name) => ({ label: name, value: name }));
 
   useEffect(() => {
     if (!open || !onlineAgents.length) return;
@@ -1595,13 +1647,20 @@ function CreateConversationModal({
     if (current?.length) return;
     form.setFieldsValue({
       agentIds: onlineAgents.slice(0, group ? Math.min(4, onlineAgents.length) : 1).map((agent) => agent.id),
-      masterEnabled: true
+      masterEnabled: true,
+      folder: form.getFieldValue("folder") || "Default"
     });
   }, [open, group, onlineAgents, form]);
 
   const submit = async () => {
     const values = await form.validateFields();
-    onCreate({ title: values.title, agentIds: values.agentIds, group, masterEnabled: values.masterEnabled ?? true });
+    onCreate({
+      title: values.title,
+      agentIds: values.agentIds,
+      group,
+      masterEnabled: values.masterEnabled ?? true,
+      folder: normalizeConversationCategory(values.folder)
+    });
     form.resetFields();
   };
 
@@ -1614,9 +1673,12 @@ function CreateConversationModal({
       okText="创建"
       okButtonProps={{ "data-testid": "create-conversation-confirm" }}
     >
-      <Form form={form} layout="vertical" initialValues={{ masterEnabled: true }}>
+      <Form form={form} layout="vertical" initialValues={{ masterEnabled: true, folder: "Default" }}>
         <Form.Item name="title" label="会话名称">
           <Input placeholder={group ? "多 Agent 协作-答辩演示" : "Agent 单聊"} />
+        </Form.Item>
+        <Form.Item name="folder" label="分类/文件夹">
+          <Select options={categorySelectOptions} placeholder="选择左侧分类" />
         </Form.Item>
         <Form.Item
           name="agentIds"
@@ -1709,12 +1771,14 @@ function ConversationSettingsDrawer({
   open,
   active,
   agents,
+  categoryOptions,
   onClose,
   onSaveConversation
 }: {
   open: boolean;
   active?: Conversation;
   agents: Agent[];
+  categoryOptions: string[];
   onClose: () => void;
   onSaveConversation: (conversation: Conversation, patch: Partial<Conversation>) => Promise<void>;
 }) {
@@ -1731,6 +1795,14 @@ function ConversationSettingsDrawer({
   const [skills, setSkills] = useState<Skill[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const { message } = AntApp.useApp();
+  const conversationCategoryOptions = useMemo(
+    () =>
+      mergeConversationCategories(categoryOptions, [active?.folder || active?.category || "Default"]).map((name) => ({
+        label: name,
+        value: name
+      })),
+    [active?.category, active?.folder, categoryOptions]
+  );
 
   const workflowNodes = workflow?.nodes ?? [];
   const workflowEdges = workflow?.edges ?? [];
@@ -1926,7 +1998,7 @@ function ConversationSettingsDrawer({
                 </Form.Item>
                 <Form.Item name="folder" label="分类/文件夹">
                   <Select
-                    options={Array.from(new Set([...CONVERSATION_CATEGORY_OPTIONS, active?.folder || active?.category || "Default"])).map((name) => ({ label: name, value: name }))}
+                    options={conversationCategoryOptions}
                     placeholder="选择分类"
                   />
                 </Form.Item>
@@ -4309,6 +4381,7 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [localRunningConversationIds, setLocalRunningConversationIds] = useState<Set<string>>(() => new Set());
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>();
+  const [conversationCategories, setConversationCategories] = useState<string[]>(CONVERSATION_CATEGORY_OPTIONS);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [streamState, setStreamState] = useState<"idle" | "streaming" | "done" | "error">("idle");
   const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
@@ -4334,6 +4407,25 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
     });
     return next;
   }, [backgroundTasks, localRunningConversationIds]);
+  const categoryStorageKey = useMemo(
+    () => `agenthub:conversation-categories:${activeWorkspaceId ?? "default"}`,
+    [activeWorkspaceId]
+  );
+  const categoryNamesFromConversations = useMemo(
+    () => conversations.map((item) => item.folder || item.category || "Default"),
+    [conversations]
+  );
+
+  const saveConversationCategories = (nextCategories: string[]) => {
+    const merged = mergeConversationCategories(CONVERSATION_CATEGORY_OPTIONS, nextCategories);
+    setConversationCategories(merged);
+    window.localStorage.setItem(categoryStorageKey, JSON.stringify(merged));
+  };
+
+  const addConversationCategory = (name: string) => {
+    saveConversationCategories([...conversationCategories, name]);
+    message.success(`分类「${name}」已创建`);
+  };
 
   const loadAgents = async () => setAgents(await api.agents());
   const loadBackgroundTasks = async () => {
@@ -4344,6 +4436,24 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
   useEffect(() => {
     setCurrentUser(user);
   }, [user]);
+
+  useEffect(() => {
+    let stored: string[] = [];
+    try {
+      const raw = window.localStorage.getItem(categoryStorageKey);
+      const parsed = raw ? JSON.parse(raw) : [];
+      stored = Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      stored = [];
+    }
+    setConversationCategories(mergeConversationCategories(CONVERSATION_CATEGORY_OPTIONS, stored));
+  }, [categoryStorageKey]);
+
+  useEffect(() => {
+    setConversationCategories((current) =>
+      mergeConversationCategories(CONVERSATION_CATEGORY_OPTIONS, current, categoryNamesFromConversations)
+    );
+  }, [categoryNamesFromConversations]);
 
   useEffect(() => {
     Promise.all([api.agents(), api.knowledgeBases(), api.workspaces()]).then(([nextAgents, kbs, nextWorkspaces]) => {
@@ -4388,17 +4498,22 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   const patchConversation = async (item: Conversation, patch: Partial<Conversation>) => {
     const updated = await api.updateConversation(item.id, patch);
+    const nextCategory = patch.folder || patch.category || updated.folder || updated.category;
+    if (nextCategory) saveConversationCategories([...conversationCategories, nextCategory]);
     setConversations((current) => current.map((conversation) => (conversation.id === item.id ? { ...conversation, ...updated } : conversation)));
   };
 
-  const createConversation = async (payload: { title?: string; agentIds: string[]; group: boolean; masterEnabled: boolean }) => {
+  const createConversation = async (payload: { title?: string; agentIds: string[]; group: boolean; masterEnabled: boolean; folder: string }) => {
     const created = await api.createConversationWithAgents({
       chat_type: payload.group ? "group" : "single",
       title: payload.title,
       participant_agent_ids: payload.agentIds,
       master_enabled: payload.masterEnabled,
+      folder: payload.folder,
+      category: payload.folder,
       workspace_id: activeWorkspaceId
     });
+    saveConversationCategories([...conversationCategories, payload.folder]);
     setConversations((current) => [created, ...current]);
     setActiveId(created.id);
     setMessages([]);
@@ -4671,8 +4786,10 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
         conversations={conversations}
         activeId={activeId}
         runningConversationIds={runningConversationIds}
+        categoryOptions={conversationCategories}
         onSelect={setActiveId}
         onCreate={(group) => setCreateOpen({ open: true, group })}
+        onCreateCategory={addConversationCategory}
         onTogglePin={(item) => patchConversation(item, { pinned: !item.pinned })}
         onToggleArchive={(item) => patchConversation(item, { archived: !item.archived })}
         onEdit={(item, patch) => patchConversation(item, patch)}
@@ -4814,6 +4931,7 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
         open={conversationSettingsOpen}
         active={active}
         agents={agents}
+        categoryOptions={conversationCategories}
         onClose={() => setConversationSettingsOpen(false)}
         onSaveConversation={patchConversation}
       />
@@ -4821,6 +4939,7 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
         open={createOpen.open}
         group={createOpen.group}
         agents={agents}
+        categoryOptions={conversationCategories}
         onCancel={() => setCreateOpen({ open: false, group: false })}
         onCreate={createConversation}
       />
