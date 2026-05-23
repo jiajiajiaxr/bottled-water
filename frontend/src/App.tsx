@@ -98,7 +98,8 @@ const { Header, Sider, Content } = Layout;
 const { Text, Title, Paragraph } = Typography;
 const { TextArea } = Input;
 
-const CONVERSATION_CATEGORY_OPTIONS = ["Default", "工厂", "字节跳动", "项目", "个人", "Demo", "归档整理"];
+const CONVERSATION_CATEGORY_OPTIONS = ["Default"];
+const LEGACY_DEFAULT_CONVERSATION_CATEGORIES = new Set(["工厂", "字节跳动", "项目", "个人", "Demo", "归档整理", "Factory"]);
 
 function normalizeConversationCategory(value?: string) {
   const name = value?.trim();
@@ -1162,6 +1163,14 @@ function AgentDirectoryDrawer({
   }));
   const skillOptions = skills.map((skill) => ({ label: `${skill.name} · ${skill.category}`, value: skill.id }));
   const mcpOptions = mcpServers.map((server) => ({ label: `${server.name} · ${server.transport}`, value: server.id }));
+  const modelConfigOptions = modelConfigs.map((model) => ({
+    label: `${model.name} · ${model.model_id}`,
+    value: model.id
+  }));
+  const modelLabel = (modelConfigId?: string) => {
+    const model = modelConfigs.find((item) => item.id === modelConfigId) ?? (!modelConfigId ? modelConfigs[0] : undefined);
+    return model ? `${model.name} · ${model.model_id}` : "火山方舟默认模型";
+  };
 
   const visible = agents.filter((agent) => {
     const text = `${agent.name} ${agent.description} ${agent.capabilities.map((item) => item.label).join(" ")}`.toLowerCase();
@@ -1341,6 +1350,7 @@ function AgentDirectoryDrawer({
                   {(agent.config.skill_ids ?? []).length > 0 && <Tag color="cyan">{agent.config.skill_ids?.length} Skills</Tag>}
                   {(agent.config.mcp_server_ids ?? []).length > 0 && <Tag color="gold">{agent.config.mcp_server_ids?.length} MCP</Tag>}
                   {agent.config.agentic_loop?.enabled === false && <Tag>纯对话</Tag>}
+                  <Tag color="purple">模型：{modelLabel(agent.config.model_config_id)}</Tag>
                 </Space>
                 <Divider />
                 <Flex justify="space-between">
@@ -1465,14 +1475,14 @@ function AgentDirectoryDrawer({
           <Form.Item name="system_prompt" label="系统提示词" rules={[{ required: true, message: "请配置系统提示词" }]}>
             <TextArea rows={5} value={systemPrompt} onChange={(event) => setSystemPrompt(event.target.value)} data-testid="agent-system-prompt" />
           </Form.Item>
-          <Form.Item name="base_agent_id" label="底层模型/基础 Agent">
+          <Form.Item name="base_agent_id" label="继承基础 Agent（可选）">
             <Select allowClear options={agents.map((agent) => ({ label: agent.name, value: agent.id }))} />
           </Form.Item>
           <Form.Item name="model_config_id" label="底层模型配置">
             <Select
               allowClear
               placeholder="使用系统默认豆包模型"
-              options={modelConfigs.map((model) => ({ label: `${model.name} / ${model.model_id}`, value: model.id }))}
+              options={modelConfigOptions}
             />
           </Form.Item>
           <Form.Item name="tools" label="工具权限">
@@ -1546,6 +1556,15 @@ function AgentDirectoryDrawer({
                 { label: "degraded", value: "degraded" },
                 { label: "maintenance", value: "maintenance" }
               ]}
+            />
+          </Form.Item>
+          <Form.Item name="model_config_id" label="底层模型配置">
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="使用系统默认豆包模型"
+              options={modelConfigOptions}
             />
           </Form.Item>
           <Form.Item name="tools" label="工具权限">
@@ -1719,13 +1738,15 @@ function MembersDrawer({
   active,
   agents,
   onClose,
-  onAddAgents
+  onAddAgents,
+  onRemoveParticipant
 }: {
   open: boolean;
   active?: Conversation;
   agents: Agent[];
   onClose: () => void;
   onAddAgents: (ids: string[]) => void;
+  onRemoveParticipant: (participant: Conversation["participants"][number]) => Promise<void>;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const existing = new Set(active?.participants.map((item) => item.agent_id).filter(Boolean));
@@ -1740,7 +1761,33 @@ function MembersDrawer({
         className="member-list"
         dataSource={active?.participants ?? []}
         renderItem={(item) => (
-          <List.Item>
+          <List.Item
+            actions={[
+              item.role === "owner" ? (
+                <Tooltip key="owner" title="群主不能直接移除">
+                  <Button size="small" shape="circle" icon={<DeleteOutlined />} disabled />
+                </Tooltip>
+              ) : (
+                <Tooltip key="remove" title="移除成员">
+                  <Button
+                    size="small"
+                    danger
+                    shape="circle"
+                    icon={<DeleteOutlined />}
+                    onClick={() => {
+                      Modal.confirm({
+                        title: `移除成员：${participantName(item)}`,
+                        content: "移除后该 Agent 不再参与当前群聊，默认工作流也会同步刷新。",
+                        okText: "移除",
+                        okButtonProps: { danger: true },
+                        onOk: () => onRemoveParticipant(item)
+                      });
+                    }}
+                  />
+                </Tooltip>
+              )
+            ]}
+          >
             <List.Item.Meta
               avatar={<Avatar>{participantName(item).slice(0, 1)}</Avatar>}
               title={<Space><Text strong>{participantName(item)}</Text><Tag>{item.role ?? "member"}</Tag></Space>}
@@ -4419,7 +4466,7 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
   const saveConversationCategories = (nextCategories: string[]) => {
     const merged = mergeConversationCategories(CONVERSATION_CATEGORY_OPTIONS, nextCategories);
     setConversationCategories(merged);
-    window.localStorage.setItem(categoryStorageKey, JSON.stringify(merged));
+    window.localStorage.setItem(categoryStorageKey, JSON.stringify({ version: 2, items: merged }));
   };
 
   const addConversationCategory = (name: string) => {
@@ -4442,7 +4489,11 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
     try {
       const raw = window.localStorage.getItem(categoryStorageKey);
       const parsed = raw ? JSON.parse(raw) : [];
-      stored = Array.isArray(parsed) ? parsed.map(String) : [];
+      if (Array.isArray(parsed)) {
+        stored = parsed.map(String).filter((name) => !LEGACY_DEFAULT_CONVERSATION_CATEGORIES.has(name));
+      } else if (parsed && Array.isArray(parsed.items)) {
+        stored = parsed.items.map(String);
+      }
     } catch {
       stored = [];
     }
@@ -4925,6 +4976,12 @@ function Workbench({ user, onLogout }: { user: User; onLogout: () => void }) {
           const updated = await api.addParticipants(activeId, ids);
           setConversations((current) => current.map((item) => (item.id === activeId ? updated : item)));
           message.success("成员已加入");
+        }}
+        onRemoveParticipant={async (participant) => {
+          if (!activeId || !participant.id) return;
+          const updated = await api.removeParticipant(activeId, participant.id);
+          setConversations((current) => current.map((item) => (item.id === activeId ? updated : item)));
+          message.success("成员已移除");
         }}
       />
       <ConversationSettingsDrawer

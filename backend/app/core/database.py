@@ -14,11 +14,12 @@ class Base(DeclarativeBase):
 
 settings = get_settings()
 
-is_sqlite = settings.database_url.startswith("sqlite")
+database_url = settings.resolved_database_url
+is_sqlite = database_url.startswith("sqlite")
 connect_args = {"check_same_thread": False, "timeout": 30} if is_sqlite else {}
 
 engine = create_engine(
-    settings.database_url,
+    database_url,
     pool_pre_ping=True,
     future=True,
     connect_args=connect_args,

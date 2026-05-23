@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 import httpx
 
-from app.core.config import Settings, get_settings
+from app.core.config import ROOT_DIR, Settings, get_settings
 
 
 class ArkProviderError(RuntimeError):
@@ -75,6 +75,26 @@ class ArkClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.base_url = self.settings.ark_base_url.rstrip("/")
+
+    def _api_key(self) -> str:
+        value = (self.settings.ark_api_key or "").strip().strip('"').strip("'")
+        if value.lower().startswith("authorization:"):
+            value = value.split(":", 1)[1].strip()
+        if value.lower().startswith("bearer "):
+            value = value[7:].strip()
+        return value
+
+    def _auth_error_hint(self, status_code: int, data: Any) -> str:
+        return json.dumps(
+            {
+                "status": status_code,
+                "error": data,
+                "env_file": str(ROOT_DIR / ".env"),
+                "key_loaded": bool(self._api_key()),
+                "hint": "后端只读取项目目录 .env；请确认 ARK_API_KEY 是火山方舟 API Key 原值，不要填 AK/SK，也不要带 Authorization/Bearer 前缀。",
+            },
+            ensure_ascii=False,
+        )
 
     async def chat(
         self,
@@ -169,14 +189,15 @@ class ArkClient:
         yield LLMStreamEvent(type="error", error=json.dumps(errors, ensure_ascii=False))
 
     async def _post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
-        if not self.settings.ark_api_key:
+        api_key = self._api_key()
+        if not api_key:
             raise ArkProviderError("缺少 ARK_API_KEY")
         async with httpx.AsyncClient(timeout=self.settings.ark_timeout_seconds) as client:
             response = await client.post(
                 f"{self.base_url}{path}",
                 json=body,
                 headers={
-                    "Authorization": f"Bearer {self.settings.ark_api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
             )
@@ -185,13 +206,14 @@ class ArkClient:
         except ValueError:
             data = {"text": response.text}
         if response.status_code < 200 or response.status_code >= 300:
-            raise ArkProviderError(json.dumps({"status": response.status_code, "error": data}))
+            raise ArkProviderError(self._auth_error_hint(response.status_code, data))
         return data
 
     async def _stream_model(
         self, model: str, body: dict[str, Any]
     ) -> AsyncIterator[LLMStreamEvent]:
-        if not self.settings.ark_api_key:
+        api_key = self._api_key()
+        if not api_key:
             raise ArkProviderError("缺少 ARK_API_KEY")
         usage: dict[str, Any] | None = None
         timeout = httpx.Timeout(self.settings.ark_stream_timeout_seconds)
@@ -201,17 +223,13 @@ class ArkClient:
                 f"{self.base_url}/chat/completions",
                 json=body,
                 headers={
-                    "Authorization": f"Bearer {self.settings.ark_api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
             ) as response:
                 if response.status_code < 200 or response.status_code >= 300:
                     text = await response.aread()
-                    raise ArkProviderError(
-                        json.dumps(
-                            {"status": response.status_code, "error": text.decode("utf-8", "replace")}
-                        )
-                    )
+                    raise ArkProviderError(self._auth_error_hint(response.status_code, text.decode("utf-8", "replace")))
                 async for line in response.aiter_lines():
                     line = line.strip()
                     if not line or not line.startswith("data:"):
@@ -271,4 +289,3 @@ class ArkClient:
 
 
 ark_client = ArkClient()
-

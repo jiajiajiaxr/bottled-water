@@ -467,8 +467,8 @@ def ensure_seed_data(db: Session) -> User:
             activity_score=88,
             extra={
                 "workspace_id": workspace.id if workspace else None,
-                "category": "Demo",
-                "folder": "Factory",
+                "category": "Default",
+                "folder": "Default",
                 "remark": "Seeded AgentHub demo group",
             },
             message_count=1,

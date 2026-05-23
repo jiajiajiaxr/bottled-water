@@ -677,6 +677,12 @@ export const api = {
     }
   },
 
+  async removeParticipant(conversationId: string, participantId: string): Promise<Conversation> {
+    return await request<Conversation>(`/conversations/${conversationId}/participants/${participantId}`, {
+      method: "DELETE"
+    });
+  },
+
   async uploadFile(file: File, conversationId?: string, purpose = "attachment"): Promise<UploadedFile> {
     try {
       const form = new FormData();

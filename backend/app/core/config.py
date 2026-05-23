@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -17,6 +17,19 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Project .env is authoritative for this local app so stale PowerShell
+        # session variables cannot silently override model keys.
+        return (init_settings, dotenv_settings, env_settings, file_secret_settings)
 
     app_name: str = "AgentHub"
     environment: Literal["development", "test", "production"] = "development"
@@ -52,6 +65,20 @@ class Settings(BaseSettings):
     artifact_base_url: str = "http://localhost:8000"
     storage_dir: str = str(ROOT_DIR / "var" / "storage")
     max_upload_mb: int = 50
+
+    @property
+    def resolved_database_url(self) -> str:
+        if not self.database_url.startswith("sqlite:///"):
+            return self.database_url
+        raw_path = self.database_url.removeprefix("sqlite:///")
+        if raw_path in {"", ":memory:"}:
+            return self.database_url
+        if Path(raw_path).is_absolute():
+            return self.database_url
+        normalized = raw_path.replace("\\", "/")
+        base_dir = ROOT_DIR if normalized.startswith(("backend/", "./backend/")) else ROOT_DIR / "backend"
+        target = (base_dir / raw_path).resolve()
+        return f"sqlite:///{target.as_posix()}"
 
     @property
     def model_candidates(self) -> list[str]:
