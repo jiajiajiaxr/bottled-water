@@ -265,9 +265,10 @@ async def list_skills(
     user: User = Depends(get_current_user),
 ):
     ensure_skill_tables(db)
+    _validate_workspace(db, user, workspace_id)
     query = select(Skill).where(Skill.deleted_at.is_(None)).where(_visible_skill_filter(user))
     if workspace_id:
-        query = query.where(Skill.workspace_id == workspace_id)
+        query = query.where(or_(Skill.workspace_id == workspace_id, Skill.workspace_id.is_(None)))
     if status:
         query = query.where(Skill.status == status)
     if source:

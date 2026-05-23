@@ -3927,33 +3927,35 @@ function PlatformControlDrawer({
                           >
                             测试
                           </Button>,
-                          <Button
-                            key="delete"
-                            size="small"
-                            danger
-                            icon={<DeleteOutlined />}
-                            onClick={() => {
-                              Modal.confirm({
-                                title: `删除 Skill：${skill.name}`,
-                                content: "删除后将不再出现在当前工作区 Skill 目录，也不能再授权给 Agent 使用。",
-                                okText: "删除",
-                                okButtonProps: { danger: true },
-                                onOk: async () => {
-                                  try {
-                                    await api.deleteSkill(skill.id);
-                                    setSkills((current) => current.filter((item) => item.id !== skill.id));
-                                    setSkillTestResult("");
-                                    message.success("Skill 已删除");
-                                  } catch (error) {
-                                    message.error(error instanceof Error ? error.message : "删除失败");
-                                    throw error;
+                          (skill.created_by || skill.workspace_id === activeWorkspace?.id) && !Boolean(skill.config?.builtin) && (
+                            <Button
+                              key="delete"
+                              size="small"
+                              danger
+                              icon={<DeleteOutlined />}
+                              onClick={() => {
+                                Modal.confirm({
+                                  title: `删除 Skill：${skill.name}`,
+                                  content: "删除后将不再出现在当前工作区 Skill 目录，也不能再授权给 Agent 使用。",
+                                  okText: "删除",
+                                  okButtonProps: { danger: true },
+                                  onOk: async () => {
+                                    try {
+                                      await api.deleteSkill(skill.id);
+                                      setSkills((current) => current.filter((item) => item.id !== skill.id));
+                                      setSkillTestResult("");
+                                      message.success("Skill 已删除");
+                                    } catch (error) {
+                                      message.error(error instanceof Error ? error.message : "删除失败");
+                                      throw error;
+                                    }
                                   }
-                                }
-                              });
-                            }}
-                          >
-                            删除
-                          </Button>
+                                });
+                              }}
+                            >
+                              删除
+                            </Button>
+                          )
                         ]}
                       >
                         <List.Item.Meta
@@ -3962,6 +3964,8 @@ function PlatformControlDrawer({
                             <Space>
                               <Text strong>{skill.name}</Text>
                               <Tag>{skill.category}</Tag>
+                              <Tag color={skill.workspace_id ? "purple" : "blue"}>{skill.workspace_id ? "工作区" : "全局"}</Tag>
+                              {Boolean(skill.config?.builtin) && <Tag color="geekblue">内置</Tag>}
                               <Tag color={skill.enabled ? "success" : "default"}>{skill.enabled ? "enabled" : "disabled"}</Tag>
                               {skill.source === "mcp" && <Tag color="blue">MCP</Tag>}
                             </Space>
