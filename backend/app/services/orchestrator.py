@@ -738,11 +738,6 @@ async def _run_canvas_agent_reply(
     db.commit()
     db.refresh(assistant)
     await event_bus.publish(channel, "message_start", {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name})
-    await event_bus.publish(
-        channel,
-        "content_block_delta",
-        {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": f"\n\n{agent.name}\n"}},
-    )
 
     stream_text = ""
     system_prompt = (agent.config or {}).get("system_prompt") or agent.description or f"You are {agent.name}."

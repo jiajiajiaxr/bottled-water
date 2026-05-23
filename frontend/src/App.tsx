@@ -369,7 +369,7 @@ function MarkdownContent({ text }: { text: string }) {
     paragraph.push(line.trim());
   }
   flushParagraph();
-  return <div className="markdown-content">{blocks.length ? blocks : <p className="typing-placeholder">正在组织回复...</p>}</div>;
+  return <div className="markdown-content">{blocks.length ? blocks : <p className="typing-placeholder">Waiting for reply...</p>}</div>;
 }
 
 function participantName(item: Conversation["participants"][number]) {
@@ -4789,6 +4789,206 @@ function Workbench({
     }
   };
 
+  const appendConversationStream = async (conversationId: string, prompt: string) => {
+    const targetConversation = conversations.find((item) => item.id === conversationId) ?? active;
+    const agentParticipants =
+      targetConversation?.participants.filter((item) => item.participant_type === "agent" && item.agent_id) ?? [];
+    const tempIdsByAgentId = new Map<string, string>();
+    const tempIdsByAuthor = new Map<string, string>();
+
+    const normalizeIncomingMessage = (incoming: ChatMessage): ChatMessage => ({
+      ...incoming,
+      conversationId: incoming.conversationId ?? (incoming as ChatMessage & { conversation_id?: string }).conversation_id ?? conversationId,
+      role: incoming.role ?? "assistant",
+      kind: incoming.kind ?? "text",
+      author: incoming.author || (incoming as ChatMessage & { sender_name?: string }).sender_name || "Agent",
+      content: incoming.role === "assistant" && incoming.kind === "text" ? stripInternalAgentOutput(incoming.content) : incoming.content,
+      createdAt: incoming.createdAt ?? (incoming as ChatMessage & { created_at?: string }).created_at ?? new Date().toISOString(),
+      streamState: incoming.role === "assistant" && incoming.kind === "text" ? "done" : incoming.streamState
+    });
+
+    const ensureStreamingMessage = (messageId: string, author: string, agentId?: string) => {
+      setMessages((current) => {
+        if (current.some((item) => item.id === messageId)) return current;
+        const tempId = (agentId && tempIdsByAgentId.get(agentId)) || tempIdsByAuthor.get(author);
+        if (tempId) {
+          if (agentId) tempIdsByAgentId.set(agentId, messageId);
+          tempIdsByAuthor.set(author, messageId);
+          return current.map((item) =>
+            item.id === tempId
+              ? {
+                  ...item,
+                  id: messageId,
+                  sender_id: agentId,
+                  author,
+                  rawContent: { ...(item.rawContent ?? {}), agent_id: agentId },
+                  streamState: "streaming"
+                }
+              : item
+          );
+        }
+        return [
+          ...current,
+          makeMessage({
+            conversationId,
+            role: "assistant",
+            kind: "text",
+            author,
+            content: "",
+            rawContent: agentId ? { agent_id: agentId } : {},
+            streamState: "streaming"
+          })
+        ].map((item) => (item.id.startsWith("local-") && item.author === author && !item.content ? { ...item, id: messageId } : item));
+      });
+    };
+
+    const upsertFinalMessage = (incoming: ChatMessage) => {
+      const normalized = normalizeIncomingMessage(incoming);
+      const agentId = normalized.sender_id || (normalized.rawContent?.agent_id as string | undefined);
+      setMessages((current) => {
+        if (current.some((item) => item.id === normalized.id)) {
+          return current.map((item) => (item.id === normalized.id ? { ...item, ...normalized } : item));
+        }
+        const tempId = (agentId && tempIdsByAgentId.get(agentId)) || tempIdsByAuthor.get(normalized.author);
+        if (tempId) {
+          if (agentId) tempIdsByAgentId.set(agentId, normalized.id);
+          tempIdsByAuthor.set(normalized.author, normalized.id);
+          return current.map((item) => (item.id === tempId ? { ...item, ...normalized } : item));
+        }
+        return [...current, normalized];
+      });
+    };
+
+    if (agentParticipants.length > 1) {
+      const placeholders = agentParticipants.map((participant) => {
+        const author = participantName(participant);
+        const agentId = participant.agent_id ?? participant.id ?? author;
+        const placeholder = makeMessage({
+          conversationId,
+          role: "assistant",
+          kind: "text",
+          author,
+          content: "",
+          rawContent: { agent_id: participant.agent_id, participant_id: participant.id },
+          streamState: "streaming"
+        });
+        tempIdsByAgentId.set(agentId, placeholder.id);
+        tempIdsByAuthor.set(author, placeholder.id);
+        return placeholder;
+      });
+      setMessages((current) => [...current, ...placeholders]);
+    }
+
+    setStreamState("streaming");
+    setLocalRunningConversationIds((current) => {
+      const next = new Set(current);
+      next.add(conversationId);
+      return next;
+    });
+    setConversations((current) =>
+      current.map((item) => (item.id === conversationId ? { ...item, updatedAt: new Date().toISOString(), unread: 0 } : item))
+    );
+    stopStreamRef.current = undefined;
+
+    let rawBuffer = "";
+    let completedPreview = "";
+    try {
+      await api.streamAssistantReply(conversationId, {
+        onMessageStart: (payload) => {
+          const messageId = String(payload.agent_message_id || payload.message_id || `stream-${Date.now()}`);
+          const agentId = payload.agent_id ? String(payload.agent_id) : undefined;
+          const author = String(payload.agent_name || payload.sender_name || (agentId ? "Agent" : "Assistant"));
+          ensureStreamingMessage(messageId, author, agentId);
+        },
+        onDelta: (delta, payload) => {
+          rawBuffer += delta;
+          const messageId = String(payload.agent_message_id || payload.message_id || "");
+          if (!messageId) return;
+          ensureStreamingMessage(messageId, String(payload.agent_name || "Agent"), payload.agent_id ? String(payload.agent_id) : undefined);
+          setMessages((current) =>
+            current.map((item) =>
+              item.id === messageId
+                ? { ...item, content: stripInternalAgentOutput(`${item.content}${delta}`), streamState: "streaming" }
+                : item
+            )
+          );
+        },
+        onMessageUpdated: upsertFinalMessage,
+        onMessageNew: (incoming) => {
+          if (incoming.kind === "preview_card") upsertFinalMessage(incoming);
+        },
+        onDone: () => {
+          setMessages((current) =>
+            current.map((item) => (item.streamState === "streaming" ? { ...item, streamState: "done" } : item))
+          );
+        },
+        onControl: (stop) => {
+          stopStreamRef.current = stop;
+        }
+      });
+      setStreamState("done");
+      const [freshMessages, freshArtifact] = await Promise.all([api.messages(conversationId), api.artifact(conversationId)]).catch(() => [
+        undefined,
+        undefined
+      ]);
+      if (freshMessages) {
+        const cleanMessages = freshMessages.map((item) =>
+          item.role === "assistant" && item.kind === "text" ? { ...item, content: stripInternalAgentOutput(item.content), streamState: "done" as const } : item
+        );
+        const hasPreviewCard = cleanMessages.some((item) => item.kind === "preview_card");
+        setMessages(
+          hasPreviewCard || !freshArtifact
+            ? cleanMessages
+            : [
+                ...cleanMessages,
+                makeMessage({
+                  conversationId,
+                  role: "assistant",
+                  kind: "preview_card",
+                  author: "Artifact Agent",
+                  content: `预览产物：${freshArtifact.title}`,
+                  streamState: "done"
+                })
+              ]
+        );
+        const lastAssistant = [...cleanMessages].reverse().find((item) => item.role === "assistant" && item.kind === "text");
+        completedPreview = (lastAssistant?.content || stripInternalAgentOutput(rawBuffer) || "done").slice(0, 120);
+        setConversations((current) =>
+          current.map((item) =>
+            item.id === conversationId ? { ...item, lastMessage: completedPreview, updatedAt: new Date().toISOString() } : item
+          )
+        );
+      }
+      if (freshArtifact) setArtifact(freshArtifact);
+    } catch (error) {
+      const fallbackPreview = stripInternalAgentOutput(rawBuffer).slice(0, 120) || "reply failed";
+      completedPreview = fallbackPreview;
+      setStreamState("error");
+      setMessages((current) =>
+        current.map((item) =>
+          item.streamState === "streaming" ? { ...item, streamState: "error", content: item.content || fallbackPreview } : item
+        )
+      );
+      throw error;
+    } finally {
+      setLocalRunningConversationIds((current) => {
+        const next = new Set(current);
+        next.delete(conversationId);
+        return next;
+      });
+      if (completedPreview) {
+        setConversations((current) =>
+          current.map((item) =>
+            item.id === conversationId && item.lastMessage === "正在回答..."
+              ? { ...item, lastMessage: completedPreview, updatedAt: new Date().toISOString() }
+              : item
+          )
+        );
+      }
+      loadBackgroundTasks().catch(() => undefined);
+    }
+  };
+
   const stopStreaming = async () => {
     if (!activeId) return;
     stopStreamRef.current?.();
@@ -4877,7 +5077,7 @@ function Workbench({
           );
         }
       }
-      appendAssistantStream(conversationId, content).catch(() => setStreamState("error"));
+      appendConversationStream(conversationId, content).catch(() => setStreamState("error"));
     } catch (error) {
       setMessages((current) =>
         current.map((item) =>
@@ -4892,7 +5092,7 @@ function Workbench({
 
   const regenerate = (source: ChatMessage) => {
     if (!activeId) return;
-    appendAssistantStream(activeId, `请重新生成这条回复：${source.content}`).catch(() => setStreamState("error"));
+    appendConversationStream(activeId, `请重新生成这条回复：${source.content}`).catch(() => setStreamState("error"));
   };
 
   const saveArtifact = async (next: WorkspaceArtifact) => {

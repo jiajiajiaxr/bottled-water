@@ -121,6 +121,24 @@ async function requestFile(path: string): Promise<{ previewUrl?: string; preview
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+type StreamAssistantHandlers = {
+  onDelta?: (delta: string, payload: Record<string, unknown>) => void;
+  onMessageStart?: (payload: Record<string, unknown>) => void;
+  onMessageUpdated?: (message: ChatMessage) => void;
+  onMessageNew?: (message: ChatMessage) => void;
+  onDone?: (payload?: Record<string, unknown>) => void;
+  onControl?: (stop: () => void) => void;
+};
+
+function eventPayload(event: Event): Record<string, unknown> {
+  try {
+    const value = JSON.parse((event as MessageEvent).data);
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
 function normalizeSkill(value: Skill & { status?: string; prompt?: string; content?: string; metadata?: Record<string, unknown> }): Skill {
   const rawTools = (value.tools ?? []) as unknown[];
   return {
@@ -366,10 +384,14 @@ export const api = {
 
   async streamAssistantReply(
     conversationId: string,
-    onDelta: (delta: string) => void,
+    handlersOrDelta: StreamAssistantHandlers | ((delta: string) => void),
     onDone?: () => void,
     onControl?: (stop: () => void) => void
   ): Promise<string> {
+    const handlers: StreamAssistantHandlers =
+      typeof handlersOrDelta === "function"
+        ? { onDelta: (delta) => handlersOrDelta(delta), onDone, onControl }
+        : handlersOrDelta;
     try {
       const token = window.localStorage.getItem("agenthub_token");
       return await new Promise<string>((resolve, reject) => {
@@ -381,32 +403,45 @@ export const api = {
         const stop = () => {
           window.clearTimeout(timeout);
           source.close();
-          onDone?.();
+          handlers.onDone?.();
           resolve(buffer);
         };
-        onControl?.(stop);
+        handlers.onControl?.(stop);
         timeout = window.setTimeout(() => {
           source.close();
-          onDone?.();
+          handlers.onDone?.();
           resolve(buffer || "任务正在后台执行，稍后刷新可查看完整结果。");
         }, 120000);
-        source.addEventListener("content_block_delta", (event) => {
-          const payload = JSON.parse((event as MessageEvent).data);
-          const delta = payload.delta?.text ?? "";
-          buffer += delta;
-          if (delta) onDelta(delta);
+        source.addEventListener("message_start", (event) => {
+          handlers.onMessageStart?.(eventPayload(event));
         });
-        source.addEventListener("message_stop", () => {
+        source.addEventListener("content_block_delta", (event) => {
+          const payload = eventPayload(event);
+          const deltaPayload = payload.delta;
+          const delta =
+            deltaPayload && typeof deltaPayload === "object" && "text" in deltaPayload
+              ? String((deltaPayload as { text?: unknown }).text ?? "")
+              : "";
+          buffer += delta;
+          if (delta) handlers.onDelta?.(delta, payload);
+        });
+        source.addEventListener("message:updated", (event) => {
+          handlers.onMessageUpdated?.(eventPayload(event) as unknown as ChatMessage);
+        });
+        source.addEventListener("message:new", (event) => {
+          handlers.onMessageNew?.(eventPayload(event) as unknown as ChatMessage);
+        });
+        source.addEventListener("message_stop", (event) => {
           window.clearTimeout(timeout);
           source.close();
-          onDone?.();
+          handlers.onDone?.(eventPayload(event));
           resolve(buffer || "主控 Agent 已完成任务编排。");
         });
         source.addEventListener("error", () => {
           window.clearTimeout(timeout);
           source.close();
           if (buffer) {
-            onDone?.();
+            handlers.onDone?.();
             resolve(buffer);
           }
           else reject(new Error("stream failed"));
@@ -415,8 +450,8 @@ export const api = {
     } catch {
       await wait(350);
       const fallback = "模型流式连接暂不可用，任务已进入后台处理，可稍后刷新查看完整结果。";
-      onDelta(fallback);
-      onDone?.();
+      handlers.onDelta?.(fallback, {});
+      handlers.onDone?.();
       return fallback;
     }
   },

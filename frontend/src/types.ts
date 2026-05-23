@@ -450,6 +450,8 @@ export interface MessageAttachment {
 export interface ChatMessage {
   id: string;
   conversationId: string;
+  sender_id?: string;
+  sender_type?: string;
   role: MessageRole;
   kind: MessageKind;
   author: string;
@@ -459,6 +461,7 @@ export interface ChatMessage {
   createdAt: string;
   streamState?: StreamState;
   quotedMessageId?: string;
+  status?: string;
 }
 
 export interface WorkspaceArtifact {
