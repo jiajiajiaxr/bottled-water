@@ -17,7 +17,7 @@ from app.services.events import event_bus
 from app.services.output_filter import strip_internal_agent_output
 from app.services.queue import queue_service
 from app.services.serialization import artifact_to_dict, message_to_dict, subtask_to_dict, task_to_dict
-from app.services.llm_gateway import test_model_config
+from app.services.llm_gateway import stream_model_config, test_model_config
 
 
 def _select_agent(agents: list[Agent], capability: str) -> Agent | None:
@@ -660,20 +660,19 @@ async def _run_direct_agent(
     model_config_id = (agent.config or {}).get("model_config_id")
     if model_config_id:
         try:
-            result = await test_model_config(
+            async for chunk in stream_model_config(
                 db,
                 str(model_config_id),
                 f"{system_prompt}\n\n工具执行摘要：{tool_summary}\n\n用户：{prompt}",
-            )
-            for index in range(0, len(result.text), 24):
-                chunk = result.text[index : index + 24]
-                stream_text += chunk
-                await event_bus.publish(
-                    channel,
-                    "content_block_delta",
-                    {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "text_delta", "text": chunk}},
-                )
-                await asyncio.sleep(0.02)
+            ):
+                text = chunk.get("text", "")
+                if text:
+                    stream_text += text
+                    await event_bus.publish(
+                        channel,
+                        "content_block_delta",
+                        {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "text_delta", "text": text}},
+                    )
         except Exception as exc:
             stream_text = f"{agent.name} 的专属模型调用失败，已降级：{exc}"
             await event_bus.publish(
@@ -755,20 +754,19 @@ async def _run_canvas_agent_reply(
     model_config_id = (agent.config or {}).get("model_config_id")
     if model_config_id:
         try:
-            result = await test_model_config(
+            async for chunk in stream_model_config(
                 db,
                 str(model_config_id),
                 f"{system_prompt}\n\nTool context:\n{tool_summary}\n\nUser:\n{prompt}",
-            )
-            for index in range(0, len(result.text), 24):
-                chunk = result.text[index : index + 24]
-                stream_text += chunk
-                await event_bus.publish(
-                    channel,
-                    "content_block_delta",
-                    {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": chunk}},
-                )
-                await asyncio.sleep(0.02)
+            ):
+                text = chunk.get("text", "")
+                if text:
+                    stream_text += text
+                    await event_bus.publish(
+                        channel,
+                        "content_block_delta",
+                        {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": text}},
+                    )
         except Exception as exc:
             stream_text = f"{agent.name} model call failed and fell back: {exc}"
             await event_bus.publish(
@@ -900,6 +898,22 @@ async def run_orchestration(message_id: str) -> None:
         task.progress = 20
         db.commit()
         await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+
+        # 非独立群聊模式下提前创建主控 Agent 占位消息，让前端立刻显示气泡
+        if not independent_group_mode:
+            assistant = Message(
+                conversation_id=conversation.id,
+                sender_type="agent",
+                sender_id=None,
+                sender_name="Master Agent",
+                content_type="text",
+                content={"text": ""},
+                status="streaming",
+            )
+            db.add(assistant)
+            db.commit()
+            db.refresh(assistant)
+            await event_bus.publish(channel, "message_start", {"agent_message_id": assistant.id})
 
         artifact_type = classify_artifact_request(prompt)
         if artifact_type:
@@ -1067,20 +1081,6 @@ async def run_orchestration(message_id: str) -> None:
                 await event_bus.publish(channel, "workflow:run_updated", {"run_id": workflow_run.id, "status": workflow_run.status, "progress": workflow_run.progress})
             await event_bus.publish(channel, "message_stop", {"stop_reason": "all_agents_completed"})
             return
-
-        assistant = Message(
-            conversation_id=conversation.id,
-            sender_type="agent",
-            sender_id=None,
-            sender_name="Master Agent",
-            content_type="text",
-            content={"text": ""},
-            status="streaming",
-        )
-        db.add(assistant)
-        db.commit()
-        db.refresh(assistant)
-        await event_bus.publish(channel, "message_start", {"agent_message_id": assistant.id})
 
         messages = [
             {
