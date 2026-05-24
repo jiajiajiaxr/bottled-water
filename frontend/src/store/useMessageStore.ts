@@ -14,6 +14,11 @@ interface MessageState {
   addRunningConversationId: (id: string) => void;
   removeRunningConversationId: (id: string) => void;
   clearMessages: () => void;
+  updateMessages: (updater: (current: ChatMessage[]) => ChatMessage[]) => void;
+  setLocalRunningConversationIds: (ids: Set<string>) => void;
+  updateLocalRunningConversationIds: (
+    updater: (current: Set<string>) => Set<string>,
+  ) => void;
 }
 
 export const useMessageStore = create<MessageState>((set) => ({
@@ -45,4 +50,14 @@ export const useMessageStore = create<MessageState>((set) => ({
       return { localRunningConversationIds: next };
     }),
   clearMessages: () => set({ messages: [] }),
+  updateMessages: (updater) =>
+    set((state) => ({ messages: updater(state.messages) })),
+  setLocalRunningConversationIds: (localRunningConversationIds) =>
+    set({ localRunningConversationIds }),
+  updateLocalRunningConversationIds: (updater) =>
+    set((state) => ({
+      localRunningConversationIds: updater(
+        state.localRunningConversationIds,
+      ),
+    })),
 }));

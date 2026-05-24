@@ -22,6 +22,7 @@ import {
   useTaskStore,
   useArtifactStore,
   useConversationStore,
+  useMessageStore,
 } from "../../store";
 import { BackgroundTasksButton } from "./BackgroundTasksButton";
 import { CreateConversationModal } from "../../features/chat/components/CreateConversationModal";
@@ -81,7 +82,15 @@ export function Workbench({
   ) => void;
 }) {
   const [currentUser, setCurrentUser] = useState(user);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const {
+    messages,
+    setMessages,
+    streamState,
+    setStreamState,
+    localRunningConversationIds,
+    updateMessages,
+    updateLocalRunningConversationIds,
+  } = useMessageStore();
   const {
     conversations,
     setConversations,
@@ -106,8 +115,6 @@ export function Workbench({
   const { agents, setAgents, addAgent, updateAgent, removeAgent } =
     useAgentStore();
   const { backgroundTasks, setBackgroundTasks } = useTaskStore();
-  const [localRunningConversationIds, setLocalRunningConversationIds] =
-    useState<Set<string>>(() => new Set());
   const {
     workspaces,
     setWorkspaces,
@@ -116,9 +123,6 @@ export function Workbench({
     addWorkspace,
     updateWorkspace,
   } = useWorkspaceStore();
-  const [streamState, setStreamState] = useState<
-    "idle" | "streaming" | "done" | "error"
-  >("idle");
   const {
     agentDrawerOpen,
     workspacesOpen,
@@ -340,7 +344,7 @@ export function Workbench({
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen, setArtifact, setActiveId, setConversations]);
+  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen, setArtifact, setActiveId, setConversations, setMessages]);
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
@@ -397,7 +401,7 @@ export function Workbench({
         setFiles(nextFiles);
       })
       .finally(() => setLoadingMessages(false));
-  }, [activeId, setArtifactPanelOpen, setArtifact, setFiles, setLoadingMessages]);
+  }, [activeId, setArtifactPanelOpen, setArtifact, setFiles, setLoadingMessages, setMessages]);
 
   const patchConversation = async (
     item: Conversation,
@@ -490,7 +494,7 @@ export function Workbench({
       author: string,
       agentId?: string,
     ) => {
-      setMessages((current) => {
+      updateMessages((current) => {
         if (current.some((item) => item.id === messageId)) return current;
         const tempId =
           (agentId && tempIdsByAgentId.get(agentId)) ||
@@ -537,7 +541,7 @@ export function Workbench({
       const agentId =
         normalized.sender_id ||
         (normalized.rawContent?.agent_id as string | undefined);
-      setMessages((current) => {
+      updateMessages((current) => {
         if (current.some((item) => item.id === normalized.id)) {
           return current.map((item) =>
             item.id === normalized.id ? { ...item, ...normalized } : item,
@@ -575,11 +579,11 @@ export function Workbench({
       });
       tempIdsByAgentId.set(agentId, placeholder.id);
       tempIdsByAuthor.set(author, placeholder.id);
-      setMessages((current) => [...current, placeholder]);
+      updateMessages((current) => [...current, placeholder]);
     }
 
     setStreamState("streaming");
-    setLocalRunningConversationIds((current) => {
+    updateLocalRunningConversationIds((current) => {
       const next = new Set(current);
       next.add(conversationId);
       return next;
@@ -624,7 +628,7 @@ export function Workbench({
             String(payload.agent_name || "Agent"),
             payload.agent_id ? String(payload.agent_id) : undefined,
           );
-          setMessages((current) =>
+          updateMessages((current) =>
             current.map((item) =>
               item.id === messageId
                 ? {
@@ -643,7 +647,7 @@ export function Workbench({
           if (incoming.kind === "preview_card") upsertFinalMessage(incoming);
         },
         onDone: () => {
-          setMessages((current) =>
+          updateMessages((current) =>
             current.map((item) =>
               item.streamState === "streaming"
                 ? { ...item, streamState: "done" }
@@ -714,7 +718,7 @@ export function Workbench({
         stripInternalAgentOutput(rawBuffer).slice(0, 120) || "reply failed";
       completedPreview = fallbackPreview;
       setStreamState("error");
-      setMessages((current) =>
+      updateMessages((current) =>
         current.map((item) =>
           item.streamState === "streaming"
             ? {
@@ -727,7 +731,7 @@ export function Workbench({
       );
       throw error;
     } finally {
-      setLocalRunningConversationIds((current) => {
+      updateLocalRunningConversationIds((current) => {
         const next = new Set(current);
         next.delete(conversationId);
         return next;
@@ -754,7 +758,7 @@ export function Workbench({
     stopStreamRef.current?.();
     stopStreamRef.current = undefined;
     setStreamState("done");
-    setLocalRunningConversationIds((current) => {
+    updateLocalRunningConversationIds((current) => {
       const next = new Set(current);
       next.delete(activeId);
       return next;
@@ -770,7 +774,7 @@ export function Workbench({
           : item,
       ),
     );
-    setMessages((current) =>
+    updateMessages((current) =>
       current.map((item) =>
         item.streamState === "streaming"
           ? {
@@ -813,7 +817,7 @@ export function Workbench({
       attachments: localAttachments,
       quotedMessageId: quoted?.id,
     });
-    setMessages((current) => [...current, localMessage]);
+    updateMessages((current) => [...current, localMessage]);
     updateConversations((current) =>
       current.map((item) =>
         item.id === conversationId
@@ -837,7 +841,7 @@ export function Workbench({
         quoted?.id,
         attachments,
       );
-      setMessages((current) =>
+      updateMessages((current) =>
         current.map((item) =>
           item.id === localMessage.id ? userMessage : item,
         ),
@@ -848,7 +852,7 @@ export function Workbench({
           .catch(() => undefined);
         if (freshArtifact) {
           setArtifact(freshArtifact);
-          setMessages((current) => {
+          updateMessages((current) => {
             const exists = current.some(
               (item) =>
                 item.kind === "preview_card" &&
@@ -885,7 +889,7 @@ export function Workbench({
     } catch (error) {
       stopStreamRef.current?.();
       void streamPromise;
-      setMessages((current) =>
+      updateMessages((current) =>
         current.map((item) =>
           item.id === localMessage.id
             ? {
@@ -1058,7 +1062,7 @@ export function Workbench({
                   await api
                     .cancelAssistantReply(task.conversation_id)
                     .catch(() => undefined);
-                  setLocalRunningConversationIds((current) => {
+                  updateLocalRunningConversationIds((current) => {
                     const next = new Set(current);
                     if (task.conversation_id) next.delete(task.conversation_id);
                     return next;
