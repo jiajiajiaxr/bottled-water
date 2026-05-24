@@ -15,7 +15,7 @@ import {
 } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
-import { useUIStore, useAgentStore } from "../../store";
+import { useUIStore, useAgentStore, useWorkspaceStore } from "../../store";
 import { BackgroundTasksButton } from "./BackgroundTasksButton";
 import { CreateConversationModal } from "../../features/chat/components/CreateConversationModal";
 import { MembersDrawer } from "../../features/chat/components/drawers/MembersDrawer";
@@ -35,7 +35,6 @@ import type {
   MessageAttachment,
   UploadedFile,
   User,
-  Workspace,
   WorkspaceArtifact,
 } from "../../types";
 import {
@@ -90,8 +89,14 @@ export function Workbench({
   const [backgroundTasks, setBackgroundTasks] = useState<AgentTask[]>([]);
   const [localRunningConversationIds, setLocalRunningConversationIds] =
     useState<Set<string>>(() => new Set());
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>();
+  const {
+    workspaces,
+    setWorkspaces,
+    activeWorkspaceId,
+    setActiveWorkspaceId,
+    addWorkspace,
+    updateWorkspace,
+  } = useWorkspaceStore();
   const [conversationCategories, setConversationCategories] = useState<
     string[]
   >(CONVERSATION_CATEGORY_OPTIONS);
@@ -1180,20 +1185,19 @@ export function Workbench({
         onClose={() => closeMainTab("workspace")}
         onCreateWorkspace={async (payload) => {
           const created = await api.createWorkspace(payload);
-          setWorkspaces((current) => [created, ...current]);
+          addWorkspace(created);
           setActiveWorkspaceId(created.id);
           navigateToConversation(created.id);
           message.success("工作区已创建");
         }}
         onCreateProject={async (workspaceId, payload) => {
           const project = await api.createProject(workspaceId, payload);
-          setWorkspaces((current) =>
-            current.map((workspace) =>
-              workspace.id === workspaceId
-                ? { ...workspace, project_count: workspace.project_count + 1 }
-                : workspace,
-            ),
-          );
+          const workspace = workspaces.find((w) => w.id === workspaceId);
+          if (workspace) {
+            updateWorkspace(workspaceId, {
+              project_count: workspace.project_count + 1,
+            });
+          }
           message.success("项目已创建");
           return project;
         }}
