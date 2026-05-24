@@ -20,6 +20,7 @@ import {
   useAgentStore,
   useWorkspaceStore,
   useTaskStore,
+  useArtifactStore,
 } from "../../store";
 import { BackgroundTasksButton } from "./BackgroundTasksButton";
 import { CreateConversationModal } from "../../features/chat/components/CreateConversationModal";
@@ -34,8 +35,6 @@ import { PlatformControlDrawer } from "../../features/platform/components/Platfo
 import type {
   ChatMessage,
   Conversation,
-  Deployment,
-  KnowledgeBase,
   MessageAttachment,
   UploadedFile,
   User,
@@ -84,12 +83,18 @@ export function Workbench({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [artifact, setArtifact] = useState<WorkspaceArtifact>();
-  const [deployment, setDeployment] = useState<Deployment>();
+  const {
+    artifact,
+    setArtifact,
+    deployment,
+    setDeployment,
+    files,
+    setFiles,
+    knowledgeBases,
+    setKnowledgeBases,
+  } = useArtifactStore();
   const { agents, setAgents, addAgent, updateAgent, removeAgent } =
     useAgentStore();
-  const [files, setFiles] = useState<UploadedFile[]>([]);
-  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const { backgroundTasks, setBackgroundTasks } = useTaskStore();
   const [localRunningConversationIds, setLocalRunningConversationIds] =
     useState<Set<string>>(() => new Set());
@@ -329,7 +334,7 @@ export function Workbench({
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen]);
+  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen, setArtifact]);
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
@@ -386,7 +391,7 @@ export function Workbench({
         setFiles(nextFiles);
       })
       .finally(() => setLoadingMessages(false));
-  }, [activeId, setArtifactPanelOpen]);
+  }, [activeId, setArtifactPanelOpen, setArtifact, setFiles]);
 
   const patchConversation = async (
     item: Conversation,
@@ -918,7 +923,7 @@ export function Workbench({
 
   const uploadFile = async (file: File) => {
     const uploaded = await api.uploadFile(file, activeId);
-    setFiles((current) => [uploaded, ...current]);
+    setFiles([uploaded, ...files]);
     message.success("文件已加入输入框，发送后会进入模型上下文");
     return uploaded;
   };
@@ -1101,7 +1106,7 @@ export function Workbench({
           onDeploy={deploy}
           onCreateKb={async (payload) => {
             const created = await api.createKnowledgeBase(payload);
-            setKnowledgeBases((current) => [created, ...current]);
+            setKnowledgeBases([created, ...knowledgeBases]);
             message.success("知识库已创建");
           }}
           onImportText={async (kbId, payload) => {
