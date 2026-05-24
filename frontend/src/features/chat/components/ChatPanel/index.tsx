@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   BranchesOutlined,
   CloudUploadOutlined,
@@ -81,12 +81,35 @@ export function ChatPanel({
     setPendingFiles([]);
   };
 
-  const copy = async (value: string) => {
-    await navigator.clipboard.writeText(value);
-    message.success("已复制");
-  };
+  const copy = useCallback(
+    async (value: string) => {
+      await navigator.clipboard.writeText(value);
+      message.success("已复制");
+    },
+    [message],
+  );
 
   const participantAvatars = active?.participants.slice(0, 8) ?? [];
+
+  // 用 Map 缓存 quoted 查找，避免每条消息渲染时都做 O(n) 遍历
+  const messageById = useMemo(() => {
+    const map = new Map<string, ChatMessage>();
+    for (const item of messages) {
+      map.set(item.id, item);
+    }
+    return map;
+  }, [messages]);
+
+  const handleQuote = useCallback((msg: ChatMessage) => setQuoted(msg), []);
+  const handleRegenerate = useCallback(
+    (msg: ChatMessage) => onRegenerate(msg),
+    [onRegenerate],
+  );
+  const handleCopy = useCallback((value: string) => copy(value), [copy]);
+  const handlePreview = useCallback(
+    (msg: ChatMessage) => onOpenPreview(msg),
+    [onOpenPreview],
+  );
 
   return (
     <Content className="chat-panel">
@@ -153,13 +176,15 @@ export function ChatPanel({
             <MessageBubble
               key={item.id}
               message={item}
-              quoted={messages.find(
-                (messageItem) => messageItem.id === item.quotedMessageId,
-              )}
-              onQuote={setQuoted}
-              onRegenerate={onRegenerate}
-              onCopy={copy}
-              onPreview={onOpenPreview}
+              quoted={
+                item.quotedMessageId
+                  ? messageById.get(item.quotedMessageId)
+                  : undefined
+              }
+              onQuote={handleQuote}
+              onRegenerate={handleRegenerate}
+              onCopy={handleCopy}
+              onPreview={handlePreview}
             />
           ))
         ) : (

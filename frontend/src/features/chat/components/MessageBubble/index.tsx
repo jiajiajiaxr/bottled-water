@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   BranchesOutlined,
   CloudUploadOutlined,
@@ -31,21 +31,23 @@ import type { ChatMessage, MessageAttachment } from "../../../../types";
 
 const { Text, Paragraph } = Typography;
 
-export function MessageBubble({
-  message,
-  quoted,
-  onQuote,
-  onRegenerate,
-  onCopy,
-  onPreview,
-}: {
+interface MessageBubbleProps {
   message: ChatMessage;
   quoted?: ChatMessage;
   onQuote: (message: ChatMessage) => void;
   onRegenerate: (message: ChatMessage) => void;
   onCopy: (text: string) => void;
   onPreview: (message: ChatMessage) => void;
-}) {
+}
+
+function MessageBubbleComponent({
+  message,
+  quoted,
+  onQuote,
+  onRegenerate,
+  onCopy,
+  onPreview,
+}: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isEvent =
     message.kind === "event" ||
@@ -302,3 +304,12 @@ export function MessageBubble({
     </>
   );
 }
+
+export const MessageBubble = React.memo(MessageBubbleComponent, (prev, next) => {
+  if (prev.message.id !== next.message.id) return false;
+  if (prev.message.content !== next.message.content) return false;
+  if (prev.message.streamState !== next.message.streamState) return false;
+  if (prev.message.kind !== next.message.kind) return false;
+  if (prev.quoted?.id !== next.quoted?.id) return false;
+  return true;
+});

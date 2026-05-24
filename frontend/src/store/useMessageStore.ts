@@ -10,6 +10,7 @@ interface MessageState {
   setMessages: (messages: ChatMessage[]) => void;
   appendMessage: (message: ChatMessage) => void;
   updateMessage: (messageId: string, patch: Partial<ChatMessage>) => void;
+  updateMessageContent: (messageId: string, content: string) => void;
   setStreamState: (state: StreamState) => void;
   addRunningConversationId: (id: string) => void;
   removeRunningConversationId: (id: string) => void;
@@ -31,11 +32,23 @@ export const useMessageStore = create<MessageState>((set) => ({
       messages: [...state.messages, message],
     })),
   updateMessage: (messageId, patch) =>
-    set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === messageId ? { ...m, ...patch } : m,
-      ),
-    })),
+    set((state) => {
+      const index = state.messages.findIndex((m) => m.id === messageId);
+      if (index === -1) return state;
+      const next = [...state.messages];
+      next[index] = { ...next[index], ...patch };
+      return { messages: next };
+    }),
+  updateMessageContent: (messageId, content) =>
+    set((state) => {
+      const index = state.messages.findIndex((m) => m.id === messageId);
+      if (index === -1) return state;
+      const target = state.messages[index];
+      if (target.content === content) return state;
+      const next = [...state.messages];
+      next[index] = { ...target, content };
+      return { messages: next };
+    }),
   setStreamState: (streamState) => set({ streamState }),
   addRunningConversationId: (id) =>
     set((state) => {

@@ -15,6 +15,44 @@ import {
   participantName,
 } from "../lib/message";
 
+/** 批量合并 delta：50ms 窗口内收到的 delta 合并为一次 state 更新 */
+function createDeltaBatcher(
+  flush: (updates: Map<string, string>) => void,
+  windowMs = 50,
+) {
+  const buffer = new Map<string, string>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const scheduleFlush = () => {
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (!buffer.size) return;
+      const snapshot = new Map(buffer);
+      buffer.clear();
+      flush(snapshot);
+    }, windowMs);
+  };
+
+  return {
+    add: (messageId: string, delta: string) => {
+      const current = buffer.get(messageId) ?? "";
+      buffer.set(messageId, current + delta);
+      scheduleFlush();
+    },
+    flushNow: () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      if (!buffer.size) return;
+      const snapshot = new Map(buffer);
+      buffer.clear();
+      flush(snapshot);
+    },
+  };
+}
+
 export function useMessageOperations(currentUserName: string) {
   const { message } = AntApp.useApp();
   const { loadBackgroundTasks } = useBackgroundTaskPolling();
@@ -23,6 +61,7 @@ export function useMessageOperations(currentUserName: string) {
     useConversationStore();
   const {
     updateMessages,
+    updateMessageContent,
     setMessages,
     setStreamState,
     updateLocalRunningConversationIds,
@@ -181,6 +220,15 @@ export function useMessageOperations(currentUserName: string) {
     );
     stopStreamRef.current = undefined;
 
+    // 批量 delta 处理器：50ms 窗口内合并为一次 state 更新
+    const latestContentById = new Map<string, string>();
+    const deltaBatcher = createDeltaBatcher((updates) => {
+      for (const [msgId, fullContent] of updates) {
+        latestContentById.set(msgId, fullContent);
+        updateMessageContent(msgId, fullContent);
+      }
+    });
+
     let rawBuffer = "";
     let completedPreview = "";
     try {
@@ -212,31 +260,32 @@ export function useMessageOperations(currentUserName: string) {
             String(payload.agent_name || "Agent"),
             payload.agent_id ? String(payload.agent_id) : undefined,
           );
-          updateMessages((current) =>
-            current.map((item) =>
-              item.id === messageId
-                ? {
-                    ...item,
-                    content: stripInternalAgentOutput(
-                      `${item.content}${delta}`,
-                    ),
-                    streamState: "streaming",
-                  }
-                : item,
-            ),
-          );
+          // 累积到 batcher，50ms 批量 flush
+          const existing = latestContentById.get(messageId) ?? "";
+          const nextContent = existing + delta;
+          latestContentById.set(messageId, nextContent);
+          deltaBatcher.add(messageId, delta);
         },
         onMessageUpdated: upsertFinalMessage,
         onMessageNew: (incoming) => {
           if (incoming.kind === "preview_card") upsertFinalMessage(incoming);
         },
         onDone: () => {
+          deltaBatcher.flushNow();
+          // 流结束时统一过滤内部输出
           updateMessages((current) =>
-            current.map((item) =>
-              item.streamState === "streaming"
-                ? { ...item, streamState: "done" }
-                : item,
-            ),
+            current.map((item) => {
+              if (item.streamState !== "streaming") return item;
+              const cleaned =
+                item.role === "assistant" && item.kind === "text"
+                  ? stripInternalAgentOutput(item.content)
+                  : item.content;
+              return {
+                ...item,
+                content: cleaned,
+                streamState: "done" as const,
+              };
+            }),
           );
         },
         onControl: (stop) => {
@@ -298,6 +347,7 @@ export function useMessageOperations(currentUserName: string) {
       }
       if (freshArtifact) setArtifact(freshArtifact);
     } catch (error) {
+      deltaBatcher.flushNow();
       const fallbackPreview =
         stripInternalAgentOutput(rawBuffer).slice(0, 120) || "reply failed";
       completedPreview = fallbackPreview;
