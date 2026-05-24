@@ -13,9 +13,14 @@ import {
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
-import { useUIStore, useAgentStore, useWorkspaceStore } from "../../store";
+import {
+  useUIStore,
+  useAgentStore,
+  useWorkspaceStore,
+  useTaskStore,
+} from "../../store";
 import { BackgroundTasksButton } from "./BackgroundTasksButton";
 import { CreateConversationModal } from "../../features/chat/components/CreateConversationModal";
 import { MembersDrawer } from "../../features/chat/components/drawers/MembersDrawer";
@@ -27,7 +32,6 @@ import { GlobalSettingsDrawer } from "../../features/settings/components/GlobalS
 import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
 import { PlatformControlDrawer } from "../../features/platform/components/PlatformControlDrawer";
 import type {
-  AgentTask,
   ChatMessage,
   Conversation,
   Deployment,
@@ -86,7 +90,7 @@ export function Workbench({
     useAgentStore();
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
-  const [backgroundTasks, setBackgroundTasks] = useState<AgentTask[]>([]);
+  const { backgroundTasks, setBackgroundTasks } = useTaskStore();
   const [localRunningConversationIds, setLocalRunningConversationIds] =
     useState<Set<string>>(() => new Set());
   const {
@@ -214,10 +218,10 @@ export function Workbench({
   };
 
   const loadAgents = async () => setAgents(await api.agents());
-  const loadBackgroundTasks = async () => {
+  const loadBackgroundTasks = useCallback(async () => {
     const tasks = await api.tasks();
     setBackgroundTasks(tasks);
-  };
+  }, [setBackgroundTasks]);
 
   useEffect(() => {
     setCurrentUser(user);
@@ -309,7 +313,7 @@ export function Workbench({
       loadBackgroundTasks().catch(() => undefined);
     }, 3500);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [loadBackgroundTasks]);
 
   useEffect(() => {
     if (!activeWorkspaceId && workspaces.length) return;
