@@ -1,51 +1,48 @@
 import { create } from "zustand";
 import type { ChatMessage } from "../types";
 
+export type StreamState = "idle" | "streaming" | "done" | "error";
+
 interface MessageState {
-  messages: Record<string, ChatMessage[]>;
-  streamingConversationId: string | null;
-  setMessages: (conversationId: string, messages: ChatMessage[]) => void;
-  appendMessage: (conversationId: string, message: ChatMessage) => void;
-  updateMessage: (
-    conversationId: string,
-    messageId: string,
-    patch: Partial<ChatMessage>,
-  ) => void;
-  setStreamingConversationId: (id: string | null) => void;
-  clearMessages: (conversationId: string) => void;
+  messages: ChatMessage[];
+  streamState: StreamState;
+  localRunningConversationIds: Set<string>;
+  setMessages: (messages: ChatMessage[]) => void;
+  appendMessage: (message: ChatMessage) => void;
+  updateMessage: (messageId: string, patch: Partial<ChatMessage>) => void;
+  setStreamState: (state: StreamState) => void;
+  addRunningConversationId: (id: string) => void;
+  removeRunningConversationId: (id: string) => void;
+  clearMessages: () => void;
 }
 
 export const useMessageStore = create<MessageState>((set) => ({
-  messages: {},
-  streamingConversationId: null,
-  setMessages: (conversationId, messages) =>
+  messages: [],
+  streamState: "idle",
+  localRunningConversationIds: new Set(),
+  setMessages: (messages) => set({ messages }),
+  appendMessage: (message) =>
     set((state) => ({
-      messages: { ...state.messages, [conversationId]: messages },
+      messages: [...state.messages, message],
     })),
-  appendMessage: (conversationId, message) =>
+  updateMessage: (messageId, patch) =>
     set((state) => ({
-      messages: {
-        ...state.messages,
-        [conversationId]: [
-          ...(state.messages[conversationId] ?? []),
-          message,
-        ],
-      },
+      messages: state.messages.map((m) =>
+        m.id === messageId ? { ...m, ...patch } : m,
+      ),
     })),
-  updateMessage: (conversationId, messageId, patch) =>
-    set((state) => ({
-      messages: {
-        ...state.messages,
-        [conversationId]: (state.messages[conversationId] ?? []).map((m) =>
-          m.id === messageId ? { ...m, ...patch } : m,
-        ),
-      },
-    })),
-  setStreamingConversationId: (id) => set({ streamingConversationId: id }),
-  clearMessages: (conversationId) =>
+  setStreamState: (streamState) => set({ streamState }),
+  addRunningConversationId: (id) =>
     set((state) => {
-      const next = { ...state.messages };
-      delete next[conversationId];
-      return { messages: next };
+      const next = new Set(state.localRunningConversationIds);
+      next.add(id);
+      return { localRunningConversationIds: next };
     }),
+  removeRunningConversationId: (id) =>
+    set((state) => {
+      const next = new Set(state.localRunningConversationIds);
+      next.delete(id);
+      return { localRunningConversationIds: next };
+    }),
+  clearMessages: () => set({ messages: [] }),
 }));

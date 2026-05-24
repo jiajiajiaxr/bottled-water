@@ -1,66 +1,60 @@
 import { create } from "zustand";
 
+interface CreateModalState {
+  open: boolean;
+  group: boolean;
+}
+
 interface UIState {
-  // 抽屉状态
-  agentDirectoryOpen: boolean;
-  workspaceDrawerOpen: boolean;
-  settingsDrawerOpen: boolean;
+  agentDrawerOpen: boolean;
+  workspacesOpen: boolean;
+  globalSettingsOpen: boolean;
   platformDrawerOpen: boolean;
-  membersDrawerOpen: boolean;
-  filesDrawerOpen: boolean;
+  membersOpen: boolean;
   conversationSettingsOpen: boolean;
-  previewPanelOpen: boolean;
+  artifactPanelOpen: boolean;
+  createOpen: CreateModalState;
 
-  // 弹窗状态
-  createConversationModalOpen: boolean;
-
-  // actions
-  setAgentDirectoryOpen: (open: boolean) => void;
-  setWorkspaceDrawerOpen: (open: boolean) => void;
-  setSettingsDrawerOpen: (open: boolean) => void;
+  setAgentDrawerOpen: (open: boolean) => void;
+  setWorkspacesOpen: (open: boolean) => void;
+  setGlobalSettingsOpen: (open: boolean) => void;
   setPlatformDrawerOpen: (open: boolean) => void;
-  setMembersDrawerOpen: (open: boolean) => void;
-  setFilesDrawerOpen: (open: boolean) => void;
+  setMembersOpen: (open: boolean) => void;
   setConversationSettingsOpen: (open: boolean) => void;
-  setPreviewPanelOpen: (open: boolean) => void;
-  setCreateConversationModalOpen: (open: boolean) => void;
+  setArtifactPanelOpen: (open: boolean) => void;
+  setCreateOpen: (state: CreateModalState) => void;
 
-  // 一键关闭所有抽屉
   closeAllDrawers: () => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
-  agentDirectoryOpen: false,
-  workspaceDrawerOpen: false,
-  settingsDrawerOpen: false,
+  agentDrawerOpen: false,
+  workspacesOpen: false,
+  globalSettingsOpen: false,
   platformDrawerOpen: false,
-  membersDrawerOpen: false,
-  filesDrawerOpen: false,
+  membersOpen: false,
   conversationSettingsOpen: false,
-  previewPanelOpen: false,
-  createConversationModalOpen: false,
+  artifactPanelOpen: false,
+  createOpen: { open: false, group: false },
 
-  setAgentDirectoryOpen: (agentDirectoryOpen) => set({ agentDirectoryOpen }),
-  setWorkspaceDrawerOpen: (workspaceDrawerOpen) => set({ workspaceDrawerOpen }),
-  setSettingsDrawerOpen: (settingsDrawerOpen) => set({ settingsDrawerOpen }),
+  setAgentDrawerOpen: (agentDrawerOpen) => set({ agentDrawerOpen }),
+  setWorkspacesOpen: (workspacesOpen) => set({ workspacesOpen }),
+  setGlobalSettingsOpen: (globalSettingsOpen) => set({ globalSettingsOpen }),
   setPlatformDrawerOpen: (platformDrawerOpen) => set({ platformDrawerOpen }),
-  setMembersDrawerOpen: (membersDrawerOpen) => set({ membersDrawerOpen }),
-  setFilesDrawerOpen: (filesDrawerOpen) => set({ filesDrawerOpen }),
+  setMembersOpen: (membersOpen) => set({ membersOpen }),
   setConversationSettingsOpen: (conversationSettingsOpen) =>
     set({ conversationSettingsOpen }),
-  setPreviewPanelOpen: (previewPanelOpen) => set({ previewPanelOpen }),
-  setCreateConversationModalOpen: (createConversationModalOpen) =>
-    set({ createConversationModalOpen }),
+  setArtifactPanelOpen: (artifactPanelOpen) => set({ artifactPanelOpen }),
+  setCreateOpen: (createOpen) => set({ createOpen }),
 
   closeAllDrawers: () =>
     set({
-      agentDirectoryOpen: false,
-      workspaceDrawerOpen: false,
-      settingsDrawerOpen: false,
+      agentDrawerOpen: false,
+      workspacesOpen: false,
+      globalSettingsOpen: false,
       platformDrawerOpen: false,
-      membersDrawerOpen: false,
-      filesDrawerOpen: false,
+      membersOpen: false,
       conversationSettingsOpen: false,
-      previewPanelOpen: false,
+      artifactPanelOpen: false,
     }),
 }));
