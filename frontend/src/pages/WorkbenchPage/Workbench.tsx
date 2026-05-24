@@ -22,7 +22,6 @@ import { ConversationSettingsDrawer } from "../../features/chat/components/drawe
 import { ConversationSidebar } from "../../features/chat/components/ConversationSidebar";
 import { ChatPanel } from "../../features/chat/components/ChatPanel";
 import { AgentDirectoryDrawer } from "../../features/agents/components/AgentDirectoryDrawer";
-import { WorkspacesDrawer } from "../../features/workspace/components/WorkspacesDrawer";
 import { GlobalSettingsDrawer } from "../../features/settings/components/GlobalSettingsDrawer";
 import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
 import { PlatformControlDrawer } from "../../features/platform/components/PlatformControlDrawer";
@@ -261,6 +260,7 @@ export function Workbench({
       },
     );
     loadBackgroundTasks().catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -284,6 +284,7 @@ export function Workbench({
       if (activeWorkspaceId !== fallbackId) setActiveWorkspaceId(fallbackId);
       navigateToConversation(fallbackId, undefined, true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeWorkspaceId, workspaces, activeWorkspaceId]);
 
   useEffect(() => {
@@ -346,6 +347,7 @@ export function Workbench({
     ) {
       navigateToConversation(workspaceId, nextConversation.id, true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeWorkspaceId,
     activeId,
@@ -417,159 +419,9 @@ export function Workbench({
     message.success(payload.group ? "群聊已创建" : "会话已创建");
   };
 
-  const appendAssistantStream = async (
-    conversationId: string,
-    prompt: string,
-  ) => {
-    const assistant = makeMessage({
-      conversationId,
-      role: "assistant",
-      kind: "text",
-      author: "Master Agent",
-      content: "",
-      streamState: "streaming",
-    });
-    setMessages((current) => [...current, assistant]);
-    setStreamState("streaming");
-    setLocalRunningConversationIds((current) => {
-      const next = new Set(current);
-      next.add(conversationId);
-      return next;
-    });
-    setConversations((current) =>
-      current.map((item) =>
-        item.id === conversationId
-          ? { ...item, updatedAt: new Date().toISOString(), unread: 0 }
-          : item,
-      ),
-    );
-    stopStreamRef.current = undefined;
-
-    let rawBuffer = "";
-    let completedPreview = "";
-    try {
-      await api.streamAssistantReply(
-        conversationId,
-        (delta) => {
-          rawBuffer += delta;
-          const visible = stripInternalAgentOutput(rawBuffer);
-          setMessages((current) =>
-            current.map((item) =>
-              item.id === assistant.id ? { ...item, content: visible } : item,
-            ),
-          );
-        },
-        () => {
-          setMessages((current) =>
-            current.map((item) =>
-              item.id === assistant.id
-                ? { ...item, streamState: "done" }
-                : item,
-            ),
-          );
-        },
-        (stop) => {
-          stopStreamRef.current = stop;
-        },
-      );
-      setMessages((current) =>
-        current.map((item) =>
-          item.id === assistant.id ? { ...item, streamState: "done" } : item,
-        ),
-      );
-      setStreamState("done");
-      const [freshMessages, freshArtifact] = await Promise.all([
-        api.messages(conversationId),
-        api.artifact(conversationId),
-      ]).catch(() => [undefined, undefined]);
-      if (freshMessages) {
-        const cleanMessages = freshMessages.map((item) =>
-          item.role === "assistant" && item.kind === "text"
-            ? { ...item, content: stripInternalAgentOutput(item.content) }
-            : item,
-        );
-        const hasPreviewCard = cleanMessages.some(
-          (item) => item.kind === "preview_card",
-        );
-        setMessages(
-          hasPreviewCard || !freshArtifact
-            ? cleanMessages
-            : [
-                ...cleanMessages,
-                makeMessage({
-                  conversationId,
-                  role: "assistant",
-                  kind: "preview_card",
-                  author: "Artifact Agent",
-                  content: `预览产物：${freshArtifact.title}`,
-                  streamState: "done",
-                }),
-              ],
-        );
-        const lastAssistant = [...cleanMessages]
-          .reverse()
-          .find((item) => item.role === "assistant" && item.kind === "text");
-        const previewText =
-          stripInternalAgentOutput(lastAssistant?.content ?? rawBuffer) ||
-          "已完成";
-        completedPreview = previewText.slice(0, 120);
-        setConversations((current) =>
-          current.map((item) =>
-            item.id === conversationId
-              ? {
-                  ...item,
-                  lastMessage: completedPreview,
-                  updatedAt: new Date().toISOString(),
-                }
-              : item,
-          ),
-        );
-      }
-      if (freshArtifact) setArtifact(freshArtifact);
-    } catch (error) {
-      const fallbackPreview =
-        stripInternalAgentOutput(rawBuffer).slice(0, 120) ||
-        "回复暂未完成，请稍后刷新。";
-      completedPreview = fallbackPreview;
-      setStreamState("error");
-      setMessages((current) =>
-        current.map((item) =>
-          item.id === assistant.id
-            ? {
-                ...item,
-                streamState: "error",
-                content: stripInternalAgentOutput(rawBuffer) || fallbackPreview,
-              }
-            : item,
-        ),
-      );
-      throw error;
-    } finally {
-      setLocalRunningConversationIds((current) => {
-        const next = new Set(current);
-        next.delete(conversationId);
-        return next;
-      });
-      if (completedPreview) {
-        setConversations((current) =>
-          current.map((item) =>
-            item.id === conversationId && item.lastMessage === "正在回答..."
-              ? {
-                  ...item,
-                  lastMessage: completedPreview,
-                  updatedAt: new Date().toISOString(),
-                }
-              : item,
-          ),
-        );
-      }
-      loadBackgroundTasks().catch(() => undefined);
-    }
-  };
-
   const appendConversationStream = async (
     conversationId: string,
-    prompt: string,
+    _prompt: string,
   ) => {
     const targetConversation =
       conversations.find((item) => item.id === conversationId) ?? active;

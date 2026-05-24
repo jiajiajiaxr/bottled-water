@@ -112,7 +112,7 @@ export function PlatformControlDrawer({
   const [modelProviders, setModelProviders] = useState<ModelProvider[]>([]);
   const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
-  const [mcpInvocations, setMcpInvocations] = useState<McpInvocation[]>([]);
+  const [_mcpInvocations, setMcpInvocations] = useState<McpInvocation[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [sandboxes, setSandboxes] = useState<SandboxSession[]>([]);
@@ -133,14 +133,14 @@ export function PlatformControlDrawer({
   const [skillSearch, setSkillSearch] = useState("");
   const [toolInvokeResult, setToolInvokeResult] = useState("");
   const [sandboxResult, setSandboxResult] = useState<SandboxCommandResult>();
-  const [mcpInvocationResult, setMcpInvocationResult] = useState("");
+  const [_mcpInvocationResult, setMcpInvocationResult] = useState("");
   const [routingMode, setRoutingMode] = useState("auto");
-  const [workflowStatus, setWorkflowStatus] = useState("ready");
+  const [_workflowStatus, setWorkflowStatus] = useState("ready");
   const [conversationWorkflow, setConversationWorkflow] =
     useState<ConversationWorkflow>();
   const [workflowJson, setWorkflowJson] = useState("");
   const [draggingNodeId, setDraggingNodeId] = useState<string>();
-  const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
+  const [_workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
   const { message } = AntApp.useApp();
 
   const activeWorkspace =

@@ -17,7 +17,8 @@ export {
   participantName,
 } from "./message";
 
-export { renderInlineMarkdown, MarkdownContent } from "./markdown";
+export { renderInlineMarkdown } from "./markdown-inline";
+export { MarkdownContent } from "./markdown";
 
 export { buildPreviewDocument } from "./preview";
 
