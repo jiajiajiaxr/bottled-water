@@ -15,6 +15,7 @@ import {
 } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
+import { useUIStore } from "../../store";
 import { BackgroundTasksButton } from "./BackgroundTasksButton";
 import { CreateConversationModal } from "../../features/chat/components/CreateConversationModal";
 import { MembersDrawer } from "../../features/chat/components/drawers/MembersDrawer";
@@ -82,7 +83,6 @@ export function Workbench({
   const [activeId, setActiveId] = useState<string>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [artifact, setArtifact] = useState<WorkspaceArtifact>();
-  const [artifactPanelOpen, setArtifactPanelOpen] = useState(false);
   const [deployment, setDeployment] = useState<Deployment>();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [files, setFiles] = useState<UploadedFile[]>([]);
@@ -99,16 +99,22 @@ export function Workbench({
   const [streamState, setStreamState] = useState<
     "idle" | "streaming" | "done" | "error"
   >("idle");
-  const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
-  const [workspacesOpen, setWorkspacesOpen] = useState(false);
-  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
-  const [conversationSettingsOpen, setConversationSettingsOpen] =
-    useState(false);
-  const [membersOpen, setMembersOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState<{
-    open: boolean;
-    group: boolean;
-  }>({ open: false, group: false });
+  const {
+    agentDrawerOpen,
+    workspacesOpen,
+    globalSettingsOpen,
+    conversationSettingsOpen,
+    membersOpen,
+    createOpen,
+    artifactPanelOpen,
+    setAgentDrawerOpen,
+    setWorkspacesOpen,
+    setGlobalSettingsOpen,
+    setConversationSettingsOpen,
+    setMembersOpen,
+    setCreateOpen,
+    setArtifactPanelOpen,
+  } = useUIStore();
   const stopStreamRef = useRef<(() => void) | undefined>();
   const { message } = AntApp.useApp();
 
@@ -291,7 +297,7 @@ export function Workbench({
     setAgentDrawerOpen(routeTab === "agents");
     setWorkspacesOpen(routeTab === "workspace");
     setGlobalSettingsOpen(routeTab === "settings");
-  }, [routeTab]);
+  }, [routeTab, setAgentDrawerOpen, setWorkspacesOpen, setGlobalSettingsOpen]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -314,7 +320,7 @@ export function Workbench({
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspaceId, workspaces.length]);
+  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen]);
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
@@ -371,7 +377,7 @@ export function Workbench({
         setFiles(nextFiles);
       })
       .finally(() => setLoadingMessages(false));
-  }, [activeId]);
+  }, [activeId, setArtifactPanelOpen]);
 
   const patchConversation = async (
     item: Conversation,
