@@ -17,6 +17,9 @@ interface ConversationState {
   removeConversation: (id: string) => void;
   setLoading: (loading: boolean) => void;
   setLoadingMessages: (loading: boolean) => void;
+  updateConversations: (
+    updater: (current: Conversation[]) => Conversation[],
+  ) => void;
 }
 
 export const useConversationStore = create<ConversationState>((set) => ({
@@ -47,4 +50,6 @@ export const useConversationStore = create<ConversationState>((set) => ({
     })),
   setLoading: (isLoading) => set({ isLoading }),
   setLoadingMessages: (loadingMessages) => set({ loadingMessages }),
+  updateConversations: (updater) =>
+    set((state) => ({ conversations: updater(state.conversations) })),
 }));

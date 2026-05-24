@@ -21,6 +21,7 @@ import {
   useWorkspaceStore,
   useTaskStore,
   useArtifactStore,
+  useConversationStore,
 } from "../../store";
 import { BackgroundTasksButton } from "./BackgroundTasksButton";
 import { CreateConversationModal } from "../../features/chat/components/CreateConversationModal";
@@ -80,9 +81,18 @@ export function Workbench({
   ) => void;
 }) {
   const [currentUser, setCurrentUser] = useState(user);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeId, setActiveId] = useState<string>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const {
+    conversations,
+    setConversations,
+    activeId,
+    setActiveId,
+    conversationCategories,
+    setConversationCategories,
+    loadingMessages,
+    setLoadingMessages,
+    updateConversations,
+  } = useConversationStore();
   const {
     artifact,
     setArtifact,
@@ -106,10 +116,6 @@ export function Workbench({
     addWorkspace,
     updateWorkspace,
   } = useWorkspaceStore();
-  const [conversationCategories, setConversationCategories] = useState<
-    string[]
-  >(CONVERSATION_CATEGORY_OPTIONS);
-  const [loadingMessages, setLoadingMessages] = useState(false);
   const [streamState, setStreamState] = useState<
     "idle" | "streaming" | "done" | "error"
   >("idle");
@@ -250,17 +256,17 @@ export function Workbench({
     setConversationCategories(
       mergeConversationCategories(CONVERSATION_CATEGORY_OPTIONS, stored),
     );
-  }, [categoryStorageKey]);
+  }, [categoryStorageKey, setConversationCategories]);
 
   useEffect(() => {
-    setConversationCategories((current) =>
+    setConversationCategories(
       mergeConversationCategories(
         CONVERSATION_CATEGORY_OPTIONS,
-        current,
+        conversationCategories,
         categoryNamesFromConversations,
       ),
     );
-  }, [categoryNamesFromConversations]);
+  }, [categoryNamesFromConversations, conversationCategories, setConversationCategories]);
 
   useEffect(() => {
     Promise.all([api.agents(), api.knowledgeBases(), api.workspaces()]).then(
@@ -334,7 +340,7 @@ export function Workbench({
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen, setArtifact]);
+  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen, setArtifact, setActiveId, setConversations]);
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
@@ -391,7 +397,7 @@ export function Workbench({
         setFiles(nextFiles);
       })
       .finally(() => setLoadingMessages(false));
-  }, [activeId, setArtifactPanelOpen, setArtifact, setFiles]);
+  }, [activeId, setArtifactPanelOpen, setArtifact, setFiles, setLoadingMessages]);
 
   const patchConversation = async (
     item: Conversation,
@@ -402,7 +408,7 @@ export function Workbench({
       patch.folder || patch.category || updated.folder || updated.category;
     if (nextCategory)
       saveConversationCategories([...conversationCategories, nextCategory]);
-    setConversations((current) =>
+    updateConversations((current) =>
       current.map((conversation) =>
         conversation.id === item.id
           ? { ...conversation, ...updated }
@@ -428,7 +434,7 @@ export function Workbench({
       workspace_id: activeWorkspaceId,
     });
     saveConversationCategories([...conversationCategories, payload.folder]);
-    setConversations((current) => [created, ...current]);
+    updateConversations((current) => [created, ...current]);
     setActiveId(created.id);
     navigateToConversation(
       created.workspace_id || activeWorkspaceId,
@@ -578,7 +584,7 @@ export function Workbench({
       next.add(conversationId);
       return next;
     });
-    setConversations((current) =>
+    updateConversations((current) =>
       current.map((item) =>
         item.id === conversationId
           ? { ...item, updatedAt: new Date().toISOString(), unread: 0 }
@@ -690,7 +696,7 @@ export function Workbench({
           stripInternalAgentOutput(rawBuffer) ||
           "done"
         ).slice(0, 120);
-        setConversations((current) =>
+        updateConversations((current) =>
           current.map((item) =>
             item.id === conversationId
               ? {
@@ -727,7 +733,7 @@ export function Workbench({
         return next;
       });
       if (completedPreview) {
-        setConversations((current) =>
+        updateConversations((current) =>
           current.map((item) =>
             item.id === conversationId && item.lastMessage === "正在回答..."
               ? {
@@ -753,7 +759,7 @@ export function Workbench({
       next.delete(activeId);
       return next;
     });
-    setConversations((current) =>
+    updateConversations((current) =>
       current.map((item) =>
         item.id === activeId
           ? {
@@ -808,7 +814,7 @@ export function Workbench({
       quotedMessageId: quoted?.id,
     });
     setMessages((current) => [...current, localMessage]);
-    setConversations((current) =>
+    updateConversations((current) =>
       current.map((item) =>
         item.id === conversationId
           ? {
@@ -862,7 +868,7 @@ export function Workbench({
               }),
             ];
           });
-          setConversations((current) =>
+          updateConversations((current) =>
             current.map((item) =>
               item.id === conversationId
                 ? {
@@ -986,7 +992,7 @@ export function Workbench({
             okButtonProps: { danger: true },
             onOk: async () => {
               await api.deleteConversation(item.id);
-              setConversations((current) =>
+              updateConversations((current) =>
                 current.filter((conversation) => conversation.id !== item.id),
               );
               if (activeId === item.id) {
@@ -1144,7 +1150,7 @@ export function Workbench({
           if (!activeId) return;
           try {
             const updated = await api.addParticipants(activeId, ids);
-            setConversations((current) =>
+            updateConversations((current) =>
               current.map((item) => (item.id === activeId ? updated : item)),
             );
             message.success("成员已加入");
@@ -1157,7 +1163,7 @@ export function Workbench({
         onRemoveParticipant={async (participant) => {
           if (!activeId || !participant.id) return;
           const updated = await api.removeParticipant(activeId, participant.id);
-          setConversations((current) =>
+          updateConversations((current) =>
             current.map((item) => (item.id === activeId ? updated : item)),
           );
           message.success("成员已移除");
