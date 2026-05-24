@@ -15,7 +15,7 @@ import {
 } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
-import { useUIStore } from "../../store";
+import { useUIStore, useAgentStore } from "../../store";
 import { BackgroundTasksButton } from "./BackgroundTasksButton";
 import { CreateConversationModal } from "../../features/chat/components/CreateConversationModal";
 import { MembersDrawer } from "../../features/chat/components/drawers/MembersDrawer";
@@ -27,7 +27,6 @@ import { GlobalSettingsDrawer } from "../../features/settings/components/GlobalS
 import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
 import { PlatformControlDrawer } from "../../features/platform/components/PlatformControlDrawer";
 import type {
-  Agent,
   AgentTask,
   ChatMessage,
   Conversation,
@@ -84,7 +83,8 @@ export function Workbench({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [artifact, setArtifact] = useState<WorkspaceArtifact>();
   const [deployment, setDeployment] = useState<Deployment>();
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const { agents, setAgents, addAgent, updateAgent, removeAgent } =
+    useAgentStore();
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [backgroundTasks, setBackgroundTasks] = useState<AgentTask[]>([]);
@@ -1111,17 +1111,11 @@ export function Workbench({
         agents={agents}
         onClose={() => closeMainTab("agents")}
         onRefresh={loadAgents}
-        onCreateAgent={(agent) => setAgents((current) => [agent, ...current])}
-        onUpdateAgent={(agent) =>
-          setAgents((current) =>
-            current.map((item) => (item.id === agent.id ? agent : item)),
-          )
-        }
+        onCreateAgent={addAgent}
+        onUpdateAgent={(agent) => updateAgent(agent.id, agent)}
         onDeleteAgent={async (agent) => {
           await api.deleteAgent(agent.id);
-          setAgents((current) =>
-            current.filter((item) => item.id !== agent.id),
-          );
+          removeAgent(agent.id);
         }}
         onTestAgent={async (agentId, text) =>
           (await api.testAgent(agentId, text)).response
