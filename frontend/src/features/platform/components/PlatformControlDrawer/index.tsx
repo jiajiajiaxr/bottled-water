@@ -1634,7 +1634,7 @@ export function PlatformControlDrawer({
                           </Button>,
                           (skill.created_by ||
                             skill.workspace_id === activeWorkspace?.id) &&
-                            !Boolean(skill.config?.builtin) && (
+                            !skill.config?.builtin && (
                               <Button
                                 key="delete"
                                 size="small"
