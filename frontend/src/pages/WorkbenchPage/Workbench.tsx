@@ -1,18 +1,4 @@
-import {
-  App as AntApp,
-  Avatar,
-  Button,
-  Layout,
-  Modal,
-  Select,
-  Space,
-  Typography,
-} from "antd";
-import {
-  AppstoreOutlined,
-  RobotOutlined,
-  ToolOutlined,
-} from "@ant-design/icons";
+import { App as AntApp } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import {
@@ -24,16 +10,8 @@ import {
   useConversationStore,
   useMessageStore,
 } from "../../store";
-import { BackgroundTasksButton } from "./BackgroundTasksButton";
-import { CreateConversationModal } from "../../features/chat/components/CreateConversationModal";
-import { MembersDrawer } from "../../features/chat/components/drawers/MembersDrawer";
-import { ConversationSettingsDrawer } from "../../features/chat/components/drawers/ConversationSettingsDrawer";
-import { ConversationSidebar } from "../../features/chat/components/ConversationSidebar";
-import { ChatPanel } from "../../features/chat/components/ChatPanel";
-import { AgentDirectoryDrawer } from "../../features/agents/components/AgentDirectoryDrawer";
-import { GlobalSettingsDrawer } from "../../features/settings/components/GlobalSettingsDrawer";
-import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
-import { PlatformControlDrawer } from "../../features/platform/components/PlatformControlDrawer";
+import { WorkbenchLayout } from "./WorkbenchLayout";
+import { WorkbenchDrawers } from "./WorkbenchDrawers";
 import type {
   ChatMessage,
   Conversation,
@@ -54,8 +32,6 @@ import {
   isLikelyArtifactRequest,
   participantName,
 } from "../../lib/message";
-
-const { Text } = Typography;
 
 export function Workbench({
   user,
@@ -972,169 +948,55 @@ export function Workbench({
   };
 
   return (
-    <Layout className="workbench">
-      <ConversationSidebar
+    <>
+      <WorkbenchLayout
+        currentUser={currentUser}
+        onLogout={onLogout}
+        workspaces={workspaces}
+        activeWorkspace={activeWorkspace}
+        activeWorkspaceId={activeWorkspaceId}
+        selectWorkspace={selectWorkspace}
+        openMainTab={openMainTab}
         conversations={conversations}
         activeId={activeId}
+        active={active}
+        conversationCategories={conversationCategories}
+        selectConversation={selectConversation}
+        setCreateOpen={setCreateOpen}
+        addConversationCategory={addConversationCategory}
+        patchConversation={patchConversation}
+        updateConversations={updateConversations}
+        setActiveId={setActiveId}
+        navigateToConversation={navigateToConversation}
+        messages={messages}
+        loadingMessages={loadingMessages}
+        streamState={streamState}
+        send={send}
+        regenerate={regenerate}
+        stopStreaming={stopStreaming}
+        setMembersOpen={setMembersOpen}
+        setConversationSettingsOpen={setConversationSettingsOpen}
+        uploadFile={uploadFile}
+        artifactPanelOpen={artifactPanelOpen}
+        artifact={artifact}
+        deployment={deployment}
+        files={files}
+        knowledgeBases={knowledgeBases}
+        setArtifactPanelOpen={setArtifactPanelOpen}
+        saveArtifact={saveArtifact}
+        deploy={deploy}
+        setKnowledgeBases={setKnowledgeBases}
+        openArtifactPreview={openArtifactPreview}
+        visibleBackgroundTasks={visibleBackgroundTasks}
+        loadBackgroundTasks={loadBackgroundTasks}
+        updateLocalRunningConversationIds={updateLocalRunningConversationIds}
         runningConversationIds={runningConversationIds}
-        categoryOptions={conversationCategories}
-        onSelect={selectConversation}
-        onCreate={(group) => setCreateOpen({ open: true, group })}
-        onCreateCategory={addConversationCategory}
-        onTogglePin={(item) =>
-          patchConversation(item, { pinned: !item.pinned })
-        }
-        onToggleArchive={(item) =>
-          patchConversation(item, { archived: !item.archived })
-        }
-        onEdit={(item, patch) => patchConversation(item, patch)}
-        onDelete={(item) => {
-          Modal.confirm({
-            title: "删除归档会话",
-            content: `确认删除「${item.title}」？删除后会从列表移除。`,
-            okText: "删除",
-            okButtonProps: { danger: true },
-            onOk: async () => {
-              await api.deleteConversation(item.id);
-              updateConversations((current) =>
-                current.filter((conversation) => conversation.id !== item.id),
-              );
-              if (activeId === item.id) {
-                const nextConversation = conversations.find(
-                  (conversation) => conversation.id !== item.id,
-                );
-                setActiveId(nextConversation?.id);
-                navigateToConversation(
-                  nextConversation?.workspace_id || activeWorkspaceId,
-                  nextConversation?.id,
-                  true,
-                );
-              }
-              message.success("归档会话已删除");
-            },
-          });
-        }}
       />
-      <Layout className="center-layout">
-        <div className="topbar">
-          <Space>
-            <Avatar>
-              {currentUser.avatar ?? currentUser.name.slice(0, 1)}
-            </Avatar>
-            <div>
-              <Text strong>{currentUser.name}</Text>
-              <br />
-              <Text type="secondary">
-                {currentUser.role === "demo" ? "演示用户" : "成员"}
-              </Text>
-            </div>
-          </Space>
-          <Space>
-            <Select
-              style={{ width: 220 }}
-              value={activeWorkspace?.id}
-              placeholder="选择工作区"
-              onChange={(value) => selectWorkspace(value)}
-              options={workspaces.map((workspace) => ({
-                label: workspace.name,
-                value: workspace.id,
-              }))}
-            />
-            <Button
-              icon={<AppstoreOutlined />}
-              onClick={() => openMainTab("workspace")}
-              data-testid="workspace-panel"
-            >
-              工作区
-            </Button>
-            <BackgroundTasksButton
-              tasks={visibleBackgroundTasks}
-              conversations={conversations}
-              activeConversationId={activeId}
-              onOpenConversation={selectConversation}
-              onCreate={async (prompt) => {
-                await send(prompt);
-                await loadBackgroundTasks().catch(() => undefined);
-              }}
-              onCancel={async (task) => {
-                await api.cancelTask(task.id);
-                if (task.conversation_id) {
-                  await api
-                    .cancelAssistantReply(task.conversation_id)
-                    .catch(() => undefined);
-                  updateLocalRunningConversationIds((current) => {
-                    const next = new Set(current);
-                    if (task.conversation_id) next.delete(task.conversation_id);
-                    return next;
-                  });
-                }
-                await loadBackgroundTasks();
-                message.info("后台任务已停止");
-              }}
-              onRefresh={loadBackgroundTasks}
-            />
-            <Button
-              icon={<ToolOutlined />}
-              onClick={() => openMainTab("settings")}
-              data-testid="global-settings"
-            >
-              设置
-            </Button>
-            <Button
-              icon={<RobotOutlined />}
-              onClick={() => openMainTab("agents")}
-              data-testid="agent-directory"
-            >
-              Agent 广场
-            </Button>
-            <Button onClick={onLogout}>退出</Button>
-          </Space>
-        </div>
-        <ChatPanel
-          user={currentUser}
-          active={active}
-          messages={messages}
-          loading={loadingMessages}
-          streamState={streamState}
-          onSend={send}
-          onRegenerate={regenerate}
-          onOpenMembers={() => setMembersOpen(true)}
-          onOpenSettings={() => setConversationSettingsOpen(true)}
-          onUploadFile={uploadFile}
-          onOpenPreview={openArtifactPreview}
-          onStopStreaming={stopStreaming}
-        />
-      </Layout>
-      {artifactPanelOpen && artifact && (
-        <PreviewPanel
-          artifact={artifact}
-          deployment={deployment}
-          files={files}
-          knowledgeBases={knowledgeBases}
-          onClose={() => setArtifactPanelOpen(false)}
-          onSave={saveArtifact}
-          onDeploy={deploy}
-          onCreateKb={async (payload) => {
-            const created = await api.createKnowledgeBase(payload);
-            setKnowledgeBases([created, ...knowledgeBases]);
-            message.success("知识库已创建");
-          }}
-          onImportText={async (kbId, payload) => {
-            await api.importKnowledgeText(kbId, payload);
-            setKnowledgeBases(await api.knowledgeBases());
-            message.success("文档已索引");
-          }}
-          onRetrieve={async (kbId, query) => {
-            const result = await api.retrieveKnowledge(kbId, query);
-            return result.context;
-          }}
-        />
-      )}
-      <AgentDirectoryDrawer
-        open={agentDrawerOpen}
+      <WorkbenchDrawers
+        agentDrawerOpen={agentDrawerOpen}
         agents={agents}
-        onClose={() => closeMainTab("agents")}
-        onRefresh={loadAgents}
+        onCloseAgentDrawer={() => closeMainTab('agents')}
+        onRefreshAgents={loadAgents}
         onCreateAgent={addAgent}
         onUpdateAgent={(agent) => updateAgent(agent.id, agent)}
         onDeleteAgent={async (agent) => {
@@ -1144,88 +1006,31 @@ export function Workbench({
         onTestAgent={async (agentId, text) =>
           (await api.testAgent(agentId, text)).response
         }
-      />
-      <MembersDrawer
-        open={membersOpen}
-        active={active}
-        agents={agents}
-        onClose={() => setMembersOpen(false)}
-        onAddAgents={async (ids) => {
-          if (!activeId) return;
-          try {
-            const updated = await api.addParticipants(activeId, ids);
-            updateConversations((current) =>
-              current.map((item) => (item.id === activeId ? updated : item)),
-            );
-            message.success("成员已加入");
-          } catch (error) {
-            message.error(
-              error instanceof Error ? error.message : "成员加入失败",
-            );
-          }
-        }}
-        onRemoveParticipant={async (participant) => {
-          if (!activeId || !participant.id) return;
-          const updated = await api.removeParticipant(activeId, participant.id);
-          updateConversations((current) =>
-            current.map((item) => (item.id === activeId ? updated : item)),
-          );
-          message.success("成员已移除");
-        }}
-      />
-      <ConversationSettingsDrawer
-        open={conversationSettingsOpen}
-        active={active}
-        agents={agents}
-        categoryOptions={conversationCategories}
-        onClose={() => setConversationSettingsOpen(false)}
-        onSaveConversation={patchConversation}
-      />
-      <CreateConversationModal
-        open={createOpen.open}
-        group={createOpen.group}
-        agents={agents}
-        categoryOptions={conversationCategories}
-        onCancel={() => setCreateOpen({ open: false, group: false })}
-        onCreate={createConversation}
-      />
-      <GlobalSettingsDrawer
-        open={globalSettingsOpen}
-        user={currentUser}
-        onClose={() => closeMainTab("settings")}
-        onUserUpdated={(nextUser) => {
-          setCurrentUser(nextUser);
-        }}
-      />
-      <PlatformControlDrawer
-        open={workspacesOpen}
-        workspaces={workspaces}
+        membersOpen={membersOpen}
         activeConversation={active}
-        onClose={() => closeMainTab("workspace")}
-        onCreateWorkspace={async (payload) => {
-          const created = await api.createWorkspace(payload);
-          addWorkspace(created);
-          setActiveWorkspaceId(created.id);
-          navigateToConversation(created.id);
-          message.success("工作区已创建");
-        }}
-        onCreateProject={async (workspaceId, payload) => {
-          const project = await api.createProject(workspaceId, payload);
-          const workspace = workspaces.find((w) => w.id === workspaceId);
-          if (workspace) {
-            updateWorkspace(workspaceId, {
-              project_count: workspace.project_count + 1,
-            });
-          }
-          message.success("项目已创建");
-          return project;
-        }}
+        activeConversationId={activeId}
+        onCloseMembers={() => setMembersOpen(false)}
+        onUpdateConversations={updateConversations}
+        conversationSettingsOpen={conversationSettingsOpen}
+        onCloseConversationSettings={() => setConversationSettingsOpen(false)}
+        conversationCategories={conversationCategories}
+        onPatchConversation={patchConversation}
+        createOpen={createOpen}
+        onCancelCreate={() => setCreateOpen({ open: false, group: false })}
+        onCreateConversation={createConversation}
+        globalSettingsOpen={globalSettingsOpen}
+        currentUser={currentUser}
+        onCloseGlobalSettings={() => closeMainTab('settings')}
+        onUserUpdated={(nextUser) => setCurrentUser(nextUser)}
+        workspacesOpen={workspacesOpen}
+        workspaces={workspaces}
+        onCloseWorkspaces={() => closeMainTab('workspace')}
         onLoadProjects={api.projects}
-        onSaveProjectFile={async (projectId, payload) => {
-          await api.saveProjectFile(projectId, payload);
-          message.success("项目文件版本已保存");
-        }}
+        onSetActiveWorkspaceId={setActiveWorkspaceId}
+        onNavigateToConversation={navigateToConversation}
+        onAddWorkspace={addWorkspace}
+        onUpdateWorkspace={updateWorkspace}
       />
-    </Layout>
+    </>
   );
 }
