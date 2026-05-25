@@ -68,7 +68,7 @@ export interface WorkbenchLayoutProps {
   messages: ChatMessage[];
   loadingMessages: boolean;
   streamState: StreamState;
-  send: (text: string, quoted?: ChatMessage, attachments?: UploadedFile[]) => Promise<void>;
+  send: (text: string, quoted?: ChatMessage, attachments?: UploadedFile[], thinkingEnabled?: boolean) => Promise<void>;
   regenerate: (source: ChatMessage) => void;
   stopStreaming: () => void;
 

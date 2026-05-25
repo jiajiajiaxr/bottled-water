@@ -436,6 +436,48 @@ button {
   border-radius: 6px;
 }
 
+.thinking-block {
+  margin: 8px 0;
+  border: 1px solid #d9f7be;
+  border-radius: 8px;
+  background: #f6ffed;
+  overflow: hidden;
+}
+
+.thinking-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: #389e0d;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.thinking-toggle:hover {
+  background: #d9f7be;
+}
+
+.thinking-chevron {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.thinking-content {
+  padding: 0 12px 10px;
+  color: #434343;
+  font-size: 13px;
+}
+
+.thinking-content .markdown-content p {
+  margin: 0 0 4px;
+}
+
 .composer-files {
   display: flex;
   flex-wrap: wrap;

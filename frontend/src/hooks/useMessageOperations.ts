@@ -66,6 +66,7 @@ export function useMessageOperations(currentUserName: string) {
   const {
     updateMessages,
     updateMessageContent,
+    updateMessageThinking,
     setMessages,
     setStreamState,
     updateLocalRunningConversationIds,
@@ -224,12 +225,21 @@ export function useMessageOperations(currentUserName: string) {
     );
     stopStreamRef.current = undefined;
 
-    // 批量 delta 处理器：50ms 窗口内有更新的消息合并为一次 state 更新
+    // 批量 delta 处理器：16ms 窗口内有更新的消息合并为一次 state 更新
     const latestContentById = new Map<string, string>();
     const deltaBatcher = createDeltaBatcher((msgIds) => {
       for (const msgId of msgIds) {
         const fullContent = latestContentById.get(msgId) ?? "";
         updateMessageContent(msgId, fullContent);
+      }
+    });
+
+    // 批量 reasoning delta 处理器
+    const latestThinkingById = new Map<string, string>();
+    const thinkingBatcher = createDeltaBatcher((msgIds) => {
+      for (const msgId of msgIds) {
+        const fullThinking = latestThinkingById.get(msgId) ?? "";
+        updateMessageThinking(msgId, fullThinking);
       }
     });
 
@@ -293,6 +303,17 @@ export function useMessageOperations(currentUserName: string) {
           latestContentById.set(messageId, existing + delta);
           deltaBatcher.add(messageId);
         },
+        onReasoningDelta: (delta, payload) => {
+          const messageId = String(
+            payload.agent_message_id || payload.message_id || "",
+          );
+          if (messageId) currentMessageId = messageId;
+          if (!messageId) return;
+          // 累积到 latestThinkingById，标记消息待更新
+          const existing = latestThinkingById.get(messageId) ?? "";
+          latestThinkingById.set(messageId, existing + delta);
+          thinkingBatcher.add(messageId);
+        },
         onMessageUpdated: upsertFinalMessage,
         onMessageNew: (incoming) => {
           if (incoming.kind === "preview_card") upsertFinalMessage(incoming);
@@ -314,6 +335,7 @@ export function useMessageOperations(currentUserName: string) {
         },
         onDone: () => {
           deltaBatcher.flushNow();
+          thinkingBatcher.flushNow();
           activeToolCalls.clear();
           // 流结束时统一过滤内部输出并清空工具调用状态
           updateMessages((current) =>
@@ -477,6 +499,7 @@ export function useMessageOperations(currentUserName: string) {
     content: string,
     quoted?: ChatMessage,
     attachments: UploadedFile[] = [],
+    thinkingEnabled?: boolean,
   ) => {
     if (!activeId) return;
     const conversationId = activeId;
@@ -523,6 +546,7 @@ export function useMessageOperations(currentUserName: string) {
         content,
         quoted?.id,
         attachments,
+        thinkingEnabled,
       );
       updateMessages((current) =>
         current.map((item) =>

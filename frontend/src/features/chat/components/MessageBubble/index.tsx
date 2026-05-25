@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   BranchesOutlined,
+  BulbOutlined,
   CloudUploadOutlined,
   CopyOutlined,
   EyeOutlined,
@@ -39,6 +40,29 @@ interface MessageBubbleProps {
   onRegenerate: (message: ChatMessage) => void;
   onCopy: (text: string) => void;
   onPreview: (message: ChatMessage) => void;
+}
+
+function ThinkingBlock({ thinking }: { thinking: string }) {
+  const [expanded, setExpanded] = useState(true);
+  if (!thinking.trim()) return null;
+  return (
+    <div className="thinking-block">
+      <button
+        type="button"
+        className="thinking-toggle"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <BulbOutlined />
+        <span>思考过程</span>
+        <span className="thinking-chevron">{expanded ? "▼" : "▶"}</span>
+      </button>
+      {expanded && (
+        <div className="thinking-content">
+          <MarkdownContent text={thinking} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function MessageBubbleComponent({
@@ -178,6 +202,9 @@ function MessageBubbleComponent({
             </Text>
           </Flex>
           {quoted && <div className="quote-block">{quoted.content}</div>}
+          {message.thinking && (
+            <ThinkingBlock thinking={message.thinking} />
+          )}
           <div className="message-content">
             <MarkdownContent text={message.content} />
           </div>
