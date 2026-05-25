@@ -216,7 +216,7 @@ button {
 .chat-panel {
   height: calc(100vh - 64px);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   background: #ffffff;
 }
 

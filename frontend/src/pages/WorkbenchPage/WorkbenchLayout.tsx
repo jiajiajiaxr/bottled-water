@@ -128,8 +128,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     send,
     regenerate,
     stopStreaming,
-    setMembersOpen,
-    setConversationSettingsOpen,
     uploadFile,
     artifactPanelOpen,
     artifact,
@@ -267,15 +265,12 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
           </Space>
         </div>
         <ChatPanel
-          user={currentUser}
           active={active}
           messages={messages}
           loading={loadingMessages}
           streamState={streamState}
           onSend={send}
           onRegenerate={regenerate}
-          onOpenMembers={() => setMembersOpen(true)}
-          onOpenSettings={() => setConversationSettingsOpen(true)}
           onUploadFile={uploadFile}
           onOpenPreview={openArtifactPreview}
           onStopStreaming={stopStreaming}

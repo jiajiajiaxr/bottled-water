@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BranchesOutlined,
   CloudUploadOutlined,
   BulbOutlined,
   ReloadOutlined,
   SendOutlined,
-  UserAddOutlined,
 } from "@ant-design/icons";
 import {
   App as AntApp,
-  Avatar,
   Button,
   Empty,
   Flex,
@@ -23,34 +20,28 @@ import {
   Upload,
 } from "antd";
 import type { UploadRequestOption } from "rc-upload/lib/interface";
-import { participantName } from "../../../../lib/message";
 import { MessageBubble } from "../MessageBubble";
 import type {
   ChatMessage,
   Conversation,
   UploadedFile,
-  User,
 } from "../../../../types";
 
-const { Content, Header } = Layout;
+const { Content } = Layout;
 const { TextArea } = Input;
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 export function ChatPanel({
-  user,
   active,
   messages,
   loading,
   streamState,
   onSend,
   onRegenerate,
-  onOpenMembers,
-  onOpenSettings,
   onUploadFile,
   onOpenPreview,
   onStopStreaming,
 }: {
-  user: User;
   active?: Conversation;
   messages: ChatMessage[];
   loading: boolean;
@@ -62,8 +53,6 @@ export function ChatPanel({
     thinkingEnabled?: boolean,
   ) => void;
   onRegenerate: (message: ChatMessage) => void;
-  onOpenMembers: () => void;
-  onOpenSettings: () => void;
   onUploadFile: (file: File) => Promise<UploadedFile>;
   onOpenPreview: (message: ChatMessage) => void;
   onStopStreaming: () => void;
@@ -91,8 +80,6 @@ export function ChatPanel({
     },
     [message],
   );
-
-  const participantAvatars = active?.participants.slice(0, 8) ?? [];
 
   // 用 Map 缓存 quoted 查找，避免每条消息渲染时都做 O(n) 遍历
   const messageById = useMemo(() => {
@@ -140,61 +127,6 @@ export function ChatPanel({
 
   return (
     <Content className="chat-panel">
-      <Header className="chat-header">
-        <div>
-          <Space align="center" wrap>
-            <Title level={3}>{active?.title ?? "选择会话"}</Title>
-            {active?.chat_type === "group" && (
-              <Tag color="blue">
-                {active.agent_count ?? active.participants.length}/8 Agent
-              </Tag>
-            )}
-            {active?.master_enabled && <Tag color="green">主控调度</Tag>}
-          </Space>
-          <Space size={4} wrap className="participant-strip">
-            {participantAvatars.map((item) => (
-              <Tooltip
-                title={`${participantName(item)} · ${item.role ?? "member"}`}
-                key={item.id ?? item.agent_id}
-              >
-                <Avatar
-                  size="small"
-                  style={{
-                    background:
-                      item.agent_status === "offline" ? "#9ca3af" : "#1677ff",
-                  }}
-                >
-                  {participantName(item).slice(0, 1)}
-                </Avatar>
-              </Tooltip>
-            ))}
-            {active?.chat_type === "group" && (
-              <>
-                <Button
-                  size="small"
-                  icon={<UserAddOutlined />}
-                  onClick={onOpenMembers}
-                  data-testid="conversation-members"
-                >
-                  成员
-                </Button>
-                <Button
-                  size="small"
-                  icon={<BranchesOutlined />}
-                  onClick={onOpenSettings}
-                  data-testid="conversation-settings"
-                >
-                  群聊设置
-                </Button>
-              </>
-            )}
-          </Space>
-        </div>
-        <Space>
-          {streamState === "streaming" && <Spin size="small" />}
-          <Avatar>{user.avatar ?? user.name.slice(0, 1)}</Avatar>
-        </Space>
-      </Header>
       <div ref={messageListRef} className="message-list">
         {loading ? (
           <Spin />
