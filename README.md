@@ -16,8 +16,10 @@ AgentHub 是一个面向多 Agent 协作的 IM 工作台。它把会话、群聊
 
 - 登录、注册、演示用户和用户基础设置。
 - 多工作区隔离，会话在不同工作区之间相互独立。
-- 左侧 IM 会话侧边栏，支持置顶、归档、分类、搜索、备注和活跃度排序。
+- 左侧 IM 会话侧边栏，支持置顶、归档、分类、搜索、备注和活跃度排序，支持折叠/展开。
 - 单聊 Agent 和多 Agent 群聊。
+- 模型思考模式开关，支持在聊天中启用/关闭模型的 reasoning 能力。
+- 流式回复实时展示模型的思考过程（thinking），可折叠查看。
 - 群聊成员管理、群聊命名、分类、备注和会话设置。
 - 普通消息、附件消息、流式回复、停止生成和后台任务状态。
 - 上传文件在输入框和聊天区展示，文件内容提取后进入模型上下文。
@@ -85,9 +87,13 @@ Persistence
 
 主要模块：
 
-- `frontend/src/App.tsx`：主工作台、会话列表、聊天区、Agent 广场、设置抽屉、工作流画布和平台控制面板。
-- `frontend/src/api.ts`：前端 API SDK，统一封装认证、会话、消息、Agent、模型、工具、Skill、MCP、文件、产物、工作区和审计请求。
-- `frontend/src/types.ts`：领域类型定义，包括会话、消息、Agent、工作流、工具、Skill、MCP、产物等。
+- `frontend/src/App.tsx`：主应用入口，路由和全局状态初始化。
+- `frontend/src/pages/WorkbenchPage`：主工作台，包含三栏布局（侧边栏、聊天区、预览区）。
+- `frontend/src/api/`：前端 API SDK，统一封装认证、会话、消息、Agent、模型、工具、Skill、MCP、文件、产物、工作区和审计请求。
+- `frontend/src/types/`：领域类型定义，包括会话、消息、Agent、工作流、工具、Skill、MCP、产物等。
+- `frontend/src/store/`：Zustand 状态管理，包括会话、消息、任务、产物等 Store。
+- `frontend/src/hooks/`：业务 Hooks，包括消息操作、后台任务轮询等。
+- `frontend/src/features/`：功能模块组件，包括聊天、预览、平台控制等。
 - `frontend/src/styles.css`：IM 工作台、三栏布局、画布、产物预览和管理面板样式。
 - `frontend/tests`：Vitest 基础渲染测试。
 - `e2e`：Playwright 端到端验收链路。
@@ -101,17 +107,19 @@ Persistence
 主要模块：
 
 - `backend/app/main.py`：FastAPI 应用入口和路由注册。
-- `backend/app/core`：配置、数据库、安全、错误处理和统一响应。
+- `backend/app/core`：配置、数据库、安全、日志、错误处理和统一响应。
 - `backend/app/api`：REST、SSE、WebSocket API。
 - `backend/app/models.py`：平台数据模型。
-- `backend/app/services/orchestrator.py`：多 Agent 编排运行时。
+- `backend/app/services/orchestrator.py`：多 Agent 编排运行时，支持单聊 Function Calling 和群聊工作流画布。
 - `backend/app/services/agentic_runtime.py`：Agent 短循环，负责选择并调用工具、Skills、MCP。
-- `backend/app/services/ark.py`：火山方舟 OpenAI-compatible 模型适配。
+- `backend/app/services/ark.py`：火山方舟 OpenAI-compatible 模型适配，支持流式输出、工具调用和思考模式。
 - `backend/app/services/llm_gateway.py`：模型配置和真实连通性测试。
 - `backend/app/services/tool_registry.py`：统一工具目录、内置工具、自定义工具和官方 Agent 工具箱。
 - `backend/app/services/file_tools.py`：文件解析、预览、转换、摘要和本地向量入口。
 - `backend/app/services/mcp_runtime.py`：MCP 工具调用和调用记录。
 - `backend/app/services/artifacts.py`：产物创建、预览卡片和导出入口。
+- `backend/app/services/events.py`：SSE 事件总线，支持会话级消息流。
+- `backend/app/services/queue.py`：异步任务队列。
 - `backend/alembic`：数据库迁移。
 
 后端是唯一能访问模型 Key、文件系统、MCP、沙箱和远程资源的层。
@@ -310,33 +318,36 @@ DATABASE_URL=...
 安装后端依赖。后端使用 `uv` 管理 Python 3.11 运行时和依赖锁定：
 
 ```powershell
-uv sync --project backend --extra dev
+cd backend
+uv sync --extra dev
 ```
 
 安装前端依赖：
 
 ```powershell
 cd frontend
-corepack pnpm install
+pnpm install
 ```
 
 运行迁移：
 
 ```powershell
-uv run --project backend --directory backend alembic upgrade head
+cd backend
+uv run alembic upgrade head
 ```
 
 启动后端：
 
 ```powershell
-uv run --project backend --directory backend uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+cd backend
+uv run uvicorn app.main:app --reload
 ```
 
 启动前端：
 
 ```powershell
 cd frontend
-corepack pnpm dev
+pnpm dev
 ```
 
 ## 测试
@@ -344,23 +355,49 @@ corepack pnpm dev
 后端：
 
 ```powershell
-uv run --project backend pytest -q
+cd backend
+uv run pytest -q
 ```
 
 前端：
 
 ```powershell
 cd frontend
-corepack pnpm build
-corepack pnpm vitest run
+pnpm build
+pnpm vitest run
 ```
 
 E2E：
 
 ```powershell
 cd frontend
-corepack pnpm exec playwright test -c ../e2e/playwright.config.ts
+pnpm exec playwright test -c ../e2e/playwright.config.ts
 ```
+
+## 代码规范
+
+后端使用 Ruff 进行代码检查和格式化：
+
+```powershell
+cd backend
+uv run ruff check .
+uv run ruff format .
+```
+
+前端使用 ESLint 和 Prettier：
+
+```powershell
+cd frontend
+pnpm lint
+pnpm format
+```
+
+## 近期更新
+
+- **侧边栏折叠**：左侧会话列表支持折叠为 52px 窄工具条，展开后恢复完整视图。
+- **消息智能滚动**：消息列表自动保持底部，用户主动向上滚动后暂停自动跟随，回到底部后恢复。
+- **流式渲染优化**：delta 批处理窗口从 50ms 降至 16ms（约 60fps），Markdown 解析结果使用 useMemo 缓存。
+- **思考模式**：支持在聊天中开启模型思考能力，流式展示 reasoning 过程，可折叠查看。
 
 ## 当前边界
 
@@ -368,3 +405,4 @@ corepack pnpm exec playwright test -c ../e2e/playwright.config.ts
 - MCP 远程执行、沙箱和部署能力保留统一接口，生产级隔离策略仍应由运行环境承载。
 - 文件 OCR 和视觉模型入口已预留，具体识别能力取决于配置的模型和后端扩展。
 - 工作流画布已支持轻量 Dify 风格节点，但复杂分支可视化、嵌套循环和长任务分布式调度仍可继续增强。
+- 思考模式目前依赖豆包/火山方舟模型的 `reasoning_content` 支持，其他模型供应商需适配对应字段。
