@@ -2,12 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BranchesOutlined,
   CheckCircleOutlined,
-  MessageOutlined,
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
-  RocketOutlined,
-  ToolOutlined,
 } from "@ant-design/icons";
 import {
   App as AntApp,
@@ -23,16 +20,15 @@ import {
   Space,
   Tag,
   Tabs,
-  Typography,
 } from "antd";
 import { api } from "../../../../api";
 import { mergeConversationCategories } from "../../../../lib/conversation";
 import {
   createWorkflowNode,
-  WORKFLOW_NODE_TYPE_LABEL,
   WORKFLOW_NODE_TYPE_OPTIONS,
   workflowNodeType,
 } from "../../../../lib/workflow";
+import { layoutWorkflowPositions } from "../../../../lib/workflowLayout";
 import type {
   Agent,
   Conversation,
@@ -45,7 +41,6 @@ import type {
 } from "../../../../types";
 import { WorkflowCanvas } from "./WorkflowCanvas";
 
-const { Text } = Typography;
 const { TextArea } = Input;
 
 export function ConversationSettingsDrawer({
@@ -71,7 +66,7 @@ export function ConversationSettingsDrawer({
   const [workflow, setWorkflow] = useState<ConversationWorkflow>();
   const [workflowJson, setWorkflowJson] = useState("");
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
-  const [draggingNodeId, setDraggingNodeId] = useState<string>();
+  const [workflowGenerating, setWorkflowGenerating] = useState(false);
   const [workflowInstruction, setWorkflowInstruction] = useState("");
   const [newNodeType, setNewNodeType] = useState("agent");
   const [editingNodeId, setEditingNodeId] = useState<string>();
@@ -91,7 +86,16 @@ export function ConversationSettingsDrawer({
   );
 
   const workflowNodes = workflow?.nodes ?? [];
-  const workflowEdges = (workflow?.edges ?? []) as Array<[string, string]>;
+  const workflowEdges = (workflow?.edges ?? [])
+    .map((edge) =>
+      Array.isArray(edge)
+        ? [String(edge[0] ?? ""), String(edge[1] ?? "")]
+        : [
+            String(edge.from ?? edge.source ?? ""),
+            String(edge.to ?? edge.target ?? ""),
+          ],
+    )
+    .filter(([from, to]) => from && to);
   const activeAgentIds = new Set(
     active?.participants
       .map((item) => item.agent_id)
@@ -129,8 +133,9 @@ export function ConversationSettingsDrawer({
   const editingNode = workflowNodes.find((node) => node.id === editingNodeId);
 
   const setWorkflowDraft = (next: ConversationWorkflow) => {
-    setWorkflow(next);
-    setWorkflowJson(JSON.stringify(next, null, 2));
+    const normalized = layoutWorkflowPositions(next);
+    setWorkflow(normalized);
+    setWorkflowJson(JSON.stringify(normalized, null, 2));
   };
 
   const loadWorkflow = async () => {
@@ -148,8 +153,7 @@ export function ConversationSettingsDrawer({
         api.skills(active.workspace_id).catch(() => []),
         api.mcpServers(active.workspace_id).catch(() => []),
       ]);
-    setWorkflow(nextWorkflow);
-    setWorkflowJson(JSON.stringify(nextWorkflow, null, 2));
+    setWorkflowDraft(nextWorkflow);
     setWorkflowInstruction(
       String(nextWorkflow.settings?.generation_instruction ?? ""),
     );
@@ -170,32 +174,8 @@ export function ConversationSettingsDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, active?.id]);
 
-  const workflowIcon = (type?: string, role?: string) => {
-    if (type === "start") return <MessageOutlined />;
-    if (type === "tool" || type === "mcp" || type === "skill")
-      return <ToolOutlined />;
-    if (type === "condition" || type === "loop" || role === "master")
-      return <BranchesOutlined />;
-    if (type === "review" || role === "reviewer")
-      return <CheckCircleOutlined />;
-    if (type === "artifact" || type === "end" || role === "artifact")
-      return <RocketOutlined />;
-    return <RobotOutlined />;
-  };
-
-  const reorderWorkflowNode = (sourceId: string, targetId: string) => {
-    if (!workflow || sourceId === targetId) return;
-    const nodes = [...workflow.nodes];
-    const from = nodes.findIndex((node) => node.id === sourceId);
-    const to = nodes.findIndex((node) => node.id === targetId);
-    if (from < 0 || to < 0) return;
-    const [moved] = nodes.splice(from, 1);
-    nodes.splice(to, 0, moved);
-    setWorkflowDraft({ ...workflow, nodes });
-  };
-
   const addWorkflowNode = (type: string) => {
-    if (!workflow) return;
+    if (!workflow || workflowGenerating) return;
     const node = createWorkflowNode(
       type,
       agents.find((agent) => activeAgentIds.has(agent.id)) ?? agents[0],
@@ -229,6 +209,7 @@ export function ConversationSettingsDrawer({
   };
 
   const openWorkflowNodeEditor = (node: WorkflowNode) => {
+    if (workflowGenerating) return;
     const config = node.config ?? {};
     setEditingNodeId(node.id);
     nodeForm.setFieldsValue({
@@ -247,7 +228,7 @@ export function ConversationSettingsDrawer({
   };
 
   const saveWorkflowNode = async () => {
-    if (!workflow || !editingNodeId) return;
+    if (!workflow || !editingNodeId || workflowGenerating) return;
     const values = await nodeForm.validateFields();
     const type = values.type;
     const config: Record<string, unknown> = {};
@@ -285,10 +266,12 @@ export function ConversationSettingsDrawer({
   };
 
   const saveWorkflow = async () => {
-    if (!active) return;
+    if (!active || workflowGenerating) return;
     let parsed: ConversationWorkflow;
     try {
-      parsed = JSON.parse(workflowJson) as ConversationWorkflow;
+      parsed = layoutWorkflowPositions(
+        JSON.parse(workflowJson) as ConversationWorkflow,
+      );
     } catch {
       message.error("工作流 JSON 格式不正确");
       return;
@@ -352,78 +335,59 @@ export function ConversationSettingsDrawer({
                     <WorkflowCanvas
                       workflow={workflow}
                       latestRun={workflowRuns[0]}
+                      locked={workflowGenerating}
+                      overlayText={
+                        workflowGenerating ? "AI 正在生成工作流…" : undefined
+                      }
                       onChange={setWorkflowDraft}
                       onNodeClick={openWorkflowNodeEditor}
                     />
                   ) : (
                     <Empty description="当前群聊暂无工作流" />
                   )}
-                  {false && (workflowNodes.length ? (
-                    workflowNodes.map((node) => (
-                      <div
-                        key={node.id}
-                        className={`workflow-node workflow-node-${node.status} workflow-node-type-${workflowNodeType(node)}`}
-                        draggable
-                        onClick={() => openWorkflowNodeEditor(node)}
-                        onDragStart={() => setDraggingNodeId(node.id)}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={() => {
-                          if (draggingNodeId)
-                            reorderWorkflowNode(draggingNodeId, node.id);
-                          setDraggingNodeId(undefined);
-                        }}
-                      >
-                        <div className="workflow-node-icon">
-                          {workflowIcon(workflowNodeType(node), node.role)}
-                        </div>
-                        <div className="workflow-node-body">
-                          <Space size={4} wrap>
-                            <Text strong>{node.title}</Text>
-                            <Tag>
-                              {WORKFLOW_NODE_TYPE_LABEL[
-                                workflowNodeType(node)
-                              ] ?? workflowNodeType(node)}
-                            </Tag>
-                          </Space>
-                          <Text type="secondary" ellipsis>
-                            {node.meta || node.role}
-                          </Text>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <Empty description="当前群聊暂无 Agent 工作流" />
-                  ))}
                 </div>
                 <div className="workflow-side">
                   <Space direction="vertical" className="full-width">
                     <Space wrap>
                       <Button
                         icon={<ReloadOutlined />}
-                        disabled={!active}
+                        disabled={!active || workflowGenerating}
                         onClick={loadWorkflow}
                       >
                         重新载入
                       </Button>
                       <Button
                         icon={<RobotOutlined />}
+                        loading={workflowGenerating}
                         disabled={!active}
                         onClick={async () => {
-                          if (!active) return;
-                          const generated =
-                            await api.generateConversationWorkflow(
-                              active.id,
-                              workflowInstruction,
+                          if (!active || workflowGenerating) return;
+                          setEditingNodeId(undefined);
+                          setWorkflowGenerating(true);
+                          try {
+                            const generated =
+                              await api.generateConversationWorkflow(
+                                active.id,
+                                workflowInstruction,
+                              );
+                            setWorkflowDraft(generated);
+                            message.success("AI 已生成工作流");
+                          } catch (error) {
+                            message.error(
+                              error instanceof Error
+                                ? error.message
+                                : "AI 生成工作流失败",
                             );
-                          setWorkflowDraft(generated);
-                          message.success("AI 已按当前群聊 Agent 生成工作流");
+                          } finally {
+                            setWorkflowGenerating(false);
+                          }
                         }}
                       >
                         AI 生成
                       </Button>
                       <Button
                         icon={<PlusOutlined />}
-                        disabled={!workflow}
+                        disabled={!workflow || workflowGenerating}
                         onClick={() => addWorkflowNode(newNodeType)}
                       >
                         添加节点
@@ -431,16 +395,16 @@ export function ConversationSettingsDrawer({
                       <Button
                         type="primary"
                         icon={<CheckCircleOutlined />}
-                        disabled={!workflowJson.trim()}
+                        disabled={!workflowJson.trim() || workflowGenerating}
                         onClick={saveWorkflow}
                       >
                         保存画布
                       </Button>
                       <Button
                         icon={<BranchesOutlined />}
-                        disabled={!active || !workflow}
+                        disabled={!active || !workflow || workflowGenerating}
                         onClick={async () => {
-                          if (!active || !workflow) return;
+                          if (!active || !workflow || workflowGenerating) return;
                           const run = await api.startWorkflowRun(
                             active.id,
                             workflow,
@@ -455,6 +419,7 @@ export function ConversationSettingsDrawer({
                     <TextArea
                       rows={3}
                       value={workflowInstruction}
+                      disabled={workflowGenerating}
                       onChange={(event) =>
                         setWorkflowInstruction(event.target.value)
                       }
@@ -464,11 +429,12 @@ export function ConversationSettingsDrawer({
                       value={newNodeType}
                       onChange={setNewNodeType}
                       options={WORKFLOW_NODE_TYPE_OPTIONS}
+                      disabled={workflowGenerating}
                       className="full-width"
                     />
                     <Select
                       value={workflow?.output_mode ?? "independent_messages"}
-                      disabled={!workflow}
+                      disabled={!workflow || workflowGenerating}
                       onChange={(value) => {
                         if (!workflow) return;
                         setWorkflowDraft({ ...workflow, output_mode: value });
@@ -482,6 +448,7 @@ export function ConversationSettingsDrawer({
                     <TextArea
                       rows={12}
                       value={workflowJson}
+                      disabled={workflowGenerating}
                       onChange={(event) => setWorkflowJson(event.target.value)}
                     />
                     <Card title="连线与运行态">
@@ -518,9 +485,10 @@ export function ConversationSettingsDrawer({
       />
       <Modal
         title="编辑工作流节点"
-        open={Boolean(editingNode)}
+        open={Boolean(editingNode) && !workflowGenerating}
         onCancel={() => setEditingNodeId(undefined)}
         onOk={saveWorkflowNode}
+        confirmLoading={workflowGenerating}
         okText="保存节点"
       >
         <Form form={nodeForm} layout="vertical">
