@@ -23,6 +23,7 @@ __pycache__/
 # Frontend dependencies and build output
 frontend/node_modules/
 node_modules/
+frontend/pnpm-lock.yaml
 frontend/dist/
 dist/
 coverage/
@@ -37,3 +38,6 @@ test-results/
 Thumbs.db
 .idea/
 .vscode/
+
+# Claude Code local settings
+.claude/
