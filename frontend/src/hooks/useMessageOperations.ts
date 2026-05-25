@@ -230,6 +230,27 @@ export function useMessageOperations(currentUserName: string) {
 
     let rawBuffer = "";
     let completedPreview = "";
+    // 追踪当前消息上正在执行的工具调用
+    const activeToolCalls = new Map<string, { toolName: string; toolCallId: string }>();
+    let currentMessageId = "";
+
+    const updateActiveToolCalls = (messageId: string) => {
+      if (!messageId) return;
+      updateMessages((current) =>
+        current.map((item) =>
+          item.id === messageId
+            ? {
+                ...item,
+                rawContent: {
+                  ...item.rawContent,
+                  _activeToolCalls: Array.from(activeToolCalls.values()),
+                },
+              }
+            : item,
+        ),
+      );
+    };
+
     try {
       await api.streamAssistantReply(conversationId, {
         onMessageStart: (payload) => {
@@ -238,6 +259,7 @@ export function useMessageOperations(currentUserName: string) {
               payload.message_id ||
               `stream-${Date.now()}`,
           );
+          currentMessageId = messageId;
           const agentId = payload.agent_id
             ? String(payload.agent_id)
             : undefined;
@@ -247,12 +269,14 @@ export function useMessageOperations(currentUserName: string) {
               (agentId ? "Agent" : "Assistant"),
           );
           ensureStreamingMessage(messageId, author, agentId);
+          activeToolCalls.clear();
         },
         onDelta: (delta, payload) => {
           rawBuffer += delta;
           const messageId = String(
             payload.agent_message_id || payload.message_id || "",
           );
+          if (messageId) currentMessageId = messageId;
           if (!messageId) return;
           ensureStreamingMessage(
             messageId,
@@ -268,9 +292,25 @@ export function useMessageOperations(currentUserName: string) {
         onMessageNew: (incoming) => {
           if (incoming.kind === "preview_card") upsertFinalMessage(incoming);
         },
+        onToolCallStart: (payload) => {
+          const toolName = String(payload.tool_name || "");
+          const toolCallId = String(payload.tool_call_id || "");
+          if (toolName && toolCallId) {
+            activeToolCalls.set(toolCallId, { toolName, toolCallId });
+            updateActiveToolCalls(currentMessageId);
+          }
+        },
+        onToolCallDone: (payload) => {
+          const toolCallId = String(payload.tool_call_id || "");
+          if (toolCallId) {
+            activeToolCalls.delete(toolCallId);
+            updateActiveToolCalls(currentMessageId);
+          }
+        },
         onDone: () => {
           deltaBatcher.flushNow();
-          // 流结束时统一过滤内部输出
+          activeToolCalls.clear();
+          // 流结束时统一过滤内部输出并清空工具调用状态
           updateMessages((current) =>
             current.map((item) => {
               if (item.streamState !== "streaming") return item;
@@ -282,6 +322,10 @@ export function useMessageOperations(currentUserName: string) {
                 ...item,
                 content: cleaned,
                 streamState: "done" as const,
+                rawContent: {
+                  ...item.rawContent,
+                  _activeToolCalls: [],
+                },
               };
             }),
           );
@@ -346,6 +390,7 @@ export function useMessageOperations(currentUserName: string) {
       if (freshArtifact) setArtifact(freshArtifact);
     } catch (error) {
       deltaBatcher.flushNow();
+      activeToolCalls.clear();
       const fallbackPreview =
         stripInternalAgentOutput(rawBuffer).slice(0, 120) || "reply failed";
       completedPreview = fallbackPreview;
@@ -357,6 +402,7 @@ export function useMessageOperations(currentUserName: string) {
                 ...item,
                 streamState: "error",
                 content: item.content || fallbackPreview,
+                rawContent: { ...item.rawContent, _activeToolCalls: [] },
               }
             : item,
         ),

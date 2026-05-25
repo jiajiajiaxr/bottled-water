@@ -120,6 +120,12 @@ export async function streamAssistantReply(
           eventPayload(event) as unknown as ChatMessage,
         );
       });
+      source.addEventListener("tool_call_start", (event) => {
+        handlers.onToolCallStart?.(eventPayload(event));
+      });
+      source.addEventListener("tool_call_done", (event) => {
+        handlers.onToolCallDone?.(eventPayload(event));
+      });
       source.addEventListener("message_stop", (event) => {
         window.clearTimeout(timeout);
         source.close();

@@ -103,6 +103,8 @@ export type StreamAssistantHandlers = {
   onMessageStart?: (payload: Record<string, unknown>) => void;
   onMessageUpdated?: (message: ChatMessage) => void;
   onMessageNew?: (message: ChatMessage) => void;
+  onToolCallStart?: (payload: Record<string, unknown>) => void;
+  onToolCallDone?: (payload: Record<string, unknown>) => void;
   onDone?: (payload?: Record<string, unknown>) => void;
   onControl?: (stop: () => void) => void;
 };

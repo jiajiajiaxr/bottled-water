@@ -4,6 +4,7 @@ import {
   CloudUploadOutlined,
   CopyOutlined,
   EyeOutlined,
+  LoadingOutlined,
   MessageOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
@@ -161,6 +162,16 @@ function MessageBubbleComponent({
               {message.streamState === "streaming" && (
                 <Tag color="processing">流式生成中</Tag>
               )}
+              {(message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ? (
+                <Tag icon={<LoadingOutlined />} color="blue">
+                  正在使用{" "}
+                  {(
+                    message.rawContent?._activeToolCalls as Array<{ toolName: string }>
+                  )
+                    .map((t) => t.toolName)
+                    .join(", ")}
+                </Tag>
+              ) : null}
             </Space>
             <Text type="secondary" className="time">
               {formatTime(message.createdAt)}
@@ -311,5 +322,8 @@ export const MessageBubble = React.memo(MessageBubbleComponent, (prev, next) => 
   if (prev.message.streamState !== next.message.streamState) return false;
   if (prev.message.kind !== next.message.kind) return false;
   if (prev.quoted?.id !== next.quoted?.id) return false;
+  const prevTools = (prev.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0;
+  const nextTools = (next.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0;
+  if (prevTools !== nextTools) return false;
   return true;
 });
