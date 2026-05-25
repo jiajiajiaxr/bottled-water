@@ -103,6 +103,7 @@ def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigg
         content={"text": text, "attachments": normalized_attachments},
         status="sent",
         reply_to_message_id=payload.get("reply_to_message_id") or payload.get("quotedMessageId"),
+        extra={"thinking_enabled": bool(payload.get("thinking_enabled"))},
     )
     conversation.last_message_preview = text[:300]
     conversation.last_message_sender = user.display_name

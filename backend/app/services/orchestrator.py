@@ -685,39 +685,59 @@ async def _run_direct_agent(
 
     # 4. 流式生成 + 工具调用循环（最多 3 轮）
     stream_text = ""
+    reasoning_text = ""
     max_tool_rounds = 3
     tool_results: list[dict[str, Any]] = []
+    thinking_enabled = (user_message.extra or {}).get("thinking_enabled") is True
+    thinking = {"type": "enabled", "budget_tokens": 1024} if thinking_enabled else None
 
     for round_num in range(max_tool_rounds + 1):
         current_text = ""
+        current_reasoning = ""
         current_tool_calls: list[dict[str, Any]] | None = None
         try:
-            logger.info("[_run_direct_agent] round=%d start stream_chat tools=%d", round_num, len(tools))
+            logger.info("[_run_direct_agent] round=%d start stream_chat tools=%d thinking=%s", round_num, len(tools), thinking_enabled)
             async for event in ark_client.stream_chat(
                 messages,
                 purpose=f"agent:{agent.type}",
                 tools=tools if tools else None,
+                thinking=thinking,
             ):
                 logger.info(
-                    "[_run_direct_agent] event type=%s text=%r error=%r tool_calls=%s",
+                    "[_run_direct_agent] event type=%s text=%r reasoning=%r error=%r tool_calls=%s",
                     event.type,
                     event.text[:50] if event.text else "",
+                    event.reasoning[:50] if event.reasoning else "",
                     event.error[:100] if event.error else "",
                     bool(event.tool_calls),
                 )
                 if event.type == "delta":
-                    stream_text += event.text
-                    current_text += event.text
-                    await event_bus.publish(
-                        channel,
-                        "content_block_delta",
-                        {
-                            "agent_message_id": assistant.id,
-                            "agent_id": agent.id,
-                            "agent_name": agent.name,
-                            "delta": {"type": "text_delta", "text": event.text},
-                        },
-                    )
+                    if event.text:
+                        stream_text += event.text
+                        current_text += event.text
+                        await event_bus.publish(
+                            channel,
+                            "content_block_delta",
+                            {
+                                "agent_message_id": assistant.id,
+                                "agent_id": agent.id,
+                                "agent_name": agent.name,
+                                "delta": {"type": "text_delta", "text": event.text},
+                            },
+                        )
+                    if event.reasoning:
+                        reasoning_text += event.reasoning
+                        current_reasoning += event.reasoning
+                        await event_bus.publish(
+                            channel,
+                            "content_block_delta",
+                            {
+                                "agent_message_id": assistant.id,
+                                "agent_id": agent.id,
+                                "agent_name": agent.name,
+                                "delta": {"type": "reasoning_delta", "text": event.reasoning},
+                            },
+                        )
                 elif event.type == "tool_calls":
                     current_tool_calls = event.tool_calls
                 elif event.type == "error":
@@ -823,7 +843,10 @@ async def _run_direct_agent(
     logger.info(
         "[_run_direct_agent] display_text len=%d content=%r", len(display_text), display_text[:200]
     )
-    assistant.content = {"text": display_text or f"{agent.name} 已完成本次单聊处理。"}
+    assistant.content = {
+        "text": display_text or f"{agent.name} 已完成本次单聊处理。",
+        "thinking": strip_internal_agent_output(reasoning_text) if reasoning_text else "",
+    }
     assistant.status = "completed"
     subtask.status = "COMPLETED"
     subtask.completed_at = utcnow()
@@ -916,12 +939,15 @@ async def _run_direct_agent_legacy(
     )
 
     stream_text = ""
+    reasoning_text = ""
     system_prompt = (agent.config or {}).get("system_prompt") or agent.description or f"你是 {agent.name}。"
     system_prompt += (
         "\n你正在单聊模式直接响应用户。只使用你被授权的工具/Skill/MCP 结果，"
         "不要伪装成 Master；如果没有工具权限，就作为纯对话 Agent 回复。"
     )
     tool_summary = json.dumps(tool_context, ensure_ascii=False)[:6000]
+    thinking_enabled = (user_message.extra or {}).get("thinking_enabled") is True
+    thinking = {"type": "enabled", "budget_tokens": 1024} if thinking_enabled else None
     model_config_id = (agent.config or {}).get("model_config_id")
     if model_config_id:
         try:
@@ -951,19 +977,32 @@ async def _run_direct_agent_legacy(
             {"role": "system", "content": "工具执行摘要：" + tool_summary},
             {"role": "user", "content": prompt},
         ]
-        async for event in ark_client.stream_chat(messages, purpose=f"agent:{agent.type}"):
+        async for event in ark_client.stream_chat(
+            messages, purpose=f"agent:{agent.type}", thinking=thinking
+        ):
             if event.type == "delta":
-                stream_text += event.text
-                await event_bus.publish(
-                    channel,
-                    "content_block_delta",
-                    {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "text_delta", "text": event.text}},
-                )
+                if event.text:
+                    stream_text += event.text
+                    await event_bus.publish(
+                        channel,
+                        "content_block_delta",
+                        {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "text_delta", "text": event.text}},
+                    )
+                if event.reasoning:
+                    reasoning_text += event.reasoning
+                    await event_bus.publish(
+                        channel,
+                        "content_block_delta",
+                        {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "reasoning_delta", "text": event.reasoning}},
+                    )
             elif event.type == "error":
                 stream_text += f"\n模型调用异常，已降级：{event.error}"
 
     display_text = strip_internal_agent_output(stream_text)
-    assistant.content = {"text": display_text or f"{agent.name} 已完成本次单聊处理。"}
+    assistant.content = {
+        "text": display_text or f"{agent.name} 已完成本次单聊处理。",
+        "thinking": strip_internal_agent_output(reasoning_text) if reasoning_text else "",
+    }
     assistant.status = "completed"
     subtask.status = "COMPLETED"
     subtask.completed_at = utcnow()
@@ -1364,23 +1403,40 @@ async def run_orchestration(message_id: str) -> None:
             },
             {"role": "user", "content": prompt},
         ]
-        async for event in ark_client.stream_chat(messages, purpose="chat"):
+        thinking_enabled = (user_message.extra or {}).get("thinking_enabled") is True
+        thinking = {"type": "enabled", "budget_tokens": 1024} if thinking_enabled else None
+        reasoning_text = ""
+        async for event in ark_client.stream_chat(messages, purpose="chat", thinking=thinking):
             if event.type == "delta":
-                stream_text += event.text
-                await event_bus.publish(
-                    channel,
-                    "content_block_delta",
-                    {
-                        "agent_message_id": assistant.id,
-                        "delta": {"type": "text_delta", "text": event.text},
-                    },
-                )
+                if event.text:
+                    stream_text += event.text
+                    await event_bus.publish(
+                        channel,
+                        "content_block_delta",
+                        {
+                            "agent_message_id": assistant.id,
+                            "delta": {"type": "text_delta", "text": event.text},
+                        },
+                    )
+                if event.reasoning:
+                    reasoning_text += event.reasoning
+                    await event_bus.publish(
+                        channel,
+                        "content_block_delta",
+                        {
+                            "agent_message_id": assistant.id,
+                            "delta": {"type": "reasoning_delta", "text": event.reasoning},
+                        },
+                    )
             elif event.type == "usage":
                 await event_bus.publish(channel, "usage", {"agent_message_id": assistant.id, "usage": event.usage})
             elif event.type == "error":
                 stream_text += f"\n模型调用异常，已降级：{event.error}"
         display_text = strip_internal_agent_output(stream_text)
-        assistant.content = {"text": display_text or "我已经完成处理，但本次模型没有返回可展示的最终回复。"}
+        assistant.content = {
+            "text": display_text or "我已经完成处理，但本次模型没有返回可展示的最终回复。",
+            "thinking": strip_internal_agent_output(reasoning_text) if reasoning_text else "",
+        }
         assistant.status = "completed"
         db.commit()
         await event_bus.publish(channel, "message:updated", message_to_dict(assistant))

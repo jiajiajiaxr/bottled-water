@@ -32,6 +32,7 @@ class LLMResult:
 class LLMStreamEvent:
     type: Literal["delta", "usage", "done", "error", "tool_calls"]
     text: str = ""
+    reasoning: str = ""
     usage: dict[str, Any] | None = None
     error: str | None = None
     model: str | None = None
@@ -174,6 +175,7 @@ class ArkClient:
         max_tokens: int = 1200,
         purpose: str = "chat",
         tools: list[dict[str, Any]] | None = None,
+        thinking: dict[str, Any] | None = None,
     ) -> AsyncIterator[LLMStreamEvent]:
         if self.settings.use_mock_llm:
             async for item in self._mock_stream(messages, purpose=purpose, tools=tools):
@@ -192,6 +194,8 @@ class ArkClient:
                 }
                 if tools:
                     body["tools"] = tools
+                if thinking:
+                    body["thinking"] = thinking
                 async for item in self._stream_model(model, body):
                     yield item
                 return
@@ -223,6 +227,87 @@ class ArkClient:
     async def _stream_model(
         self, model: str, body: dict[str, Any]
     ) -> AsyncIterator[LLMStreamEvent]:
+        api_key = self._api_key()
+        if not api_key:
+            raise ArkProviderError("缺少 ARK_API_KEY")
+        usage: dict[str, Any] | None = None
+        timeout = httpx.Timeout(self.settings.ark_stream_timeout_seconds)
+        # 累积增量 tool_calls：key 为 index，value 为累积后的 tool_call 字典
+        accumulated_tool_calls: dict[int, dict[str, Any]] = {}
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                json=body,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+            ) as response:
+                if response.status_code < 200 or response.status_code >= 300:
+                    text = await response.aread()
+                    raise ArkProviderError(self._auth_error_hint(response.status_code, text.decode("utf-8", "replace")))
+                line_count = 0
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data_text = line.removeprefix("data:").strip()
+                    if data_text == "[DONE]":
+                        break
+                    data = json.loads(data_text)
+                    line_count += 1
+                    if line_count <= 3:
+                        logger.info("[ark_sse] chunk %d: %s", line_count, json.dumps(data, ensure_ascii=False)[:400])
+                    if data.get("usage"):
+                        usage = data["usage"]
+                        yield LLMStreamEvent(type="usage", usage=usage, model=model)
+                    for choice in data.get("choices") or []:
+                        delta = choice.get("delta") or {}
+                        content = delta.get("content")
+                        reasoning_content = delta.get("reasoning_content")
+                        if content or reasoning_content:
+                            yield LLMStreamEvent(
+                                type="delta",
+                                text=content or "",
+                                reasoning=reasoning_content or "",
+                                model=model,
+                            )
+                        # 解析增量 tool_calls
+                        tool_calls = delta.get("tool_calls")
+                        if tool_calls and isinstance(tool_calls, list):
+                            for tc_delta in tool_calls:
+                                if not isinstance(tc_delta, dict):
+                                    continue
+                                idx = tc_delta.get("index", 0)
+                                if idx not in accumulated_tool_calls:
+                                    accumulated_tool_calls[idx] = {}
+                                acc = accumulated_tool_calls[idx]
+                                if "id" in tc_delta:
+                                    acc["id"] = tc_delta["id"]
+                                if "type" in tc_delta:
+                                    acc["type"] = tc_delta["type"]
+                                if "function" in tc_delta and isinstance(tc_delta["function"], dict):
+                                    func = tc_delta["function"]
+                                    if "function" not in acc:
+                                        acc["function"] = {}
+                                    if "name" in func:
+                                        acc["function"]["name"] = func["name"]
+                                    if "arguments" in func:
+                                        acc["function"].setdefault("arguments", "")
+                                        acc["function"]["arguments"] += func["arguments"]
+                            finish_reason = choice.get("finish_reason")
+                            if finish_reason == "tool_calls":
+                                yield LLMStreamEvent(
+                                    type="tool_calls",
+                                    tool_calls=[
+                                        {"id": v.get("id", ""), "type": v.get("type", "function"), "function": v.get("function", {})}
+                                        for v in accumulated_tool_calls.values()
+                                        if v.get("function", {}).get("name")
+                                    ],
+                                    model=model,
+                                )
+        yield LLMStreamEvent(type="done", usage=usage or {}, model=model)
         api_key = self._api_key()
         if not api_key:
             raise ArkProviderError("缺少 ARK_API_KEY")
