@@ -51,4 +51,26 @@ describe("conversation SSE stream", () => {
     expect(source.closed).toBe(true);
     expect(onDone).toHaveBeenCalledOnce();
   });
+
+  it("waits for generation_finished after workflow completed", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const onDone = vi.fn();
+    const promise = streamAssistantReply("conversation-2", { onDone });
+    const source = FakeEventSource.latest!;
+
+    source.emit("content_block_delta", {
+      agent_message_id: "agent-message-2",
+      delta: { type: "text_delta", text: "done" },
+    });
+    source.emit("workflow:completed", { status: "completed" });
+
+    await Promise.resolve();
+    expect(source.closed).toBe(false);
+    expect(onDone).not.toHaveBeenCalled();
+
+    source.emit("generation_finished", { reason: "workflow_completed" });
+    await expect(promise).resolves.toBe("done");
+    expect(source.closed).toBe(true);
+    expect(onDone).toHaveBeenCalledOnce();
+  });
 });

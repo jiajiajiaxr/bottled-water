@@ -155,14 +155,14 @@ export async function streamAssistantReply(
           close(payload);
         }
       });
-      source.addEventListener("workflow:completed", (event) => {
-        close(eventPayload(event));
+      source.addEventListener("workflow:completed", () => {
+        // 工作流完成事件可能早于 Task 状态落库，等待 generation_finished 统一收尾。
       });
-      source.addEventListener("workflow:failed", (event) => {
-        close(eventPayload(event), "工作流执行失败。");
+      source.addEventListener("workflow:failed", () => {
+        // 失败路径后端也会发送 generation_finished，避免提前刷新到旧任务状态。
       });
-      source.addEventListener("workflow:cancelled", (event) => {
-        close(eventPayload(event), "本次响应已停止。");
+      source.addEventListener("workflow:cancelled", () => {
+        // 取消同样等待全局结束事件，保持单一收尾语义。
       });
       source.addEventListener("generation_finished", (event) => {
         close(eventPayload(event));
