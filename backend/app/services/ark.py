@@ -240,8 +240,6 @@ class ArkClient:
                 if response.status_code < 200 or response.status_code >= 300:
                     text = await response.aread()
                     raise ArkProviderError(self._auth_error_hint(response.status_code, text.decode("utf-8", "replace")))
-                import logging
-                _logger = logging.getLogger(__name__)
                 line_count = 0
                 async for line in response.aiter_lines():
                     line = line.strip()
@@ -253,7 +251,7 @@ class ArkClient:
                     data = json.loads(data_text)
                     line_count += 1
                     if line_count <= 3:
-                        _logger.info("[ark_sse] chunk %d: %s", line_count, json.dumps(data, ensure_ascii=False)[:400])
+                        print(f"[ark_sse] chunk {line_count}: {json.dumps(data, ensure_ascii=False)[:400]}")
                     if data.get("usage"):
                         usage = data["usage"]
                         yield LLMStreamEvent(type="usage", usage=usage, model=model)

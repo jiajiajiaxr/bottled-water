@@ -594,12 +594,10 @@ async def _run_direct_agent(
     channel: str,
 ) -> None:
     """单聊模式 Function Calling 版本。"""
-    import logging
-    _logger = logging.getLogger(__name__)
     settings = get_settings()
     enable_fc = settings.enable_function_calling
     model_config_id = (agent.config or {}).get("model_config_id")
-    _logger.info("[_run_direct_agent] agent=%s enable_fc=%s model_config_id=%s", agent.name, enable_fc, model_config_id)
+    print(f"[_run_direct_agent] agent={agent.name} enable_fc={enable_fc} model_config_id={model_config_id}")
     # 自定义模型暂不支持 tools，回退到预编排
     if not enable_fc or model_config_id:
         return await _run_direct_agent_legacy(
@@ -691,13 +689,13 @@ async def _run_direct_agent(
         current_text = ""
         current_tool_calls: list[dict[str, Any]] | None = None
         try:
-            _logger.info("[_run_direct_agent] round=%d start stream_chat tools=%s", round_num, len(tools))
+            print(f"[_run_direct_agent] round={round_num} start stream_chat tools={len(tools)}")
             async for event in ark_client.stream_chat(
                 messages,
                 purpose=f"agent:{agent.type}",
                 tools=tools if tools else None,
             ):
-                _logger.info("[_run_direct_agent] event type=%s text=%r tool_calls=%s", event.type, event.text[:50] if event.text else "", bool(event.tool_calls))
+                print(f"[_run_direct_agent] event type={event.type} text={event.text[:50] if event.text else ''!r} tool_calls={bool(event.tool_calls)}")
                 if event.type == "delta":
                     stream_text += event.text
                     current_text += event.text
@@ -714,7 +712,7 @@ async def _run_direct_agent(
                 elif event.type == "tool_calls":
                     current_tool_calls = event.tool_calls
         except Exception as exc:
-            _logger.error("[_run_direct_agent] stream_chat error: %s", exc)
+            print(f"[_run_direct_agent] stream_chat error: {exc}")
             if not stream_text:
                 stream_text = f"\n模型调用异常，已降级：{exc}"
                 await event_bus.publish(
@@ -797,9 +795,9 @@ async def _run_direct_agent(
         await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
     # 5. 完成收尾
-    _logger.info("[_run_direct_agent] stream_text len=%d content=%r", len(stream_text), stream_text[:200] if stream_text else "")
+    print(f"[_run_direct_agent] stream_text len={len(stream_text)} content={stream_text[:200]!r}")
     display_text = strip_internal_agent_output(stream_text)
-    _logger.info("[_run_direct_agent] display_text len=%d content=%r", len(display_text), display_text[:200] if display_text else "")
+    print(f"[_run_direct_agent] display_text len={len(display_text)} content={display_text[:200]!r}")
     assistant.content = {"text": display_text or f"{agent.name} 已完成本次单聊处理。"}
     assistant.status = "completed"
     subtask.status = "COMPLETED"
