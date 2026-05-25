@@ -11,10 +11,12 @@ from app.api import agents, artifacts, auth, context, conversations, deployments
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.errors import AppError
+from app.core.logging_config import configure_logging
 from app.core.response import fail, ok
 from app.services.seed import ensure_seed_data
 
 
+configure_logging()
 settings = get_settings()
 
 

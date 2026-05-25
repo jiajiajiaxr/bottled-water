@@ -100,9 +100,12 @@ export const wait = (ms: number) =>
 
 export type StreamAssistantHandlers = {
   onDelta?: (delta: string, payload: Record<string, unknown>) => void;
+  onReasoningDelta?: (delta: string, payload: Record<string, unknown>) => void;
   onMessageStart?: (payload: Record<string, unknown>) => void;
   onMessageUpdated?: (message: ChatMessage) => void;
   onMessageNew?: (message: ChatMessage) => void;
+  onToolCallStart?: (payload: Record<string, unknown>) => void;
+  onToolCallDone?: (payload: Record<string, unknown>) => void;
   onDone?: (payload?: Record<string, unknown>) => void;
   onControl?: (stop: () => void) => void;
 };

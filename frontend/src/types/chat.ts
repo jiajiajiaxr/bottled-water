@@ -64,6 +64,7 @@ export interface ChatMessage {
   kind: MessageKind;
   author: string;
   content: string;
+  thinking?: string;
   rawContent?: Record<string, unknown>;
   attachments?: MessageAttachment[];
   createdAt: string;

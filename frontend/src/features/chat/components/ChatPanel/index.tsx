@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BranchesOutlined,
   CloudUploadOutlined,
+  BulbOutlined,
   ReloadOutlined,
   SendOutlined,
   UserAddOutlined,
@@ -58,6 +59,7 @@ export function ChatPanel({
     text: string,
     quoted?: ChatMessage,
     attachments?: UploadedFile[],
+    thinkingEnabled?: boolean,
   ) => void;
   onRegenerate: (message: ChatMessage) => void;
   onOpenMembers: () => void;
@@ -69,13 +71,14 @@ export function ChatPanel({
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const { message } = AntApp.useApp();
 
   const submit = () => {
     const value =
       text.trim() || (pendingFiles.length ? "请结合上传附件继续处理。" : "");
     if (!value || !active) return;
-    onSend(value, quoted, pendingFiles);
+    onSend(value, quoted, pendingFiles, thinkingEnabled);
     setText("");
     setQuoted(undefined);
     setPendingFiles([]);
@@ -110,6 +113,30 @@ export function ChatPanel({
     (msg: ChatMessage) => onOpenPreview(msg),
     [onOpenPreview],
   );
+
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const isAtBottom = useRef(true);
+
+  useEffect(() => {
+    const el = messageListRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      const threshold = 50;
+      isAtBottom.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!isAtBottom.current) return;
+    const el = messageListRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, streamState]);
 
   return (
     <Content className="chat-panel">
@@ -168,7 +195,7 @@ export function ChatPanel({
           <Avatar>{user.avatar ?? user.name.slice(0, 1)}</Avatar>
         </Space>
       </Header>
-      <div className="message-list">
+      <div ref={messageListRef} className="message-list">
         {loading ? (
           <Spin />
         ) : messages.length ? (
@@ -254,21 +281,35 @@ export function ChatPanel({
               </Button>
             </Upload>
           </Space>
-          {streamState === "streaming" ? (
-            <Button danger icon={<ReloadOutlined />} onClick={onStopStreaming}>
-              Stop
-            </Button>
-          ) : (
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={submit}
-              disabled={!active}
-              data-testid="send-message"
-            >
-              发送
-            </Button>
-          )}
+          <Space>
+            <Tooltip title={thinkingEnabled ? "已开启思考模式" : "思考模式"}>
+              <Button
+                type={thinkingEnabled ? "primary" : "default"}
+                ghost={thinkingEnabled}
+                icon={<BulbOutlined />}
+                onClick={() => setThinkingEnabled((v) => !v)}
+                disabled={!active}
+                data-testid="thinking-toggle"
+              >
+                思考
+              </Button>
+            </Tooltip>
+            {streamState === "streaming" ? (
+              <Button danger icon={<ReloadOutlined />} onClick={onStopStreaming}>
+                Stop
+              </Button>
+            ) : (
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                onClick={submit}
+                disabled={!active}
+                data-testid="send-message"
+              >
+                发送
+              </Button>
+            )}
+          </Space>
         </Flex>
       </div>
     </Content>

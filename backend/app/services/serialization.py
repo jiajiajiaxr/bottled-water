@@ -249,6 +249,7 @@ def message_to_dict(message: Message) -> dict[str, Any]:
         "content": text,
         "rawContent": message.content,
         "attachments": attachments,
+        "thinking": message.content.get("thinking") if isinstance(message.content, dict) else None,
         "status": message.status,
         "reply_to_message_id": message.reply_to_message_id,
         "quotedMessageId": message.reply_to_message_id,

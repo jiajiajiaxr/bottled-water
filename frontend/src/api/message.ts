@@ -18,6 +18,7 @@ export async function sendMessage(
   content: string,
   quotedMessageId?: string,
   attachments: UploadedFile[] = [],
+  thinkingEnabled?: boolean,
 ): Promise<ChatMessage> {
   try {
     return await request<ChatMessage>(
@@ -37,6 +38,7 @@ export async function sendMessage(
             })),
           },
           reply_to_message_id: quotedMessageId,
+          thinking_enabled: thinkingEnabled,
         }),
       },
     );
@@ -101,14 +103,22 @@ export async function streamAssistantReply(
       source.addEventListener("content_block_delta", (event) => {
         const payload = eventPayload(event);
         const deltaPayload = payload.delta;
-        const delta =
+        const deltaType =
+          deltaPayload && typeof deltaPayload === "object"
+            ? String((deltaPayload as { type?: unknown }).type ?? "text_delta")
+            : "text_delta";
+        const deltaText =
           deltaPayload &&
           typeof deltaPayload === "object" &&
           "text" in deltaPayload
             ? String((deltaPayload as { text?: unknown }).text ?? "")
             : "";
-        buffer += delta;
-        if (delta) handlers.onDelta?.(delta, payload);
+        if (deltaType === "reasoning_delta" && deltaText) {
+          handlers.onReasoningDelta?.(deltaText, payload);
+        } else if (deltaText) {
+          buffer += deltaText;
+          handlers.onDelta?.(deltaText, payload);
+        }
       });
       source.addEventListener("message:updated", (event) => {
         handlers.onMessageUpdated?.(
@@ -119,6 +129,12 @@ export async function streamAssistantReply(
         handlers.onMessageNew?.(
           eventPayload(event) as unknown as ChatMessage,
         );
+      });
+      source.addEventListener("tool_call_start", (event) => {
+        handlers.onToolCallStart?.(eventPayload(event));
+      });
+      source.addEventListener("tool_call_done", (event) => {
+        handlers.onToolCallDone?.(eventPayload(event));
       });
       source.addEventListener("message_stop", (event) => {
         window.clearTimeout(timeout);

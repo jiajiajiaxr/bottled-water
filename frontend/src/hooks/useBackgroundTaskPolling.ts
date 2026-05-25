@@ -2,8 +2,16 @@ import { useCallback, useEffect, useRef } from "react";
 import { useTaskStore } from "../store";
 import { api } from "../api";
 
-export function useBackgroundTaskPolling(intervalMs = 3500) {
-  const { setBackgroundTasks } = useTaskStore();
+const POLLING_ACTIVE_MS = 5000;
+const POLLING_IDLE_MS = 30000;
+
+function isTaskRunning(status: string) {
+  return status === "PENDING" || status === "RUNNING";
+}
+
+export function useBackgroundTaskPolling() {
+  const { backgroundTasks, setBackgroundTasks } = useTaskStore();
+  const hasRunning = backgroundTasks.some((t) => isTaskRunning(t.status));
 
   const loadBackgroundTasks = useCallback(async () => {
     const tasks = await api.tasks();
@@ -15,12 +23,37 @@ export function useBackgroundTaskPolling(intervalMs = 3500) {
     loadRef.current = loadBackgroundTasks;
   }, [loadBackgroundTasks]);
 
+  // 只在有进行中的任务且页面可见时轮询
   useEffect(() => {
-    const timer = window.setInterval(() => {
+    let timer: number | undefined;
+    const tick = () => {
       loadRef.current().catch(() => undefined);
-    }, intervalMs);
-    return () => window.clearInterval(timer);
-  }, [intervalMs]);
+    };
+    const schedule = () => {
+      if (timer) window.clearInterval(timer);
+      const interval = hasRunning ? POLLING_ACTIVE_MS : POLLING_IDLE_MS;
+      timer = window.setInterval(tick, interval);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        if (timer) window.clearInterval(timer);
+        timer = undefined;
+      } else {
+        tick();
+        schedule();
+      }
+    };
+
+    if (!document.hidden) {
+      schedule();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      if (timer) window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [hasRunning]);
 
   return { loadBackgroundTasks };
 }

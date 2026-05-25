@@ -5,8 +5,8 @@ import {
   useConversationStore,
   useMessageStore,
   useArtifactStore,
+  useTaskStore,
 } from "../store";
-import { useBackgroundTaskPolling } from "./useBackgroundTaskPolling";
 import type { ChatMessage, UploadedFile, MessageAttachment } from "../types";
 import {
   makeMessage,
@@ -15,10 +15,10 @@ import {
   participantName,
 } from "../lib/message";
 
-/** 批量触发更新：50ms 窗口内收到 delta 的消息 id 合并为一次 state 更新 */
+/** 批量触发更新：16ms 窗口内收到 delta 的消息 id 合并为一次 state 更新（约 60fps） */
 function createDeltaBatcher(
   flush: (msgIds: string[]) => void,
-  windowMs = 50,
+  windowMs = 16,
 ) {
   const pending = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -54,13 +54,19 @@ function createDeltaBatcher(
 
 export function useMessageOperations(currentUserName: string) {
   const { message } = AntApp.useApp();
-  const { loadBackgroundTasks } = useBackgroundTaskPolling();
+  const { setBackgroundTasks } = useTaskStore();
+
+  const refreshTasks = async () => {
+    const tasks = await api.tasks();
+    setBackgroundTasks(tasks);
+  };
 
   const { conversations, activeId, updateConversations } =
     useConversationStore();
   const {
     updateMessages,
     updateMessageContent,
+    updateMessageThinking,
     setMessages,
     setStreamState,
     updateLocalRunningConversationIds,
@@ -219,7 +225,7 @@ export function useMessageOperations(currentUserName: string) {
     );
     stopStreamRef.current = undefined;
 
-    // 批量 delta 处理器：50ms 窗口内有更新的消息合并为一次 state 更新
+    // 批量 delta 处理器：16ms 窗口内有更新的消息合并为一次 state 更新
     const latestContentById = new Map<string, string>();
     const deltaBatcher = createDeltaBatcher((msgIds) => {
       for (const msgId of msgIds) {
@@ -228,8 +234,38 @@ export function useMessageOperations(currentUserName: string) {
       }
     });
 
+    // 批量 reasoning delta 处理器
+    const latestThinkingById = new Map<string, string>();
+    const thinkingBatcher = createDeltaBatcher((msgIds) => {
+      for (const msgId of msgIds) {
+        const fullThinking = latestThinkingById.get(msgId) ?? "";
+        updateMessageThinking(msgId, fullThinking);
+      }
+    });
+
     let rawBuffer = "";
     let completedPreview = "";
+    // 追踪当前消息上正在执行的工具调用
+    const activeToolCalls = new Map<string, { toolName: string; toolCallId: string }>();
+    let currentMessageId = "";
+
+    const updateActiveToolCalls = (messageId: string) => {
+      if (!messageId) return;
+      updateMessages((current) =>
+        current.map((item) =>
+          item.id === messageId
+            ? {
+                ...item,
+                rawContent: {
+                  ...item.rawContent,
+                  _activeToolCalls: Array.from(activeToolCalls.values()),
+                },
+              }
+            : item,
+        ),
+      );
+    };
+
     try {
       await api.streamAssistantReply(conversationId, {
         onMessageStart: (payload) => {
@@ -238,6 +274,7 @@ export function useMessageOperations(currentUserName: string) {
               payload.message_id ||
               `stream-${Date.now()}`,
           );
+          currentMessageId = messageId;
           const agentId = payload.agent_id
             ? String(payload.agent_id)
             : undefined;
@@ -247,12 +284,14 @@ export function useMessageOperations(currentUserName: string) {
               (agentId ? "Agent" : "Assistant"),
           );
           ensureStreamingMessage(messageId, author, agentId);
+          activeToolCalls.clear();
         },
         onDelta: (delta, payload) => {
           rawBuffer += delta;
           const messageId = String(
             payload.agent_message_id || payload.message_id || "",
           );
+          if (messageId) currentMessageId = messageId;
           if (!messageId) return;
           ensureStreamingMessage(
             messageId,
@@ -264,13 +303,41 @@ export function useMessageOperations(currentUserName: string) {
           latestContentById.set(messageId, existing + delta);
           deltaBatcher.add(messageId);
         },
+        onReasoningDelta: (delta, payload) => {
+          const messageId = String(
+            payload.agent_message_id || payload.message_id || "",
+          );
+          if (messageId) currentMessageId = messageId;
+          if (!messageId) return;
+          // 累积到 latestThinkingById，标记消息待更新
+          const existing = latestThinkingById.get(messageId) ?? "";
+          latestThinkingById.set(messageId, existing + delta);
+          thinkingBatcher.add(messageId);
+        },
         onMessageUpdated: upsertFinalMessage,
         onMessageNew: (incoming) => {
           if (incoming.kind === "preview_card") upsertFinalMessage(incoming);
         },
+        onToolCallStart: (payload) => {
+          const toolName = String(payload.tool_name || "");
+          const toolCallId = String(payload.tool_call_id || "");
+          if (toolName && toolCallId) {
+            activeToolCalls.set(toolCallId, { toolName, toolCallId });
+            updateActiveToolCalls(currentMessageId);
+          }
+        },
+        onToolCallDone: (payload) => {
+          const toolCallId = String(payload.tool_call_id || "");
+          if (toolCallId) {
+            activeToolCalls.delete(toolCallId);
+            updateActiveToolCalls(currentMessageId);
+          }
+        },
         onDone: () => {
           deltaBatcher.flushNow();
-          // 流结束时统一过滤内部输出
+          thinkingBatcher.flushNow();
+          activeToolCalls.clear();
+          // 流结束时统一过滤内部输出并清空工具调用状态
           updateMessages((current) =>
             current.map((item) => {
               if (item.streamState !== "streaming") return item;
@@ -282,6 +349,10 @@ export function useMessageOperations(currentUserName: string) {
                 ...item,
                 content: cleaned,
                 streamState: "done" as const,
+                rawContent: {
+                  ...item.rawContent,
+                  _activeToolCalls: [],
+                },
               };
             }),
           );
@@ -346,6 +417,7 @@ export function useMessageOperations(currentUserName: string) {
       if (freshArtifact) setArtifact(freshArtifact);
     } catch (error) {
       deltaBatcher.flushNow();
+      activeToolCalls.clear();
       const fallbackPreview =
         stripInternalAgentOutput(rawBuffer).slice(0, 120) || "reply failed";
       completedPreview = fallbackPreview;
@@ -357,6 +429,7 @@ export function useMessageOperations(currentUserName: string) {
                 ...item,
                 streamState: "error",
                 content: item.content || fallbackPreview,
+                rawContent: { ...item.rawContent, _activeToolCalls: [] },
               }
             : item,
         ),
@@ -381,7 +454,7 @@ export function useMessageOperations(currentUserName: string) {
           ),
         );
       }
-      loadBackgroundTasks().catch(() => undefined);
+      refreshTasks().catch(() => undefined);
     }
   };
 
@@ -418,7 +491,7 @@ export function useMessageOperations(currentUserName: string) {
       ),
     );
     await api.cancelAssistantReply(activeId).catch(() => undefined);
-    await loadBackgroundTasks().catch(() => undefined);
+    await refreshTasks().catch(() => undefined);
     message.info("已停止本次响应");
   };
 
@@ -426,6 +499,7 @@ export function useMessageOperations(currentUserName: string) {
     content: string,
     quoted?: ChatMessage,
     attachments: UploadedFile[] = [],
+    thinkingEnabled?: boolean,
   ) => {
     if (!activeId) return;
     const conversationId = activeId;
@@ -472,6 +546,7 @@ export function useMessageOperations(currentUserName: string) {
         content,
         quoted?.id,
         attachments,
+        thinkingEnabled,
       );
       updateMessages((current) =>
         current.map((item) =>

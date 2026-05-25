@@ -5,6 +5,8 @@ import {
   FolderAddOutlined,
   FolderOpenOutlined,
   InboxOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   MessageOutlined,
   PushpinFilled,
   PushpinOutlined,
@@ -69,6 +71,7 @@ export function ConversationSidebar({
   const [newFolderName, setNewFolderName] = useState("");
   const [editing, setEditing] = useState<Conversation>();
   const [editForm] = Form.useForm();
+  const [collapsed, setCollapsed] = useState(false);
 
   const folders = useMemo(() => {
     const names = conversations.map(
@@ -118,17 +121,27 @@ export function ConversationSidebar({
   };
 
   return (
-    <Sider width={320} className="sidebar">
-      <div className="sidebar-head">
-        <div>
-          <Text type="secondary">Workspace</Text>
-          <Title level={3}>会话</Title>
-        </div>
-        <Space>
+    <Sider
+      width={320}
+      collapsed={collapsed}
+      collapsedWidth={52}
+      className="sidebar"
+    >
+      {collapsed ? (
+        <div className="sidebar-collapsed">
+          <Tooltip title="展开侧边栏">
+            <Button
+              type="text"
+              size="small"
+              icon={<MenuUnfoldOutlined />}
+              onClick={() => setCollapsed(false)}
+            />
+          </Tooltip>
           <Tooltip title="新建单聊">
             <Button
               shape="circle"
               type="primary"
+              size="small"
               icon={<UserAddOutlined />}
               onClick={() => onCreate(false)}
               data-testid="new-chat"
@@ -137,14 +150,48 @@ export function ConversationSidebar({
           <Tooltip title="新建群聊">
             <Button
               shape="circle"
+              size="small"
               icon={<TeamOutlined />}
               onClick={() => onCreate(true)}
               data-testid="new-group-chat"
             />
           </Tooltip>
-        </Space>
-      </div>
-      <Input
+        </div>
+      ) : (
+        <>
+          <div className="sidebar-head">
+            <div>
+              <Text type="secondary">Workspace</Text>
+              <Title level={3}>会话</Title>
+            </div>
+            <Space>
+              <Tooltip title="新建单聊">
+                <Button
+                  shape="circle"
+                  type="primary"
+                  icon={<UserAddOutlined />}
+                  onClick={() => onCreate(false)}
+                  data-testid="new-chat"
+                />
+              </Tooltip>
+              <Tooltip title="新建群聊">
+                <Button
+                  shape="circle"
+                  icon={<TeamOutlined />}
+                  onClick={() => onCreate(true)}
+                  data-testid="new-group-chat"
+                />
+              </Tooltip>
+              <Tooltip title="收起侧边栏">
+                <Button
+                  type="text"
+                  icon={<MenuFoldOutlined />}
+                  onClick={() => setCollapsed(true)}
+                />
+              </Tooltip>
+            </Space>
+          </div>
+          <Input
         className="search-box"
         prefix={<SearchOutlined />}
         placeholder="搜索会话、标签或消息"
@@ -341,6 +388,8 @@ export function ConversationSidebar({
           </Form.Item>
         </Form>
       </Modal>
+        </>
+      )}
     </Sider>
   );
 }

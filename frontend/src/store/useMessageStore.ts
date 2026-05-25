@@ -11,6 +11,7 @@ interface MessageState {
   appendMessage: (message: ChatMessage) => void;
   updateMessage: (messageId: string, patch: Partial<ChatMessage>) => void;
   updateMessageContent: (messageId: string, content: string) => void;
+  updateMessageThinking: (messageId: string, thinking: string) => void;
   setStreamState: (state: StreamState) => void;
   addRunningConversationId: (id: string) => void;
   removeRunningConversationId: (id: string) => void;
@@ -47,6 +48,16 @@ export const useMessageStore = create<MessageState>((set) => ({
       if (target.content === content) return state;
       const next = [...state.messages];
       next[index] = { ...target, content };
+      return { messages: next };
+    }),
+  updateMessageThinking: (messageId, thinking) =>
+    set((state) => {
+      const index = state.messages.findIndex((m) => m.id === messageId);
+      if (index === -1) return state;
+      const target = state.messages[index];
+      if (target.thinking === thinking) return state;
+      const next = [...state.messages];
+      next[index] = { ...target, thinking };
       return { messages: next };
     }),
   setStreamState: (streamState) => set({ streamState }),

@@ -6,12 +6,7 @@ from typing import Any
 import pytest
 
 
-DEFAULT_APP_CANDIDATES = (
-    "backend.main:app",
-    "backend.app:app",
-    "app.main:app",
-    "main:app",
-)
+DEFAULT_APP_CANDIDATES = ("app:app",)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
