@@ -336,11 +336,11 @@ cd backend
 uv run alembic upgrade head
 ```
 
-启动后端：
+启动后端（推荐在工作区中运行）：
 
 ```powershell
 cd backend
-uv run uvicorn app.main:app --reload
+uv run uvicorn app:app --reload --reload-dir ./app
 ```
 
 启动前端：
@@ -349,6 +349,19 @@ uv run uvicorn app.main:app --reload
 cd frontend
 pnpm dev
 ```
+
+### VS Code 工作区
+
+项目根目录提供 `agenthub.code-workspace`，在 VS Code 中打开可直接获得前后端分离的工作区体验：
+
+- **文件夹**：`Backend`（后端）、`Frontend`（前端）、`E2E Tests`（端到端测试）、`Root`（项目根目录）
+- **任务**（`Ctrl+Shift+P` → `Tasks: Run Task`）：
+  - `Start Backend` — 在 Backend 目录下启动 `uv run uvicorn app:app --reload --reload-dir ./app`
+  - `Start Frontend` — 在 Frontend 目录下启动 `pnpm dev`
+  - `Start All` — 并行启动前后端
+  - `Backend Tests` — 在 Root 目录下运行 `uv run pytest tests -q`
+- **调试**（`F5`）：
+  - `Debug Backend` — 使用 debugpy 调试 uvicorn，带热重载，排除 logs/ 和 *.db 文件
 
 ## 测试
 
