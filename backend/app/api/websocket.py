@@ -4,7 +4,6 @@ import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.services.events import event_bus
 
 
 router = APIRouter(tags=["websocket"])

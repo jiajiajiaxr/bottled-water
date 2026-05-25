@@ -156,7 +156,7 @@ def create_artifact(
         name=name,
         description=description or "由多 Agent 协作生成的可预览产物。",
         status="published",
-        storage_url=f"/api/v1/artifacts/preview-pending",
+        storage_url="/api/v1/artifacts/preview-pending",
         content={
             "files": {"index.html": html},
             "previous_files": {"index.html": previous_html},

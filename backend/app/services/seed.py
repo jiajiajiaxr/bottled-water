@@ -25,7 +25,7 @@ from app.models import (
     WorkspaceMember,
     utcnow,
 )
-from app.services.tool_registry import get_official_toolbox, ensure_tool_tables
+from app.services.tools.registry import get_official_toolbox, ensure_tool_tables
 
 
 DEFAULT_AGENTS = [

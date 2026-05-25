@@ -13,9 +13,9 @@ from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Artifact, Conversation, FileAsset, Message, User, utcnow
-from app.services.events import event_bus
+from app.services.realtime.event_bus import event_bus
 from app.services.artifacts import build_demo_html, classify_artifact_request, create_artifact, create_preview_message
-from app.services.orchestrator import run_orchestration
+from app.services.chat.orchestrator import run_orchestration
 from app.services.serialization import artifact_to_dict, message_to_dict
 
 

@@ -1,12 +1,11 @@
-import asyncio
-import json
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.services.ark import LLMStreamEvent, ArkClient
 from app.services.agentic_runtime import build_tools_for_agent, execute_tool_by_name
+from app.services.agents.function_loop import run_agent_function_call_loop
 
 
 class TestArkClientToolCalls:
@@ -189,6 +188,74 @@ class TestExecuteToolByName:
         assert result["type"] == "unknown"
         assert result["status"] == "failed"
         assert "未知工具" in result["output"]
+
+
+class TestAgentFunctionCallLoop:
+    """???????????? Function Call Loop?"""
+
+    @pytest.mark.asyncio
+    async def test_tool_result_is_fed_back_to_model(self) -> None:
+        db = MagicMock()
+        db.get.return_value = MagicMock()
+
+        def refresh(obj: Any) -> None:
+            if getattr(obj, "id", None) is None:
+                obj.id = "assistant-message-1"
+
+        db.refresh.side_effect = refresh
+        db.scalars.return_value.all.return_value = []
+
+        conversation = MagicMock()
+        conversation.id = "conversation-1"
+        conversation.creator_id = "user-1"
+        user_message = MagicMock()
+        user_message.extra = {}
+        agent = MagicMock()
+        agent.id = "agent-1"
+        agent.name = "Backend Worker"
+        agent.type = "backend"
+        agent.description = "Backend worker"
+        agent.config = {"tools": ["api.test"]}
+
+        calls: list[list[dict[str, Any]]] = []
+
+        async def fake_stream_chat(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
+            calls.append(messages)
+            if len(calls) == 1:
+                yield LLMStreamEvent(type="delta", text="I will test the API.")
+                yield LLMStreamEvent(
+                    type="tool_calls",
+                    tool_calls=[
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "api.test", "arguments": '{"path": "/health"}'},
+                        }
+                    ],
+                )
+                yield LLMStreamEvent(type="done", usage={})
+                return
+            yield LLMStreamEvent(type="delta", text="API test passed.")
+            yield LLMStreamEvent(type="done", usage={})
+
+        with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream_chat):
+            with patch("app.services.agents.function_loop.execute_tool_by_name", new_callable=AsyncMock) as execute:
+                execute.return_value = {"status": "succeeded", "output": {"path": "/health"}}
+                with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock):
+                    result = await run_agent_function_call_loop(
+                        db,
+                        conversation=conversation,
+                        user_message=user_message,
+                        agent=agent,
+                        prompt="test api",
+                        channel="conversation:conversation-1",
+                        mode="unit-test",
+                    )
+
+        assert result.text == "I will test the API.API test passed."
+        execute.assert_awaited_once()
+        assert len(calls) == 2
+        assert any(message.get("role") == "tool" for message in calls[1])
 
 
 class TestStreamEventDataclass:

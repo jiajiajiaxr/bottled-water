@@ -9,7 +9,7 @@ from app.core.database import get_db
 from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import Artifact, Conversation, FileAsset, KnowledgeBase, KnowledgeDocument, User, utcnow
+from app.models import Artifact, Conversation, FileAsset, KnowledgeBase, User, utcnow
 from app.services.artifacts import (
     build_demo_html,
     compute_artifact_diff,
