@@ -695,7 +695,7 @@ async def _run_direct_agent(
                 purpose=f"agent:{agent.type}",
                 tools=tools if tools else None,
             ):
-                print(f"[_run_direct_agent] event type={event.type} text={event.text[:50] if event.text else ''!r} tool_calls={bool(event.tool_calls)}")
+                print(f"[_run_direct_agent] event type={event.type} text={event.text[:50] if event.text else ''!r} error={event.error[:100] if event.error else ''!r} tool_calls={bool(event.tool_calls)}")
                 if event.type == "delta":
                     stream_text += event.text
                     current_text += event.text
@@ -711,6 +711,18 @@ async def _run_direct_agent(
                     )
                 elif event.type == "tool_calls":
                     current_tool_calls = event.tool_calls
+                elif event.type == "error":
+                    stream_text += f"\n[Error] {event.error}"
+                    await event_bus.publish(
+                        channel,
+                        "content_block_delta",
+                        {
+                            "agent_message_id": assistant.id,
+                            "agent_id": agent.id,
+                            "agent_name": agent.name,
+                            "delta": {"type": "text_delta", "text": f"[Error] {event.error}"},
+                        },
+                    )
         except Exception as exc:
             print(f"[_run_direct_agent] stream_chat error: {exc}")
             if not stream_text:
