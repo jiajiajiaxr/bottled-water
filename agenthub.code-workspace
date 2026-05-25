@@ -36,7 +36,7 @@
                 "request": "launch",
                 "module": "uvicorn",
                 "args": [
-                    "app.main:app",
+                    "app:app",
                     "--reload",
                     "--host",
                     "127.0.0.1",
@@ -55,7 +55,7 @@
             {
                 "label": "Start Backend",
                 "type": "shell",
-                "command": "uv run uvicorn app.main:app --reload",
+                "command": "uv run uvicorn app:app --reload",
                 "options": {
                     "cwd": "${workspaceFolder:Backend}"
                 },
