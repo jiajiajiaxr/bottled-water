@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   CloudUploadOutlined,
   BulbOutlined,
@@ -19,8 +25,10 @@ import {
   Typography,
   Upload,
 } from "antd";
-import type { UploadRequestOption } from "rc-upload/lib/interface";
+// rc-upload 类型声明缺失，使用 any 绕过
+type UploadRequestOption = any;
 import { MessageBubble } from "../MessageBubble";
+import { useMessageStore } from "../../../../store";
 import type {
   ChatMessage,
   Conversation,
@@ -33,7 +41,6 @@ const { Text } = Typography;
 
 export function ChatPanel({
   active,
-  messages,
   loading,
   streamState,
   onSend,
@@ -43,7 +50,6 @@ export function ChatPanel({
   onStopStreaming,
 }: {
   active?: Conversation;
-  messages: ChatMessage[];
   loading: boolean;
   streamState: "idle" | "streaming" | "done" | "error";
   onSend: (
@@ -62,6 +68,25 @@ export function ChatPanel({
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const { message } = AntApp.useApp();
+
+  // 从 Store 分别订阅历史消息和流式消息，互不影响
+  const historyMessages = useMessageStore((s) => s.historyMessages);
+  const streamingMessages = useMessageStore((s) => s.streamingMessages);
+
+  // 合并为渲染列表（保持按时间顺序）
+  const messages = useMemo(() => {
+    const streaming = Array.from(streamingMessages.values());
+    const merged = [...historyMessages, ...streaming].sort(
+      (a, b) =>
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+    const assistantMsgs = merged.filter((m) => m.role === "assistant");
+    if (assistantMsgs.length) {
+      const last = assistantMsgs[assistantMsgs.length - 1];
+      console.log("[ChatPanel] last assistant msg id=", last.id, "thinking=", last.thinking?.slice(0, 30), "streamState=", last.streamState);
+    }
+    return merged;
+  }, [historyMessages, streamingMessages]);
 
   const submit = () => {
     const value =
@@ -153,9 +178,9 @@ export function ChatPanel({
       <div className="composer">
         {quoted && (
           <div className="composer-quote">
-            <Text type="secondary" ellipsis>
-              引用：{quoted.content}
-            </Text>
+            <div className="composer-quote-text">
+              <Text type="secondary">引用：{quoted.content}</Text>
+            </div>
             <Button
               type="text"
               size="small"
@@ -227,7 +252,11 @@ export function ChatPanel({
               </Button>
             </Tooltip>
             {streamState === "streaming" ? (
-              <Button danger icon={<ReloadOutlined />} onClick={onStopStreaming}>
+              <Button
+                danger
+                icon={<ReloadOutlined />}
+                onClick={onStopStreaming}
+              >
                 Stop
               </Button>
             ) : (

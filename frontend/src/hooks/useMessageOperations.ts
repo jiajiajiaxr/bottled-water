@@ -15,43 +15,6 @@ import {
   participantName,
 } from "../lib/message";
 
-/** 批量触发更新：16ms 窗口内收到 delta 的消息 id 合并为一次 state 更新（约 60fps） */
-function createDeltaBatcher(
-  flush: (msgIds: string[]) => void,
-  windowMs = 16,
-) {
-  const pending = new Set<string>();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const scheduleFlush = () => {
-    if (timer) return;
-    timer = setTimeout(() => {
-      timer = undefined;
-      if (!pending.size) return;
-      const snapshot = Array.from(pending);
-      pending.clear();
-      flush(snapshot);
-    }, windowMs);
-  };
-
-  return {
-    add: (messageId: string) => {
-      pending.add(messageId);
-      scheduleFlush();
-    },
-    flushNow: () => {
-      if (timer) {
-        clearTimeout(timer);
-        timer = undefined;
-      }
-      if (!pending.size) return;
-      const snapshot = Array.from(pending);
-      pending.clear();
-      flush(snapshot);
-    },
-  };
-}
-
 export function useMessageOperations(currentUserName: string) {
   const { message } = AntApp.useApp();
   const { setBackgroundTasks } = useTaskStore();
@@ -64,10 +27,15 @@ export function useMessageOperations(currentUserName: string) {
   const { conversations, activeId, updateConversations } =
     useConversationStore();
   const {
-    updateMessages,
-    updateMessageContent,
-    updateMessageThinking,
-    setMessages,
+    appendHistoryMessage,
+    replaceHistoryMessage,
+    startStreamingMessage,
+    updateStreamingContent,
+    updateStreamingThinking,
+    updateStreamingState,
+    finishStreamingMessage,
+    finishAllStreamingMessages,
+    setHistoryMessages,
     setStreamState,
     updateLocalRunningConversationIds,
   } = useMessageStore();
@@ -117,78 +85,101 @@ export function useMessageOperations(currentUserName: string) {
           : incoming.streamState,
     });
 
+    /** 确保流式消息存在于 streamingMessages Map 中 */
     const ensureStreamingMessage = (
       messageId: string,
       author: string,
       agentId?: string,
     ) => {
-      updateMessages((current) => {
-        if (current.some((item) => item.id === messageId)) return current;
-        const tempId =
-          (agentId && tempIdsByAgentId.get(agentId)) ||
-          tempIdsByAuthor.get(author);
-        if (tempId) {
-          if (agentId) tempIdsByAgentId.set(agentId, messageId);
-          tempIdsByAuthor.set(author, messageId);
-          return current.map((item) =>
-            item.id === tempId
-              ? {
-                  ...item,
-                  id: messageId,
-                  sender_id: agentId,
-                  author,
-                  rawContent: { ...(item.rawContent ?? {}), agent_id: agentId },
-                  streamState: "streaming",
-                }
-              : item,
-          );
-        }
-        return [
-          ...current,
-          makeMessage({
-            conversationId,
-            role: "assistant",
-            kind: "text",
-            author,
-            content: "",
-            rawContent: agentId ? { agent_id: agentId } : {},
-            streamState: "streaming",
-          }),
-        ].map((item) =>
-          item.id.startsWith("local-") &&
-          item.author === author &&
-          !item.content
-            ? { ...item, id: messageId }
-            : item,
-        );
-      });
+      const { streamingMessages } = useMessageStore.getState();
+
+      // 已存在，不做任何事
+      if (streamingMessages.has(messageId)) return;
+
+      // 查找临时消息并替换
+      const tempId =
+        (agentId && tempIdsByAgentId.get(agentId)) ||
+        tempIdsByAuthor.get(author);
+      if (tempId && streamingMessages.has(tempId)) {
+        const tempMsg = streamingMessages.get(tempId)!;
+        if (agentId) tempIdsByAgentId.set(agentId, messageId);
+        tempIdsByAuthor.set(author, messageId);
+
+        const { removeStreamingMessage } = useMessageStore.getState();
+        removeStreamingMessage(tempId);
+        startStreamingMessage({
+          ...tempMsg,
+          id: messageId,
+          sender_id: agentId,
+          author,
+          rawContent: { ...(tempMsg.rawContent ?? {}), agent_id: agentId },
+          streamState: "streaming",
+        });
+        return;
+      }
+
+      // 创建新消息
+      startStreamingMessage(
+        makeMessage({
+          conversationId,
+          role: "assistant",
+          kind: "text",
+          author,
+          content: "",
+          rawContent: agentId ? { agent_id: agentId } : {},
+          streamState: "streaming",
+        }),
+      );
     };
 
+    /** 插入或更新最终消息（后端推送的完整消息） */
     const upsertFinalMessage = (incoming: ChatMessage) => {
       const normalized = normalizeIncomingMessage(incoming);
       const agentId =
         normalized.sender_id ||
         (normalized.rawContent?.agent_id as string | undefined);
-      updateMessages((current) => {
-        if (current.some((item) => item.id === normalized.id)) {
-          return current.map((item) =>
-            item.id === normalized.id ? { ...item, ...normalized } : item,
-          );
-        }
-        const tempId =
-          (agentId && tempIdsByAgentId.get(agentId)) ||
-          tempIdsByAuthor.get(normalized.author);
-        if (tempId) {
-          if (agentId) tempIdsByAgentId.set(agentId, normalized.id);
-          tempIdsByAuthor.set(normalized.author, normalized.id);
-          return current.map((item) =>
-            item.id === tempId ? { ...item, ...normalized } : item,
-          );
-        }
-        return [...current, normalized];
-      });
+
+      const {
+        streamingMessages,
+        historyMessages,
+        updateStreamingState,
+        replaceHistoryMessage,
+      } = useMessageStore.getState();
+
+      // 优先检查 streamingMessages
+      if (streamingMessages.has(normalized.id)) {
+        updateStreamingState(normalized.id, normalized);
+        return;
+      }
+
+      // 检查 historyMessages
+      const inHistory = historyMessages.some(
+        (item) => item.id === normalized.id,
+      );
+      if (inHistory) {
+        replaceHistoryMessage(normalized.id, normalized);
+        return;
+      }
+
+      // 检查是否有临时消息需要替换
+      const tempId =
+        (agentId && tempIdsByAgentId.get(agentId)) ||
+        tempIdsByAuthor.get(normalized.author);
+      if (tempId && streamingMessages.has(tempId)) {
+        if (agentId) tempIdsByAgentId.set(agentId, normalized.id);
+        tempIdsByAuthor.set(normalized.author, normalized.id);
+
+        const { removeStreamingMessage } = useMessageStore.getState();
+        removeStreamingMessage(tempId);
+        startStreamingMessage(normalized);
+        return;
+      }
+
+      // 直接添加为历史消息
+      appendHistoryMessage(normalized);
     };
 
+    // 单 Agent 模式：预创建占位消息
     if (agentParticipants.length === 1) {
       const participant = agentParticipants[0];
       const author = participantName(participant);
@@ -207,7 +198,7 @@ export function useMessageOperations(currentUserName: string) {
       });
       tempIdsByAgentId.set(agentId, placeholder.id);
       tempIdsByAuthor.set(author, placeholder.id);
-      updateMessages((current) => [...current, placeholder]);
+      startStreamingMessage(placeholder);
     }
 
     setStreamState("streaming");
@@ -225,45 +216,30 @@ export function useMessageOperations(currentUserName: string) {
     );
     stopStreamRef.current = undefined;
 
-    // 批量 delta 处理器：16ms 窗口内有更新的消息合并为一次 state 更新
+    // delta 累积器（仅用于本地缓冲，不控制渲染频率）
     const latestContentById = new Map<string, string>();
-    const deltaBatcher = createDeltaBatcher((msgIds) => {
-      for (const msgId of msgIds) {
-        const fullContent = latestContentById.get(msgId) ?? "";
-        updateMessageContent(msgId, fullContent);
-      }
-    });
-
-    // 批量 reasoning delta 处理器
     const latestThinkingById = new Map<string, string>();
-    const thinkingBatcher = createDeltaBatcher((msgIds) => {
-      for (const msgId of msgIds) {
-        const fullThinking = latestThinkingById.get(msgId) ?? "";
-        updateMessageThinking(msgId, fullThinking);
-      }
-    });
 
     let rawBuffer = "";
     let completedPreview = "";
     // 追踪当前消息上正在执行的工具调用
-    const activeToolCalls = new Map<string, { toolName: string; toolCallId: string }>();
+    const activeToolCalls = new Map<
+      string,
+      { toolName: string; toolCallId: string }
+    >();
     let currentMessageId = "";
 
     const updateActiveToolCalls = (messageId: string) => {
       if (!messageId) return;
-      updateMessages((current) =>
-        current.map((item) =>
-          item.id === messageId
-            ? {
-                ...item,
-                rawContent: {
-                  ...item.rawContent,
-                  _activeToolCalls: Array.from(activeToolCalls.values()),
-                },
-              }
-            : item,
-        ),
-      );
+      const { streamingMessages } = useMessageStore.getState();
+      const msg = streamingMessages.get(messageId);
+      if (!msg) return;
+      updateStreamingState(messageId, {
+        rawContent: {
+          ...msg.rawContent,
+          _activeToolCalls: Array.from(activeToolCalls.values()),
+        },
+      });
     };
 
     try {
@@ -298,21 +274,24 @@ export function useMessageOperations(currentUserName: string) {
             String(payload.agent_name || "Agent"),
             payload.agent_id ? String(payload.agent_id) : undefined,
           );
-          // 累积到 latestContentById，标记消息待更新
+          // 累积到本地缓冲，直接 O(1) 更新 Map
           const existing = latestContentById.get(messageId) ?? "";
-          latestContentById.set(messageId, existing + delta);
-          deltaBatcher.add(messageId);
+          const nextContent = existing + delta;
+          latestContentById.set(messageId, nextContent);
+          updateStreamingContent(messageId, nextContent);
         },
         onReasoningDelta: (delta, payload) => {
           const messageId = String(
             payload.agent_message_id || payload.message_id || "",
           );
+          console.log("[onReasoningDelta] messageId=", messageId, "delta=", delta.slice(0, 50));
           if (messageId) currentMessageId = messageId;
           if (!messageId) return;
-          // 累积到 latestThinkingById，标记消息待更新
           const existing = latestThinkingById.get(messageId) ?? "";
-          latestThinkingById.set(messageId, existing + delta);
-          thinkingBatcher.add(messageId);
+          const nextThinking = existing + delta;
+          latestThinkingById.set(messageId, nextThinking);
+          console.log("[onReasoningDelta] updating thinking, msgId=", messageId, "thinking=", nextThinking.slice(0, 50));
+          updateStreamingThinking(messageId, nextThinking);
         },
         onMessageUpdated: upsertFinalMessage,
         onMessageNew: (incoming) => {
@@ -334,28 +313,27 @@ export function useMessageOperations(currentUserName: string) {
           }
         },
         onDone: () => {
-          deltaBatcher.flushNow();
-          thinkingBatcher.flushNow();
           activeToolCalls.clear();
-          // 流结束时统一过滤内部输出并清空工具调用状态
-          updateMessages((current) =>
-            current.map((item) => {
-              if (item.streamState !== "streaming") return item;
-              const cleaned =
-                item.role === "assistant" && item.kind === "text"
-                  ? stripInternalAgentOutput(item.content)
-                  : item.content;
-              return {
-                ...item,
-                content: cleaned,
-                streamState: "done" as const,
-                rawContent: {
-                  ...item.rawContent,
-                  _activeToolCalls: [],
-                },
-              };
-            }),
-          );
+
+          const { streamingMessages } = useMessageStore.getState();
+
+          // 先批量清理所有 streaming 消息的内容和工具调用状态
+          for (const [msgId, msg] of streamingMessages) {
+            const cleaned =
+              msg.role === "assistant" && msg.kind === "text"
+                ? stripInternalAgentOutput(msg.content)
+                : msg.content;
+            updateStreamingState(msgId, {
+              content: cleaned,
+              rawContent: {
+                ...msg.rawContent,
+                _activeToolCalls: [],
+              },
+            });
+          }
+
+          // 将所有 streaming 消息归档到 history
+          finishAllStreamingMessages();
         },
         onControl: (stop) => {
           stopStreamRef.current = stop;
@@ -379,7 +357,7 @@ export function useMessageOperations(currentUserName: string) {
         const hasPreviewCard = cleanMessages.some(
           (item) => item.kind === "preview_card",
         );
-        setMessages(
+        setHistoryMessages(
           hasPreviewCard || !freshArtifact
             ? cleanMessages
             : [
@@ -416,24 +394,24 @@ export function useMessageOperations(currentUserName: string) {
       }
       if (freshArtifact) setArtifact(freshArtifact);
     } catch (error) {
-      deltaBatcher.flushNow();
       activeToolCalls.clear();
       const fallbackPreview =
         stripInternalAgentOutput(rawBuffer).slice(0, 120) || "reply failed";
       completedPreview = fallbackPreview;
       setStreamState("error");
-      updateMessages((current) =>
-        current.map((item) =>
-          item.streamState === "streaming"
-            ? {
-                ...item,
-                streamState: "error",
-                content: item.content || fallbackPreview,
-                rawContent: { ...item.rawContent, _activeToolCalls: [] },
-              }
-            : item,
-        ),
-      );
+
+      const { streamingMessages } = useMessageStore.getState();
+
+      // 将所有 streaming 消息标记为 error 并归档
+      for (const [msgId, msg] of streamingMessages) {
+        updateStreamingState(msgId, {
+          streamState: "error",
+          content: msg.content || fallbackPreview,
+          rawContent: { ...msg.rawContent, _activeToolCalls: [] },
+        });
+        finishStreamingMessage(msgId);
+      }
+
       throw error;
     } finally {
       updateLocalRunningConversationIds((current) => {
@@ -479,17 +457,18 @@ export function useMessageOperations(currentUserName: string) {
           : item,
       ),
     );
-    updateMessages((current) =>
-      current.map((item) =>
-        item.streamState === "streaming"
-          ? {
-              ...item,
-              streamState: "done",
-              content: item.content || "已停止接收本次回复。",
-            }
-          : item,
-      ),
-    );
+
+    const { streamingMessages } = useMessageStore.getState();
+
+    // 将所有 streaming 消息标记为 done 并归档
+    for (const [msgId, msg] of streamingMessages) {
+      updateStreamingState(msgId, {
+        streamState: "done",
+        content: msg.content || "已停止接收本次回复。",
+      });
+      finishStreamingMessage(msgId);
+    }
+
     await api.cancelAssistantReply(activeId).catch(() => undefined);
     await refreshTasks().catch(() => undefined);
     message.info("已停止本次响应");
@@ -523,7 +502,7 @@ export function useMessageOperations(currentUserName: string) {
       attachments: localAttachments,
       quotedMessageId: quoted?.id,
     });
-    updateMessages((current) => [...current, localMessage]);
+    appendHistoryMessage(localMessage);
     updateConversations((current) =>
       current.map((item) =>
         item.id === conversationId
@@ -548,26 +527,21 @@ export function useMessageOperations(currentUserName: string) {
         attachments,
         thinkingEnabled,
       );
-      updateMessages((current) =>
-        current.map((item) =>
-          item.id === localMessage.id ? userMessage : item,
-        ),
-      );
+      replaceHistoryMessage(localMessage.id, userMessage);
       if (isLikelyArtifactRequest(content)) {
         const freshArtifact = await api
           .artifact(conversationId)
           .catch(() => undefined);
         if (freshArtifact) {
           setArtifact(freshArtifact);
-          updateMessages((current) => {
-            const exists = current.some(
-              (item) =>
-                item.kind === "preview_card" &&
-                item.rawContent?.artifact_id === freshArtifact.id,
-            );
-            if (exists) return current;
-            return [
-              ...current,
+          const { historyMessages } = useMessageStore.getState();
+          const exists = historyMessages.some(
+            (item) =>
+              item.kind === "preview_card" &&
+              item.rawContent?.artifact_id === freshArtifact.id,
+          );
+          if (!exists) {
+            appendHistoryMessage(
               makeMessage({
                 conversationId,
                 role: "assistant",
@@ -577,8 +551,8 @@ export function useMessageOperations(currentUserName: string) {
                 rawContent: { artifact_id: freshArtifact.id },
                 streamState: "done",
               }),
-            ];
-          });
+            );
+          }
           updateConversations((current) =>
             current.map((item) =>
               item.id === conversationId
@@ -596,17 +570,17 @@ export function useMessageOperations(currentUserName: string) {
     } catch (error) {
       stopStreamRef.current?.();
       void streamPromise;
-      updateMessages((current) =>
-        current.map((item) =>
-          item.id === localMessage.id
-            ? {
-                ...item,
-                kind: "error",
-                content: `${content}\n\n发送失败：${error instanceof Error ? error.message : "网络异常"}`,
-              }
-            : item,
-        ),
+      const { historyMessages } = useMessageStore.getState();
+      const index = historyMessages.findIndex(
+        (item) => item.id === localMessage.id,
       );
+      if (index !== -1) {
+        const { updateHistoryMessage } = useMessageStore.getState();
+        updateHistoryMessage(localMessage.id, {
+          kind: "error",
+          content: `${content}\n\n发送失败：${error instanceof Error ? error.message : "网络异常"}`,
+        });
+      }
       message.error("消息发送失败");
     }
   };

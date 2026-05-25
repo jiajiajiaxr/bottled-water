@@ -65,7 +65,6 @@ export interface WorkbenchLayoutProps {
   ) => void;
 
   // Messages
-  messages: ChatMessage[];
   loadingMessages: boolean;
   streamState: StreamState;
   send: (text: string, quoted?: ChatMessage, attachments?: UploadedFile[], thinkingEnabled?: boolean) => Promise<void>;
@@ -122,7 +121,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     updateConversations,
     setActiveId,
     navigateToConversation,
-    messages,
     loadingMessages,
     streamState,
     send,
@@ -266,7 +264,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         </div>
         <ChatPanel
           active={active}
-          messages={messages}
           loading={loadingMessages}
           streamState={streamState}
           onSend={send}

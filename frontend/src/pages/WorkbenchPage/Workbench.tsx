@@ -46,8 +46,8 @@ export function Workbench({
 }) {
   const [currentUser, setCurrentUser] = useState(user);
   const {
-    messages,
-    setMessages,
+    setHistoryMessages,
+    clearMessages,
     streamState,
     localRunningConversationIds,
     updateLocalRunningConversationIds,
@@ -242,7 +242,7 @@ export function Workbench({
     let cancelled = false;
     setConversations([]);
     setActiveId(undefined);
-    setMessages([]);
+    clearMessages();
     setArtifact(undefined);
     setArtifactPanelOpen(false);
     api.conversations(activeWorkspaceId).then((items) => {
@@ -251,7 +251,7 @@ export function Workbench({
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen, setArtifact, setActiveId, setConversations, setMessages]);
+  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen, setArtifact, setActiveId, setConversations, clearMessages]);
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
@@ -303,12 +303,12 @@ export function Workbench({
       api.files(activeId),
     ])
       .then(([nextMessages, nextArtifact, nextFiles]) => {
-        setMessages(nextMessages);
+        setHistoryMessages(nextMessages);
         setArtifact(nextArtifact);
         setFiles(nextFiles);
       })
       .finally(() => setLoadingMessages(false));
-  }, [activeId, setArtifactPanelOpen, setArtifact, setFiles, setLoadingMessages, setMessages]);
+  }, [activeId, setArtifactPanelOpen, setArtifact, setFiles, setLoadingMessages, setHistoryMessages]);
 
   return (
     <>
@@ -331,7 +331,6 @@ export function Workbench({
         updateConversations={updateConversations}
         setActiveId={setActiveId}
         navigateToConversation={navigateToConversation}
-        messages={messages}
         loadingMessages={loadingMessages}
         streamState={streamState}
         send={send}

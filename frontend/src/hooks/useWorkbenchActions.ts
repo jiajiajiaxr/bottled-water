@@ -28,7 +28,7 @@ export function useWorkbenchActions(
     setActiveId,
     updateConversations,
   } = useConversationStore();
-  const { setMessages } = useMessageStore();
+  const { clearMessages } = useMessageStore();
   const {
     artifact,
     files,
@@ -80,7 +80,7 @@ export function useWorkbenchActions(
       created.workspace_id || activeWorkspaceId,
       created.id,
     );
-    setMessages([]);
+    clearMessages();
     setCreateOpen({ open: false, group: false });
     message.success(payload.group ? "群聊已创建" : "会话已创建");
   };

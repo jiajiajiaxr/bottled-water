@@ -1,4 +1,9 @@
-import { request, wait, eventPayload, type StreamAssistantHandlers } from "./client";
+import {
+  request,
+  wait,
+  eventPayload,
+  type StreamAssistantHandlers,
+} from "./client";
 import { demoUser, demoMessages } from "../mock";
 import type { ChatMessage, UploadedFile } from "../types";
 
@@ -114,6 +119,12 @@ export async function streamAssistantReply(
             ? String((deltaPayload as { text?: unknown }).text ?? "")
             : "";
         if (deltaType === "reasoning_delta" && deltaText) {
+          console.log(
+            "[SSE reasoning_delta] text=",
+            deltaText.slice(0, 50),
+            "payload=",
+            payload,
+          );
           handlers.onReasoningDelta?.(deltaText, payload);
         } else if (deltaText) {
           buffer += deltaText;
@@ -126,9 +137,7 @@ export async function streamAssistantReply(
         );
       });
       source.addEventListener("message:new", (event) => {
-        handlers.onMessageNew?.(
-          eventPayload(event) as unknown as ChatMessage,
-        );
+        handlers.onMessageNew?.(eventPayload(event) as unknown as ChatMessage);
       });
       source.addEventListener("tool_call_start", (event) => {
         handlers.onToolCallStart?.(eventPayload(event));

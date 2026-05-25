@@ -508,10 +508,18 @@ button {
 
 .composer-quote {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
   margin: 0 0 10px;
+}
+
+.composer-quote-text {
+  flex: 1;
+  min-height: 28px;
+  max-height: 120px;
+  overflow-y: auto;
+  word-break: break-word;
 }
 
 .preview-panel {

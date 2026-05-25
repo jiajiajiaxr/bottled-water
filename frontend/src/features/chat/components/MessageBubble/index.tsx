@@ -42,7 +42,13 @@ interface MessageBubbleProps {
   onPreview: (message: ChatMessage) => void;
 }
 
-function ThinkingBlock({ thinking }: { thinking: string }) {
+function ThinkingBlock({
+  thinking,
+  streaming,
+}: {
+  thinking: string;
+  streaming?: boolean;
+}) {
   const [expanded, setExpanded] = useState(true);
   if (!thinking.trim()) return null;
   return (
@@ -58,7 +64,7 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
       </button>
       {expanded && (
         <div className="thinking-content">
-          <MarkdownContent text={thinking} />
+          {streaming ? thinking : <MarkdownContent text={thinking} />}
         </div>
       )}
     </div>
@@ -73,6 +79,7 @@ function MessageBubbleComponent({
   onCopy,
   onPreview,
 }: MessageBubbleProps) {
+  console.log("[MessageBubble] id=", message.id, "thinking=", message.thinking?.slice(0, 30), "streamState=", message.streamState);
   const isUser = message.role === "user";
   const isEvent =
     message.kind === "event" ||
@@ -186,11 +193,17 @@ function MessageBubbleComponent({
               {message.streamState === "streaming" && (
                 <Tag color="processing">流式生成中</Tag>
               )}
-              {(message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ? (
+              {(
+                message.rawContent?._activeToolCalls as
+                  | Array<{ toolName: string }>
+                  | undefined
+              )?.length ? (
                 <Tag icon={<LoadingOutlined />} color="blue">
                   正在使用{" "}
                   {(
-                    message.rawContent?._activeToolCalls as Array<{ toolName: string }>
+                    message.rawContent?._activeToolCalls as Array<{
+                      toolName: string;
+                    }>
                   )
                     .map((t) => t.toolName)
                     .join(", ")}
@@ -203,10 +216,17 @@ function MessageBubbleComponent({
           </Flex>
           {quoted && <div className="quote-block">{quoted.content}</div>}
           {message.thinking && (
-            <ThinkingBlock thinking={message.thinking} />
+            <ThinkingBlock
+              thinking={message.thinking}
+              streaming={message.streamState === "streaming"}
+            />
           )}
           <div className="message-content">
-            <MarkdownContent text={message.content} />
+            {message.streamState === "streaming" ? (
+              <div className="markdown-content">{message.content}</div>
+            ) : (
+              <MarkdownContent text={message.content} />
+            )}
           </div>
           {attachments.length > 0 && (
             <div
@@ -343,14 +363,21 @@ function MessageBubbleComponent({
   );
 }
 
-export const MessageBubble = React.memo(MessageBubbleComponent, (prev, next) => {
-  if (prev.message.id !== next.message.id) return false;
-  if (prev.message.content !== next.message.content) return false;
-  if (prev.message.streamState !== next.message.streamState) return false;
-  if (prev.message.kind !== next.message.kind) return false;
-  if (prev.quoted?.id !== next.quoted?.id) return false;
-  const prevTools = (prev.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0;
-  const nextTools = (next.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0;
-  if (prevTools !== nextTools) return false;
-  return true;
-});
+export const MessageBubble = React.memo(
+  MessageBubbleComponent,
+  (prev, next) => {
+    const skip =
+      prev.message.id === next.message.id &&
+      prev.message.content === next.message.content &&
+      prev.message.thinking === next.message.thinking &&
+      prev.message.streamState === next.message.streamState &&
+      prev.message.kind === next.message.kind &&
+      prev.quoted?.id === next.quoted?.id &&
+      ((prev.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0) ===
+      ((next.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0);
+    if (prev.message.id.startsWith("431db571") || next.message.id.startsWith("431db571")) {
+      console.log("[memo] id=", prev.message.id, "skip=", skip, "prevThink=", prev.message.thinking?.slice(0,20), "nextThink=", next.message.thinking?.slice(0,20));
+    }
+    return skip;
+  },
+);
