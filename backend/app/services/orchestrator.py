@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models import Agent, Artifact, Conversation, ConversationParticipant, Message, Subtask, Task, User, WorkflowRun, utcnow
 from app.services.ark import ArkProviderError, ark_client
@@ -593,7 +594,8 @@ async def _run_direct_agent(
     channel: str,
 ) -> None:
     """单聊模式 Function Calling 版本。"""
-    enable_fc = (agent.config or {}).get("enable_function_calling", False)
+    settings = get_settings()
+    enable_fc = settings.enable_function_calling
     model_config_id = (agent.config or {}).get("model_config_id")
     # 自定义模型暂不支持 tools，回退到预编排
     if not enable_fc or model_config_id:

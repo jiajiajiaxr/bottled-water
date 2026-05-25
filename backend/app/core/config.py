@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     storage_dir: str = str(ROOT_DIR / "var" / "storage")
     max_upload_mb: int = 50
 
+    enable_function_calling: bool = True
+
     @property
     def resolved_database_url(self) -> str:
         if not self.database_url.startswith("sqlite:///"):
