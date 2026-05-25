@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BranchesOutlined,
   CloudUploadOutlined,
@@ -111,6 +111,30 @@ export function ChatPanel({
     [onOpenPreview],
   );
 
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const isAtBottom = useRef(true);
+
+  useEffect(() => {
+    const el = messageListRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      const threshold = 50;
+      isAtBottom.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!isAtBottom.current) return;
+    const el = messageListRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, streamState]);
+
   return (
     <Content className="chat-panel">
       <Header className="chat-header">
@@ -168,7 +192,7 @@ export function ChatPanel({
           <Avatar>{user.avatar ?? user.name.slice(0, 1)}</Avatar>
         </Space>
       </Header>
-      <div className="message-list">
+      <div ref={messageListRef} className="message-list">
         {loading ? (
           <Spin />
         ) : messages.length ? (
