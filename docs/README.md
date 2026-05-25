@@ -1,4 +1,4 @@
-# AgentHub Docs
+﻿# AgentHub Docs
 
 这个目录放项目的补充说明，主要服务三类人：
 
@@ -21,9 +21,9 @@
 
 如果要排查问题，优先看：
 
-- 消息不流式：`frontend/src/api.ts`、`backend/app/api/messages.py`、`backend/app/services/events.py`、`backend/app/services/orchestrator.py`
-- Agent 不按权限调用工具：`backend/app/services/agentic_runtime.py`、`backend/app/services/tool_registry.py`、`backend/app/models.py`
-- 工作流画布保存或运行异常：`backend/app/api/conversations.py`、`backend/app/services/orchestrator.py`、`frontend/src/App.tsx`
+- 消息不流式：`frontend/src/api.ts`、`backend/app/api/messages.py`、`backend/app/services/realtime/event_bus.py`、`backend/app/services/chat/orchestrator.py`
+- Agent 不按权限调用工具：`backend/app/services/agents/tool_loop.py`、`backend/app/services/tools/registry.py`、`backend/app/models.py`
+- 工作流画布保存或运行异常：`backend/app/api/conversations.py`、`backend/app/services/chat/orchestrator.py`、`frontend/src/App.tsx`
 - 文件/产物异常：`backend/app/api/files.py`、`backend/app/services/file_tools.py`、`backend/app/api/artifacts.py`、`backend/app/services/artifact_exports.py`
 - 模型调用失败：`backend/app/core/config.py`、`backend/app/services/ark.py`、`backend/app/services/llm_gateway.py`
 

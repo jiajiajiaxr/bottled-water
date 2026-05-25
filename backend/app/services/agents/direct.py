@@ -39,7 +39,7 @@ async def _run_direct_agent(
         (agent.config or {}).get("model_config_id"),
     )
     if not enable_fc:
-        return await _run_direct_agent_legacy(
+        return await _run_direct_agent_without_function_calling(
             db,
             conversation=conversation,
             user_message=user_message,
@@ -124,7 +124,7 @@ async def _run_direct_agent(
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
 
-async def _run_direct_agent_legacy(
+async def _run_direct_agent_without_function_calling(
     db: Session,
     *,
     conversation: Conversation,

@@ -477,13 +477,11 @@ async def execute_tool_by_name(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     """根据 tool_name 路由到内置工具/Skill/MCP 执行器。"""
-    # Keep the legacy namespace as the patch/integration surface while the
-    # implementation lives in services.tools.registry.
-    from app.services import tool_registry
+    from app.services.tools import registry
 
     # 内置工具
-    if tool_name in tool_registry.BUILTIN_TOOLS:
-        return tool_registry.invoke_builtin_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
+    if tool_name in registry.BUILTIN_TOOLS:
+        return registry.invoke_builtin_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
 
     # Skill
     if tool_name.startswith("skill."):

@@ -1,4 +1,4 @@
-# 开发维护手册
+﻿# 开发维护手册
 
 本文说明如何在本地开发、验证和修改 AgentHub。
 
@@ -123,20 +123,20 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 4. 修改 `frontend/src/types.ts` 的 `Agent` / `AgentConfig`。
 5. 修改 Agent 创建、编辑表单。
 6. 修改 `backend/app/api/agents.py` 的创建和更新逻辑。
-7. 如果影响执行，修改 `agentic_runtime.py` 或 `orchestrator.py`。
+7. 如果影响执行，修改 `backend/app/services/agents/function_loop.py`、`backend/app/services/agents/tool_loop.py` 或 `backend/app/services/chat/orchestrator.py`。
 
 ### 新增一个工作流节点类型
 
 1. 修改 `frontend/src/types.ts` 的 `WorkflowNode` 约定。
 2. 修改 `frontend/src/App.tsx` 的节点类型选项、创建默认配置、编辑表单。
 3. 修改 `backend/app/api/conversations.py` 的 normalize 逻辑，确保 `type/config` 不丢失。
-4. 修改 `backend/app/services/orchestrator.py` 的执行逻辑。
+4. 修改 `backend/app/services/chat/orchestrator.py` 的执行逻辑。
 5. 修改 `WorkflowRun.node_states` 输出。
 6. 增加 `tests/test_conversation.py` 和 `tests/test_orchestrator.py`。
 
 ### 新增一个内置工具
 
-1. 在 `backend/app/services/tool_registry.py` 增加工具定义。
+1. 在 `backend/app/services/tools/registry.py` 增加工具定义。
 2. 在 `invoke_builtin_tool` 中实现真实执行。
 3. 给官方 Agent 工具箱加权限。
 4. 如果需要文件能力，优先复用 `file_tools.py`。
@@ -167,7 +167,7 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 
 - 后端过滤：`backend/app/services/output_filter.py`
 - 前端过滤：`frontend/src/App.tsx` 中的 `stripInternalAgentOutput`
-- 编排生成：`backend/app/services/orchestrator.py`
+- 编排生成：`backend/app/services/chat/orchestrator.py`
 
 ## 7. 数据流速查
 
@@ -199,7 +199,7 @@ frontend uploadFile
 
 ```text
 Agent / tool
-  -> tool_registry.invoke_builtin_tool
+  -> tools.registry.invoke_builtin_tool
   -> artifacts.create_artifact
   -> Message preview_card
   -> 用户点击卡片
