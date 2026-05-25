@@ -63,7 +63,7 @@
             {
                 "label": "Start Backend",
                 "type": "shell",
-                "command": "uv run uvicorn app:app --reload --reload-exclude logs/* --reload-exclude *.db --reload-exclude *.db-shm --reload-exclude *.db-wal",
+                "command": "uv run uvicorn app:app --reload --reload-dir ./app",
                 "options": {
                     "cwd": "${workspaceFolder:Backend}"
                 },
