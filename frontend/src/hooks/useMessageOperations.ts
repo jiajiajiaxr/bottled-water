@@ -15,10 +15,10 @@ import {
   participantName,
 } from "../lib/message";
 
-/** 批量触发更新：50ms 窗口内收到 delta 的消息 id 合并为一次 state 更新 */
+/** 批量触发更新：16ms 窗口内收到 delta 的消息 id 合并为一次 state 更新（约 60fps） */
 function createDeltaBatcher(
   flush: (msgIds: string[]) => void,
-  windowMs = 50,
+  windowMs = 16,
 ) {
   const pending = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
