@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
 
 from sqlalchemy import select
 
 from app.core.database import SessionLocal
-from app.models import Agent, Artifact, Conversation, Message, Subtask, Task, WorkflowRun, utcnow
+from app.models import Artifact, Conversation, Message, Subtask, Task, WorkflowRun, utcnow
 from app.services.agents.direct import _run_direct_agent
-from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.ark import ArkProviderError, ark_client
 from app.services.artifacts import build_demo_html, classify_artifact_request, create_artifact, create_preview_message
 from app.services.chat.artifacts import _publish_tool_artifacts
@@ -18,17 +16,16 @@ from app.services.queue import queue_service
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import artifact_to_dict, message_to_dict, subtask_to_dict, task_to_dict
 from app.services.tasks.service import create_task_for_prompt
+from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.definition import (
     _conversation_agents,
-    _node_config,
     _single_agent_for_conversation,
     _workflow_for_conversation,
     _workflow_node_states,
-    _workflow_node_type,
     _workflow_plan,
 )
 from app.services.workflows.planning import _maybe_replan_workflow
-from app.services.workflows.runtime import _set_workflow_node_state, _sync_workflow_run
+from app.services.workflows.runtime import _sync_workflow_run
 
 
 async def run_orchestration(message_id: str) -> None:
@@ -163,91 +160,39 @@ async def run_orchestration(message_id: str) -> None:
             .unique()
             .all()
         )
-        worker_contexts: list[dict[str, Any]] = []
+        engine_result = await WorkflowEngine(
+            db,
+            conversation=conversation,
+            user_message=user_message,
+            task=task,
+            workflow_run=workflow_run,
+            workflow=workflow,
+            prompt=prompt,
+            channel=channel,
+            agents=agents,
+        ).run()
+        worker_contexts = engine_result.worker_contexts
+        independent_agent_replies = engine_result.agent_replies
+        tool_context = engine_result.tool_context
+        if worker_contexts:
+            task.output = {**(task.output or {}), "worker_contexts": worker_contexts}
         for subtask in subtasks:
-            subtask.status = "EXECUTING"
-            subtask.started_at = utcnow()
-            db.commit()
-            await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
-            await asyncio.sleep(0.15)
-            worker_context: dict[str, Any] = {}
-            node = subtask.input.get("workflow_node") if isinstance(subtask.input, dict) else {}
-            node = node if isinstance(node, dict) else {}
-            node_type = _workflow_node_type(node)
-            node_config = _node_config(node)
-            node_id = str(node.get("id") or subtask.id)
-            if workflow_run:
-                _set_workflow_node_state(workflow_run, node_id, status="running", progress=30)
-                _sync_workflow_run(conversation, workflow_run)
-                db.commit()
-                await event_bus.publish(channel, "workflow:run_updated", {"run_id": workflow_run.id, "status": workflow_run.status, "progress": workflow_run.progress, "node_id": node_id})
-            agent_id = node.get("agent_id") or node_config.get("agent_id") or subtask.agent_id
-            worker_agent = db.get(Agent, str(agent_id)) if agent_id else None
-            if node_type in {"agent", "review"} and worker_agent and worker_agent.deleted_at is None:
-                loop_result = await run_agent_function_call_loop(
-                    db,
-                    conversation=conversation,
-                    user_message=user_message,
-                    agent=worker_agent,
-                    prompt=f"{prompt}\n\nWorkflow node: {subtask.title}\n{subtask.description}",
-                    channel=channel,
-                    mode="群聊工作流节点",
-                    task=task,
-                    workflow_run=workflow_run,
-                    workflow_node_id=node_id,
-                    node_title=subtask.title,
-                    max_tool_rounds=3,
-                )
-                worker_context = loop_result.tool_context
-                worker_contexts.append(
-                    {
-                        "subtask_id": subtask.id,
-                        "subtask_title": subtask.title,
-                        "agent_id": worker_agent.id,
-                        "agent_name": worker_agent.name,
-                        "context": worker_context,
-                    }
-                )
-                await _publish_tool_artifacts(db, channel, worker_context)
-                if independent_group_mode:
-                    independent_agent_replies.append(
-                        {"agent_id": worker_agent.id, "agent_name": worker_agent.name, "text": loop_result.text[:1000]}
-                    )
-            elif node_type == "condition":
-                branches = node_config.get("branches") if isinstance(node_config.get("branches"), list) else ["true", "false"]
-                matched = branches[0] if branches else "default"
-                worker_context = {"mode": "condition", "expression": node_config.get("expression"), "matched_branch": matched}
-            elif node_type == "loop":
-                max_iterations = int(node_config.get("max_iterations") or 3)
-                worker_context = {"mode": "loop", "max_iterations": max_iterations, "current_iteration": max_iterations}
-            else:
-                worker_context = {"mode": "canvas_node", "type": node_type, "config": node_config}
-            subtask.status = "REVIEW_PENDING" if subtask.order_index < len(subtasks) - 1 else "REVIEWING"
+            subtask_input = subtask.input if isinstance(subtask.input, dict) else {}
+            workflow_node = subtask_input.get("workflow_node") if isinstance(subtask_input.get("workflow_node"), dict) else {}
+            node_id = str(subtask_input.get("subtask_id") or workflow_node.get("id") or subtask.id)
+            node_output = engine_result.outputs.get(node_id, {})
+            subtask.status = "COMPLETED" if node_output else "SKIPPED"
             subtask.output = {
-                "summary": f"{subtask.title} 已完成",
-                "files": ["index.html"] if subtask.order_index == 0 else [],
-                "agentic_tools": worker_context,
+                "summary": str(node_output.get("summary") or node_output.get("text") or subtask.title)[:500],
+                "agentic_tools": node_output,
             }
             subtask.completed_at = utcnow()
-            if workflow_run:
-                node_output = worker_context if isinstance(worker_context, dict) else {"result": worker_context}
-                _set_workflow_node_state(workflow_run, node_id, status="completed", progress=100, output=node_output)
-                _sync_workflow_run(conversation, workflow_run)
-            db.commit()
             await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
-            if workflow_run:
-                await event_bus.publish(channel, "workflow:run_updated", {"run_id": workflow_run.id, "status": workflow_run.status, "progress": workflow_run.progress, "node_id": node_id})
-
-        tool_context = {"mode": "canvas_first", "executions": [], "worker_contexts": worker_contexts, "summary": "workflow nodes executed"}
-        if worker_contexts:
-            tool_context = {**tool_context, "worker_contexts": worker_contexts}
-            task.output = {**(task.output or {}), "worker_contexts": worker_contexts}
         await _publish_tool_artifacts(db, channel, tool_context)
-        if tool_context["executions"]:
-            task.output = {**(task.output or {}), "agentic_tools": tool_context}
-            task.progress = 58
-            db.commit()
-            await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+        task.output = {**(task.output or {}), "agentic_tools": tool_context}
+        task.progress = max(task.progress or 0, 58)
+        db.commit()
+        await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
         if artifact_type:
             artifact_name = {

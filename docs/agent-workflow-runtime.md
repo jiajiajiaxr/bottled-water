@@ -29,6 +29,9 @@ User message
 关键文件：
 
 - `backend/app/services/chat/orchestrator.py`：判断会话类型，选择单聊或群聊路径。
+- `backend/app/services/workflows/engine.py`：群聊工作流执行入口，严格按画布节点和边运行。
+- `backend/app/services/workflows/graph.py`：拓扑排序、并行层级、条件分支路径。
+- `backend/app/services/workflows/nodes/`：不同节点类型的独立执行器。
 - `backend/app/services/agents/function_loop.py`：执行 Agent 的完整 Function Call Loop。
 - `backend/app/services/agents/tool_loop.py`：构造工具 schema 并分发 Tool、Skill、MCP。
 - `backend/app/services/tools/registry.py`：执行工具。

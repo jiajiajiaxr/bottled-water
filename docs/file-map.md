@@ -76,6 +76,11 @@ agenthub/
 ## 后端 services
 
 - `backend/app/services/chat/orchestrator.py`：核心编排服务。负责单聊/群聊入口、工作流执行、任务拆解、运行态同步、产物卡片生成。
+- `backend/app/services/workflows/engine.py`：Dify 风格工作流执行入口，按画布节点和边调度执行。
+- `backend/app/services/workflows/graph.py`：WorkflowGraph、Node、Edge、拓扑排序、并行层级和分支路径。
+- `backend/app/services/workflows/nodes/`：start、agent、tool、skill、mcp、condition、loop、review、artifact、end 节点执行器。
+- `backend/app/services/workflows/runtime.py`：WorkflowRun/NodeRun/EdgeRun JSON 运行态持久化和会话同步。
+- `backend/app/services/workflows/validator.py`：节点配置、边、权限引用、循环上限和 DAG 校验。
 - `backend/app/services/agents/function_loop.py`：单聊和群聊共用的 Agent Function Call Loop，负责 tool_calls、role=tool 回填和最终回复。
 - `backend/app/services/agents/tool_loop.py`：工具 schema 构造，以及 Tool、Skill、MCP 执行分发。
 - `backend/app/services/ark.py`：火山方舟和 OpenAI-compatible 模型适配，包括普通调用、流式调用和 mock fallback。

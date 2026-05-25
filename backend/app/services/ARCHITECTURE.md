@@ -5,7 +5,7 @@ This directory is organized by service domain. The previous root-level service e
 ## Dependency Direction
 
 - `chat/` owns chat orchestration and may depend on `workflows/`, `agents/`, `tasks/`, and `realtime/`.
-- `workflows/` owns workflow definition normalization, DAG ordering, planning, and `WorkflowRun` runtime state.
+- `workflows/` owns workflow graph validation, scheduling, node execution, planning, and `WorkflowRun` runtime state.
 - `agents/` owns Agent execution, Function Call loops, context construction, and tool result feedback.
 - `tools/` owns tool catalog, permission helpers, execution dispatch, built-in tools, and custom tool invocation.
 - `realtime/` owns EventBus/SSE/WebSocket boundaries and must not depend on business orchestration modules.
@@ -16,8 +16,15 @@ This directory is organized by service domain. The previous root-level service e
 - `chat/orchestrator.py`: chat orchestration entrypoint, including direct-agent routing and workflow-driven group execution.
 - `chat/artifacts.py`: publishes artifact messages produced by tool execution.
 - `workflows/definition.py`: workflow canvas normalization, node config, default canvas, DAG execution order, and workflow task plan generation.
+- `workflows/graph.py`: Dify-style `WorkflowGraph`, `Node`, `Edge`, topological sorting, parallel levels, and branch target helpers.
+- `workflows/engine.py`: workflow execution entrypoint used by group chat. It validates the graph, schedules nodes, persists runtime state, and delegates node execution.
+- `workflows/scheduler.py`: serial, parallel-level, conditional-branch, and loop scheduling helpers.
 - `workflows/planning.py`: task planning and workflow replanning prompts.
-- `workflows/runtime.py`: `WorkflowRun.node_states` updates and conversation runtime synchronization.
+- `workflows/planner.py`: stable planner import surface for AI-generated or rearranged workflow canvases.
+- `workflows/runtime.py`: `WorkflowRun`, `NodeRun`, and `EdgeRun` JSON-state helpers for node states, edge states, events, completion, cancel, skip, and retry metadata.
+- `workflows/validator.py`: node type/config, edge, permission reference, loop limit, and cycle validation.
+- `workflows/events.py`: workflow/node/tool SSE event publishing helpers.
+- `workflows/nodes/`: node executors for `start`, `agent`, `tool`, `skill`, `mcp`, `condition`, `loop`, `review`, `artifact`, and `end`.
 - `agents/function_loop.py`: shared direct/group Agent Function Call loop. It creates assistant messages, streams model output, executes `tool_calls`, appends `role=tool` results, and asks the model for the final answer.
 - `agents/direct.py`: direct single-Agent Task/Subtask lifecycle. The actual reasoning loop is delegated to `agents/function_loop.py`.
 - `agents/tool_loop.py`: tool schema construction plus Skill/MCP/built-in tool execution dispatch. The older heuristic short loop remains only as an internal helper, not as a service entrypoint.
@@ -35,6 +42,6 @@ Root-level orchestration/runtime/tool/event service modules have been deleted. U
 
 ## Extension Path
 
-Multi-Agent Function Call workflow execution should start from `workflows/definition.py`, compile each `agent` node into an independent `agents/function_loop.py` execution unit, and write progress through `workflows/runtime.py`.
+Multi-Agent Function Call workflow execution starts from `workflows/engine.py`. The workflow canvas is the source of truth; each `agent` or `review` node delegates to `agents/function_loop.py`, while tool-like nodes use their own executors under `workflows/nodes/`.
 
 When adding concurrent node execution, pass IDs between tasks and create a fresh SQLAlchemy session per task. Do not share ORM objects across concurrent workers.
