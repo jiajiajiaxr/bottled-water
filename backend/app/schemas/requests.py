@@ -19,14 +19,28 @@ class RegisterRequest(BaseModel):
 
 class CreateConversationRequest(BaseModel):
     chat_type: Literal["single", "group"] = "single"
+    type: Literal["single", "group"] | None = None
     title: str | None = None
     description: str | None = None
     participant_agent_ids: list[str] = Field(default_factory=list)
+    agent_ids: list[str] = Field(default_factory=list)
+    workspace_id: str | None = None
+    group: bool = False
+    master_enabled: bool | None = None
+    category: str | None = None
+    folder: str | None = None
+    remark: str | None = None
 
 
 class UpdateConversationRequest(BaseModel):
-    action: Literal["pin", "unpin", "archive", "unarchive", "rename"]
+    action: Literal["pin", "unpin", "archive", "unarchive", "rename"] | None = None
     title: str | None = None
+    description: str | None = None
+    remark: str | None = None
+    category: str | None = None
+    folder: str | None = None
+    pinned: bool | None = None
+    archived: bool | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -369,3 +383,162 @@ class CreateRemoteConnectionRequest(BaseModel):
     connection_type: str = "browser"
     endpoint: str = ""
     capabilities: list[str] = Field(default_factory=list)
+
+
+# ===== auth =====
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: str | None = None
+    name: str | None = None
+    avatar_url: str | None = None
+    settings: dict[str, Any] | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str | None = None
+    old_password: str | None = None
+    new_password: str | None = None
+    password: str | None = None
+
+
+class WorkflowUpdatePayload(BaseModel):
+    """更新会话工作流请求体。"""
+
+    mode: str | None = None
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[list[str]] = Field(default_factory=list)
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowGeneratePayload(BaseModel):
+    """生成工作流请求体。"""
+
+    instruction: str | None = None
+    prompt: str | None = None
+
+
+class WorkflowRunStartPayload(BaseModel):
+    """启动工作流运行请求体。"""
+
+    workflow: dict[str, Any] | None = None
+    trigger_message_id: str | None = None
+    mode: str | None = None
+
+
+class WorkflowNodeUpdatePayload(BaseModel):
+    """更新工作流节点状态请求体。"""
+
+    status: str | None = None
+    progress: int | None = None
+    output: dict[str, Any] | None = None
+    matched_branch: str | None = None
+    current_iteration: int | None = None
+    max_iterations: int | None = None
+    message: str | None = None
+
+
+class ParticipantRoleUpdatePayload(BaseModel):
+    """更新参与者角色请求体。"""
+
+    role: str
+
+
+# ===== messages =====
+
+
+class MessageAttachment(BaseModel):
+    file_id: str | None = None
+    id: str | None = None
+    filename: str | None = None
+    content_type: str | None = None
+    size: int = 0
+    parse_status: str = "pending"
+    extracted_text: str = ""
+
+
+class SendMessagePayload(BaseModel):
+    client_message_id: str | None = None
+    content_type: str = "text"
+    content: dict[str, Any] = Field(default_factory=dict)
+    text: str | None = None
+    prompt: str | None = None
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
+    reply_to_message_id: str | None = None
+    quotedMessageId: str | None = None
+    thinking_enabled: bool = False
+
+
+# ===== tasks =====
+
+
+class CreateTaskRequest(BaseModel):
+    conversation_id: str | None = None
+    prompt: str | None = None
+    title: str | None = None
+    description: str | None = None
+
+
+# ===== files =====
+
+
+class FileUploadMeta(BaseModel):
+    conversation_id: str | None = None
+    purpose: str = "attachment"
+
+
+# ===== artifacts =====
+
+
+class CreateArtifactRequest(BaseModel):
+    conversation_id: str
+    content: dict[str, Any] = Field(default_factory=dict)
+    title: str | None = None
+    name: str | None = None
+
+
+class ArtifactEditPayload(BaseModel):
+    files: dict[str, str]
+    change_summary: str = "用户在线编辑"
+
+
+class SaveArtifactRequest(BaseModel):
+    files: dict[str, str] | None = None
+    code: str | None = None
+    content: dict[str, Any] | None = None
+    change_summary: str | None = None
+
+
+class DiffPayload(BaseModel):
+    old_version: int | None = None
+    new_version: int | None = None
+
+
+# ===== conversations workflow / participants =====
+
+
+class WorkflowUpdatePayload(BaseModel):
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[list[str]] = Field(default_factory=list)
+    mode: str | None = None
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowGeneratePayload(BaseModel):
+    instruction: str | None = None
+    prompt: str | None = None
+
+
+class WorkflowRunStartPayload(BaseModel):
+    trigger_message_id: str | None = None
+    workflow: dict[str, Any] | None = None
+
+
+class WorkflowNodeUpdatePayload(BaseModel):
+    status: str | None = None
+    progress: int | None = None
+    output: dict[str, Any] = Field(default_factory=dict)
+
+
+class ParticipantRoleUpdatePayload(BaseModel):
+    role: str

@@ -12,6 +12,7 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import McpServer, Skill, User, Workspace, utcnow
+from app.schemas.common import ApiResponse, SkillOut
 from app.schemas.requests import (
     CreateSkillRequest,
     GenerateSkillRequest,
@@ -255,7 +256,7 @@ async def _generate_skill_spec(payload: GenerateSkillRequest) -> dict[str, Any]:
     }
 
 
-@router.get("/skills")
+@router.get("/skills", response_model=ApiResponse[dict])
 async def list_skills(
     workspace_id: str | None = None,
     status: str | None = None,
@@ -280,7 +281,7 @@ async def list_skills(
     return ok({"items": [skill_to_dict(item) for item in skills], "total": len(skills)})
 
 
-@router.post("/skills")
+@router.post("/skills", response_model=ApiResponse[SkillOut])
 async def create_skill(
     payload: CreateSkillRequest,
     db: Session = Depends(get_db),
@@ -311,8 +312,8 @@ async def create_skill(
     return ok(skill_to_dict(skill), "Skill created")
 
 
-@router.post("/skills/import-mcp")
-@router.post("/skills/import-mcp-tools")
+@router.post("/skills/import-mcp", response_model=ApiResponse[SkillOut])
+@router.post("/skills/import-mcp-tools", response_model=ApiResponse[SkillOut])
 async def import_mcp_skill(
     payload: ImportMcpSkillRequest,
     db: Session = Depends(get_db),
@@ -362,8 +363,8 @@ async def import_mcp_skill(
     return ok(skill_to_dict(skill), "Skill imported from MCP tools")
 
 
-@router.post("/skills/generate")
-@router.post("/skills/ai-generate")
+@router.post("/skills/generate", response_model=ApiResponse[SkillOut])
+@router.post("/skills/ai-generate", response_model=ApiResponse[SkillOut])
 async def generate_skill(
     payload: GenerateSkillRequest,
     db: Session = Depends(get_db),
@@ -395,7 +396,7 @@ async def generate_skill(
     return ok(skill_to_dict(skill), "Skill generated")
 
 
-@router.get("/skills/{skill_id}")
+@router.get("/skills/{skill_id}", response_model=ApiResponse[SkillOut])
 async def get_skill(
     skill_id: str,
     db: Session = Depends(get_db),
@@ -404,7 +405,7 @@ async def get_skill(
     return ok(skill_to_dict(_get_skill(db, user, skill_id)))
 
 
-@router.patch("/skills/{skill_id}")
+@router.patch("/skills/{skill_id}", response_model=ApiResponse[SkillOut])
 async def update_skill(
     skill_id: str,
     payload: UpdateSkillRequest,
@@ -425,7 +426,7 @@ async def update_skill(
     return ok(skill_to_dict(skill), "Skill updated")
 
 
-@router.delete("/skills/{skill_id}")
+@router.delete("/skills/{skill_id}", response_model=ApiResponse[dict])
 async def delete_skill(
     skill_id: str,
     db: Session = Depends(get_db),
@@ -439,7 +440,7 @@ async def delete_skill(
     return ok({"id": skill.id, "deleted": True})
 
 
-@router.post("/skills/{skill_id}/test")
+@router.post("/skills/{skill_id}/test", response_model=ApiResponse[dict])
 async def test_skill(
     skill_id: str,
     payload: TestSkillRequest,

@@ -11,6 +11,8 @@ from app.core.response import ok
 from app.core.security import create_access_token, hash_password, verify_password
 from app.deps import get_current_user
 from app.models import User, UserSettings, utcnow
+from app.schemas.common import ApiResponse, UserOut, UserResponse
+from app.schemas.requests import ChangePasswordRequest, LoginRequest, RegisterRequest, UpdateProfileRequest
 from app.services.seed import ensure_seed_data
 from app.services.serialization import user_to_dict
 
@@ -31,13 +33,6 @@ def _find_user(db: Session, username_or_email: str) -> User | None:
 def _login_response(user: User) -> dict:
     token = create_access_token(user.id, {"email": user.email, "role": user.role})
     return {"access_token": token, "token": token, "user": user_to_dict(user)}
-
-
-async def _payload(request: Request) -> dict:
-    try:
-        return await request.json()
-    except Exception:
-        return {}
 
 
 def _register(db: Session, payload: dict) -> tuple[dict, int]:
@@ -83,70 +78,72 @@ def _login(db: Session, payload: dict) -> dict:
     return _login_response(user)
 
 
-@router.post("/auth/register")
-async def register(request: Request, db: Session = Depends(get_db)):
-    data, _ = _register(db, await _payload(request))
+@router.post("/auth/register", response_model=ApiResponse[dict])
+async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    data, _ = _register(db, payload.model_dump())
     return ok(data, "注册成功")
 
 
-@router.post("/auth/signup")
-async def signup_alias(request: Request, db: Session = Depends(get_db)):
-    data, _ = _register(db, await _payload(request))
+@router.post("/auth/signup", response_model=ApiResponse[dict])
+async def signup_alias(payload: RegisterRequest, db: Session = Depends(get_db)):
+    data, _ = _register(db, payload.model_dump())
     return ok(data, "注册成功")
 
 
-@router.post("/auth/login")
-async def login(request: Request, db: Session = Depends(get_db)):
-    return ok(_login(db, await _payload(request)), "登录成功")
+@router.post("/auth/login", response_model=ApiResponse[dict])
+async def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    return ok(_login(db, payload.model_dump()), "登录成功")
 
 
-@router.post("/auth/demo")
+@router.post("/auth/demo", response_model=ApiResponse[dict])
 async def demo_login(db: Session = Depends(get_db)):
     return ok(_login_response(ensure_seed_data(db)), "演示用户已登录")
 
 
-@router.get("/auth/me")
+@router.get("/auth/me", response_model=UserResponse)
 async def me(user: User = Depends(get_current_user)):
     return ok(user_to_dict(user))
 
 
-@router.post("/auth/logout")
+@router.post("/auth/logout", response_model=ApiResponse[dict])
 async def logout():
     return ok({"ok": True}, "已退出")
 
 
-@router.patch("/auth/me")
+@router.patch("/auth/me", response_model=UserResponse)
 async def update_me(
-    request: Request,
+    payload: UpdateProfileRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    payload = await _payload(request)
-    display_name = str(payload.get("display_name") or payload.get("name") or user.display_name).strip()
+    raw = payload.model_dump(exclude_unset=True)
+    display_name = str(
+        raw.get("display_name") or raw.get("name") or user.display_name,
+    ).strip()
     if not display_name:
         raise ValidationAppError("display name cannot be empty")
     user.display_name = display_name[:100]
-    if "avatar_url" in payload:
-        user.avatar_url = str(payload.get("avatar_url") or "") or None
-    if isinstance(payload.get("settings"), dict):
+    if "avatar_url" in raw:
+        user.avatar_url = str(raw.get("avatar_url") or "") or None
+    if isinstance(raw.get("settings"), dict):
         if not user.settings:
             db.add(UserSettings(user_id=user.id, theme="light"))
             db.flush()
-        user.extra = {**(user.extra or {}), "ui_settings": payload["settings"]}
+        user.extra = {**(user.extra or {}), "ui_settings": raw["settings"]}
     db.commit()
     db.refresh(user)
     return ok(user_to_dict(user), "profile updated")
 
 
-@router.post("/auth/password")
+@router.post("/auth/password", response_model=ApiResponse[dict])
 async def change_password(
-    request: Request,
+    payload: ChangePasswordRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    payload = await _payload(request)
-    current_password = str(payload.get("current_password") or payload.get("old_password") or "")
-    new_password = str(payload.get("new_password") or payload.get("password") or "")
+    raw = payload.model_dump(exclude_unset=True)
+    current_password = str(raw.get("current_password") or raw.get("old_password") or "")
+    new_password = str(raw.get("new_password") or raw.get("password") or "")
     if not current_password or not new_password:
         raise ValidationAppError("current password and new password are required")
     if len(new_password) < 6:
@@ -158,15 +155,22 @@ async def change_password(
     return ok({"changed": True}, "password updated")
 
 
+async def _compat_payload(request: Request) -> dict:
+    try:
+        return await request.json()
+    except Exception:
+        return {}
+
+
 @compat_router.post("/auth/signup")
 async def compat_signup(request: Request, db: Session = Depends(get_db)):
-    data, status = _register(db, await _payload(request))
+    data, status = _register(db, await _compat_payload(request))
     return data if status != 409 else data
 
 
 @compat_router.post("/auth/login")
 async def compat_login(request: Request, db: Session = Depends(get_db)):
-    return _login(db, await _payload(request))
+    return _login(db, await _compat_payload(request))
 
 
 @compat_router.get("/auth/me")

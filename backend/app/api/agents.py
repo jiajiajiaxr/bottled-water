@@ -12,8 +12,15 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Agent, User, utcnow
-from app.schemas.requests import CreateAgentRequest, GenerateAgentRequest, ParseCapabilitiesRequest, TestAgentRequest, UpdateAgentRequest
-from app.services.ark import ArkClient, ArkProviderError
+from app.schemas.common import AgentOut, ApiResponse
+from app.schemas.requests import (
+    CreateAgentRequest,
+    GenerateAgentRequest,
+    ParseCapabilitiesRequest,
+    TestAgentRequest,
+    UpdateAgentRequest,
+)
+from app.services.ark import ArkClient
 from app.services.llm_gateway import test_model_config
 from app.services.serialization import agent_to_dict
 from app.services.tool_registry import normalize_tool_names
@@ -46,11 +53,11 @@ def _fallback_agent_spec(brief: str, preferred_tools: list[str] | None = None) -
             {"label": "任务分析", "category": "通用", "proficiency": 4},
             {"label": "结构化输出", "category": "通用", "proficiency": 4},
         ]
-    safe_name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fa5]+", " ", text).strip()[:18] or "自定义 Agent"
+    safe_name = re.sub(r"[^0-9A-Za-z一-龥]+", " ", text).strip()[:18] or "自定义 Agent"
     return {
         "name": f"{safe_name} Agent",
         "display_name": f"{safe_name} Agent",
-        "description": f"面向“{text[:80]}”的自定义协作 Agent。",
+        "description": f"面向\"{text[:80]}\"的自定义协作 Agent。",
         "capabilities": capabilities[:6],
         "system_prompt": (
             f"你是 {safe_name} Agent，负责处理以下方向：{text}。"
@@ -77,7 +84,7 @@ def _parse_json_object(text: str) -> dict | None:
         return None
 
 
-@router.get("/agents")
+@router.get("/agents", response_model=ApiResponse[dict])
 async def list_agents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -144,7 +151,7 @@ async def list_agents(
     )
 
 
-@router.get("/agents/status")
+@router.get("/agents/status", response_model=ApiResponse[dict])
 async def agent_status(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
@@ -153,7 +160,7 @@ async def agent_status(
     return ok({agent.id: {"status": agent.status, "name": agent.name} for agent in agents})
 
 
-@router.get("/agents/capabilities")
+@router.get("/agents/capabilities", response_model=ApiResponse[dict])
 async def list_capabilities(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
@@ -178,7 +185,7 @@ async def list_capabilities(
     return ok({"items": list(capabilities.values())})
 
 
-@router.post("/agents/parse-capabilities")
+@router.post("/agents/parse-capabilities", response_model=ApiResponse[dict])
 async def parse_capabilities(
     payload: ParseCapabilitiesRequest,
     _user: User = Depends(get_current_user),
@@ -213,7 +220,7 @@ async def parse_capabilities(
     return ok({"items": items, "system_prompt": f"你是{text[:200]}。请保持结构化、可验证、可执行的输出。"})
 
 
-@router.post("/agents/generate")
+@router.post("/agents/generate", response_model=ApiResponse[dict])
 async def generate_agent(
     payload: GenerateAgentRequest,
     _user: User = Depends(get_current_user),
@@ -270,7 +277,7 @@ def _get_agent(db: Session, agent_id: str) -> Agent:
     return agent
 
 
-@router.get("/agents/{agent_id}")
+@router.get("/agents/{agent_id}", response_model=ApiResponse[AgentOut])
 async def get_agent(
     agent_id: str,
     db: Session = Depends(get_db),
@@ -279,7 +286,7 @@ async def get_agent(
     return ok(agent_to_dict(_get_agent(db, agent_id)))
 
 
-@router.post("/agents")
+@router.post("/agents", response_model=ApiResponse[AgentOut])
 async def create_agent(
     payload: CreateAgentRequest,
     db: Session = Depends(get_db),
@@ -317,7 +324,7 @@ async def create_agent(
     return ok(agent_to_dict(agent), "Agent 创建成功")
 
 
-@router.patch("/agents/{agent_id}")
+@router.patch("/agents/{agent_id}", response_model=ApiResponse[AgentOut])
 async def update_agent(
     agent_id: str,
     payload: UpdateAgentRequest,
@@ -350,7 +357,7 @@ async def update_agent(
     return ok(agent_to_dict(agent), "Agent已更新")
 
 
-@router.delete("/agents/{agent_id}")
+@router.delete("/agents/{agent_id}", response_model=ApiResponse[dict])
 async def delete_agent(
     agent_id: str,
     db: Session = Depends(get_db),
@@ -367,7 +374,7 @@ async def delete_agent(
     return ok({"id": agent.id, "deleted": True})
 
 
-@router.post("/agents/{agent_id}/test")
+@router.post("/agents/{agent_id}/test", response_model=ApiResponse[dict])
 async def test_agent(
     agent_id: str,
     payload: TestAgentRequest,
@@ -388,7 +395,7 @@ async def test_agent(
                 "usage": result.usage,
                 "latency_ms": (agent.extra or {}).get("response_latency_ms", 1000),
             },
-            "娴嬭瘯瀹屾垚",
+            "测试完成",
         )
     client = ArkClient()
     prompt = (agent.config or {}).get("system_prompt") or agent.description or f"你是 {agent.name}"

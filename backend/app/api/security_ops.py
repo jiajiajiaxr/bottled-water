@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from app.core.errors import ForbiddenError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import AuditLog, Permission, Role, RolePermission, User, UserRole, utcnow
+from app.schemas.common import ApiResponse
 from app.services.audit import permissions_for_user, write_audit_log
 from app.services.serialization import iso
 
@@ -19,13 +21,6 @@ router = APIRouter(tags=["security-ops"])
 def _security_admin(user: User) -> None:
     if user.role not in {"admin", "developer"} and user.username != "demo":
         raise ForbiddenError("需要安全管理权限")
-
-
-async def _payload(request: Request) -> dict:
-    try:
-        return await request.json()
-    except Exception:
-        return {}
 
 
 def _role_to_dict(db: Session, role: Role) -> dict:
@@ -67,7 +62,7 @@ def _permission_to_dict(permission: Permission) -> dict:
     }
 
 
-@router.get("/permissions/me")
+@router.get("/permissions/me", response_model=ApiResponse[dict])
 async def my_permissions(user: User = Depends(get_current_user)):
     permissions = permissions_for_user(user)
     return ok(
@@ -80,7 +75,7 @@ async def my_permissions(user: User = Depends(get_current_user)):
     )
 
 
-@router.get("/security/permissions")
+@router.get("/security/permissions", response_model=ApiResponse[dict])
 async def list_permissions(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -89,7 +84,7 @@ async def list_permissions(
     return ok({"items": [_permission_to_dict(item) for item in permissions], "total": len(permissions)})
 
 
-@router.get("/security/roles")
+@router.get("/security/roles", response_model=ApiResponse[dict])
 async def list_roles(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -98,35 +93,44 @@ async def list_roles(
     return ok({"items": [_role_to_dict(db, item) for item in roles], "total": len(roles)})
 
 
-@router.post("/security/roles")
+class CreateRoleRequest(BaseModel):
+    code: str | None = None
+    name: str | None = None
+    description: str = ""
+
+
+@router.post("/security/roles", response_model=ApiResponse[dict])
 async def create_role(
-    request: Request,
+    payload: CreateRoleRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     _security_admin(user)
-    payload = await _payload(request)
-    code = str(payload.get("code") or "").strip().upper()
+    code = str(payload.code or "").strip().upper()
     if not code.startswith("ROLE_"):
         code = f"ROLE_{code or 'CUSTOM'}"
     role = Role(
         code=code,
-        name=str(payload.get("name") or code),
-        description=str(payload.get("description") or ""),
+        name=str(payload.name or code),
+        description=str(payload.description or ""),
         is_system=False,
     )
     db.add(role)
     db.flush()
-    write_audit_log(db, user=user, action="security.role.create", target_type="role", target_id=role.id, detail={"code": code}, request=request, risk_score=0.3)
+    write_audit_log(db, user=user, action="security.role.create", target_type="role", target_id=role.id, detail={"code": code}, risk_score=0.3)
     db.commit()
     db.refresh(role)
     return ok(_role_to_dict(db, role), "Role created")
 
 
-@router.patch("/security/roles/{role_id}/permissions")
+class UpdateRolePermissionsRequest(BaseModel):
+    permission_codes: list[str] = []
+
+
+@router.patch("/security/roles/{role_id}/permissions", response_model=ApiResponse[dict])
 async def update_role_permissions(
     role_id: str,
-    request: Request,
+    payload: UpdateRolePermissionsRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -134,8 +138,7 @@ async def update_role_permissions(
     role = db.get(Role, role_id)
     if not role or role.deleted_at is not None:
         raise ForbiddenError("Role not found")
-    payload = await _payload(request)
-    codes = [str(item) for item in payload.get("permission_codes", [])]
+    codes = [str(item) for item in payload.permission_codes]
     permissions = db.scalars(select(Permission).where(Permission.code.in_(codes))).all() if codes else []
     for row in db.scalars(select(RolePermission).where(RolePermission.role_id == role.id)).all():
         db.delete(row)
@@ -149,14 +152,13 @@ async def update_role_permissions(
         target_type="role",
         target_id=role.id,
         detail={"permission_codes": codes},
-        request=request,
         risk_score=0.45,
     )
     db.commit()
     return ok(_role_to_dict(db, role), "Role permissions updated")
 
 
-@router.get("/security/users")
+@router.get("/security/users", response_model=ApiResponse[dict])
 async def list_security_users(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -191,10 +193,14 @@ async def list_security_users(
     )
 
 
-@router.patch("/security/users/{target_user_id}/role")
+class UpdateUserRoleRequest(BaseModel):
+    role: str = "member"
+
+
+@router.patch("/security/users/{target_user_id}/role", response_model=ApiResponse[dict])
 async def update_user_role(
     target_user_id: str,
-    request: Request,
+    payload: UpdateUserRoleRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -202,16 +208,14 @@ async def update_user_role(
     target = db.get(User, target_user_id)
     if not target or target.deleted_at is not None:
         raise ForbiddenError("User not found")
-    payload = await _payload(request)
-    role = str(payload.get("role") or "member")
-    target.role = role
+    target.role = payload.role
     target.updated_at = utcnow()
-    write_audit_log(db, user=user, action="security.user.role.update", target_type="user", target_id=target.id, detail={"role": role}, request=request, risk_score=0.55)
+    write_audit_log(db, user=user, action="security.user.role.update", target_type="user", target_id=target.id, detail={"role": payload.role}, risk_score=0.55)
     db.commit()
     return ok({"id": target.id, "role": target.role}, "User role updated")
 
 
-@router.get("/audit-logs")
+@router.get("/audit-logs", response_model=ApiResponse[dict])
 async def list_audit_logs(
     target_type: str | None = None,
     action: str | None = None,
@@ -255,7 +259,7 @@ async def list_audit_logs(
     )
 
 
-@router.get("/audit-logs/stats")
+@router.get("/audit-logs/stats", response_model=ApiResponse[dict])
 async def audit_stats(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -281,7 +285,7 @@ async def audit_stats(
     )
 
 
-@router.get("/admin/guard")
+@router.get("/admin/guard", response_model=ApiResponse[dict])
 async def admin_guard(user: User = Depends(get_current_user)):
     if user.role != "admin":
         raise ForbiddenError("需要管理员权限")

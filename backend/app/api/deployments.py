@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
@@ -9,6 +10,8 @@ from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Artifact, Conversation, Deployment, User, utcnow
+from app.schemas.common import ApiResponse, DeploymentOut
+from app.schemas.requests import CreateDeploymentRequest
 from app.services.artifacts import create_deployment
 from app.services.events import event_bus
 from app.services.serialization import deployment_to_dict
@@ -18,11 +21,17 @@ router = APIRouter(tags=["deployments"])
 compat_router = APIRouter(tags=["deployments-compat"])
 
 
-async def _payload(request: Request) -> dict:
-    try:
-        return await request.json()
-    except Exception:
-        return {}
+class CancelDeploymentRequest(BaseModel):
+    reason: str | None = None
+
+
+class RollbackDeploymentRequest(BaseModel):
+    target_deployment_id: str | None = None
+
+
+class ParseDeploymentCommandRequest(BaseModel):
+    message: str | None = None
+    text: str | None = None
 
 
 def _check_artifact_owner(db: Session, user: User, artifact_id: str) -> Artifact:
@@ -52,13 +61,13 @@ def _create(db: Session, user: User, payload: dict) -> Deployment:
     return deployment
 
 
-@router.post("/deployments")
+@router.post("/deployments", response_model=ApiResponse[DeploymentOut])
 async def create_deployment_endpoint(
-    request: Request,
+    payload: CreateDeploymentRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    deployment = _create(db, user, await _payload(request))
+    deployment = _create(db, user, payload.model_dump())
     await event_bus.publish(
         f"deployment:{deployment.id}",
         "deployment:status_changed",
@@ -67,7 +76,7 @@ async def create_deployment_endpoint(
     return ok(deployment_to_dict(deployment), "部署成功")
 
 
-@router.get("/deployments/{deployment_id}")
+@router.get("/deployments/{deployment_id}", response_model=ApiResponse[DeploymentOut])
 async def get_deployment(
     deployment_id: str,
     db: Session = Depends(get_db),
@@ -79,7 +88,7 @@ async def get_deployment(
     return ok(deployment_to_dict(deployment))
 
 
-@router.get("/deployments/{deployment_id}/logs")
+@router.get("/deployments/{deployment_id}/logs", response_model=ApiResponse[dict])
 async def get_deployment_logs(
     deployment_id: str,
     level: str = "all",
@@ -108,10 +117,10 @@ async def get_deployment_logs(
     return ok({"items": records[start : start + page_size], "total": len(records), "page": page, "page_size": page_size})
 
 
-@router.post("/deployments/{deployment_id}/cancel")
+@router.post("/deployments/{deployment_id}/cancel", response_model=ApiResponse[DeploymentOut])
 async def cancel_deployment(
     deployment_id: str,
-    request: Request,
+    payload: CancelDeploymentRequest,
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -120,19 +129,18 @@ async def cancel_deployment(
         raise NotFoundError("部署不存在")
     if deployment.status in {"deployed", "failed", "cancelled", "rolled_back"}:
         raise ValidationAppError("已完成的部署不可取消，请使用回滚或重新部署")
-    payload = await _payload(request)
     deployment.status = "cancelled"
     deployment.stopped_at = utcnow()
-    deployment.error_message = payload.get("reason") or "用户取消部署"
+    deployment.error_message = payload.reason or "用户取消部署"
     deployment.deploy_log = f"{deployment.deploy_log}\n用户取消部署：{deployment.error_message}".strip()
     db.commit()
     return ok(deployment_to_dict(deployment), "部署已取消")
 
 
-@router.post("/deployments/{deployment_id}/rollback")
+@router.post("/deployments/{deployment_id}/rollback", response_model=ApiResponse[DeploymentOut])
 async def rollback_deployment(
     deployment_id: str,
-    request: Request,
+    payload: RollbackDeploymentRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -140,8 +148,7 @@ async def rollback_deployment(
     if not deployment:
         raise NotFoundError("部署不存在")
     artifact = _check_artifact_owner(db, user, deployment.artifact_id)
-    payload = await _payload(request)
-    target_id = payload.get("target_deployment_id")
+    target_id = payload.target_deployment_id
     target = db.get(Deployment, target_id) if target_id else None
     rollback = Deployment(
         artifact_id=artifact.id,
@@ -166,7 +173,7 @@ async def rollback_deployment(
     return ok(deployment_to_dict(rollback), "部署已回滚")
 
 
-@router.get("/artifacts/{artifact_id}/deployments")
+@router.get("/artifacts/{artifact_id}/deployments", response_model=ApiResponse[dict])
 async def list_artifact_deployments(
     artifact_id: str,
     db: Session = Depends(get_db),
@@ -182,13 +189,12 @@ async def list_artifact_deployments(
     return ok({"items": [deployment_to_dict(item) for item in deployments], "total": len(deployments)})
 
 
-@router.post("/deployments/parse-command")
+@router.post("/deployments/parse-command", response_model=ApiResponse[dict])
 async def parse_deployment_command(
-    request: Request,
+    payload: ParseDeploymentCommandRequest,
     _user: User = Depends(get_current_user),
 ):
-    payload = await _payload(request)
-    text = (payload.get("message") or payload.get("text") or "").lower()
+    text = (payload.message or payload.text or "").lower()
     recognized = any(keyword in text for keyword in ["部署", "发布", "上线", "deploy"])
     mode = "preview_link"
     if "容器" in text or "container" in text:
@@ -221,13 +227,13 @@ async def stream_deployment(deployment_id: str):
     return EventSourceResponse(generator())
 
 
-@compat_router.post("/deployments")
+@compat_router.post("/deployments", response_model=DeploymentOut)
 async def compat_create_deployment(
-    request: Request,
+    payload: CreateDeploymentRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     try:
-        return deployment_to_dict(_create(db, user, await _payload(request)))
+        return deployment_to_dict(_create(db, user, payload.model_dump()))
     except NotFoundError:
         raise

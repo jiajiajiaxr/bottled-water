@@ -9,6 +9,7 @@ from app.core.errors import ForbiddenError, NotFoundError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import ModelConfig, ModelProvider, User, utcnow
+from app.schemas.common import ApiResponse, ModelConfigOut, ModelProviderOut
 from app.schemas.requests import CreateModelConfigRequest, CreateModelProviderRequest, TestModelRequest
 from app.services.llm_gateway import test_model_config
 from app.services.serialization import model_config_to_dict, model_provider_to_dict
@@ -36,7 +37,7 @@ def _get_provider(db: Session, user: User, provider_id: str) -> ModelProvider:
     return provider
 
 
-@router.get("/model-providers")
+@router.get("/model-providers", response_model=ApiResponse[dict])
 async def list_model_providers(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     ensure_model_tables(db)
     providers = db.scalars(
@@ -49,7 +50,7 @@ async def list_model_providers(db: Session = Depends(get_db), user: User = Depen
     return ok({"items": [model_provider_to_dict(item) for item in providers], "total": len(providers)})
 
 
-@router.post("/model-providers")
+@router.post("/model-providers", response_model=ApiResponse[ModelProviderOut])
 async def create_model_provider(
     payload: CreateModelProviderRequest,
     db: Session = Depends(get_db),
@@ -83,7 +84,7 @@ async def create_model_provider(
     return ok(model_provider_to_dict(_get_provider(db, user, provider.id)), "模型供应商已创建")
 
 
-@router.patch("/model-providers/{provider_id}")
+@router.patch("/model-providers/{provider_id}", response_model=ApiResponse[ModelProviderOut])
 async def update_model_provider(
     provider_id: str,
     payload: CreateModelProviderRequest,
@@ -106,7 +107,7 @@ async def update_model_provider(
     return ok(model_provider_to_dict(provider), "模型供应商已更新")
 
 
-@router.delete("/model-providers/{provider_id}")
+@router.delete("/model-providers/{provider_id}", response_model=ApiResponse[dict])
 async def delete_model_provider(
     provider_id: str,
     db: Session = Depends(get_db),
@@ -121,7 +122,7 @@ async def delete_model_provider(
     return ok({"id": provider.id, "deleted": True})
 
 
-@router.get("/model-configs")
+@router.get("/model-configs", response_model=ApiResponse[dict])
 async def list_model_configs(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -138,7 +139,7 @@ async def list_model_configs(
     return ok({"items": [model_config_to_dict(item) for item in configs], "total": len(configs)})
 
 
-@router.post("/model-configs")
+@router.post("/model-configs", response_model=ApiResponse[ModelConfigOut])
 async def create_model_config(
     payload: CreateModelConfigRequest,
     db: Session = Depends(get_db),
@@ -161,7 +162,7 @@ async def create_model_config(
     return ok(model_config_to_dict(config), "模型配置已创建")
 
 
-@router.post("/model-configs/test")
+@router.post("/model-configs/test", response_model=ApiResponse[dict])
 async def test_model(
     payload: TestModelRequest,
     db: Session = Depends(get_db),

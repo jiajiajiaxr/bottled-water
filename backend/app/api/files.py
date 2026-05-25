@@ -12,6 +12,7 @@ from app.core.errors import ForbiddenError, NotFoundError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import FileAsset, User, utcnow
+from app.schemas.common import ApiResponse, FileAssetOut
 from app.services.files import save_upload
 from app.services.file_tools import convert_file, embed_text, extract_text_from_path, preview_payload, summarize_text
 from app.services.serialization import file_asset_to_dict
@@ -29,7 +30,7 @@ def _get_file(db: Session, user: User, file_id: str) -> FileAsset:
     return asset
 
 
-@router.post("/files/upload")
+@router.post("/files/upload", response_model=ApiResponse[FileAssetOut])
 async def upload_file(
     file: UploadFile = File(...),
     conversation_id: str | None = Form(None),
@@ -41,7 +42,7 @@ async def upload_file(
     return ok(file_asset_to_dict(asset), "文件上传成功")
 
 
-@router.post("/files")
+@router.post("/files", response_model=ApiResponse[FileAssetOut])
 async def upload_file_alias(
     file: UploadFile = File(...),
     conversation_id: str | None = Form(None),
@@ -52,7 +53,7 @@ async def upload_file_alias(
     return await upload_file(file, conversation_id, purpose, db, user)
 
 
-@router.get("/files")
+@router.get("/files", response_model=ApiResponse[dict])
 async def list_files(
     conversation_id: str | None = None,
     purpose: str | None = None,
@@ -68,7 +69,7 @@ async def list_files(
     return ok({"items": [file_asset_to_dict(item) for item in items], "total": len(items)})
 
 
-@router.get("/files/{file_id}")
+@router.get("/files/{file_id}", response_model=ApiResponse[FileAssetOut])
 async def get_file(
     file_id: str,
     db: Session = Depends(get_db),
@@ -87,7 +88,7 @@ async def download_file(
     return FileResponse(asset.storage_path, media_type=asset.content_type, filename=asset.original_filename)
 
 
-@router.post("/files/{file_id}/extract-text")
+@router.post("/files/{file_id}/extract-text", response_model=ApiResponse[dict])
 async def extract_file_text(
     file_id: str,
     db: Session = Depends(get_db),
@@ -107,7 +108,7 @@ async def extract_file_text(
     return ok({"file": file_asset_to_dict(asset), "text": asset.extracted_text, "metadata": asset.extra})
 
 
-@router.get("/files/{file_id}/preview")
+@router.get("/files/{file_id}/preview", response_model=ApiResponse[dict])
 async def preview_file(
     file_id: str,
     db: Session = Depends(get_db),
@@ -122,7 +123,7 @@ async def preview_file(
     return ok({**payload, "download_url": f"/api/v1/files/{asset.id}/download"})
 
 
-@router.post("/files/{file_id}/summarize")
+@router.post("/files/{file_id}/summarize", response_model=ApiResponse[dict])
 async def summarize_file(
     file_id: str,
     db: Session = Depends(get_db),
@@ -139,7 +140,7 @@ async def summarize_file(
     return ok({"file_id": asset.id, "summary": summarize_text(text or asset.original_filename)})
 
 
-@router.post("/files/{file_id}/embed")
+@router.post("/files/{file_id}/embed", response_model=ApiResponse[dict])
 async def embed_file(
     file_id: str,
     db: Session = Depends(get_db),
@@ -174,7 +175,7 @@ async def convert_uploaded_file(
     )
 
 
-@router.delete("/files/{file_id}")
+@router.delete("/files/{file_id}", response_model=ApiResponse[dict])
 async def delete_file(
     file_id: str,
     db: Session = Depends(get_db),

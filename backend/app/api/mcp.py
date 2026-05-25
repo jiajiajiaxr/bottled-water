@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -13,6 +12,7 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import McpServer, McpToolInvocation, User, Workspace, utcnow
+from app.schemas.common import ApiResponse, McpServerOut
 from app.schemas.requests import CreateMcpServerRequest, ImportMcpServerRequest, InvokeMcpToolRequest
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_allowed
 from app.services.serialization import mcp_invocation_to_dict, mcp_server_to_dict
@@ -50,7 +50,7 @@ def _tool_allowed(server: McpServer, tool_name: str) -> bool:
     return tool_allowed(server, tool_name)
 
 
-@router.get("/mcp-servers")
+@router.get("/mcp-servers", response_model=ApiResponse[dict])
 async def list_mcp_servers(
     workspace_id: str | None = None,
     db: Session = Depends(get_db),
@@ -64,7 +64,7 @@ async def list_mcp_servers(
     return ok({"items": [mcp_server_to_dict(item) for item in servers], "total": len(servers)})
 
 
-@router.post("/mcp-servers")
+@router.post("/mcp-servers", response_model=ApiResponse[McpServerOut])
 async def create_mcp_server(
     payload: CreateMcpServerRequest,
     db: Session = Depends(get_db),
@@ -98,7 +98,7 @@ async def create_mcp_server(
     return ok(mcp_server_to_dict(server), "MCP服务已创建")
 
 
-@router.post("/mcp-servers/import")
+@router.post("/mcp-servers/import", response_model=ApiResponse[McpServerOut])
 async def import_mcp_server(
     payload: ImportMcpServerRequest,
     db: Session = Depends(get_db),
@@ -149,7 +149,7 @@ async def import_mcp_server(
     return ok(mcp_server_to_dict(server), "MCP 已导入")
 
 
-@router.patch("/mcp-servers/{server_id}")
+@router.patch("/mcp-servers/{server_id}", response_model=ApiResponse[McpServerOut])
 async def update_mcp_server(
     server_id: str,
     payload: CreateMcpServerRequest,
@@ -176,7 +176,7 @@ async def update_mcp_server(
     return ok(mcp_server_to_dict(server), "MCP服务已更新")
 
 
-@router.post("/mcp-servers/{server_id}/probe")
+@router.post("/mcp-servers/{server_id}/probe", response_model=ApiResponse[McpServerOut])
 async def probe_mcp_server(
     server_id: str,
     db: Session = Depends(get_db),
@@ -194,7 +194,7 @@ async def probe_mcp_server(
     return ok(mcp_server_to_dict(server), "MCP服务探测完成")
 
 
-@router.get("/mcp-servers/{server_id}/tools")
+@router.get("/mcp-servers/{server_id}/tools", response_model=ApiResponse[dict])
 async def list_mcp_tools(
     server_id: str,
     db: Session = Depends(get_db),
@@ -208,7 +208,7 @@ async def list_mcp_tools(
     return ok({"server_id": server.id, "items": tools, "total": len(tools)})
 
 
-@router.post("/mcp-servers/{server_id}/tools/{tool_name:path}/invoke")
+@router.post("/mcp-servers/{server_id}/tools/{tool_name:path}/invoke", response_model=ApiResponse[dict])
 async def invoke_mcp_tool(
     server_id: str,
     tool_name: str,
@@ -230,7 +230,7 @@ async def invoke_mcp_tool(
     return ok(invocation, "MCP tool invocation recorded")
 
 
-@router.get("/mcp-invocations")
+@router.get("/mcp-invocations", response_model=ApiResponse[dict])
 async def list_mcp_invocations(
     server_id: str | None = None,
     status: str | None = None,
@@ -249,7 +249,7 @@ async def list_mcp_invocations(
     return ok({"items": [mcp_invocation_to_dict(item) for item in items], "total": len(items)})
 
 
-@router.get("/mcp-invocations/{invocation_id}")
+@router.get("/mcp-invocations/{invocation_id}", response_model=ApiResponse[dict])
 async def get_mcp_invocation(
     invocation_id: str,
     db: Session = Depends(get_db),
@@ -262,7 +262,7 @@ async def get_mcp_invocation(
     return ok(mcp_invocation_to_dict(invocation))
 
 
-@router.delete("/mcp-servers/{server_id}")
+@router.delete("/mcp-servers/{server_id}", response_model=ApiResponse[dict])
 async def delete_mcp_server(
     server_id: str,
     db: Session = Depends(get_db),

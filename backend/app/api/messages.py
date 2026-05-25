@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
@@ -13,6 +13,8 @@ from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Artifact, Conversation, FileAsset, Message, User, utcnow
+from app.schemas.common import ApiResponse
+from app.schemas.requests import SendMessagePayload
 from app.services.events import event_bus
 from app.services.artifacts import build_demo_html, classify_artifact_request, create_artifact, create_preview_message
 from app.services.orchestrator import run_orchestration
@@ -24,11 +26,6 @@ compat_router = APIRouter(tags=["messages-compat"])
 ORCHESTRATION_TASKS: dict[str, asyncio.Task] = {}
 
 
-async def _payload(request: Request) -> dict:
-    try:
-        return await request.json()
-    except Exception:
-        return {}
 
 
 def _get_conversation(db: Session, user: User, conversation_id: str) -> Conversation:
@@ -123,7 +120,7 @@ def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigg
     return message
 
 
-@router.get("/conversations/{conversation_id}/messages")
+@router.get("/conversations/{conversation_id}/messages", response_model=ApiResponse[dict])
 async def list_messages(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -132,14 +129,14 @@ async def list_messages(
     return ok({"items": _list_messages(db, user, conversation_id), "next_cursor": None, "has_more": False})
 
 
-@router.post("/conversations/{conversation_id}/messages")
+@router.post("/conversations/{conversation_id}/messages", response_model=ApiResponse[dict])
 async def send_message(
     conversation_id: str,
-    request: Request,
+    payload: SendMessagePayload,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    message = _send(db, user, conversation_id, await _payload(request), trigger_agent=True)
+    message = _send(db, user, conversation_id, payload.model_dump(), trigger_agent=True)
     preview_message = None
     artifact = None
     artifact_type = classify_artifact_request(message.content.get("text", ""))
@@ -195,7 +192,7 @@ async def send_message(
     return ok(message_to_dict(message), "消息发送成功")
 
 
-@router.post("/conversations/{conversation_id}/messages/{message_id}/regenerate")
+@router.post("/conversations/{conversation_id}/messages/{message_id}/regenerate", response_model=ApiResponse[dict])
 async def regenerate_message(
     conversation_id: str,
     message_id: str,
@@ -224,17 +221,17 @@ async def regenerate_message(
     )
 
 
-@router.post("/conversations/{conversation_id}/messages/{message_id}/reply")
+@router.post("/conversations/{conversation_id}/messages/{message_id}/reply", response_model=ApiResponse[dict])
 async def reply_message(
     conversation_id: str,
     message_id: str,
-    request: Request,
+    payload: SendMessagePayload,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    payload = await _payload(request)
-    payload["reply_to_message_id"] = message_id
-    message = _send(db, user, conversation_id, payload, trigger_agent=True)
+    payload_dict = payload.model_dump()
+    payload_dict["reply_to_message_id"] = message_id
+    message = _send(db, user, conversation_id, payload_dict, trigger_agent=True)
     return ok(message_to_dict(message), "回复成功")
 
 
@@ -254,7 +251,7 @@ async def stream_conversation(
     return EventSourceResponse(generator())
 
 
-@router.post("/conversations/{conversation_id}/stream/cancel")
+@router.post("/conversations/{conversation_id}/stream/cancel", response_model=ApiResponse[dict])
 async def cancel_stream(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -274,7 +271,7 @@ async def cancel_stream(
     return ok({"conversation_id": conversation.id, "cancelled": cancelled}, "Generation cancelled")
 
 
-@compat_router.get("/conversations/{conversation_id}/messages")
+@compat_router.get("/conversations/{conversation_id}/messages", response_model=list[dict])
 async def compat_list_messages(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -283,12 +280,12 @@ async def compat_list_messages(
     return _list_messages(db, user, conversation_id)
 
 
-@compat_router.post("/conversations/{conversation_id}/messages")
+@compat_router.post("/conversations/{conversation_id}/messages", response_model=dict)
 async def compat_send_message(
     conversation_id: str,
-    request: Request,
+    payload: SendMessagePayload,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    message = _send(db, user, conversation_id, await _payload(request), trigger_agent=False)
+    message = _send(db, user, conversation_id, payload.model_dump(), trigger_agent=False)
     return message_to_dict(message)

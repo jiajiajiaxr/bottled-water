@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -30,6 +30,7 @@ from app.schemas.requests import (
     UpdateWorkspaceRequest,
     UpsertProjectFileRequest,
 )
+from app.schemas.common import ApiResponse, ProjectFileOut, ProjectOut, PromptTemplateOut, ShortcutCommandOut, WorkspaceOut
 from app.services.audit import write_audit_log
 from app.services.serialization import (
     project_file_to_dict,
@@ -118,22 +119,21 @@ def _can_manage(workspace: Workspace, user: User) -> bool:
     )
 
 
-@router.get("/workspace-templates")
+@router.get("/workspace-templates", response_model=ApiResponse[dict])
 async def workspace_templates(_user: User = Depends(get_current_user)):
     return ok({"items": WORKSPACE_TEMPLATES})
 
 
-@router.get("/workspaces")
+@router.get("/workspaces", response_model=ApiResponse[dict])
 async def list_workspaces(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     ensure_workspace_tables(db)
     items = db.scalars(_workspace_query(user).order_by(Workspace.updated_at.desc())).all()
     return ok({"items": [workspace_to_dict(item) for item in items], "total": len(items)})
 
 
-@router.post("/workspaces")
+@router.post("/workspaces", response_model=ApiResponse[WorkspaceOut])
 async def create_workspace(
     payload: CreateWorkspaceRequest,
-    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -167,14 +167,13 @@ async def create_workspace(
         target_type="workspace",
         target_id=workspace.id,
         detail={"name": workspace.name},
-        request=request,
     )
     db.commit()
     db.refresh(workspace)
     return ok(workspace_to_dict(_get_workspace(db, user, workspace.id)), "工作区已创建")
 
 
-@router.get("/workspaces/{workspace_id}")
+@router.get("/workspaces/{workspace_id}", response_model=ApiResponse[WorkspaceOut])
 async def get_workspace(
     workspace_id: str,
     db: Session = Depends(get_db),
@@ -183,11 +182,10 @@ async def get_workspace(
     return ok(workspace_to_dict(_get_workspace(db, user, workspace_id)))
 
 
-@router.patch("/workspaces/{workspace_id}")
+@router.patch("/workspaces/{workspace_id}", response_model=ApiResponse[WorkspaceOut])
 async def update_workspace(
     workspace_id: str,
     payload: UpdateWorkspaceRequest,
-    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -199,12 +197,12 @@ async def update_workspace(
         if field in data and data[field] is not None:
             setattr(workspace, field, data[field])
     workspace.last_active_at = utcnow()
-    write_audit_log(db, user=user, action="workspace.update", target_type="workspace", target_id=workspace.id, request=request)
+    write_audit_log(db, user=user, action="workspace.update", target_type="workspace", target_id=workspace.id)
     db.commit()
     return ok(workspace_to_dict(_get_workspace(db, user, workspace.id)), "工作区已更新")
 
 
-@router.post("/workspaces/{workspace_id}/archive")
+@router.post("/workspaces/{workspace_id}/archive", response_model=ApiResponse[WorkspaceOut])
 async def archive_workspace(
     workspace_id: str,
     db: Session = Depends(get_db),
@@ -218,7 +216,7 @@ async def archive_workspace(
     return ok(workspace_to_dict(workspace), "工作区已归档")
 
 
-@router.post("/workspaces/{workspace_id}/clone")
+@router.post("/workspaces/{workspace_id}/clone", response_model=ApiResponse[WorkspaceOut])
 async def clone_workspace(
     workspace_id: str,
     db: Session = Depends(get_db),
@@ -243,7 +241,7 @@ async def clone_workspace(
     return ok(workspace_to_dict(_get_workspace(db, user, clone.id)), "工作区已克隆")
 
 
-@router.delete("/workspaces/{workspace_id}")
+@router.delete("/workspaces/{workspace_id}", response_model=ApiResponse[dict])
 async def delete_workspace(
     workspace_id: str,
     db: Session = Depends(get_db),
@@ -258,7 +256,7 @@ async def delete_workspace(
     return ok({"id": workspace.id, "deleted": True})
 
 
-@router.get("/workspaces/{workspace_id}/members")
+@router.get("/workspaces/{workspace_id}/members", response_model=ApiResponse[dict])
 async def list_workspace_members(
     workspace_id: str,
     db: Session = Depends(get_db),
@@ -268,7 +266,7 @@ async def list_workspace_members(
     return ok({"items": [workspace_member_to_dict(item) for item in workspace.members if item.left_at is None]})
 
 
-@router.post("/workspaces/{workspace_id}/members")
+@router.post("/workspaces/{workspace_id}/members", response_model=ApiResponse[WorkspaceOut])
 async def add_workspace_member(
     workspace_id: str,
     payload: AddWorkspaceMemberRequest,
@@ -299,7 +297,7 @@ async def add_workspace_member(
     return ok(workspace_to_dict(_get_workspace(db, user, workspace.id)), "成员已加入")
 
 
-@router.post("/workspaces/{workspace_id}/projects")
+@router.post("/workspaces/{workspace_id}/projects", response_model=ApiResponse[ProjectOut])
 async def create_project(
     workspace_id: str,
     payload: CreateProjectRequest,
@@ -323,7 +321,7 @@ async def create_project(
     return ok(project_to_dict(project), "项目已创建")
 
 
-@router.get("/workspaces/{workspace_id}/projects")
+@router.get("/workspaces/{workspace_id}/projects", response_model=ApiResponse[dict])
 async def list_projects(
     workspace_id: str,
     db: Session = Depends(get_db),
@@ -336,7 +334,7 @@ async def list_projects(
     return ok({"items": [project_to_dict(item) for item in projects], "total": len(projects)})
 
 
-@router.put("/projects/{project_id}/files")
+@router.put("/projects/{project_id}/files", response_model=ApiResponse[ProjectFileOut])
 async def upsert_project_file(
     project_id: str,
     payload: UpsertProjectFileRequest,
@@ -375,7 +373,7 @@ async def upsert_project_file(
     return ok(project_file_to_dict(file), "项目文件已保存")
 
 
-@router.get("/projects/{project_id}/files")
+@router.get("/projects/{project_id}/files", response_model=ApiResponse[dict])
 async def list_project_files(
     project_id: str,
     db: Session = Depends(get_db),
@@ -392,7 +390,7 @@ async def list_project_files(
     return ok({"items": [project_file_to_dict(item, include_content=False) for item in files], "total": len(files)})
 
 
-@router.post("/workspaces/{workspace_id}/prompt-templates")
+@router.post("/workspaces/{workspace_id}/prompt-templates", response_model=ApiResponse[PromptTemplateOut])
 async def create_prompt_template(
     workspace_id: str,
     payload: CreatePromptTemplateRequest,
@@ -416,7 +414,7 @@ async def create_prompt_template(
     return ok(prompt_template_to_dict(template), "提示词模板已创建")
 
 
-@router.post("/workspaces/{workspace_id}/shortcut-commands")
+@router.post("/workspaces/{workspace_id}/shortcut-commands", response_model=ApiResponse[ShortcutCommandOut])
 async def create_shortcut_command(
     workspace_id: str,
     payload: CreateShortcutCommandRequest,

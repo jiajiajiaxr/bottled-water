@@ -11,6 +11,7 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import RemoteConnection, SandboxSession, User, Workspace, utcnow
+from app.schemas.common import ApiResponse, RemoteConnectionOut, SandboxOut
 from app.schemas.requests import CreateRemoteConnectionRequest, CreateSandboxRequest, RunSandboxCommandRequest
 from app.services.serialization import remote_connection_to_dict, sandbox_to_dict
 
@@ -43,7 +44,7 @@ def _get_sandbox(db: Session, user: User, sandbox_id: str) -> SandboxSession:
     return sandbox
 
 
-@router.get("/sandboxes")
+@router.get("/sandboxes", response_model=ApiResponse[dict])
 async def list_sandboxes(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     ensure_sandbox_tables(db)
     items = db.scalars(
@@ -54,7 +55,7 @@ async def list_sandboxes(db: Session = Depends(get_db), user: User = Depends(get
     return ok({"items": [sandbox_to_dict(item) for item in items], "total": len(items)})
 
 
-@router.post("/sandboxes")
+@router.post("/sandboxes", response_model=ApiResponse[SandboxOut])
 async def create_sandbox(
     payload: CreateSandboxRequest,
     db: Session = Depends(get_db),
@@ -77,7 +78,7 @@ async def create_sandbox(
     return ok(sandbox_to_dict(session), "沙箱已创建")
 
 
-@router.post("/sandboxes/{sandbox_id}/commands")
+@router.post("/sandboxes/{sandbox_id}/commands", response_model=ApiResponse[dict])
 async def run_sandbox_command(
     sandbox_id: str,
     payload: RunSandboxCommandRequest,
@@ -108,7 +109,7 @@ async def run_sandbox_command(
     return ok({"sandbox": sandbox_to_dict(session), "result": output}, "命令执行完成")
 
 
-@router.post("/sandboxes/{sandbox_id}/stop")
+@router.post("/sandboxes/{sandbox_id}/stop", response_model=ApiResponse[SandboxOut])
 async def stop_sandbox(
     sandbox_id: str,
     db: Session = Depends(get_db),
@@ -120,7 +121,7 @@ async def stop_sandbox(
     return ok(sandbox_to_dict(session), "沙箱已停止")
 
 
-@router.get("/remote-connections")
+@router.get("/remote-connections", response_model=ApiResponse[dict])
 async def list_remote_connections(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     ensure_sandbox_tables(db)
     items = db.scalars(
@@ -131,7 +132,7 @@ async def list_remote_connections(db: Session = Depends(get_db), user: User = De
     return ok({"items": [remote_connection_to_dict(item) for item in items], "total": len(items)})
 
 
-@router.post("/remote-connections")
+@router.post("/remote-connections", response_model=ApiResponse[RemoteConnectionOut])
 async def create_remote_connection(
     payload: CreateRemoteConnectionRequest,
     db: Session = Depends(get_db),
@@ -154,7 +155,7 @@ async def create_remote_connection(
     return ok(remote_connection_to_dict(connection), "远程连接已创建")
 
 
-@router.post("/remote-connections/{connection_id}/connect")
+@router.post("/remote-connections/{connection_id}/connect", response_model=ApiResponse[RemoteConnectionOut])
 async def connect_remote(
     connection_id: str,
     db: Session = Depends(get_db),

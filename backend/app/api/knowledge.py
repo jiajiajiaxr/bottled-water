@@ -9,6 +9,7 @@ from app.core.errors import ForbiddenError, NotFoundError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import KnowledgeBase, KnowledgeDocument, User, utcnow
+from app.schemas.common import ApiResponse, KnowledgeBaseOut, KnowledgeDocumentOut
 from app.schemas.requests import CreateKnowledgeBaseRequest, ImportKnowledgeTextRequest, RetrieveKnowledgeRequest
 from app.services.files import save_upload
 from app.services.knowledge import build_context_snippet, index_document, retrieve
@@ -31,7 +32,7 @@ def _get_kb(db: Session, user: User, kb_id: str) -> KnowledgeBase:
     return kb
 
 
-@router.get("/knowledge-bases")
+@router.get("/knowledge-bases", response_model=ApiResponse[dict])
 async def list_knowledge_bases(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -47,7 +48,7 @@ async def list_knowledge_bases(
     return ok({"items": [knowledge_base_to_dict(item) for item in items], "total": len(items)})
 
 
-@router.post("/knowledge-bases")
+@router.post("/knowledge-bases", response_model=ApiResponse[KnowledgeBaseOut])
 async def create_knowledge_base(
     payload: CreateKnowledgeBaseRequest,
     db: Session = Depends(get_db),
@@ -67,7 +68,7 @@ async def create_knowledge_base(
     return ok(knowledge_base_to_dict(kb), "知识库已创建")
 
 
-@router.get("/knowledge-bases/{kb_id}")
+@router.get("/knowledge-bases/{kb_id}", response_model=ApiResponse[KnowledgeBaseOut])
 async def get_knowledge_base(
     kb_id: str,
     db: Session = Depends(get_db),
@@ -76,7 +77,7 @@ async def get_knowledge_base(
     return ok(knowledge_base_to_dict(_get_kb(db, user, kb_id)))
 
 
-@router.delete("/knowledge-bases/{kb_id}")
+@router.delete("/knowledge-bases/{kb_id}", response_model=ApiResponse[dict])
 async def delete_knowledge_base(
     kb_id: str,
     db: Session = Depends(get_db),
@@ -91,7 +92,7 @@ async def delete_knowledge_base(
     return ok({"id": kb.id, "deleted": True})
 
 
-@router.get("/knowledge-bases/{kb_id}/documents")
+@router.get("/knowledge-bases/{kb_id}/documents", response_model=ApiResponse[dict])
 async def list_documents(
     kb_id: str,
     db: Session = Depends(get_db),
@@ -106,7 +107,7 @@ async def list_documents(
     return ok({"items": [knowledge_document_to_dict(item) for item in docs], "total": len(docs)})
 
 
-@router.post("/knowledge-bases/{kb_id}/documents")
+@router.post("/knowledge-bases/{kb_id}/documents", response_model=ApiResponse[KnowledgeDocumentOut])
 async def import_text_document(
     kb_id: str,
     payload: ImportKnowledgeTextRequest,
@@ -127,7 +128,7 @@ async def import_text_document(
     return ok(knowledge_document_to_dict(document), "文档已索引")
 
 
-@router.post("/knowledge-bases/{kb_id}/documents/upload")
+@router.post("/knowledge-bases/{kb_id}/documents/upload", response_model=ApiResponse[dict])
 async def upload_document(
     kb_id: str,
     file: UploadFile = File(...),
@@ -153,7 +154,7 @@ async def upload_document(
     )
 
 
-@router.post("/knowledge-bases/{kb_id}/retrieve")
+@router.post("/knowledge-bases/{kb_id}/retrieve", response_model=ApiResponse[dict])
 async def retrieve_knowledge(
     kb_id: str,
     payload: RetrieveKnowledgeRequest,

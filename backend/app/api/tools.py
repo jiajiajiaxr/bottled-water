@@ -14,6 +14,7 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import ToolDefinition, User, Workspace, utcnow
+from app.schemas.common import ApiResponse, ToolDefinitionOut
 from app.schemas.requests import CreateToolRequest, GenerateToolRequest, InvokeToolRequest, UpdateToolRequest
 from app.services.ark import ark_client
 from app.services.serialization import redact_sensitive, tool_definition_to_dict
@@ -168,7 +169,7 @@ async def _generate_tool_spec(payload: GenerateToolRequest) -> dict[str, Any]:
         return spec
 
 
-@router.get("/tools")
+@router.get("/tools", response_model=ApiResponse[dict])
 async def list_tool_catalog(
     workspace_id: str | None = None,
     q: str | None = None,
@@ -180,7 +181,7 @@ async def list_tool_catalog(
     return ok({"items": items, "total": len(items)})
 
 
-@router.post("/tools")
+@router.post("/tools", response_model=ApiResponse[ToolDefinitionOut])
 async def create_tool(
     payload: CreateToolRequest,
     db: Session = Depends(get_db),
@@ -227,7 +228,7 @@ async def create_tool(
     return ok(tool_definition_to_dict(tool), "工具已创建")
 
 
-@router.post("/tools/generate")
+@router.post("/tools/generate", response_model=ApiResponse[ToolDefinitionOut])
 async def generate_tool(
     payload: GenerateToolRequest,
     db: Session = Depends(get_db),
@@ -264,7 +265,7 @@ async def generate_tool(
     return ok(tool_definition_to_dict(tool), "AI 已生成工具")
 
 
-@router.get("/tools/{tool_id}")
+@router.get("/tools/{tool_id}", response_model=ApiResponse[ToolDefinitionOut])
 async def get_tool(
     tool_id: str,
     db: Session = Depends(get_db),
@@ -275,7 +276,7 @@ async def get_tool(
     return ok(tool_definition_to_dict(_owned_tool(db, user, tool_id)))
 
 
-@router.patch("/tools/{tool_id}")
+@router.patch("/tools/{tool_id}", response_model=ApiResponse[ToolDefinitionOut])
 async def update_tool(
     tool_id: str,
     payload: UpdateToolRequest,
@@ -299,7 +300,7 @@ async def update_tool(
     return ok(tool_definition_to_dict(tool), "工具已更新")
 
 
-@router.delete("/tools/{tool_id}")
+@router.delete("/tools/{tool_id}", response_model=ApiResponse[dict])
 async def delete_tool(
     tool_id: str,
     db: Session = Depends(get_db),
@@ -312,7 +313,7 @@ async def delete_tool(
     return ok({"id": tool.id, "deleted": True})
 
 
-@router.post("/tools/{tool_id}/invoke")
+@router.post("/tools/{tool_id}/invoke", response_model=ApiResponse[dict])
 async def invoke_tool_endpoint(
     tool_id: str,
     payload: InvokeToolRequest,

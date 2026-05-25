@@ -8,13 +8,14 @@ from app.core.database import get_db
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Message, User
+from app.schemas.common import ApiResponse
 from app.services.ark import ark_client
 
 
 router = APIRouter(tags=["context"])
 
 
-@router.get("/conversations/{conversation_id}/context")
+@router.get("/conversations/{conversation_id}/context", response_model=ApiResponse[dict])
 async def get_context(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -25,7 +26,7 @@ async def get_context(
     return ok({"message_count": len(messages), "estimated_tokens": chars // 3, "compression": "available"})
 
 
-@router.post("/conversations/{conversation_id}/context/compress")
+@router.post("/conversations/{conversation_id}/context/compress", response_model=ApiResponse[dict])
 async def compress_context(
     conversation_id: str,
     db: Session = Depends(get_db),

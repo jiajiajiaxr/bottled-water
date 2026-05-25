@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -12,7 +12,18 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Agent, Conversation, ConversationParticipant, Message, User, WorkflowRun, Workspace, WorkspaceMember, utcnow
-from app.schemas.requests import AddParticipantRequest, InviteParticipantRequest
+from app.schemas.common import ApiResponse
+from app.schemas.requests import (
+    AddParticipantRequest,
+    CreateConversationRequest,
+    InviteParticipantRequest,
+    ParticipantRoleUpdatePayload,
+    UpdateConversationRequest,
+    WorkflowGeneratePayload,
+    WorkflowNodeUpdatePayload,
+    WorkflowRunStartPayload,
+    WorkflowUpdatePayload,
+)
 from app.services.ark import ArkClient
 from app.services.audit import write_audit_log
 from app.services.serialization import conversation_to_dict, participant_to_dict, workflow_run_to_dict
@@ -20,13 +31,6 @@ from app.services.serialization import conversation_to_dict, participant_to_dict
 
 router = APIRouter(tags=["conversations"])
 compat_router = APIRouter(tags=["conversations-compat"])
-
-
-async def _payload(request: Request) -> dict:
-    try:
-        return await request.json()
-    except Exception:
-        return {}
 
 
 def _conversation_query(user_id: str):
@@ -457,7 +461,7 @@ def _patch(db: Session, user: User, conversation_id: str, payload: dict) -> Conv
     return _get(db, user, conversation.id)
 
 
-@router.get("/conversations")
+@router.get("/conversations", response_model=ApiResponse[dict])
 async def list_conversations(
     workspace_id: str | None = None,
     db: Session = Depends(get_db),
@@ -475,16 +479,16 @@ async def list_conversations(
     )
 
 
-@router.post("/conversations")
+@router.post("/conversations", response_model=ApiResponse[dict])
 async def create_conversation(
-    request: Request,
+    payload: CreateConversationRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return ok(conversation_to_dict(_create(db, user, await _payload(request))), "会话创建成功")
+    return ok(conversation_to_dict(_create(db, user, payload.model_dump())), "会话创建成功")
 
 
-@router.get("/conversations/{conversation_id}")
+@router.get("/conversations/{conversation_id}", response_model=ApiResponse[dict])
 async def get_conversation(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -493,7 +497,7 @@ async def get_conversation(
     return ok(conversation_to_dict(_get(db, user, conversation_id)))
 
 
-@router.get("/conversations/{conversation_id}/workflow")
+@router.get("/conversations/{conversation_id}/workflow", response_model=ApiResponse[dict])
 async def get_conversation_workflow(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -506,26 +510,26 @@ async def get_conversation_workflow(
     return ok(_normalize_workflow(workflow, conversation))
 
 
-@router.patch("/conversations/{conversation_id}/workflow")
+@router.patch("/conversations/{conversation_id}/workflow", response_model=ApiResponse[dict])
 async def update_conversation_workflow(
     conversation_id: str,
-    request: Request,
+    payload: WorkflowUpdatePayload,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     conversation = _get(db, user, conversation_id)
     _ensure_can_manage(conversation, user)
-    workflow = _normalize_workflow(await _payload(request), conversation)
+    workflow = _normalize_workflow(payload.model_dump(), conversation)
     workflow["settings"] = {**(workflow.get("settings") or {}), "edited_by_user": True}
     conversation.extra = {**(conversation.extra or {}), "workflow": workflow}
     db.commit()
     return ok(workflow, "工作流已保存")
 
 
-@router.post("/conversations/{conversation_id}/workflow/generate")
+@router.post("/conversations/{conversation_id}/workflow/generate", response_model=ApiResponse[dict])
 async def generate_conversation_workflow(
     conversation_id: str,
-    request: Request,
+    payload: WorkflowGeneratePayload,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -544,8 +548,8 @@ async def generate_conversation_workflow(
         if item.agent
     ]
     generated = fallback
-    payload = await _payload(request)
-    instruction = str(payload.get("instruction") or payload.get("prompt") or "").strip()
+    payload_dict = payload.model_dump()
+    instruction = str(payload_dict.get("instruction") or payload_dict.get("prompt") or "").strip()
     try:
         result = await ArkClient().chat(
             [
@@ -583,7 +587,7 @@ async def generate_conversation_workflow(
     return ok(workflow, "工作流已生成")
 
 
-@router.get("/conversations/{conversation_id}/workflow/runs")
+@router.get("/conversations/{conversation_id}/workflow/runs", response_model=ApiResponse[dict])
 async def list_workflow_runs(
     conversation_id: str,
     latest: bool = False,
@@ -600,26 +604,26 @@ async def list_workflow_runs(
     return ok({"items": [workflow_run_to_dict(item) for item in runs], "total": len(runs)})
 
 
-@router.post("/conversations/{conversation_id}/workflow/runs")
+@router.post("/conversations/{conversation_id}/workflow/runs", response_model=ApiResponse[dict])
 async def start_workflow_run(
     conversation_id: str,
-    request: Request,
+    payload: WorkflowRunStartPayload,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     _ensure_workflow_tables(db)
     conversation = _get(db, user, conversation_id)
-    payload = await _payload(request)
+    payload_dict = payload.model_dump()
     workflow = (conversation.extra or {}).get("workflow")
     if not isinstance(workflow, dict):
         workflow = _fallback_workflow(conversation)
-    workflow = _normalize_workflow(payload.get("workflow") if isinstance(payload.get("workflow"), dict) else workflow, conversation)
+    workflow = _normalize_workflow(payload_dict.get("workflow") if isinstance(payload_dict.get("workflow"), dict) else workflow, conversation)
     run = WorkflowRun(
         conversation_id=conversation.id,
-        trigger_message_id=payload.get("trigger_message_id"),
+        trigger_message_id=payload_dict.get("trigger_message_id"),
         started_by=user.id,
         status="running",
-        mode=str(payload.get("mode") or workflow.get("mode") or "manual"),
+        mode=str(payload_dict.get("mode") or workflow.get("mode") or "manual"),
         workflow_snapshot=workflow,
         node_states=_new_node_states(workflow),
         edge_states=[
@@ -641,7 +645,7 @@ async def start_workflow_run(
         target_type="conversation",
         target_id=conversation.id,
         detail={"run_id": run.id, "mode": run.mode},
-        request=request,
+        request=None,
         risk_score=0.15,
     )
     db.commit()
@@ -649,12 +653,12 @@ async def start_workflow_run(
     return ok(workflow_run_to_dict(run), "Workflow run started")
 
 
-@router.patch("/conversations/{conversation_id}/workflow/runs/{run_id}/nodes/{node_id}")
+@router.patch("/conversations/{conversation_id}/workflow/runs/{run_id}/nodes/{node_id}", response_model=ApiResponse[dict])
 async def update_workflow_node_state(
     conversation_id: str,
     run_id: str,
     node_id: str,
-    request: Request,
+    payload: WorkflowNodeUpdatePayload,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -663,7 +667,7 @@ async def update_workflow_node_state(
     run = db.get(WorkflowRun, run_id)
     if not run or run.conversation_id != conversation.id:
         raise NotFoundError("Workflow run not found")
-    payload = await _payload(request)
+    payload_dict = payload.model_dump()
     states = list(run.node_states or [])
     found = False
     now = utcnow().isoformat()
@@ -671,23 +675,23 @@ async def update_workflow_node_state(
         if state.get("id") != node_id:
             continue
         found = True
-        next_status = str(payload.get("status") or state.get("status") or "running")
+        next_status = str(payload_dict.get("status") or state.get("status") or "running")
         state["status"] = next_status
-        if "progress" in payload:
-            state["progress"] = max(0, min(100, int(payload.get("progress") or 0)))
+        if "progress" in payload_dict:
+            state["progress"] = max(0, min(100, int(payload_dict.get("progress") or 0)))
         elif next_status in {"completed", "succeeded"}:
             state["progress"] = 100
-        state["output"] = payload.get("output", state.get("output") or {})
-        if state.get("type") == "condition" and "matched_branch" in payload:
-            state["output"] = {**(state.get("output") or {}), "matched_branch": payload.get("matched_branch")}
+        state["output"] = payload_dict.get("output", state.get("output") or {})
+        if state.get("type") == "condition" and "matched_branch" in payload_dict:
+            state["output"] = {**(state.get("output") or {}), "matched_branch": payload_dict.get("matched_branch")}
         if state.get("type") == "loop":
             loop_output = dict(state.get("output") or {})
-            if "current_iteration" in payload:
-                loop_output["current_iteration"] = max(0, int(payload.get("current_iteration") or 0))
-            if "max_iterations" in payload:
-                loop_output["max_iterations"] = max(1, int(payload.get("max_iterations") or 1))
+            if "current_iteration" in payload_dict:
+                loop_output["current_iteration"] = max(0, int(payload_dict.get("current_iteration") or 0))
+            if "max_iterations" in payload_dict:
+                loop_output["max_iterations"] = max(1, int(payload_dict.get("max_iterations") or 1))
             state["output"] = loop_output
-        state["message"] = payload.get("message", state.get("message"))
+        state["message"] = payload_dict.get("message", state.get("message"))
         if next_status in {"running", "reviewing"} and not state.get("started_at"):
             state["started_at"] = now
         if next_status in {"completed", "succeeded", "failed", "skipped"}:
@@ -714,7 +718,7 @@ async def update_workflow_node_state(
         {
             "type": "node.updated",
             "node_id": node_id,
-            "status": payload.get("status"),
+            "status": payload_dict.get("status"),
             "at": now,
             "actor_id": user.id,
         },
@@ -726,8 +730,8 @@ async def update_workflow_node_state(
         action="workflow.node.update",
         target_type="workflow_run",
         target_id=run.id,
-        detail={"node_id": node_id, "status": payload.get("status"), "progress": run.progress},
-        request=request,
+        detail={"node_id": node_id, "status": payload_dict.get("status"), "progress": run.progress},
+        request=None,
         risk_score=0.1,
     )
     db.commit()
@@ -735,17 +739,17 @@ async def update_workflow_node_state(
     return ok(workflow_run_to_dict(run), "Workflow node state updated")
 
 
-@router.patch("/conversations/{conversation_id}")
+@router.patch("/conversations/{conversation_id}", response_model=ApiResponse[dict])
 async def update_conversation(
     conversation_id: str,
-    request: Request,
+    payload: UpdateConversationRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return ok(conversation_to_dict(_patch(db, user, conversation_id, await _payload(request))), "操作成功")
+    return ok(conversation_to_dict(_patch(db, user, conversation_id, payload.model_dump())), "操作成功")
 
 
-@router.delete("/conversations/{conversation_id}")
+@router.delete("/conversations/{conversation_id}", response_model=ApiResponse[dict])
 async def delete_conversation(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -758,7 +762,7 @@ async def delete_conversation(
     return ok({"id": conversation.id, "deleted_at": conversation.deleted_at.isoformat()})
 
 
-@router.post("/conversations/{conversation_id}/read")
+@router.post("/conversations/{conversation_id}/read", response_model=ApiResponse[dict])
 async def mark_read(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -770,8 +774,8 @@ async def mark_read(
     return ok({"id": conversation.id, "unread_count": 0})
 
 
-@router.get("/conversations/{conversation_id}/participants")
-@router.get("/conversations/{conversation_id}/members")
+@router.get("/conversations/{conversation_id}/participants", response_model=ApiResponse[dict])
+@router.get("/conversations/{conversation_id}/members", response_model=ApiResponse[dict])
 async def list_participants(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -781,8 +785,8 @@ async def list_participants(
     return ok({"items": [participant_to_dict(item) for item in _active_participants(conversation)]})
 
 
-@router.post("/conversations/{conversation_id}/participants")
-@router.post("/conversations/{conversation_id}/members")
+@router.post("/conversations/{conversation_id}/participants", response_model=ApiResponse[dict])
+@router.post("/conversations/{conversation_id}/members", response_model=ApiResponse[dict])
 async def add_participants(
     conversation_id: str,
     payload: AddParticipantRequest,
@@ -853,18 +857,17 @@ async def add_participants(
     return ok(conversation_to_dict(_get(db, user, conversation.id)), "成员已加入")
 
 
-@router.patch("/conversations/{conversation_id}/participants/{participant_id}")
+@router.patch("/conversations/{conversation_id}/participants/{participant_id}", response_model=ApiResponse[dict])
 async def update_participant_role(
     conversation_id: str,
     participant_id: str,
-    request: Request,
+    payload: ParticipantRoleUpdatePayload,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     conversation = _get(db, user, conversation_id)
     _ensure_can_manage(conversation, user)
-    payload = await _payload(request)
-    role = payload.get("role")
+    role = payload.role
     if role not in {"owner", "admin", "member"}:
         raise ValidationAppError("角色必须是 owner/admin/member")
     participant = next((item for item in conversation.participants if item.id == participant_id), None)
@@ -879,7 +882,7 @@ async def update_participant_role(
     return ok(participant_to_dict(participant), "成员角色已更新")
 
 
-@router.delete("/conversations/{conversation_id}/participants/{participant_id}")
+@router.delete("/conversations/{conversation_id}/participants/{participant_id}", response_model=ApiResponse[dict])
 async def remove_participant(
     conversation_id: str,
     participant_id: str,
@@ -919,7 +922,7 @@ async def remove_participant(
     return ok(conversation_to_dict(_get(db, user, conversation.id)), "成员已移除")
 
 
-@router.post("/conversations/{conversation_id}/invites")
+@router.post("/conversations/{conversation_id}/invites", response_model=ApiResponse[dict])
 async def invite_participants(
     conversation_id: str,
     payload: InviteParticipantRequest,
@@ -943,7 +946,7 @@ async def invite_participants(
     return ok({"invite_token": token, "status": "pending", "conversation_id": conversation.id}, "邀请已创建")
 
 
-@compat_router.get("/conversations")
+@compat_router.get("/conversations", response_model=dict)
 async def compat_list_conversations(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -951,17 +954,17 @@ async def compat_list_conversations(
     return {"items": _list(db, user)}
 
 
-@compat_router.post("/conversations")
+@compat_router.post("/conversations", response_model=dict)
 async def compat_create_conversation(
-    request: Request,
+    payload: CreateConversationRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return conversation_to_dict(_create(db, user, await _payload(request)))
+    return conversation_to_dict(_create(db, user, payload.model_dump()))
 
 
-@compat_router.get("/conversations/{conversation_id}/participants")
-@compat_router.get("/conversations/{conversation_id}/members")
+@compat_router.get("/conversations/{conversation_id}/participants", response_model=dict)
+@compat_router.get("/conversations/{conversation_id}/members", response_model=dict)
 async def compat_list_participants(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -971,8 +974,8 @@ async def compat_list_participants(
     return {"items": [participant_to_dict(item) for item in _active_participants(conversation)]}
 
 
-@compat_router.post("/conversations/{conversation_id}/participants")
-@compat_router.post("/conversations/{conversation_id}/members")
+@compat_router.post("/conversations/{conversation_id}/participants", response_model=dict)
+@compat_router.post("/conversations/{conversation_id}/members", response_model=dict)
 async def compat_add_participants(
     conversation_id: str,
     payload: AddParticipantRequest,
