@@ -393,3 +393,113 @@ async def run_agentic_tool_loop(
             for item in results
         ),
     }
+
+
+def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
+    """将 Agent 配置的 tools/skills/mcp 转为 OpenAI Function Calling 格式。"""
+    from app.services.tool_registry import BUILTIN_TOOLS
+
+    tools: list[dict[str, Any]] = []
+    config = agent.config or {}
+
+    # 内置工具
+    allowed_tool_names = normalize_tool_names(config.get("tools") or [])
+    for name in allowed_tool_names:
+        if name not in BUILTIN_TOOLS:
+            continue
+        builtin = BUILTIN_TOOLS[name]
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": builtin.description,
+                "parameters": builtin.input_schema,
+            },
+        })
+
+    # Skill（作为 function 暴露）
+    allowed_skill_ids = [str(item) for item in config.get("skill_ids") or [] if item]
+    if allowed_skill_ids:
+        skill_query = select(Skill).where(
+            Skill.id.in_(allowed_skill_ids),
+            Skill.deleted_at.is_(None),
+            Skill.status == "active",
+        )
+        for skill in db.scalars(skill_query).all():
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": f"skill.{skill.id}",
+                    "description": skill.description or skill.prompt or f"Skill: {skill.name}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"prompt": {"type": "string", "description": "用户请求内容"}},
+                        "required": ["prompt"],
+                    },
+                },
+            })
+
+    # MCP 工具
+    allowed_mcp_ids = [str(item) for item in config.get("mcp_server_ids") or [] if item]
+    if allowed_mcp_ids:
+        mcp_query = select(McpServer).where(
+            McpServer.id.in_(allowed_mcp_ids),
+            McpServer.deleted_at.is_(None),
+            McpServer.enabled.is_(True),
+        )
+        for server in db.scalars(mcp_query).all():
+            server_tools = [item for item in (server.tools or []) if isinstance(item, dict) and item.get("enabled", True)]
+            if not server_tools:
+                server_tools = [{"name": item, "description": "Allowed by tool_filter", "enabled": True} for item in (server.tool_filter or [])]
+            for t in server_tools:
+                name = tool_name(t)
+                if not name:
+                    continue
+                tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": f"mcp.{server.id}.{name}",
+                        "description": t.get("description") or f"MCP tool {name} on {server.name}",
+                        "parameters": t.get("inputSchema") or t.get("input_schema") or {"type": "object", "properties": {}},
+                    },
+                })
+
+    return tools
+
+
+async def execute_tool_by_name(
+    db: Session,
+    *,
+    agent: Agent,
+    user: User | None,
+    conversation: Conversation,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """根据 tool_name 路由到内置工具/Skill/MCP 执行器。"""
+    from app.services.tool_registry import BUILTIN_TOOLS, invoke_builtin_tool
+
+    # 内置工具
+    if tool_name in BUILTIN_TOOLS:
+        return invoke_builtin_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
+
+    # Skill
+    if tool_name.startswith("skill."):
+        skill_id = tool_name.removeprefix("skill.")
+        skill = db.get(Skill, skill_id)
+        if not skill or skill.deleted_at is not None or skill.status != "active":
+            return {"type": "skill", "skill_id": skill_id, "status": "failed", "output": "Skill 不存在或未启用"}
+        return await execute_skill(db, skill=skill, user=user, conversation=conversation, prompt=arguments.get("prompt", ""))
+
+    # MCP
+    if tool_name.startswith("mcp."):
+        parts = tool_name.split(".")
+        if len(parts) >= 3:
+            server_id = parts[1]
+            actual_tool_name = ".".join(parts[2:])
+            server = db.get(McpServer, server_id)
+            if not server or server.deleted_at is not None or not server.enabled:
+                return {"type": "mcp", "server_id": server_id, "tool_name": actual_tool_name, "status": "failed", "output": "MCP server 不存在或未启用"}
+            return await execute_mcp_action(db, server=server, name=actual_tool_name, user=user, conversation=conversation, prompt=arguments.get("prompt", ""))
+
+    return {"type": "unknown", "tool_name": tool_name, "status": "failed", "output": f"未知工具: {tool_name}"}
