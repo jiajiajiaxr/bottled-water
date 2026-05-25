@@ -12,6 +12,7 @@ from app.services.workflows.nodes.base import NodeExecutionResult, WorkflowNodeE
 from app.services.workflows.nodes.condition import ConditionNodeExecutor
 from app.services.workflows.nodes.loop import LoopNodeExecutor
 from app.services.workflows.nodes.base import resolve_references
+from app.services.workflows.nodes.tool import ToolNodeExecutor
 from app.services.workflows.runtime import build_edge_states, build_node_states
 from app.services.workflows.scheduler import WorkflowScheduler
 from app.services.workflows.validator import validate_workflow_graph
@@ -95,6 +96,14 @@ def test_node_output_reference_resolution() -> None:
     assert resolved == {"prompt": "Use hello", "items": ["3", "plain"]}
 
 
+def test_runtime_node_states_include_input_output_error_fields() -> None:
+    states = build_node_states(_workflow())
+
+    assert states[0]["input"] == {}
+    assert states[0]["output"] == {}
+    assert states[0]["error"] is None
+
+
 @pytest.mark.asyncio
 async def test_condition_and_loop_nodes_record_runtime() -> None:
     context = SimpleNamespace(prompt="please build frontend", outputs={})
@@ -154,6 +163,13 @@ class FlakyExecutor(WorkflowNodeExecutor):
         return NodeExecutionResult(output={"ok": True}, retries=1)
 
 
+class FailingExecutor(WorkflowNodeExecutor):
+    async def execute(self, node: Any, context: Any) -> NodeExecutionResult:
+        if node.id == "fail":
+            return NodeExecutionResult(status="failed", output={"error": "boom"})
+        return NodeExecutionResult(output={"ok": node.id})
+
+
 @pytest.mark.asyncio
 async def test_engine_retry_and_cancel_paths() -> None:
     workflow = {
@@ -197,3 +213,64 @@ async def test_engine_retry_and_cancel_paths() -> None:
         ).run()
     assert cancelled.outputs == {}
     assert cancelled_run.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_engine_marks_failed_node_and_skips_downstream_dependencies() -> None:
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {"id": "fail", "type": "tool", "config": {"tool_name": "bad.tool"}},
+            {"id": "end", "type": "end"},
+        ],
+        "edges": [["start", "fail"], ["fail", "end"]],
+    }
+    db, conversation, user_message, task, run = _runtime(workflow)
+
+    with patch("app.services.workflows.engine.get_executor", return_value=FailingExecutor()):
+        with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+            result = await WorkflowEngine(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                task=task,
+                workflow_run=run,
+                workflow=workflow,
+                prompt="hello",
+                channel="conversation:conv-1",
+                agents=[],
+            ).run()
+
+    states = {state["id"]: state for state in run.node_states}
+    assert run.status == "failed"
+    assert states["fail"]["status"] == "failed"
+    assert states["fail"]["error"] == "boom"
+    assert states["end"]["status"] == "skipped"
+    assert result.outputs["fail"]["error"] == "boom"
+
+
+@pytest.mark.asyncio
+async def test_tool_node_executes_real_tool_and_records_failure_status() -> None:
+    workflow = {
+        "nodes": [{"id": "tool", "type": "tool", "config": {"tool_name": "bad.tool"}}],
+        "edges": [],
+    }
+    db, conversation, user_message, task, run = _runtime(workflow)
+    context = SimpleNamespace(
+        db=db,
+        conversation=conversation,
+        workflow_run=run,
+        channel="conversation:conv-1",
+        agents=[],
+        outputs={},
+        prompt="hello",
+    )
+
+    with patch("app.services.workflows.nodes.tool.execute_tool_by_name", new_callable=AsyncMock) as execute_tool:
+        execute_tool.return_value = {"status": "failed", "output": "missing"}
+        with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+            result = await ToolNodeExecutor().execute(WorkflowGraph.from_workflow(workflow).nodes[0], context)
+
+    execute_tool.assert_awaited_once()
+    assert result.status == "failed"
+    assert result.output["result"]["output"] == "missing"

@@ -142,3 +142,14 @@ class WorkflowGraph:
     def skipped_targets_for_branch(self, node_id: str, branch: str | None) -> set[str]:
         targets = {edge.target for edge in self.outgoing.get(node_id, [])}
         return targets - self.branch_targets(node_id, branch)
+
+    def descendants(self, node_id: str) -> set[str]:
+        pending = [edge.target for edge in self.outgoing.get(node_id, [])]
+        seen: set[str] = set()
+        while pending:
+            current = pending.pop(0)
+            if current in seen:
+                continue
+            seen.add(current)
+            pending.extend(edge.target for edge in self.outgoing.get(current, []))
+        return seen

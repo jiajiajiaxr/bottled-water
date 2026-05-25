@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.models import Agent, User
 from app.services.agents.tool_loop import execute_tool_by_name
+from app.services.workflows.events import publish_tool_event
 from app.services.workflows.graph import Node
 from app.services.workflows.nodes.base import NodeExecutionResult, WorkflowExecutionContext, WorkflowNodeExecutor, resolve_references
 
@@ -25,6 +26,13 @@ class ToolNodeExecutor(WorkflowNodeExecutor):
         arguments = dict(node.config.get("arguments") if isinstance(node.config.get("arguments"), dict) else {})
         arguments = resolve_references(arguments, context.outputs)
         arguments.setdefault("prompt", context.prompt)
+        await publish_tool_event(
+            context.channel,
+            context.workflow_run,
+            node.id,
+            "workflow:tool_call_started",
+            {"tool_name": tool_name, "arguments": arguments},
+        )
         result = await execute_tool_by_name(
             context.db,
             agent=agent,
@@ -33,4 +41,22 @@ class ToolNodeExecutor(WorkflowNodeExecutor):
             tool_name=tool_name,
             arguments=arguments,
         )
-        return NodeExecutionResult(output={"tool_name": tool_name, "result": result}, message=f"Tool {tool_name} completed")
+        status = str(result.get("status") or result.get("result", {}).get("status") or "succeeded")
+        node_status = "failed" if status.startswith("failed") or status == "error" else "completed"
+        await publish_tool_event(
+            context.channel,
+            context.workflow_run,
+            node.id,
+            "workflow:tool_call_completed",
+            {"tool_name": tool_name, "status": status},
+        )
+        return NodeExecutionResult(
+            status=node_status,
+            output={
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "result": result,
+                **({"error": str(result.get("output") or result)} if node_status == "failed" else {}),
+            },
+            message=f"Tool {tool_name} {status}",
+        )

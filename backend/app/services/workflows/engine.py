@@ -70,7 +70,8 @@ class WorkflowEngine:
     async def run(self) -> WorkflowEngineResult:
         validation = validate_workflow_graph(self.workflow, agents=self.agents)
         if not validation.ok:
-            raise ValueError("; ".join(validation.errors))
+            await self._fail_run(None, ValueError("; ".join(validation.errors)))
+            return self.result
         append_run_event(self.workflow_run, "run.engine_started", {"warnings": validation.warnings})
         self.db.commit()
         await publish_run_updated(self.channel, self.workflow_run)
@@ -84,10 +85,18 @@ class WorkflowEngine:
                 # this code path yet; execute the batch in graph order while
                 # preserving the scheduler's parallel level semantics in state.
                 for node in runnable:
-                    await self._run_node(node)
+                    if self.workflow_run.status == "cancelled":
+                        break
+                    if not await self._run_node(node) and self.workflow_run.status != "cancelled":
+                        await self._fail_run(node)
+                        return self.result
             else:
                 for node in runnable:
-                    await self._run_node(node)
+                    if self.workflow_run.status == "cancelled":
+                        break
+                    if not await self._run_node(node) and self.workflow_run.status != "cancelled":
+                        await self._fail_run(node)
+                        return self.result
             if self.workflow_run.status == "cancelled":
                 break
 
@@ -97,17 +106,23 @@ class WorkflowEngine:
             await publish_run_updated(self.channel, self.workflow_run)
         return self.result
 
-    async def _run_node(self, node: Node) -> None:
+    async def _run_node(self, node: Node) -> bool:
         if self.workflow_run.status == "cancelled":
-            return
+            return False
         retry_limit = max(0, min(int(node.config.get("retry") or node.config.get("retry_count") or 0), 3))
         attempt = 0
         while True:
             try:
-                await self._mark_node(node, "running", 20, message=f"{node.title} running")
+                await self._mark_node(
+                    node,
+                    "running",
+                    20,
+                    input_data=self._node_input(node),
+                    message=f"{node.title} running",
+                )
                 execution = await get_executor(node.type).execute(node, self._context())
                 await self._complete_node(node, execution)
-                return
+                return execution.status not in {"failed", "error"}
             except asyncio.CancelledError:
                 self.workflow_run.status = "cancelled"
                 append_run_event(self.workflow_run, "run.cancelled", {"node_id": node.id})
@@ -126,9 +141,10 @@ class WorkflowEngine:
                     "failed",
                     100,
                     output={"error": str(exc), "attempts": attempt},
+                    error=str(exc),
                     message=f"{node.title} failed",
                 )
-                raise
+                return False
 
     def _context(self) -> WorkflowExecutionContext:
         return WorkflowExecutionContext(
@@ -149,21 +165,38 @@ class WorkflowEngine:
         node: Node,
         status: str,
         progress: int,
+        input_data: dict[str, Any] | None = None,
         output: dict[str, Any] | None = None,
+        error: str | None = None,
         message: str | None = None,
     ) -> None:
+        if status == "running":
+            for edge in self.graph.incoming.get(node.id, []):
+                set_edge_state(self.workflow_run, edge.source, edge.target, "running")
         _set_workflow_node_state(
             self.workflow_run,
             node.id,
             status=status,
             progress=progress,
+            input_data=input_data,
             output=output,
+            error=error,
             message=message,
         )
-        append_run_event(self.workflow_run, f"node.{status}", {"node_id": node.id})
+        append_run_event(
+            self.workflow_run,
+            f"node.{status}",
+            {"node_id": node.id, **({"error": error} if error else {})},
+        )
         _sync_workflow_run(self.conversation, self.workflow_run)
         self.db.commit()
-        await publish_node_event(self.channel, self.workflow_run, node.id, status, {"message": message} if message else None)
+        await publish_node_event(
+            self.channel,
+            self.workflow_run,
+            node.id,
+            status,
+            {"message": message, **({"error": error} if error else {})} if message or error else None,
+        )
 
     async def _complete_node(self, node: Node, execution: NodeExecutionResult) -> None:
         self.result.outputs[node.id] = execution.output
@@ -195,6 +228,8 @@ class WorkflowEngine:
                     output={"reason": "condition_branch_not_matched", "matched_branch": execution.branch},
                     message="Skipped by condition",
                 )
+        for edge in self.graph.incoming.get(node.id, []):
+            set_edge_state(self.workflow_run, edge.source, edge.target, execution.status)
         for edge in self.graph.outgoing.get(node.id, []):
             set_edge_state(
                 self.workflow_run,
@@ -207,5 +242,41 @@ class WorkflowEngine:
             execution.status,
             100,
             output=execution.output,
+            error=execution.output.get("error") if execution.status in {"failed", "error"} else None,
             message=execution.message,
         )
+
+    def _node_input(self, node: Node) -> dict[str, Any]:
+        upstream = {
+            edge.source: self.result.outputs.get(edge.source, {})
+            for edge in self.graph.incoming.get(node.id, [])
+        }
+        return {
+            "prompt": self.prompt,
+            "node_config": node.config,
+            "upstream": upstream,
+        }
+
+    async def _fail_run(self, node: Node | None, error: Exception | None = None) -> None:
+        error_text = str(error) if error else None
+        if node:
+            for skipped_id in self.graph.descendants(node.id):
+                if skipped_id in self.result.outputs:
+                    continue
+                self.result.skipped_nodes.add(skipped_id)
+                await self._mark_node(
+                    self.graph.node_by_id[skipped_id],
+                    "skipped",
+                    100,
+                    output={"reason": "dependency_failed", "failed_dependency": node.id},
+                    message="Skipped because an upstream node failed",
+                )
+        self.workflow_run.status = "failed"
+        append_run_event(
+            self.workflow_run,
+            "run.failed",
+            {"node_id": node.id if node else None, **({"error": error_text} if error_text else {})},
+        )
+        mark_workflow_completed(self.conversation, self.workflow_run, status="failed")
+        self.db.commit()
+        await publish_run_updated(self.channel, self.workflow_run, node_id=node.id if node else None)

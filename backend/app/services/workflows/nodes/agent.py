@@ -15,7 +15,11 @@ class AgentNodeExecutor(WorkflowNodeExecutor):
         if agent is None:
             agent = next((item for item in context.agents if item.id == agent_id), None)
         if not agent or agent.deleted_at is not None:
-            return NodeExecutionResult(status="skipped", output={"reason": "agent not found"}, message="Agent skipped")
+            return NodeExecutionResult(
+                status="failed",
+                output={"error": "agent not found", "agent_id": agent_id},
+                message="Agent not found",
+            )
         result = await run_agent_function_call_loop(
             context.db,
             conversation=context.conversation,

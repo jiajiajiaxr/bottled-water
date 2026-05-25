@@ -7,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, ConversationParticipant, utcnow
+from app.services.workflows.graph import Edge, WorkflowGraph
+from app.services.workflows.runtime import build_node_states
 
 
 def _single_agent_for_conversation(db: Session, conversation: Conversation) -> Agent | None:
@@ -157,11 +159,22 @@ def _sanitize_workflow(conversation: Conversation, agents: list[Agent], value: d
         )
     node_ids = {node["id"] for node in nodes}
     raw_edges = source.get("edges") if isinstance(source.get("edges"), list) else fallback["edges"]
-    edges = [
-        [str(edge[0]), str(edge[1])]
-        for edge in raw_edges[:80]
-        if isinstance(edge, list) and len(edge) == 2 and str(edge[0]) in node_ids and str(edge[1]) in node_ids
-    ]
+    edges: list[list[str] | dict[str, Any]] = []
+    for raw_edge in raw_edges[:80]:
+        edge = Edge.from_value(raw_edge)
+        if not edge or edge.source not in node_ids or edge.target not in node_ids:
+            continue
+        if edge.condition or edge.config:
+            edges.append(
+                {
+                    "from": edge.source,
+                    "to": edge.target,
+                    **({"condition": edge.condition} if edge.condition else {}),
+                    **({"config": edge.config} if edge.config else {}),
+                }
+            )
+        else:
+            edges.append([edge.source, edge.target])
     return {
         **fallback,
         **{key: source[key] for key in ("mode", "settings") if key in source},
@@ -179,58 +192,14 @@ def _workflow_for_conversation(conversation: Conversation, agents: list[Agent]) 
 def _workflow_execution_order(workflow: dict[str, Any]) -> list[dict[str, Any]]:
     nodes = [node for node in workflow.get("nodes", []) if isinstance(node, dict)]
     node_by_id = {str(node.get("id")): node for node in nodes}
-    indegree = {node_id: 0 for node_id in node_by_id}
-    outgoing: dict[str, list[str]] = {node_id: [] for node_id in node_by_id}
-    for edge in workflow.get("edges", []):
-        if not isinstance(edge, list) or len(edge) != 2:
-            continue
-        start, end = str(edge[0]), str(edge[1])
-        if start in node_by_id and end in node_by_id:
-            outgoing[start].append(end)
-            indegree[end] += 1
-    ready = [node_id for node_id, degree in indegree.items() if degree == 0]
-    ordered_ids: list[str] = []
-    while ready:
-        node_id = ready.pop(0)
-        ordered_ids.append(node_id)
-        for next_id in outgoing.get(node_id, []):
-            indegree[next_id] -= 1
-            if indegree[next_id] == 0:
-                ready.append(next_id)
-    if len(ordered_ids) != len(nodes):
+    ordered = WorkflowGraph.from_workflow(workflow).topological_sort()
+    if not ordered:
         return nodes
-    return [node_by_id[node_id] for node_id in ordered_ids]
+    return [node_by_id[node.id] for node in ordered if node.id in node_by_id]
 
 
 def _workflow_node_states(workflow: dict[str, Any]) -> list[dict[str, Any]]:
-    states: list[dict[str, Any]] = []
-    for index, node in enumerate(workflow.get("nodes", [])):
-        if not isinstance(node, dict):
-            continue
-        node_type = _workflow_node_type(node)
-        config = _node_config(node)
-        output: dict[str, Any] = {}
-        if node_type == "condition":
-            branches = config.get("branches") if isinstance(config.get("branches"), list) else ["true", "false"]
-            output = {"expression": config.get("expression"), "matched_branch": branches[0] if branches else "default"}
-        elif node_type == "loop":
-            output = {"max_iterations": int(config.get("max_iterations") or 3), "current_iteration": 0}
-        states.append(
-            {
-                "id": str(node.get("id") or f"node-{index + 1}"),
-                "title": str(node.get("title") or f"Node {index + 1}"),
-                "type": node_type,
-                "role": str(node.get("role") or node_type),
-                "agent_id": node.get("agent_id"),
-                "config": config,
-                "status": "queued",
-                "progress": 0,
-                "output": output,
-                "started_at": None,
-                "completed_at": None,
-            }
-        )
-    return states
+    return build_node_states(workflow)
 
 
 def _workflow_plan(prompt: str, workflow: dict[str, Any]) -> dict[str, Any]:

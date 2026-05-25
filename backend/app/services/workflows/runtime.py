@@ -38,8 +38,10 @@ def build_node_states(workflow: dict[str, Any]) -> list[dict[str, Any]]:
                 "agent_id": node.agent_id,
                 "config": node.config,
                 "status": "queued",
+                "input": {},
                 "progress": 0,
                 "output": output,
+                "error": None,
                 "started_at": None,
                 "completed_at": None,
             }
@@ -76,7 +78,17 @@ def mark_workflow_completed(conversation: Conversation, run: WorkflowRun, status
     _sync_workflow_run(conversation, run)
 
 
-def _set_workflow_node_state(run: WorkflowRun, node_id: str, *, status: str, progress: int, output: dict[str, Any] | None = None, message: str | None = None) -> None:
+def _set_workflow_node_state(
+    run: WorkflowRun,
+    node_id: str,
+    *,
+    status: str,
+    progress: int,
+    input_data: dict[str, Any] | None = None,
+    output: dict[str, Any] | None = None,
+    error: str | None = None,
+    message: str | None = None,
+) -> None:
     states = list(run.node_states or [])
     now = utcnow().isoformat()
     for state in states:
@@ -84,8 +96,14 @@ def _set_workflow_node_state(run: WorkflowRun, node_id: str, *, status: str, pro
             continue
         state["status"] = status
         state["progress"] = max(0, min(100, progress))
+        if input_data is not None:
+            state["input"] = input_data
         if output is not None:
             state["output"] = {**(state.get("output") or {}), **output}
+        if error is not None:
+            state["error"] = error
+        elif status not in {"failed", "error"}:
+            state.setdefault("error", None)
         if message:
             state["message"] = message
         if status in {"running", "reviewing"} and not state.get("started_at"):
@@ -96,4 +114,7 @@ def _set_workflow_node_state(run: WorkflowRun, node_id: str, *, status: str, pro
     run.node_states = states
     total = max(1, len(states))
     done = len([state for state in states if state.get("status") in {"completed", "succeeded", "skipped"}])
-    run.progress = int(done / total * 100) if status != "running" else max(run.progress or 0, progress)
+    if status == "failed":
+        run.progress = max(run.progress or 0, int(done / total * 100))
+    else:
+        run.progress = int(done / total * 100) if status != "running" else max(run.progress or 0, progress)

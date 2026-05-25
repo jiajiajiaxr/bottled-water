@@ -21,11 +21,10 @@ from app.services.workflows.definition import (
     _conversation_agents,
     _single_agent_for_conversation,
     _workflow_for_conversation,
-    _workflow_node_states,
     _workflow_plan,
 )
 from app.services.workflows.planning import _maybe_replan_workflow
-from app.services.workflows.runtime import _sync_workflow_run
+from app.services.workflows.runtime import _sync_workflow_run, build_edge_states, build_node_states
 
 
 async def run_orchestration(message_id: str) -> None:
@@ -92,24 +91,13 @@ async def run_orchestration(message_id: str) -> None:
             status="running",
             mode=str(workflow.get("mode") or "canvas"),
             workflow_snapshot=workflow,
-            node_states=_workflow_node_states(workflow),
-            edge_states=[
-                {"from": edge[0], "to": edge[1], "status": "waiting"}
-                for edge in workflow.get("edges", [])
-                if isinstance(edge, list) and len(edge) == 2
-            ],
+            node_states=build_node_states(workflow),
+            edge_states=build_edge_states(workflow),
             events=[{"type": "run.started", "at": utcnow().isoformat(), "trigger_message_id": user_message.id}],
             progress=5,
             started_at=utcnow(),
         )
         db.add(workflow_run)
-        for state in workflow_run.node_states or []:
-            if state.get("type") == "start":
-                state["status"] = "completed"
-                state["progress"] = 100
-                state["started_at"] = utcnow().isoformat()
-                state["completed_at"] = utcnow().isoformat()
-        workflow_run.node_states = list(workflow_run.node_states or [])
         _sync_workflow_run(conversation, workflow_run)
         db.commit()
         await queue_service.enqueue({"id": task.id, "conversation_id": conversation.id}, priority=10)
@@ -174,6 +162,26 @@ async def run_orchestration(message_id: str) -> None:
         worker_contexts = engine_result.worker_contexts
         independent_agent_replies = engine_result.agent_replies
         tool_context = engine_result.tool_context
+        if workflow_run.status == "failed":
+            task.status = "FAILED"
+            task.progress = workflow_run.progress
+            task.error_info = {
+                "workflow_run_id": workflow_run.id,
+                "events": workflow_run.events[-10:] if workflow_run.events else [],
+            }
+            task.completed_at = utcnow()
+            if assistant:
+                assistant.status = "failed"
+                assistant.content = {"text": "工作流执行失败，已停止后续依赖节点。请打开群聊设置里的画布查看失败节点。"}
+            conversation.last_message_preview = "工作流执行失败，已停止后续依赖节点。"
+            conversation.last_message_sender = "Workflow Engine"
+            conversation.last_message_at = utcnow()
+            db.commit()
+            await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+            if assistant:
+                await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+                await event_bus.publish(channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "workflow_failed"})
+            return
         if worker_contexts:
             task.output = {**(task.output or {}), "worker_contexts": worker_contexts}
         for subtask in subtasks:
