@@ -43,6 +43,7 @@ import type {
   WorkflowNode,
   WorkflowRun,
 } from "../../../../types";
+import { WorkflowCanvas } from "./WorkflowCanvas";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -90,7 +91,7 @@ export function ConversationSettingsDrawer({
   );
 
   const workflowNodes = workflow?.nodes ?? [];
-  const workflowEdges = workflow?.edges ?? [];
+  const workflowEdges = (workflow?.edges ?? []) as Array<[string, string]>;
   const activeAgentIds = new Set(
     active?.participants
       .map((item) => item.agent_id)
@@ -347,7 +348,17 @@ export function ConversationSettingsDrawer({
             children: (
               <div className="workflow-board conversation-workflow">
                 <div className="workflow-canvas">
-                  {workflowNodes.length ? (
+                  {workflow ? (
+                    <WorkflowCanvas
+                      workflow={workflow}
+                      latestRun={workflowRuns[0]}
+                      onChange={setWorkflowDraft}
+                      onNodeClick={openWorkflowNodeEditor}
+                    />
+                  ) : (
+                    <Empty description="当前群聊暂无工作流" />
+                  )}
+                  {false && (workflowNodes.length ? (
                     workflowNodes.map((node) => (
                       <div
                         key={node.id}
@@ -382,7 +393,7 @@ export function ConversationSettingsDrawer({
                     ))
                   ) : (
                     <Empty description="当前群聊暂无 Agent 工作流" />
-                  )}
+                  ))}
                 </div>
                 <div className="workflow-side">
                   <Space direction="vertical" className="full-width">
@@ -453,6 +464,19 @@ export function ConversationSettingsDrawer({
                       value={newNodeType}
                       onChange={setNewNodeType}
                       options={WORKFLOW_NODE_TYPE_OPTIONS}
+                      className="full-width"
+                    />
+                    <Select
+                      value={workflow?.output_mode ?? "independent_messages"}
+                      disabled={!workflow}
+                      onChange={(value) => {
+                        if (!workflow) return;
+                        setWorkflowDraft({ ...workflow, output_mode: value });
+                      }}
+                      options={[
+                        { label: "独立气泡回复", value: "independent_messages" },
+                        { label: "汇总回复", value: "aggregate" },
+                      ]}
                       className="full-width"
                     />
                     <TextArea

@@ -1,5 +1,10 @@
-import { request, wait, eventPayload, type StreamAssistantHandlers } from "./client";
-import { demoUser, demoMessages } from "../mock";
+import {
+  eventPayload,
+  request,
+  type StreamAssistantHandlers,
+  wait,
+} from "./client";
+import { demoMessages, demoUser } from "../mock";
 import type { ChatMessage, UploadedFile } from "../types";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
@@ -81,22 +86,25 @@ export async function streamAssistantReply(
     const token = window.localStorage.getItem("agenthub_token");
     return await new Promise<string>((resolve, reject) => {
       let buffer = "";
+      let settled = false;
       const source = new EventSource(
         `${"/api/v1"}/conversations/${conversationId}/stream?replay=false${token ? `&token=${encodeURIComponent(token)}` : ""}`,
       );
       let timeout = 0;
-      const stop = () => {
+      const close = (payload?: Record<string, unknown>, fallback = "任务已完成。") => {
+        if (settled) return;
+        settled = true;
         window.clearTimeout(timeout);
         source.close();
-        handlers.onDone?.();
-        resolve(buffer);
+        handlers.onDone?.(payload);
+        resolve(buffer || fallback);
       };
+      const stop = () => close(undefined, buffer);
       handlers.onControl?.(stop);
       timeout = window.setTimeout(() => {
-        source.close();
-        handlers.onDone?.();
-        resolve(buffer || "任务正在后台执行，稍后刷新可查看完整结果。");
+        close(undefined, "任务正在后台执行，稍后刷新可查看完整结果。");
       }, 120000);
+
       source.addEventListener("message_start", (event) => {
         handlers.onMessageStart?.(eventPayload(event));
       });
@@ -137,18 +145,41 @@ export async function streamAssistantReply(
         handlers.onToolCallDone?.(eventPayload(event));
       });
       source.addEventListener("message_stop", (event) => {
-        window.clearTimeout(timeout);
-        source.close();
-        handlers.onDone?.(eventPayload(event));
-        resolve(buffer || "主控 Agent 已完成任务编排。");
+        const payload = eventPayload(event);
+        const stopReason = String(payload.stop_reason || "");
+        if (
+          ["workflow_completed", "generation_finished", "cancelled"].includes(
+            stopReason,
+          )
+        ) {
+          close(payload);
+        }
+      });
+      source.addEventListener("workflow:completed", (event) => {
+        close(eventPayload(event));
+      });
+      source.addEventListener("workflow:failed", (event) => {
+        close(eventPayload(event), "工作流执行失败。");
+      });
+      source.addEventListener("workflow:cancelled", (event) => {
+        close(eventPayload(event), "本次响应已停止。");
+      });
+      source.addEventListener("generation_finished", (event) => {
+        close(eventPayload(event));
+      });
+      source.addEventListener("generation:cancelled", (event) => {
+        close(eventPayload(event), "本次响应已停止。");
       });
       source.addEventListener("error", () => {
+        if (settled) return;
         window.clearTimeout(timeout);
         source.close();
         if (buffer) {
           handlers.onDone?.();
           resolve(buffer);
-        } else reject(new Error("stream failed"));
+        } else {
+          reject(new Error("stream failed"));
+        }
       });
     });
   } catch {
@@ -168,7 +199,7 @@ export async function assistantReply(
   let text = "";
   return await streamAssistantReply(conversationId, (delta) => {
     text += delta;
-  }).then((result) => result || text || `收到："${prompt}"。`);
+  }).then((result) => result || text || `收到：${prompt}`);
 }
 
 export async function cancelAssistantReply(

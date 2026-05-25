@@ -278,6 +278,7 @@ def _fallback_workflow(conversation: Conversation) -> dict:
     return {
         "conversation_id": conversation.id,
         "mode": "all_agents_independent",
+        "output_mode": "independent_messages",
         "nodes": [start_node, *agent_nodes, end_node],
         "edges": edges or [["start", "end"]],
         "settings": {
@@ -371,7 +372,7 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
             normalized_edges.append([edge.source, edge.target])
     return {
         **fallback,
-        **{key: value[key] for key in ("mode", "settings") if key in value},
+        **{key: value[key] for key in ("mode", "output_mode", "settings") if key in value},
         "nodes": normalized_nodes or fallback["nodes"],
         "edges": normalized_edges or fallback["edges"],
     }

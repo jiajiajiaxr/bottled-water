@@ -4,12 +4,15 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import asyncio
 import pytest
 
+from app.models import Conversation, Message, Task, WorkflowRun
 from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.graph import WorkflowGraph
 from app.services.workflows.nodes.base import NodeExecutionResult, WorkflowNodeExecutor
 from app.services.workflows.nodes.condition import ConditionNodeExecutor
+from app.services.workflows.nodes.end import EndNodeExecutor
 from app.services.workflows.nodes.loop import LoopNodeExecutor
 from app.services.workflows.nodes.base import resolve_references
 from app.services.workflows.nodes.tool import ToolNodeExecutor
@@ -147,6 +150,7 @@ async def test_engine_agent_node_uses_function_call_loop() -> None:
             ).run()
 
     call_loop.assert_awaited_once()
+    assert call_loop.await_args.kwargs["emit_message"] is True
     assert result.outputs["a"]["text"] == "done"
     assert run.status == "completed"
     assert any(state["id"] == "a" and state["status"] == "completed" for state in run.node_states)
@@ -168,6 +172,16 @@ class FailingExecutor(WorkflowNodeExecutor):
         if node.id == "fail":
             return NodeExecutionResult(status="failed", output={"error": "boom"})
         return NodeExecutionResult(output={"ok": node.id})
+
+
+class SlowParallelExecutor(WorkflowNodeExecutor):
+    started: list[str] = []
+
+    async def execute(self, node: Any, context: Any) -> NodeExecutionResult:
+        if node.id in {"a", "b"}:
+            self.started.append(node.id)
+            await asyncio.sleep(0.05)
+        return NodeExecutionResult(output={"node": node.id})
 
 
 @pytest.mark.asyncio
@@ -247,6 +261,109 @@ async def test_engine_marks_failed_node_and_skips_downstream_dependencies() -> N
     assert states["fail"]["error"] == "boom"
     assert states["end"]["status"] == "skipped"
     assert result.outputs["fail"]["error"] == "boom"
+
+
+@pytest.mark.asyncio
+async def test_engine_runs_parallel_nodes_with_isolated_sessions() -> None:
+    workflow = {
+        "mode": "all_agents_independent",
+        "output_mode": "independent_messages",
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {"id": "a", "type": "tool", "config": {"tool_name": "api.test"}},
+            {"id": "b", "type": "tool", "config": {"tool_name": "db.inspect"}},
+            {"id": "end", "type": "end"},
+        ],
+        "edges": [["start", "a"], ["start", "b"], ["a", "end"], ["b", "end"]],
+    }
+    db, conversation, user_message, task, run = _runtime(workflow)
+    executor = SlowParallelExecutor()
+
+    def session_factory() -> Any:
+        session = MagicMock()
+
+        def get(model: Any, item_id: str) -> Any:
+            mapping = {
+                Conversation: conversation,
+                Message: user_message,
+                Task: task,
+                WorkflowRun: run,
+            }
+            return mapping.get(model)
+
+        session.get.side_effect = get
+        return session
+
+    with patch("app.services.workflows.engine.SessionLocal", side_effect=session_factory):
+        with patch("app.services.workflows.engine.get_executor", return_value=executor):
+            with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+                started_at = asyncio.get_running_loop().time()
+                result = await WorkflowEngine(
+                    db,
+                    conversation=conversation,
+                    user_message=user_message,
+                    task=task,
+                    workflow_run=run,
+                    workflow=workflow,
+                    prompt="hello",
+                    channel="conversation:conv-1",
+                    agents=[],
+                ).run()
+                elapsed = asyncio.get_running_loop().time() - started_at
+
+    assert set(executor.started) == {"a", "b"}
+    assert elapsed < 0.09
+    assert result.outputs["a"]["node"] == "a"
+    assert result.outputs["b"]["node"] == "b"
+
+
+@pytest.mark.asyncio
+async def test_aggregate_mode_agent_node_suppresses_chat_bubble() -> None:
+    workflow = {**_workflow(), "output_mode": "aggregate"}
+    db, conversation, user_message, task, run = _runtime(workflow)
+    agent = SimpleNamespace(id="agent-1", name="Backend Worker", deleted_at=None)
+    db.get.return_value = agent
+    loop_result = SimpleNamespace(
+        assistant=None,
+        text="node only",
+        tool_context={"agent_name": "Backend Worker", "summary": "node only"},
+    )
+
+    with patch("app.services.workflows.nodes.agent.run_agent_function_call_loop", new_callable=AsyncMock) as call_loop:
+        call_loop.return_value = loop_result
+        with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+            result = await WorkflowEngine(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                task=task,
+                workflow_run=run,
+                workflow=workflow,
+                prompt="hello",
+                channel="conversation:conv-1",
+                agents=[agent],
+            ).run()
+
+    assert call_loop.await_args.kwargs["emit_message"] is False
+    assert result.outputs["a"]["assistant_message_id"] is None
+    assert result.outputs["a"]["text"] == "node only"
+
+
+@pytest.mark.asyncio
+async def test_end_node_aggregates_upstream_outputs() -> None:
+    context = SimpleNamespace(
+        outputs={
+            "a": {"text": "frontend done"},
+            "b": {"summary": "backend done"},
+        }
+    )
+    result = await EndNodeExecutor().execute(
+        SimpleNamespace(id="end", type="end", config={}),
+        context,
+    )
+
+    assert "frontend done" in result.output["summary"]
+    assert "backend done" in result.output["summary"]
 
 
 @pytest.mark.asyncio

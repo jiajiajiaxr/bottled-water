@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.database import SessionLocal
 from app.models import Agent, Conversation, Message, Task, WorkflowRun
 from app.services.workflows.events import publish_node_event, publish_run_updated
 from app.services.workflows.graph import Node, WorkflowGraph
@@ -16,6 +17,7 @@ from app.services.workflows.runtime import (
     _sync_workflow_run,
     append_run_event,
     mark_workflow_completed,
+    mutate_workflow_run_locked,
     set_edge_state,
 )
 from app.services.workflows.scheduler import WorkflowScheduler
@@ -66,6 +68,10 @@ class WorkflowEngine:
         self.graph = WorkflowGraph.from_workflow(workflow)
         self.scheduler = WorkflowScheduler(self.graph)
         self.result = WorkflowEngineResult()
+        settings = workflow.get("settings") if isinstance(workflow.get("settings"), dict) else {}
+        self.output_mode = str(
+            workflow.get("output_mode") or settings.get("output_mode") or "independent_messages"
+        )
 
     async def run(self) -> WorkflowEngineResult:
         validation = validate_workflow_graph(self.workflow, agents=self.agents)
@@ -80,16 +86,25 @@ class WorkflowEngine:
             runnable = [node for node in level if node.id not in self.result.skipped_nodes]
             if not runnable:
                 continue
-            if len(runnable) > 1 and self.workflow.get("mode") == "all_agents_independent":
-                # SQLAlchemy sessions are not shared across concurrent workers in
-                # this code path yet; execute the batch in graph order while
-                # preserving the scheduler's parallel level semantics in state.
-                for node in runnable:
-                    if self.workflow_run.status == "cancelled":
-                        break
-                    if not await self._run_node(node) and self.workflow_run.status != "cancelled":
-                        await self._fail_run(node)
-                        return self.result
+            if len(runnable) > 1:
+                batch = await asyncio.gather(
+                    *[
+                        self._run_node_in_isolated_session(node, dict(self.result.outputs))
+                        for node in runnable
+                    ]
+                )
+                failed_node: Node | None = None
+                for node, ok, child_result in batch:
+                    self.result.outputs.update(child_result.outputs)
+                    self.result.worker_contexts.extend(child_result.worker_contexts)
+                    self.result.agent_replies.extend(child_result.agent_replies)
+                    self.result.skipped_nodes.update(child_result.skipped_nodes)
+                    if not ok and self.workflow_run.status != "cancelled" and failed_node is None:
+                        failed_node = node
+                self.db.refresh(self.workflow_run)
+                if failed_node:
+                    await self._fail_run(failed_node)
+                    return self.result
             else:
                 for node in runnable:
                     if self.workflow_run.status == "cancelled":
@@ -105,6 +120,41 @@ class WorkflowEngine:
             self.db.commit()
             await publish_run_updated(self.channel, self.workflow_run)
         return self.result
+
+    async def _run_node_in_isolated_session(
+        self,
+        node: Node,
+        upstream_outputs: dict[str, dict[str, Any]],
+    ) -> tuple[Node, bool, WorkflowEngineResult]:
+        db = SessionLocal()
+        try:
+            conversation = db.get(Conversation, self.conversation.id)
+            user_message = db.get(Message, self.user_message.id)
+            task = db.get(Task, self.task.id)
+            workflow_run = db.get(WorkflowRun, self.workflow_run.id)
+            agents = [
+                agent
+                for agent_id in [agent.id for agent in self.agents]
+                if (agent := db.get(Agent, agent_id)) is not None
+            ]
+            if not conversation or not user_message or not task or not workflow_run:
+                return node, False, WorkflowEngineResult()
+            isolated = WorkflowEngine(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                task=task,
+                workflow_run=workflow_run,
+                workflow=self.workflow,
+                prompt=self.prompt,
+                channel=self.channel,
+                agents=agents,
+            )
+            isolated.result.outputs.update(upstream_outputs)
+            ok = await isolated._run_node(node)
+            return node, ok, isolated.result
+        finally:
+            db.close()
 
     async def _run_node(self, node: Node) -> bool:
         if self.workflow_run.status == "cancelled":
@@ -156,6 +206,7 @@ class WorkflowEngine:
             prompt=self.prompt,
             channel=self.channel,
             agents=self.agents,
+            output_mode=self.output_mode,
             outputs=self.result.outputs,
             cancelled=self.workflow_run.status == "cancelled",
         )
@@ -169,27 +220,31 @@ class WorkflowEngine:
         output: dict[str, Any] | None = None,
         error: str | None = None,
         message: str | None = None,
+        edge_updates: list[tuple[str, str, str]] | None = None,
     ) -> None:
-        if status == "running":
-            for edge in self.graph.incoming.get(node.id, []):
-                set_edge_state(self.workflow_run, edge.source, edge.target, "running")
-        _set_workflow_node_state(
-            self.workflow_run,
-            node.id,
-            status=status,
-            progress=progress,
-            input_data=input_data,
-            output=output,
-            error=error,
-            message=message,
-        )
-        append_run_event(
-            self.workflow_run,
-            f"node.{status}",
-            {"node_id": node.id, **({"error": error} if error else {})},
-        )
-        _sync_workflow_run(self.conversation, self.workflow_run)
-        self.db.commit()
+        def _mutate(run: WorkflowRun) -> None:
+            if status == "running":
+                for edge in self.graph.incoming.get(node.id, []):
+                    set_edge_state(run, edge.source, edge.target, "running")
+            for source, target, edge_status in edge_updates or []:
+                set_edge_state(run, source, target, edge_status)
+            _set_workflow_node_state(
+                run,
+                node.id,
+                status=status,
+                progress=progress,
+                input_data=input_data,
+                output=output,
+                error=error,
+                message=message,
+            )
+            append_run_event(
+                run,
+                f"node.{status}",
+                {"node_id": node.id, **({"error": error} if error else {})},
+            )
+
+        await mutate_workflow_run_locked(self.db, self.conversation, self.workflow_run, _mutate)
         await publish_node_event(
             self.channel,
             self.workflow_run,
@@ -228,15 +283,18 @@ class WorkflowEngine:
                     output={"reason": "condition_branch_not_matched", "matched_branch": execution.branch},
                     message="Skipped by condition",
                 )
-        for edge in self.graph.incoming.get(node.id, []):
-            set_edge_state(self.workflow_run, edge.source, edge.target, execution.status)
-        for edge in self.graph.outgoing.get(node.id, []):
-            set_edge_state(
-                self.workflow_run,
+        edge_updates = [
+            (edge.source, edge.target, execution.status)
+            for edge in self.graph.incoming.get(node.id, [])
+        ]
+        edge_updates.extend(
+            (
                 edge.source,
                 edge.target,
                 "skipped" if edge.target in self.result.skipped_nodes else "ready",
             )
+            for edge in self.graph.outgoing.get(node.id, [])
+        )
         await self._mark_node(
             node,
             execution.status,
@@ -244,6 +302,7 @@ class WorkflowEngine:
             output=execution.output,
             error=execution.output.get("error") if execution.status in {"failed", "error"} else None,
             message=execution.message,
+            edge_updates=edge_updates,
         )
 
     def _node_input(self, node: Node) -> dict[str, Any]:

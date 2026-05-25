@@ -15,14 +15,14 @@ from app.services.llm_gateway import stream_model_config_chat
 from app.services.output_filter import strip_internal_agent_output
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import message_to_dict, task_to_dict
-from app.services.workflows.runtime import _set_workflow_node_state, _sync_workflow_run
+from app.services.workflows.runtime import _set_workflow_node_state, mutate_workflow_run_locked
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AgentFunctionLoopResult:
-    assistant: Message
+    assistant: Message | None
     text: str
     thinking: str
     tool_results: list[dict[str, Any]]
@@ -43,16 +43,18 @@ async def _publish_workflow_update(
 ) -> None:
     if not workflow_run or not workflow_node_id:
         return
-    _set_workflow_node_state(
-        workflow_run,
-        workflow_node_id,
-        status=status,
-        progress=progress,
-        output=output,
-        message=message,
-    )
-    _sync_workflow_run(conversation, workflow_run)
-    db.commit()
+
+    def _mutate(run: WorkflowRun) -> None:
+        _set_workflow_node_state(
+            run,
+            workflow_node_id,
+            status=status,
+            progress=progress,
+            output=output,
+            message=message,
+        )
+
+    await mutate_workflow_run_locked(db, conversation, workflow_run, _mutate)
     await event_bus.publish(
         channel,
         "workflow:run_updated",
@@ -71,7 +73,7 @@ def _agent_system_prompt(agent: Agent, *, mode: str, node_title: str | None = No
     return (
         f"{base}{node_hint}\n"
         f"你正在以 {agent.name} 的身份独立执行 {mode}。"
-        "你可以根据任务自主决定是否调用已经授权的 Tool、Skill 或 MCP；"
+        "你可以根据任务自主决定是否调用已授权的 Tool、Skill 或 MCP。"
         "没有必要调用工具时可以直接回答。"
         "如果调用了工具，必须结合工具结果继续推理，然后给用户自然语言最终回复。"
         "不要伪装成 Master Agent，也不要暴露内部 JSON。"
@@ -97,6 +99,56 @@ def _tool_arguments(raw: str) -> dict[str, Any]:
         return {"raw": raw}
 
 
+async def _publish_text_delta(
+    *,
+    channel: str,
+    assistant: Message | None,
+    agent: Agent,
+    text: str,
+    delta_type: str = "text_delta",
+    emit_message: bool,
+) -> None:
+    if not emit_message or not assistant or not text:
+        return
+    await event_bus.publish(
+        channel,
+        "content_block_delta",
+        {
+            "agent_message_id": assistant.id,
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "delta": {"type": delta_type, "text": text},
+        },
+    )
+
+
+async def _publish_message_tool_event(
+    *,
+    channel: str,
+    assistant: Message | None,
+    agent: Agent,
+    event_name: str,
+    tool_name: str,
+    tool_call_id: str,
+    emit_message: bool,
+    status: str | None = None,
+) -> None:
+    if not emit_message or not assistant:
+        return
+    await event_bus.publish(
+        channel,
+        event_name,
+        {
+            "agent_message_id": assistant.id,
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            **({"status": status} if status else {}),
+        },
+    )
+
+
 async def run_agent_function_call_loop(
     db: Session,
     *,
@@ -111,35 +163,39 @@ async def run_agent_function_call_loop(
     workflow_node_id: str | None = None,
     node_title: str | None = None,
     max_tool_rounds: int = 3,
+    emit_message: bool = True,
 ) -> AgentFunctionLoopResult:
-    """Run one Agent as an independent OpenAI-style Function Call loop."""
+    """Run one Agent as an independent OpenAI-style function-call loop."""
     settings = get_settings()
     user = db.get(User, conversation.creator_id)
     tools = build_tools_for_agent(db, agent) if settings.enable_function_calling else []
     allowed_tool_names = _tool_names(tools)
     model_config_id = (agent.config or {}).get("model_config_id")
 
-    assistant = Message(
-        conversation_id=conversation.id,
-        sender_type="agent",
-        sender_id=agent.id,
-        sender_name=agent.name,
-        content_type="text",
-        content={"text": ""},
-        status="streaming",
-    )
-    db.add(assistant)
-    db.commit()
-    db.refresh(assistant)
-    await event_bus.publish(
-        channel,
-        "message_start",
-        {
-            "agent_message_id": assistant.id,
-            "agent_id": agent.id,
-            "agent_name": agent.name,
-        },
-    )
+    assistant: Message | None = None
+    if emit_message:
+        assistant = Message(
+            conversation_id=conversation.id,
+            sender_type="agent",
+            sender_id=agent.id,
+            sender_name=agent.name,
+            content_type="text",
+            content={"text": ""},
+            status="streaming",
+        )
+        db.add(assistant)
+        db.commit()
+        db.refresh(assistant)
+        await event_bus.publish(
+            channel,
+            "message_start",
+            {
+                "agent_message_id": assistant.id,
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+            },
+        )
+
     await _publish_workflow_update(
         db,
         conversation=conversation,
@@ -151,7 +207,7 @@ async def run_agent_function_call_loop(
         output={
             "agent_id": agent.id,
             "agent_name": agent.name,
-            "assistant_message_id": assistant.id,
+            "assistant_message_id": assistant.id if assistant else None,
             "model_config_id": model_config_id,
             "tool_count": len(tools),
             "tool_names": sorted(allowed_tool_names),
@@ -192,61 +248,51 @@ async def run_agent_function_call_loop(
                     if event.text:
                         stream_text += event.text
                         current_text += event.text
-                        await event_bus.publish(
-                            channel,
-                            "content_block_delta",
-                            {
-                                "agent_message_id": assistant.id,
-                                "agent_id": agent.id,
-                                "agent_name": agent.name,
-                                "delta": {"type": "text_delta", "text": event.text},
-                            },
+                        await _publish_text_delta(
+                            channel=channel,
+                            assistant=assistant,
+                            agent=agent,
+                            text=event.text,
+                            emit_message=emit_message,
                         )
                     if event.reasoning:
                         reasoning_text += event.reasoning
-                        await event_bus.publish(
-                            channel,
-                            "content_block_delta",
-                            {
-                                "agent_message_id": assistant.id,
-                                "agent_id": agent.id,
-                                "agent_name": agent.name,
-                                "delta": {"type": "reasoning_delta", "text": event.reasoning},
-                            },
+                        await _publish_text_delta(
+                            channel=channel,
+                            assistant=assistant,
+                            agent=agent,
+                            text=event.reasoning,
+                            delta_type="reasoning_delta",
+                            emit_message=emit_message,
                         )
                 elif event.type == "tool_calls":
                     current_tool_calls = event.tool_calls or []
-                elif event.type == "usage":
+                elif event.type == "usage" and emit_message and assistant:
                     await event_bus.publish(
                         channel,
                         "usage",
                         {"agent_message_id": assistant.id, "agent_id": agent.id, "usage": event.usage},
                     )
                 elif event.type == "error":
-                    stream_text += f"\n模型调用异常，已降级：{event.error}"
-                    await event_bus.publish(
-                        channel,
-                        "content_block_delta",
-                        {
-                            "agent_message_id": assistant.id,
-                            "agent_id": agent.id,
-                            "agent_name": agent.name,
-                            "delta": {"type": "text_delta", "text": f"模型调用异常，已降级：{event.error}"},
-                        },
+                    text = f"\n模型调用异常，已降级：{event.error}"
+                    stream_text += text
+                    await _publish_text_delta(
+                        channel=channel,
+                        assistant=assistant,
+                        agent=agent,
+                        text=text,
+                        emit_message=emit_message,
                     )
         except Exception as exc:
             logger.exception("agent function loop stream failed: agent=%s", agent.id)
             if not stream_text:
                 stream_text = f"模型调用异常，已降级：{exc}"
-                await event_bus.publish(
-                    channel,
-                    "content_block_delta",
-                    {
-                        "agent_message_id": assistant.id,
-                        "agent_id": agent.id,
-                        "agent_name": agent.name,
-                        "delta": {"type": "text_delta", "text": stream_text},
-                    },
+                await _publish_text_delta(
+                    channel=channel,
+                    assistant=assistant,
+                    agent=agent,
+                    text=stream_text,
+                    emit_message=emit_message,
                 )
             break
 
@@ -260,16 +306,14 @@ async def run_agent_function_call_loop(
             tool_name = str(function.get("name") or "")
             tool_call_id = str(tool_call.get("id") or f"call_{round_num}_{len(tool_results) + 1}")
             arguments = _tool_arguments(str(function.get("arguments") or ""))
-            await event_bus.publish(
-                channel,
-                "tool_call_start",
-                {
-                    "agent_message_id": assistant.id,
-                    "agent_id": agent.id,
-                    "agent_name": agent.name,
-                    "tool_name": tool_name,
-                    "tool_call_id": tool_call_id,
-                },
+            await _publish_message_tool_event(
+                channel=channel,
+                assistant=assistant,
+                agent=agent,
+                event_name="tool_call_start",
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                emit_message=emit_message,
             )
             await _publish_workflow_update(
                 db,
@@ -324,17 +368,15 @@ async def run_agent_function_call_loop(
             tool_results.append(record)
             round_tool_results.append(record)
             db.commit()
-            await event_bus.publish(
-                channel,
-                "tool_call_done",
-                {
-                    "agent_message_id": assistant.id,
-                    "agent_id": agent.id,
-                    "agent_name": agent.name,
-                    "tool_name": tool_name,
-                    "tool_call_id": tool_call_id,
-                    "status": status,
-                },
+            await _publish_message_tool_event(
+                channel=channel,
+                assistant=assistant,
+                agent=agent,
+                event_name="tool_call_done",
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                emit_message=emit_message,
+                status=status,
             )
             await _publish_workflow_update(
                 db,
@@ -372,25 +414,25 @@ async def run_agent_function_call_loop(
             db.commit()
             await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
-    display_text = strip_internal_agent_output(stream_text)
+    final_text = strip_internal_agent_output(stream_text) or f"{agent.name} 已完成本次处理。"
     thinking_text = strip_internal_agent_output(reasoning_text) if reasoning_text else ""
-    assistant.content = {
-        "text": display_text or f"{agent.name} 已完成本次处理。",
-        "thinking": thinking_text,
-    }
-    assistant.status = "completed"
-    db.commit()
-    await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
-    await event_bus.publish(
-        channel,
-        "message_stop",
-        {
-            "agent_message_id": assistant.id,
-            "agent_id": agent.id,
-            "agent_name": agent.name,
-            "stop_reason": "end_turn",
-        },
-    )
+    assistant_message_id = assistant.id if assistant else None
+    if assistant:
+        assistant.content = {"text": final_text, "thinking": thinking_text}
+        assistant.status = "completed"
+        db.commit()
+        await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+        await event_bus.publish(
+            channel,
+            "message_stop",
+            {
+                "agent_message_id": assistant.id,
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "stop_reason": "end_turn",
+            },
+        )
+
     await _publish_workflow_update(
         db,
         conversation=conversation,
@@ -400,23 +442,23 @@ async def run_agent_function_call_loop(
         status="completed",
         progress=100,
         output={
-            "summary": assistant.content["text"][:1000],
+            "summary": final_text[:1000],
             "tool_results": tool_results,
-            "assistant_message_id": assistant.id,
+            "assistant_message_id": assistant_message_id,
             "completed_at": utcnow().isoformat(),
         },
         message=f"{agent.name} 已完成回复",
     )
     return AgentFunctionLoopResult(
         assistant=assistant,
-        text=assistant.content["text"],
+        text=final_text,
         thinking=thinking_text,
         tool_results=tool_results,
         tool_context={
             "mode": "function_call_loop",
             "agent_id": agent.id,
             "agent_name": agent.name,
-            "assistant_message_id": assistant.id,
+            "assistant_message_id": assistant_message_id,
             "model_config_id": model_config_id,
             "executions": [item["result"] for item in tool_results],
             "tool_results": tool_results,

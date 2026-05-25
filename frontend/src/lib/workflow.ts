@@ -3,6 +3,8 @@ import type { Agent, WorkflowNode } from "../types";
 export const WORKFLOW_NODE_TYPE_OPTIONS = [
   { label: "Agent", value: "agent" },
   { label: "Tool", value: "tool" },
+  { label: "Skill", value: "skill" },
+  { label: "MCP", value: "mcp" },
   { label: "Condition", value: "condition" },
   { label: "Loop", value: "loop" },
   { label: "Review", value: "review" },
@@ -53,6 +55,12 @@ export function createWorkflowNode(type: string, agent?: Agent): WorkflowNode {
   } else if (type === "tool") {
     base.config = { tool_name: "file.read" };
     base.meta = "Call an authorized tool";
+  } else if (type === "skill") {
+    base.config = { skill_id: "" };
+    base.meta = "Run a workspace Skill";
+  } else if (type === "mcp") {
+    base.config = { server_id: "", tool_name: "" };
+    base.meta = "Call an MCP server tool";
   } else if (type === "condition") {
     base.config = {
       expression: "input.includes('review')",

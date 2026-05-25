@@ -122,6 +122,7 @@ async def _run_direct_agent(
     db.commit()
     await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+    await event_bus.publish(channel, "generation_finished", {"conversation_id": conversation.id, "reason": "direct_agent_completed"})
 
 
 async def _run_direct_agent_without_function_calling(
@@ -278,3 +279,4 @@ async def _run_direct_agent_without_function_calling(
     await event_bus.publish(channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "end_turn"})
     await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+    await event_bus.publish(channel, "generation_finished", {"conversation_id": conversation.id, "reason": "direct_agent_completed"})

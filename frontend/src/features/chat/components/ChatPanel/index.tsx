@@ -22,7 +22,7 @@ import {
   Typography,
   Upload,
 } from "antd";
-import type { UploadRequestOption } from "rc-upload/lib/interface";
+import type { UploadProps } from "antd";
 import { participantName } from "../../../../lib/message";
 import { MessageBubble } from "../MessageBubble";
 import type {
@@ -35,6 +35,7 @@ import type {
 const { Content, Header } = Layout;
 const { TextArea } = Input;
 const { Title, Text } = Typography;
+type UploadRequestOption = Parameters<NonNullable<UploadProps["customRequest"]>>[0];
 
 export function ChatPanel({
   user,

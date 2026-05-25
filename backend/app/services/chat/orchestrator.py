@@ -80,7 +80,8 @@ async def run_orchestration(message_id: str) -> None:
             workflow=workflow,
             channel=channel,
         )
-        independent_group_mode = conversation.chat_type == "group" and str(workflow.get("mode") or "") == "all_agents_independent"
+        output_mode = str(workflow.get("output_mode") or (workflow.get("settings") or {}).get("output_mode") or "independent_messages")
+        independent_group_mode = conversation.chat_type == "group" and output_mode == "independent_messages"
         independent_agent_replies: list[dict[str, str]] = []
         plan = _workflow_plan(prompt, workflow)
         task = create_task_for_prompt(db, conversation, prompt, plan=plan)
@@ -181,6 +182,7 @@ async def run_orchestration(message_id: str) -> None:
             if assistant:
                 await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
                 await event_bus.publish(channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "workflow_failed"})
+            await event_bus.publish(channel, "generation_finished", {"conversation_id": conversation.id, "reason": "workflow_failed"})
             return
         if worker_contexts:
             task.output = {**(task.output or {}), "worker_contexts": worker_contexts}
@@ -259,7 +261,7 @@ async def run_orchestration(message_id: str) -> None:
             await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
             if workflow_run:
                 await event_bus.publish(channel, "workflow:run_updated", {"run_id": workflow_run.id, "status": workflow_run.status, "progress": workflow_run.progress})
-            await event_bus.publish(channel, "message_stop", {"stop_reason": "all_agents_completed"})
+            await event_bus.publish(channel, "generation_finished", {"conversation_id": conversation.id, "reason": "workflow_completed"})
             return
 
         messages = [
@@ -379,6 +381,7 @@ async def run_orchestration(message_id: str) -> None:
         await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
         if workflow_run:
             await event_bus.publish(channel, "workflow:run_updated", {"run_id": workflow_run.id, "status": workflow_run.status, "progress": workflow_run.progress})
+        await event_bus.publish(channel, "generation_finished", {"conversation_id": conversation.id, "reason": "workflow_completed"})
     except asyncio.CancelledError:
         if task:
             task.status = "CANCELLED"
@@ -407,6 +410,7 @@ async def run_orchestration(message_id: str) -> None:
                 await event_bus.publish(channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "cancelled"})
             if workflow_run:
                 await event_bus.publish(channel, "workflow:run_updated", {"run_id": workflow_run.id, "status": workflow_run.status, "progress": workflow_run.progress})
+            await event_bus.publish(channel, "generation_finished", {"conversation_id": conversation.id, "reason": "cancelled"})
         raise
     finally:
         db.close()

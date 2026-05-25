@@ -20,6 +20,7 @@ class WorkflowExecutionContext:
     prompt: str
     channel: str
     agents: list[Agent]
+    output_mode: str = "independent_messages"
     outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     cancelled: bool = False
 

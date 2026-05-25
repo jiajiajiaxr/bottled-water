@@ -1,9 +1,36 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from typing import Any
+
+from sqlalchemy.orm import Session
 
 from app.models import Conversation, WorkflowRun, utcnow
 from app.services.workflows.graph import WorkflowGraph
+
+_RUN_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _run_lock(run_id: str) -> asyncio.Lock:
+    lock = _RUN_LOCKS.get(run_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _RUN_LOCKS[run_id] = lock
+    return lock
+
+
+async def mutate_workflow_run_locked(
+    db: Session,
+    conversation: Conversation,
+    run: WorkflowRun,
+    mutator: Callable[[WorkflowRun], None],
+) -> None:
+    async with _run_lock(run.id):
+        db.refresh(run)
+        mutator(run)
+        _sync_workflow_run(conversation, run)
+        db.commit()
 
 
 def _sync_workflow_run(conversation: Conversation, run: WorkflowRun) -> None:

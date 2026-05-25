@@ -125,6 +125,7 @@ def _fallback_workflow_for_agents(conversation: Conversation, agents: list[Agent
     return {
         "conversation_id": conversation.id,
         "mode": "all_agents_independent",
+        "output_mode": "independent_messages",
         "nodes": nodes,
         "edges": edges or [["start", "end"]],
         "settings": {"default_policy": "canvas-first", "review_policy": "optional"},
@@ -177,7 +178,7 @@ def _sanitize_workflow(conversation: Conversation, agents: list[Agent], value: d
             edges.append([edge.source, edge.target])
     return {
         **fallback,
-        **{key: source[key] for key in ("mode", "settings") if key in source},
+        **{key: source[key] for key in ("mode", "output_mode", "settings") if key in source},
         "conversation_id": conversation.id,
         "nodes": nodes or fallback["nodes"],
         "edges": edges or fallback["edges"],

@@ -669,6 +669,67 @@ button {
   overflow-x: auto;
 }
 
+.xy-workflow-canvas {
+  width: 100%;
+  height: 560px;
+  min-width: 680px;
+  overflow: hidden;
+}
+
+.xy-workflow-node {
+  width: 220px;
+  border: 1px solid #d9e8ff;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(31, 64, 120, 0.08);
+}
+
+.xy-workflow-node-running {
+  border-color: #1677ff;
+  box-shadow: 0 10px 24px rgba(22, 119, 255, 0.18);
+}
+
+.xy-workflow-node-completed,
+.xy-workflow-node-succeeded {
+  border-color: #95de64;
+}
+
+.xy-workflow-node-failed {
+  border-color: #ff7875;
+}
+
+.xy-workflow-node-skipped {
+  opacity: 0.66;
+}
+
+.xy-workflow-node-content {
+  display: flex;
+  min-height: 88px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.xy-workflow-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.xy-workflow-node-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.xy-workflow-node-footer span {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
 .workflow-node {
   position: relative;
   width: 180px;

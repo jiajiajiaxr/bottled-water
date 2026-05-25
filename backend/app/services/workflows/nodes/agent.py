@@ -33,12 +33,13 @@ class AgentNodeExecutor(WorkflowNodeExecutor):
             workflow_node_id=node.id,
             node_title=node.title,
             max_tool_rounds=int(node.config.get("max_tool_rounds") or 3),
+            emit_message=context.output_mode == "independent_messages",
         )
         return NodeExecutionResult(
             output={
                 **result.tool_context,
                 "text": result.text,
-                "assistant_message_id": result.assistant.id,
+                "assistant_message_id": result.assistant.id if result.assistant else None,
             },
             message=f"{agent.name} completed",
         )
