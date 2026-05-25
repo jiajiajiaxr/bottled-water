@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -10,6 +11,8 @@ from typing import Any, Literal
 import httpx
 
 from app.core.config import ROOT_DIR, Settings, get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class ArkProviderError(RuntimeError):
@@ -251,7 +254,7 @@ class ArkClient:
                     data = json.loads(data_text)
                     line_count += 1
                     if line_count <= 3:
-                        print(f"[ark_sse] chunk {line_count}: {json.dumps(data, ensure_ascii=False)[:400]}")
+                        logger.info("[ark_sse] chunk %d: %s", line_count, json.dumps(data, ensure_ascii=False)[:400])
                     if data.get("usage"):
                         usage = data["usage"]
                         yield LLMStreamEvent(type="usage", usage=usage, model=model)

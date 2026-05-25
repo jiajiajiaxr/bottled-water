@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from typing import Any
 
@@ -23,6 +24,8 @@ from app.services.output_filter import strip_internal_agent_output
 from app.services.queue import queue_service
 from app.services.serialization import artifact_to_dict, message_to_dict, subtask_to_dict, task_to_dict
 from app.services.llm_gateway import stream_model_config
+
+logger = logging.getLogger(__name__)
 
 
 def _select_agent(agents: list[Agent], capability: str) -> Agent | None:
@@ -597,7 +600,7 @@ async def _run_direct_agent(
     settings = get_settings()
     enable_fc = settings.enable_function_calling
     model_config_id = (agent.config or {}).get("model_config_id")
-    print(f"[_run_direct_agent] agent={agent.name} enable_fc={enable_fc} model_config_id={model_config_id}")
+    logger.info("[_run_direct_agent] agent=%s enable_fc=%s model_config_id=%s", agent.name, enable_fc, model_config_id)
     # 自定义模型暂不支持 tools，回退到预编排
     if not enable_fc or model_config_id:
         return await _run_direct_agent_legacy(
@@ -689,13 +692,19 @@ async def _run_direct_agent(
         current_text = ""
         current_tool_calls: list[dict[str, Any]] | None = None
         try:
-            print(f"[_run_direct_agent] round={round_num} start stream_chat tools={len(tools)}")
+            logger.info("[_run_direct_agent] round=%d start stream_chat tools=%d", round_num, len(tools))
             async for event in ark_client.stream_chat(
                 messages,
                 purpose=f"agent:{agent.type}",
                 tools=tools if tools else None,
             ):
-                print(f"[_run_direct_agent] event type={event.type} text={event.text[:50] if event.text else ''!r} error={event.error[:100] if event.error else ''!r} tool_calls={bool(event.tool_calls)}")
+                logger.info(
+                    "[_run_direct_agent] event type=%s text=%r error=%r tool_calls=%s",
+                    event.type,
+                    event.text[:50] if event.text else "",
+                    event.error[:100] if event.error else "",
+                    bool(event.tool_calls),
+                )
                 if event.type == "delta":
                     stream_text += event.text
                     current_text += event.text
@@ -724,7 +733,7 @@ async def _run_direct_agent(
                         },
                     )
         except Exception as exc:
-            print(f"[_run_direct_agent] stream_chat error: {exc}")
+            logger.error("[_run_direct_agent] stream_chat error: %s", exc)
             if not stream_text:
                 stream_text = f"\n模型调用异常，已降级：{exc}"
                 await event_bus.publish(
@@ -807,9 +816,13 @@ async def _run_direct_agent(
         await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
     # 5. 完成收尾
-    print(f"[_run_direct_agent] stream_text len={len(stream_text)} content={stream_text[:200]!r}")
+    logger.info(
+        "[_run_direct_agent] stream_text len=%d content=%r", len(stream_text), stream_text[:200]
+    )
     display_text = strip_internal_agent_output(stream_text)
-    print(f"[_run_direct_agent] display_text len={len(display_text)} content={display_text[:200]!r}")
+    logger.info(
+        "[_run_direct_agent] display_text len=%d content=%r", len(display_text), display_text[:200]
+    )
     assistant.content = {"text": display_text or f"{agent.name} 已完成本次单聊处理。"}
     assistant.status = "completed"
     subtask.status = "COMPLETED"
