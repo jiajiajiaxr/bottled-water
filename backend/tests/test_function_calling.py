@@ -78,6 +78,56 @@ class TestArkClientToolCalls:
         assert tc_event.tool_calls
         assert tc_event.tool_calls[0]["function"]["name"] == "file.extract_text"
 
+    @pytest.mark.asyncio
+    async def test_stream_model_requests_once(self, client: ArkClient) -> None:
+        """_stream_model should not issue a second HTTP stream after done."""
+
+        class FakeStreamResponse:
+            status_code = 200
+
+            async def __aenter__(self) -> "FakeStreamResponse":
+                return self
+
+            async def __aexit__(self, *_args: Any) -> None:
+                return None
+
+            async def aiter_lines(self) -> Any:
+                yield 'data: {"choices":[{"delta":{"content":"hello"}}]}'
+                yield 'data: {"usage":{"input_tokens":1,"output_tokens":1},"choices":[]}'
+                yield "data: [DONE]"
+
+            async def aread(self) -> bytes:
+                return b""
+
+        class FakeAsyncClient:
+            stream_calls = 0
+
+            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *_args: Any) -> None:
+                return None
+
+            def stream(self, *_args: Any, **_kwargs: Any) -> FakeStreamResponse:
+                type(self).stream_calls += 1
+                return FakeStreamResponse()
+
+        with patch.object(client, "_api_key", return_value="test-key"):
+            with patch("app.services.ark.httpx.AsyncClient", FakeAsyncClient):
+                events = [
+                    event
+                    async for event in client._stream_model(
+                        "test-model",
+                        {"model": "test-model", "messages": [], "stream": True},
+                    )
+                ]
+
+        assert FakeAsyncClient.stream_calls == 1
+        assert [event.type for event in events] == ["delta", "usage", "done"]
+
 
 class TestBuildToolsForAgent:
     """测试 build_tools_for_agent 将 Agent 配置转为 Function Calling 格式。"""
