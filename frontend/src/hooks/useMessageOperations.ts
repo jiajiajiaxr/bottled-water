@@ -5,8 +5,8 @@ import {
   useConversationStore,
   useMessageStore,
   useArtifactStore,
+  useTaskStore,
 } from "../store";
-import { useBackgroundTaskPolling } from "./useBackgroundTaskPolling";
 import type { ChatMessage, UploadedFile, MessageAttachment } from "../types";
 import {
   makeMessage,
@@ -54,7 +54,12 @@ function createDeltaBatcher(
 
 export function useMessageOperations(currentUserName: string) {
   const { message } = AntApp.useApp();
-  const { loadBackgroundTasks } = useBackgroundTaskPolling();
+  const { setBackgroundTasks } = useTaskStore();
+
+  const refreshTasks = async () => {
+    const tasks = await api.tasks();
+    setBackgroundTasks(tasks);
+  };
 
   const { conversations, activeId, updateConversations } =
     useConversationStore();
@@ -427,7 +432,7 @@ export function useMessageOperations(currentUserName: string) {
           ),
         );
       }
-      loadBackgroundTasks().catch(() => undefined);
+      refreshTasks().catch(() => undefined);
     }
   };
 
@@ -464,7 +469,7 @@ export function useMessageOperations(currentUserName: string) {
       ),
     );
     await api.cancelAssistantReply(activeId).catch(() => undefined);
-    await loadBackgroundTasks().catch(() => undefined);
+    await refreshTasks().catch(() => undefined);
     message.info("已停止本次响应");
   };
 
