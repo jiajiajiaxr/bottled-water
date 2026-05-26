@@ -650,14 +650,14 @@ button {
 
 .workflow-board {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 14px;
+  grid-template-columns: minmax(720px, 1fr) 390px;
+  gap: 16px;
   align-items: start;
 }
 
 .workflow-canvas {
   position: relative;
-  min-height: 560px;
+  min-height: 680px;
   display: block;
   padding: 0;
   border: 1px solid #dbe3ef;
@@ -669,21 +669,30 @@ button {
 .xy-workflow-canvas {
   position: relative;
   width: 100%;
-  height: 560px;
-  min-width: 680px;
+  height: 680px;
+  min-width: 720px;
   overflow: hidden;
+  outline: none;
 }
 
 .xy-workflow-node {
-  width: 240px !important;
-  height: 112px;
+  width: 248px !important;
+  height: 116px;
   box-sizing: border-box;
   padding: 0 !important;
   border: 1px solid #d9e8ff;
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 8px 20px rgba(31, 64, 120, 0.08);
+  cursor: pointer;
   overflow: hidden;
+}
+
+.xy-workflow-node.selected {
+  border-color: #1677ff;
+  box-shadow:
+    0 0 0 3px rgba(22, 119, 255, 0.16),
+    0 10px 24px rgba(22, 119, 255, 0.16);
 }
 
 .xy-workflow-node-running {
@@ -709,6 +718,7 @@ button {
   width: 100%;
   height: 100%;
   flex-direction: column;
+  justify-content: space-between;
   gap: 8px;
   padding: 10px 12px;
   box-sizing: border-box;
@@ -736,17 +746,20 @@ button {
 
 .xy-workflow-node-title {
   flex: 1 1 auto;
+  line-height: 22px;
 }
 
 .xy-workflow-node-type {
   flex: 0 0 auto;
   max-width: 90px;
   margin-inline-end: 0;
+  line-height: 20px;
 }
 
 .xy-workflow-node-meta {
   display: block;
   flex: 1 1 auto;
+  line-height: 20px;
 }
 
 .xy-workflow-node-footer {
@@ -758,6 +771,7 @@ button {
 
 .xy-workflow-node-status {
   display: block;
+  line-height: 20px;
 }
 
 .xy-workflow-node-footer span {
@@ -862,6 +876,32 @@ button {
 }
 
 .workflow-side {
+  min-width: 0;
+  max-height: 680px;
+  padding-right: 4px;
+  overflow: auto;
+}
+
+.workflow-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.workflow-node-config .ant-form-item {
+  margin-bottom: 10px;
+}
+
+.workflow-inline-form-item {
+  width: 160px;
+  margin-bottom: 0 !important;
+}
+
+.workflow-inline-form-item .ant-form-item-control {
   min-width: 0;
 }
 

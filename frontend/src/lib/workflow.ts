@@ -46,6 +46,7 @@ export function createWorkflowNode(type: string, agent?: Agent): WorkflowNode {
     role: type === "review" ? "reviewer" : type,
     status: "ready",
     meta: "Manual step",
+    data: {},
     config: {},
   };
   if (type === "agent" || type === "review") {

@@ -7,6 +7,7 @@ export interface WorkflowNode {
   meta?: string;
   agent_id?: string;
   position?: { x: number; y: number };
+  data?: Record<string, unknown>;
   config?: Record<string, unknown>;
 }
 
