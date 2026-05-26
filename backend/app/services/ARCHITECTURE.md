@@ -27,10 +27,15 @@ This directory is organized by service domain. The previous root-level service e
 - `workflows/nodes/`: node executors for `start`, `agent`, `tool`, `skill`, `mcp`, `condition`, `loop`, `review`, `artifact`, and `end`.
 - `agents/function_loop.py`: shared direct/group Agent Function Call loop. It creates assistant messages, streams model output, executes `tool_calls`, appends `role=tool` results, and asks the model for the final answer.
 - `agents/direct.py`: direct single-Agent Task/Subtask lifecycle. The actual reasoning loop is delegated to `agents/function_loop.py`.
-- `agents/tool_loop.py`: tool schema construction plus Skill/MCP/built-in tool execution dispatch. The older heuristic short loop remains only as an internal helper, not as a service entrypoint.
-- `tools/registry.py`: built-in tool catalog, official Agent toolboxes, custom tools, and invocation dispatch.
-- `tools/executor.py`: tool execution facade for future hard permission and schema validation.
-- `tools/permissions.py`: tool permission name normalization helpers.
+- `agents/tool_loop.py`: Function Call tool schema construction plus Skill/MCP routing. The older heuristic short loop remains only as an internal helper, not as a service entrypoint.
+- `tools/builtins.py`: built-in tool metadata, JSON schemas, and official Agent toolboxes.
+- `tools/builtin_executor.py`: built-in tool execution for file, artifact, runtime, QA, and deployment tools.
+- `tools/catalog.py`: tool table bootstrap, custom tool visibility query, and unified catalog listing.
+- `tools/custom.py`: custom Python tool runtime and invocation bookkeeping.
+- `tools/executor.py`: unified tool execution entrypoint with schema validation and permission metadata checks.
+- `tools/permissions.py`: tool name normalization and user permission helpers.
+- `tools/schema.py`: lightweight JSON Schema argument validation for model-generated tool calls.
+- `tools/registry.py`: compatibility re-export layer for older imports.
 - `realtime/event_bus.py`: in-memory EventBus and event replay.
 - `realtime/sse.py`: SSE channel helpers.
 - `realtime/websocket.py`: WebSocket protocol helpers.
