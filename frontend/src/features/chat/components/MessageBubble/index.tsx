@@ -47,7 +47,7 @@ function ThinkingBlock({
   thinking,
   streaming,
 }: {
-  thinking: string;
+  thinking?: string;
   streaming?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -64,8 +64,8 @@ function ThinkingBlock({
       </button>
       {expanded && (
         <div className="thinking-content">
-          {thinking.trim()
-            ? (streaming ? thinking : <MarkdownContent text={thinking} />)
+          {(thinking ?? "").trim()
+            ? (streaming ? thinking : <MarkdownContent text={thinking!} />)
             : <Text type="secondary">思考中...</Text>}
         </div>
       )}
