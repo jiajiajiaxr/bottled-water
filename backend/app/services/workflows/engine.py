@@ -10,6 +10,7 @@ from app.core.database import SessionLocal
 from app.models import Agent, Conversation, Message, Task, WorkflowRun
 from app.services.workflows.events import publish_node_event, publish_run_updated
 from app.services.workflows.graph import Node, WorkflowGraph
+from app.services.workflows.io import resolve_node_input, resolve_node_output
 from app.services.workflows.nodes import get_executor
 from app.services.workflows.nodes.base import NodeExecutionResult, WorkflowExecutionContext
 from app.services.workflows.runtime import (
@@ -159,18 +160,29 @@ class WorkflowEngine:
     async def _run_node(self, node: Node) -> bool:
         if self.workflow_run.status == "cancelled":
             return False
-        retry_limit = max(0, min(int(node.config.get("retry") or node.config.get("retry_count") or 0), 3))
+        retry_limit = max(
+            0, min(int(node.config.get("retry") or node.config.get("retry_count") or 0), 3)
+        )
         attempt = 0
         while True:
             try:
+                node_input = self._node_input(node)
                 await self._mark_node(
                     node,
                     "running",
                     20,
-                    input_data=self._node_input(node),
+                    input_data=node_input,
                     message=f"{node.title} running",
                 )
-                execution = await get_executor(node.type).execute(node, self._context())
+                execution = await get_executor(node.type).execute(node, self._context(node_input))
+                execution.output = resolve_node_output(
+                    node=node,
+                    prompt=self.prompt,
+                    outputs=self.result.outputs,
+                    node_input=node_input,
+                    raw_output=execution.output,
+                    graph=self.graph,
+                )
                 await self._complete_node(node, execution)
                 return execution.status not in {"failed", "error"}
             except asyncio.CancelledError:
@@ -183,7 +195,9 @@ class WorkflowEngine:
             except Exception as exc:
                 attempt += 1
                 if attempt <= retry_limit:
-                    append_run_event(self.workflow_run, "node.retry", {"node_id": node.id, "attempt": attempt})
+                    append_run_event(
+                        self.workflow_run, "node.retry", {"node_id": node.id, "attempt": attempt}
+                    )
                     self.db.commit()
                     continue
                 await self._mark_node(
@@ -196,7 +210,7 @@ class WorkflowEngine:
                 )
                 return False
 
-    def _context(self) -> WorkflowExecutionContext:
+    def _context(self, node_input: dict[str, Any]) -> WorkflowExecutionContext:
         return WorkflowExecutionContext(
             db=self.db,
             conversation=self.conversation,
@@ -208,6 +222,7 @@ class WorkflowEngine:
             agents=self.agents,
             output_mode=self.output_mode,
             outputs=self.result.outputs,
+            node_input=node_input,
             cancelled=self.workflow_run.status == "cancelled",
         )
 
@@ -250,7 +265,9 @@ class WorkflowEngine:
             self.workflow_run,
             node.id,
             status,
-            {"message": message, **({"error": error} if error else {})} if message or error else None,
+            {"message": message, **({"error": error} if error else {})}
+            if message or error
+            else None,
         )
 
     async def _complete_node(self, node: Node, execution: NodeExecutionResult) -> None:
@@ -280,7 +297,10 @@ class WorkflowEngine:
                     self.graph.node_by_id[skipped],
                     "skipped",
                     100,
-                    output={"reason": "condition_branch_not_matched", "matched_branch": execution.branch},
+                    output={
+                        "reason": "condition_branch_not_matched",
+                        "matched_branch": execution.branch,
+                    },
                     message="Skipped by condition",
                 )
         edge_updates = [
@@ -300,21 +320,20 @@ class WorkflowEngine:
             execution.status,
             100,
             output=execution.output,
-            error=execution.output.get("error") if execution.status in {"failed", "error"} else None,
+            error=execution.output.get("error")
+            if execution.status in {"failed", "error"}
+            else None,
             message=execution.message,
             edge_updates=edge_updates,
         )
 
     def _node_input(self, node: Node) -> dict[str, Any]:
-        upstream = {
-            edge.source: self.result.outputs.get(edge.source, {})
-            for edge in self.graph.incoming.get(node.id, [])
-        }
-        return {
-            "prompt": self.prompt,
-            "node_config": node.config,
-            "upstream": upstream,
-        }
+        return resolve_node_input(
+            node=node,
+            graph=self.graph,
+            prompt=self.prompt,
+            outputs=self.result.outputs,
+        )
 
     async def _fail_run(self, node: Node | None, error: Exception | None = None) -> None:
         error_text = str(error) if error else None
@@ -338,4 +357,6 @@ class WorkflowEngine:
         )
         mark_workflow_completed(self.conversation, self.workflow_run, status="failed")
         self.db.commit()
-        await publish_run_updated(self.channel, self.workflow_run, node_id=node.id if node else None)
+        await publish_run_updated(
+            self.channel, self.workflow_run, node_id=node.id if node else None
+        )

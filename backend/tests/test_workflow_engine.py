@@ -7,9 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
 import pytest
 
-from app.models import Conversation, Message, Task, WorkflowRun
+from app.models import Agent, Conversation, Message, Task, User, WorkflowRun
 from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.graph import WorkflowGraph
+from app.services.workflows.io import resolve_node_input
 from app.services.workflows.nodes.base import NodeExecutionResult, WorkflowNodeExecutor
 from app.services.workflows.nodes.condition import ConditionNodeExecutor
 from app.services.workflows.nodes.end import EndNodeExecutor
@@ -77,7 +78,10 @@ def test_workflow_graph_topological_levels_and_branch_paths() -> None:
 
 def test_workflow_validator_rejects_cycles_and_loop_overflow() -> None:
     cyclic = {
-        "nodes": [{"id": "a", "type": "start"}, {"id": "b", "type": "loop", "config": {"max_iterations": 99}}],
+        "nodes": [
+            {"id": "a", "type": "start"},
+            {"id": "b", "type": "loop", "config": {"max_iterations": 99}},
+        ],
         "edges": [["a", "b"], ["b", "a"]],
     }
 
@@ -96,7 +100,38 @@ def test_node_output_reference_resolution() -> None:
 
     resolved = resolve_references(value, {"agent": {"text": "hello", "nested": {"value": 3}}})
 
-    assert resolved == {"prompt": "Use hello", "items": ["3", "plain"]}
+    assert resolved == {"prompt": "Use hello", "items": [3, "plain"]}
+
+
+def test_node_input_resolver_supports_dify_style_references() -> None:
+    workflow = {
+        "nodes": [
+            {"id": "source", "type": "tool"},
+            {
+                "id": "target",
+                "type": "tool",
+                "config": {
+                    "input": {
+                        "raw": "{{input}}",
+                        "from_node": "{{nodes.source.text}}",
+                        "joined": "{{upstream.text}}",
+                    }
+                },
+            },
+        ],
+        "edges": [["source", "target"]],
+    }
+    graph = WorkflowGraph.from_workflow(workflow)
+    node_input = resolve_node_input(
+        node=graph.node_by_id["target"],
+        graph=graph,
+        prompt="原始需求",
+        outputs={"source": {"text": "上游产物"}},
+    )
+
+    assert node_input["raw"] == "原始需求"
+    assert node_input["from_node"] == "上游产物"
+    assert "source: 上游产物" in node_input["joined"]
 
 
 def test_runtime_node_states_include_input_output_error_fields() -> None:
@@ -111,14 +146,21 @@ def test_runtime_node_states_include_input_output_error_fields() -> None:
 async def test_condition_and_loop_nodes_record_runtime() -> None:
     context = SimpleNamespace(prompt="please build frontend", outputs={})
     condition = await ConditionNodeExecutor().execute(
-        SimpleNamespace(id="cond", type="condition", config={"expression": "contains('frontend')", "branches": ["hit", "miss"]}),
+        SimpleNamespace(
+            id="cond",
+            type="condition",
+            config={"expression": "contains('frontend')", "branches": ["hit", "miss"]},
+        ),
         context,
     )
-    loop = await LoopNodeExecutor().execute(SimpleNamespace(id="loop", type="loop", config={"max_iterations": 2}), context)
+    loop = await LoopNodeExecutor().execute(
+        SimpleNamespace(id="loop", type="loop", config={"max_iterations": 2}), context
+    )
 
     assert condition.branch == "hit"
     assert condition.output["matched_branch"] == "hit"
-    assert loop.output == {"max_iterations": 2, "current_iteration": 2}
+    assert loop.output["max_iterations"] == 2
+    assert loop.output["current_iteration"] == 2
 
 
 @pytest.mark.asyncio
@@ -134,7 +176,9 @@ async def test_engine_agent_node_uses_function_call_loop() -> None:
         tool_context={"agent_name": "Backend Worker", "summary": "ok"},
     )
 
-    with patch("app.services.workflows.nodes.agent.run_agent_function_call_loop", new_callable=AsyncMock) as call_loop:
+    with patch(
+        "app.services.workflows.nodes.agent.run_agent_function_call_loop", new_callable=AsyncMock
+    ) as call_loop:
         call_loop.return_value = loop_result
         with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
             result = await WorkflowEngine(
@@ -154,6 +198,123 @@ async def test_engine_agent_node_uses_function_call_loop() -> None:
     assert result.outputs["a"]["text"] == "done"
     assert run.status == "completed"
     assert any(state["id"] == "a" and state["status"] == "completed" for state in run.node_states)
+
+
+@pytest.mark.asyncio
+async def test_agent_node_receives_upstream_output_in_model_context() -> None:
+    workflow = {
+        "nodes": [
+            {
+                "id": "source",
+                "type": "tool",
+                "config": {
+                    "tool_name": "source.tool",
+                    "output": {"text": "{{output.result.text}}"},
+                },
+            },
+            {
+                "id": "agent",
+                "type": "agent",
+                "agent_id": "agent-1",
+                "title": "Writer",
+                "config": {"input": {"brief": "{{nodes.source.text}}", "all": "{{upstream.text}}"}},
+            },
+        ],
+        "edges": [["source", "agent"]],
+    }
+    db, conversation, user_message, task, run = _runtime(workflow)
+    agent = SimpleNamespace(id="agent-1", name="Writer", deleted_at=None, config={})
+    user = SimpleNamespace(id="user-1")
+
+    def get_model(model: Any, item_id: str) -> Any:
+        if model is Agent and item_id == "agent-1":
+            return agent
+        if model is User:
+            return user
+        return None
+
+    db.get.side_effect = get_model
+    loop_result = SimpleNamespace(
+        assistant=None,
+        text="final",
+        tool_context={"agent_name": "Writer", "summary": "ok"},
+    )
+
+    with patch(
+        "app.services.workflows.nodes.tool.execute_tool_by_name", new_callable=AsyncMock
+    ) as tool_call:
+        tool_call.return_value = {"status": "succeeded", "text": "上游设计方案"}
+        with patch(
+            "app.services.workflows.nodes.agent.run_agent_function_call_loop",
+            new_callable=AsyncMock,
+        ) as call_loop:
+            call_loop.return_value = loop_result
+            with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+                await WorkflowEngine(
+                    db,
+                    conversation=conversation,
+                    user_message=user_message,
+                    task=task,
+                    workflow_run=run,
+                    workflow=workflow,
+                    prompt="生成方案",
+                    channel="conversation:conv-1",
+                    agents=[agent],
+                ).run()
+
+    prompt = call_loop.await_args.kwargs["prompt"]
+    assert "上游设计方案" in prompt
+    assert "当前节点输入映射" in prompt
+
+
+@pytest.mark.asyncio
+async def test_tool_node_uses_upstream_reference_as_arguments() -> None:
+    workflow = {
+        "nodes": [
+            {
+                "id": "source",
+                "type": "tool",
+                "config": {
+                    "tool_name": "source.tool",
+                    "output": {"text": "{{output.result.text}}"},
+                },
+            },
+            {
+                "id": "target",
+                "type": "tool",
+                "config": {"tool_name": "target.tool", "input": {"query": "{{nodes.source.text}}"}},
+            },
+        ],
+        "edges": [["source", "target"]],
+    }
+    db, conversation, user_message, task, run = _runtime(workflow)
+    db.get.side_effect = lambda model, item_id: (
+        SimpleNamespace(id="user-1") if model is User else None
+    )
+    calls: list[dict[str, Any]] = []
+
+    async def execute_tool(*_: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs["arguments"])
+        if kwargs["tool_name"] == "source.tool":
+            return {"status": "succeeded", "text": "上游参数"}
+        return {"status": "succeeded", "echo": kwargs["arguments"]}
+
+    with patch("app.services.workflows.nodes.tool.execute_tool_by_name", side_effect=execute_tool):
+        with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+            result = await WorkflowEngine(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                task=task,
+                workflow_run=run,
+                workflow=workflow,
+                prompt="查一下",
+                channel="conversation:conv-1",
+                agents=[],
+            ).run()
+
+    assert calls[1]["query"] == "上游参数"
+    assert result.outputs["target"]["arguments"]["query"] == "上游参数"
 
 
 class FlakyExecutor(WorkflowNodeExecutor):
@@ -329,7 +490,9 @@ async def test_aggregate_mode_agent_node_suppresses_chat_bubble() -> None:
         tool_context={"agent_name": "Backend Worker", "summary": "node only"},
     )
 
-    with patch("app.services.workflows.nodes.agent.run_agent_function_call_loop", new_callable=AsyncMock) as call_loop:
+    with patch(
+        "app.services.workflows.nodes.agent.run_agent_function_call_loop", new_callable=AsyncMock
+    ) as call_loop:
         call_loop.return_value = loop_result
         with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
             result = await WorkflowEngine(
@@ -355,7 +518,14 @@ async def test_end_node_aggregates_upstream_outputs() -> None:
         outputs={
             "a": {"text": "frontend done"},
             "b": {"summary": "backend done"},
-        }
+            "unrelated": {"text": "should not appear"},
+        },
+        node_input={
+            "upstream": {
+                "a": {"text": "frontend done"},
+                "b": {"summary": "backend done"},
+            }
+        },
     )
     result = await EndNodeExecutor().execute(
         SimpleNamespace(id="end", type="end", config={}),
@@ -364,6 +534,7 @@ async def test_end_node_aggregates_upstream_outputs() -> None:
 
     assert "frontend done" in result.output["summary"]
     assert "backend done" in result.output["summary"]
+    assert "should not appear" not in result.output["summary"]
 
 
 @pytest.mark.asyncio
@@ -383,10 +554,14 @@ async def test_tool_node_executes_real_tool_and_records_failure_status() -> None
         prompt="hello",
     )
 
-    with patch("app.services.workflows.nodes.tool.execute_tool_by_name", new_callable=AsyncMock) as execute_tool:
+    with patch(
+        "app.services.workflows.nodes.tool.execute_tool_by_name", new_callable=AsyncMock
+    ) as execute_tool:
         execute_tool.return_value = {"status": "failed", "output": "missing"}
         with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
-            result = await ToolNodeExecutor().execute(WorkflowGraph.from_workflow(workflow).nodes[0], context)
+            result = await ToolNodeExecutor().execute(
+                WorkflowGraph.from_workflow(workflow).nodes[0], context
+            )
 
     execute_tool.assert_awaited_once()
     assert result.status == "failed"

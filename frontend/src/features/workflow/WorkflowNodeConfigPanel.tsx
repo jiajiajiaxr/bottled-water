@@ -87,11 +87,25 @@ export function WorkflowNodeConfigPanel({
               />
             )}
           </Form.Item>
-          <Form.Item name="input_mapping" label="输入">
-            <TextArea rows={3} placeholder='例如 {"prompt": "$input"}' />
+          <Form.Item
+            name="input_mapping"
+            label="输入"
+            extra="支持 {{input}}、{{nodes.agent-frontend.text}}、{{upstream.text}}。"
+          >
+            <TextArea
+              rows={3}
+              placeholder='例如 {"prompt": "{{input}}", "brief": "{{upstream.text}}"}'
+            />
           </Form.Item>
-          <Form.Item name="output_mapping" label="输出">
-            <TextArea rows={3} placeholder='例如 {"summary": "$result.text"}' />
+          <Form.Item
+            name="output_mapping"
+            label="输出"
+            extra="节点执行结果可用 {{output.text}} / {{output.result}} 引用。"
+          >
+            <TextArea
+              rows={3}
+              placeholder='例如 {"text": "{{output.text}}", "summary": "{{output.summary}}"}'
+            />
           </Form.Item>
           <Space wrap>
             <Form.Item

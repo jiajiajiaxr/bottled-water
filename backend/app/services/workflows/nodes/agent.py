@@ -3,7 +3,12 @@ from __future__ import annotations
 from app.models import Agent
 from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.workflows.graph import Node
-from app.services.workflows.nodes.base import NodeExecutionResult, WorkflowExecutionContext, WorkflowNodeExecutor
+from app.services.workflows.io import format_node_input_for_agent
+from app.services.workflows.nodes.base import (
+    NodeExecutionResult,
+    WorkflowExecutionContext,
+    WorkflowNodeExecutor,
+)
 
 
 class AgentNodeExecutor(WorkflowNodeExecutor):
@@ -25,7 +30,7 @@ class AgentNodeExecutor(WorkflowNodeExecutor):
             conversation=context.conversation,
             user_message=context.user_message,
             agent=agent,
-            prompt=f"{context.prompt}\n\nWorkflow node: {node.title}\n{node.meta}",
+            prompt=format_node_input_for_agent(node, getattr(context, "node_input", {}) or {}),
             channel=context.channel,
             mode="workflow-agent-node",
             task=context.task,

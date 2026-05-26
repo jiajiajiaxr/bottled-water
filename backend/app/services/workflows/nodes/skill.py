@@ -4,7 +4,12 @@ from app.models import Skill, User
 from app.services.agents.tool_loop import execute_skill
 from app.services.workflows.events import publish_tool_event
 from app.services.workflows.graph import Node
-from app.services.workflows.nodes.base import NodeExecutionResult, WorkflowExecutionContext, WorkflowNodeExecutor, resolve_references
+from app.services.workflows.io import resolve_value
+from app.services.workflows.nodes.base import (
+    NodeExecutionResult,
+    WorkflowExecutionContext,
+    WorkflowNodeExecutor,
+)
 
 
 class SkillNodeExecutor(WorkflowNodeExecutor):
@@ -14,9 +19,11 @@ class SkillNodeExecutor(WorkflowNodeExecutor):
         skill_id = str(node.config.get("skill_id") or "")
         skill = context.db.get(Skill, skill_id) if skill_id else None
         if not skill or skill.deleted_at is not None:
-            return NodeExecutionResult(status="failed", output={"error": "skill not found", "skill_id": skill_id})
+            return NodeExecutionResult(
+                status="failed", output={"error": "skill not found", "skill_id": skill_id}
+            )
         user = context.db.get(User, context.conversation.creator_id)
-        prompt = str(resolve_references(node.config.get("prompt") or context.prompt, context.outputs))
+        prompt = str(_prompt_from_input(node, context))
         await publish_tool_event(
             context.channel,
             context.workflow_run,
@@ -46,7 +53,31 @@ class SkillNodeExecutor(WorkflowNodeExecutor):
                 "skill_id": skill_id,
                 "prompt": prompt,
                 "result": result,
-                **({"error": str(result.get("output") or result)} if node_status == "failed" else {}),
+                **(
+                    {"error": str(result.get("output") or result)}
+                    if node_status == "failed"
+                    else {}
+                ),
             },
             message=f"Skill {skill.name} {status}",
         )
+
+
+def _prompt_from_input(node: Node, context: WorkflowExecutionContext) -> str:
+    node_input = getattr(context, "node_input", {}) or {}
+    mapped = node_input.get("mapped")
+    if isinstance(mapped, dict):
+        for key in ("prompt", "text", "query", "content"):
+            if mapped.get(key):
+                return str(mapped[key])
+    if mapped not in ({}, None, ""):
+        return str(mapped)
+    scope = {
+        "input": context.prompt,
+        "nodes": context.outputs,
+        "upstream": {
+            "nodes": node_input.get("upstream", {}),
+            "text": node_input.get("upstream_text", ""),
+        },
+    }
+    return str(resolve_value(node.config.get("prompt") or context.prompt, scope))
