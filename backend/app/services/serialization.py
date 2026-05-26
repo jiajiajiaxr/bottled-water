@@ -225,6 +225,22 @@ def conversation_to_dict(conversation: Conversation) -> dict[str, Any]:
     }
 
 
+def message_meta_to_dict(message: Message) -> dict[str, Any]:
+    """只返回消息元数据，用于流结束后的 message:updated 事件。
+
+    不包含 content、thinking 等已在流式传输过程中传递给前端的内容字段，
+    避免前端已累积的流式内容被覆盖。
+    """
+    return {
+        "id": message.id,
+        "status": message.status,
+        "version_count": message.version_count,
+        "current_version": message.current_version,
+        "created_at": iso(message.created_at),
+        "updated_at": iso(message.updated_at),
+    }
+
+
 def message_to_dict(message: Message) -> dict[str, Any]:
     text = message.content.get("text") or message.content.get("code") or ""
     attachments = message.content.get("attachments") or []

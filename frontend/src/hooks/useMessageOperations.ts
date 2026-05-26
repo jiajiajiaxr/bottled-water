@@ -134,7 +134,7 @@ export function useMessageOperations(currentUserName: string) {
 
     /** 插入或更新最终消息（后端推送的完整消息） */
     const upsertFinalMessage = (incoming: ChatMessage) => {
-      const normalized = normalizeIncomingMessage(incoming);
+      let normalized = normalizeIncomingMessage(incoming);
       const agentId =
         normalized.sender_id ||
         (normalized.rawContent?.agent_id as string | undefined);
@@ -146,8 +146,17 @@ export function useMessageOperations(currentUserName: string) {
         replaceHistoryMessage,
       } = useMessageStore.getState();
 
-      // 优先检查 streamingMessages
+      // 优先检查 streamingMessages：保留流式传输过程中已累积的内容字段
       if (streamingMessages.has(normalized.id)) {
+        const existing = streamingMessages.get(normalized.id)!;
+        // 后端 message:updated 可能只传了元数据（无 content/thinking），
+        // 不要用它覆盖前端已收到的流式内容
+        if (!normalized.content && existing.content) {
+          normalized = { ...normalized, content: existing.content };
+        }
+        if (!normalized.thinking && existing.thinking) {
+          normalized = { ...normalized, thinking: existing.thinking };
+        }
         updateStreamingState(normalized.id, normalized);
         return;
       }

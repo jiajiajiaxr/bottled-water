@@ -29,6 +29,7 @@ import {
   stripInternalAgentOutput,
 } from "@/lib/message";
 import { formatTime } from "@/lib/format";
+import { useMessageStore } from "@/store";
 import type { ChatMessage, MessageAttachment } from "@/types";
 
 const { Text, Paragraph } = Typography;
@@ -84,6 +85,9 @@ function MessageBubbleComponent({
     message.kind === "event" ||
     message.role === "system" ||
     message.role === "tool";
+  const thinkingEnabled = useMessageStore((s) =>
+    s.getThinkingEnabled(message.conversationId),
+  );
   const attachments = messageAttachments(message);
   const [previewAttachment, setPreviewAttachment] = useState<
     | (MessageAttachment & {
@@ -214,7 +218,7 @@ function MessageBubbleComponent({
             </Text>
           </Flex>
           {quoted && <div className="quote-block">{quoted.content}</div>}
-          {message.thinking && (
+          {thinkingEnabled && message.thinking && (
             <ThinkingBlock
               thinking={message.thinking}
               streaming={message.streamState === "streaming"}

@@ -38,11 +38,43 @@ interface MessageState {
   updateLocalRunningConversationIds: (
     updater: (current: Set<string>) => Set<string>,
   ) => void;
+
+  // === 思考模式（按会话存储，参与持久化） ===
+  thinkingEnabled: Map<string, boolean>;
+  setThinkingEnabled: (conversationId: string, enabled: boolean) => void;
+  getThinkingEnabled: (conversationId: string) => boolean;
+}
+
+function loadThinkingEnabled(): Map<string, boolean> {
+  try {
+    const raw = window.localStorage.getItem("agenthub:thinking-enabled");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return new Map(parsed as [string, boolean][]);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return new Map();
+}
+
+function saveThinkingEnabled(map: Map<string, boolean>) {
+  try {
+    window.localStorage.setItem(
+      "agenthub:thinking-enabled",
+      JSON.stringify(Array.from(map.entries())),
+    );
+  } catch {
+    // ignore
+  }
 }
 
 export const useMessageStore = create<MessageState>((set, get) => ({
   historyMessages: [],
   streamingMessages: new Map(),
+  thinkingEnabled: loadThinkingEnabled(),
   streamState: "idle",
   localRunningConversationIds: new Set(),
 
@@ -183,4 +215,17 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set((state) => ({
       localRunningConversationIds: updater(state.localRunningConversationIds),
     })),
+
+  // --- 思考模式（按会话持久化） ---
+
+  setThinkingEnabled: (conversationId, enabled) =>
+    set((state) => {
+      const next = new Map(state.thinkingEnabled);
+      next.set(conversationId, enabled);
+      saveThinkingEnabled(next);
+      return { thinkingEnabled: next };
+    }),
+
+  getThinkingEnabled: (conversationId) =>
+    get().thinkingEnabled.get(conversationId) ?? false,
 }));

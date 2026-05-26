@@ -66,8 +66,20 @@ export function ChatPanel({
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
-  const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const { message } = AntApp.useApp();
+
+  // 从 Store 读取当前会话的思考模式状态（持久化）
+  const thinkingEnabled = useMessageStore((s) =>
+    active ? s.getThinkingEnabled(active.id) : false,
+  );
+  const setThinkingEnabled = useCallback(
+    (enabled: boolean) => {
+      if (active) {
+        useMessageStore.getState().setThinkingEnabled(active.id, enabled);
+      }
+    },
+    [active],
+  );
 
   // 从 Store 分别订阅历史消息和流式消息，互不影响
   const historyMessages = useMessageStore((s) => s.historyMessages);
@@ -239,7 +251,7 @@ export function ChatPanel({
                 type={thinkingEnabled ? "primary" : "default"}
                 ghost={thinkingEnabled}
                 icon={<BulbOutlined />}
-                onClick={() => setThinkingEnabled((v) => !v)}
+                onClick={() => setThinkingEnabled(!thinkingEnabled)}
                 disabled={!active}
                 data-testid="thinking-toggle"
               >

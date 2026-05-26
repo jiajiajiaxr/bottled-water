@@ -112,7 +112,13 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
     const data = unwrap<T>(await response.json());
     responseInterceptors.forEach((fn) => fn(path, response, data));
-    logger.debug("api", `${response.status} ${path} (${duration}ms)`);
+    const dataPreview =
+      typeof data === "object" && data !== null
+        ? JSON.stringify(data).slice(0, 500)
+        : String(data).slice(0, 500);
+    logger.debug("api", `${response.status} ${path} (${duration}ms)`, {
+      response: dataPreview,
+    });
     return data;
   } catch (error) {
     if (error instanceof ApiError) throw error;

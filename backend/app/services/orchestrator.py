@@ -22,7 +22,7 @@ from app.services.artifacts import build_demo_html, classify_artifact_request, c
 from app.services.events import event_bus
 from app.services.output_filter import strip_internal_agent_output
 from app.services.queue import queue_service
-from app.services.serialization import artifact_to_dict, message_to_dict, subtask_to_dict, task_to_dict
+from app.services.serialization import artifact_to_dict, message_meta_to_dict, message_to_dict, subtask_to_dict, task_to_dict
 from app.services.llm_gateway import stream_model_config
 
 logger = logging.getLogger(__name__)
@@ -861,7 +861,7 @@ async def _run_direct_agent(
     conversation.activity_score = min(100, conversation.activity_score + 6)
     conversation.message_count += 1
     db.commit()
-    await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+    await event_bus.publish(channel, "message:updated", message_meta_to_dict(assistant))
     await event_bus.publish(channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "end_turn"})
     await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
@@ -1017,7 +1017,7 @@ async def _run_direct_agent_legacy(
     conversation.activity_score = min(100, conversation.activity_score + 6)
     conversation.message_count += 1
     db.commit()
-    await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+    await event_bus.publish(channel, "message:updated", message_meta_to_dict(assistant))
     await event_bus.publish(channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "end_turn"})
     await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
@@ -1104,7 +1104,7 @@ async def _run_canvas_agent_reply(
     conversation.activity_score = min(100, conversation.activity_score + 4)
     conversation.message_count += 1
     db.commit()
-    await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+    await event_bus.publish(channel, "message:updated", message_meta_to_dict(assistant))
     return assistant.content["text"]
 
 
@@ -1439,7 +1439,7 @@ async def run_orchestration(message_id: str) -> None:
         }
         assistant.status = "completed"
         db.commit()
-        await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+        await event_bus.publish(channel, "message:updated", message_meta_to_dict(assistant))
 
         created_preview_after_stream = False
         if artifact_type and not preview_message:
@@ -1527,7 +1527,7 @@ async def run_orchestration(message_id: str) -> None:
             if task:
                 await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
             if assistant:
-                await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+                await event_bus.publish(channel, "message:updated", message_meta_to_dict(assistant))
                 await event_bus.publish(channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "cancelled"})
             if workflow_run:
                 await event_bus.publish(channel, "workflow:run_updated", {"run_id": workflow_run.id, "status": workflow_run.status, "progress": workflow_run.progress})
