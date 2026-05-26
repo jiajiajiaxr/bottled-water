@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import {
   addEdge,
   applyEdgeChanges,
@@ -110,6 +110,9 @@ function layoutNodes(
       id: node.id,
       position: workflowNodeSavedPosition(node) ?? { x: 48, y: 64 },
       selected: selectedNodeIds.includes(node.id),
+      selectable: true,
+      draggable: true,
+      focusable: true,
       className: `xy-workflow-node xy-workflow-node-${status}`,
       data: {
         label: (
@@ -193,6 +196,7 @@ export function WorkflowCanvas({
   selectedEdgeIds = [],
   onChange,
   onNodeClick,
+  onPaneClick,
   onSelectionChange,
   onCopySelection,
 }: {
@@ -204,9 +208,14 @@ export function WorkflowCanvas({
   selectedEdgeIds?: string[];
   onChange: (workflow: ConversationWorkflow) => void;
   onNodeClick: (node: WorkflowNode) => void;
+  onPaneClick?: () => void;
   onSelectionChange?: (nodeIds: string[], edgeIds: string[]) => void;
   onCopySelection?: () => void;
 }) {
+  const lastNodePointerAt = useRef(0);
+  const markNodePointer = useCallback(() => {
+    lastNodePointerAt.current = Date.now();
+  }, []);
   const flowNodes = useMemo(
     () => layoutNodes(workflow, latestRun, selectedNodeIds, onNodeClick),
     [workflow, latestRun, selectedNodeIds, onNodeClick],
@@ -219,6 +228,13 @@ export function WorkflowCanvas({
     () => new Map((workflow.nodes ?? []).map((node) => [node.id, node])),
     [workflow.nodes],
   );
+
+  const nodeFromEventTarget = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return undefined;
+    const nodeElement = target.closest(".react-flow__node");
+    const nodeId = nodeElement?.getAttribute("data-id");
+    return nodeId ? nodeById.get(nodeId) : undefined;
+  };
 
   const handleNodesChange = (changes: NodeChange[]) => {
     if (locked) return;
@@ -274,6 +290,16 @@ export function WorkflowCanvas({
     <div
       className="xy-workflow-canvas"
       tabIndex={0}
+      onClickCapture={(event) => {
+        const workflowNode = nodeFromEventTarget(event.target);
+        if (!workflowNode) return;
+        markNodePointer();
+        onNodeClick(workflowNode);
+        event.stopPropagation();
+      }}
+      onMouseDownCapture={(event) => {
+        if (nodeFromEventTarget(event.target)) markNodePointer();
+      }}
       onKeyDown={(event) => {
         if (locked) return;
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
@@ -294,12 +320,15 @@ export function WorkflowCanvas({
         nodesConnectable={!locked}
         elementsSelectable={!locked}
         panOnScroll
-        selectionOnDrag={!locked}
+        panOnDrag={locked ? false : [1, 2]}
+        selectionOnDrag={false}
+        selectionKeyCode={locked ? null : "Shift"}
         selectionMode={SelectionMode.Partial}
         selectNodesOnDrag={false}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
+        onNodeDragStart={markNodePointer}
         onSelectionChange={({ nodes, edges }) => {
           onSelectionChange?.(
             nodes.map((node) => node.id),
@@ -311,7 +340,11 @@ export function WorkflowCanvas({
           const workflowNode = nodeById.get(node.id);
           if (workflowNode) onNodeClick(workflowNode);
         }}
-        onPaneClick={() => onSelectionChange?.([], [])}
+        onPaneClick={() => {
+          if (Date.now() - lastNodePointerAt.current < 250) return;
+          onSelectionChange?.([], []);
+          onPaneClick?.();
+        }}
       >
         <MiniMap pannable zoomable nodeStrokeWidth={3} />
         <Controls />

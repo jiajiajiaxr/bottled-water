@@ -513,6 +513,11 @@ export function ConversationSettingsDrawer({
                       selectedEdgeIds={selectedEdgeIds}
                       onChange={setWorkflowDraft}
                       onNodeClick={openWorkflowNodeEditor}
+                      onPaneClick={() => {
+                        setSelectedNodeIds([]);
+                        setSelectedEdgeIds([]);
+                        setEditingNodeId(undefined);
+                      }}
                       onCopySelection={copySelection}
                       onSelectionChange={(nodeIds, edgeIds) => {
                         setSelectedNodeIds(nodeIds);
@@ -525,7 +530,7 @@ export function ConversationSettingsDrawer({
                             setEditingNodeId(node.id);
                             hydrateNodeForm(node);
                           }
-                        } else if (!nodeIds.length) {
+                        } else if (nodeIds.length > 1 || edgeIds.length) {
                           setEditingNodeId(undefined);
                         }
                       }}

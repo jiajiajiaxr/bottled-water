@@ -675,6 +675,25 @@ button {
   outline: none;
 }
 
+.xy-workflow-canvas .react-flow__viewport,
+.xy-workflow-canvas .react-flow__nodes {
+  pointer-events: auto;
+}
+
+.xy-workflow-canvas .react-flow__viewport-portal {
+  pointer-events: none;
+}
+
+.xy-workflow-canvas .react-flow__node {
+  z-index: 10;
+  pointer-events: all;
+}
+
+.xy-workflow-canvas .react-flow__nodesselection,
+.xy-workflow-canvas .react-flow__nodesselection-rect {
+  pointer-events: none;
+}
+
 .xy-workflow-node {
   width: 248px !important;
   height: 116px;
@@ -685,6 +704,8 @@ button {
   background: #ffffff;
   box-shadow: 0 8px 20px rgba(31, 64, 120, 0.08);
   cursor: pointer;
+  user-select: none;
+  touch-action: none;
   overflow: hidden;
 }
 
@@ -722,6 +743,7 @@ button {
   gap: 8px;
   padding: 10px 12px;
   box-sizing: border-box;
+  pointer-events: auto;
   overflow: hidden;
 }
 
