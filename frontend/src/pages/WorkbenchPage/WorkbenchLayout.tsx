@@ -13,11 +13,11 @@ import {
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
-import { api } from "../../api";
+import { api } from "@/api";
 import { BackgroundTasksButton } from "./BackgroundTasksButton";
-import { ConversationSidebar } from "../../features/chat/components/ConversationSidebar";
-import { ChatPanel } from "../../features/chat/components/ChatPanel";
-import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
+import { ConversationSidebar } from "@/features/chat/components/ConversationSidebar";
+import { ChatPanel } from "@/features/chat/components/ChatPanel";
+import { PreviewPanel } from "@/features/preview/components/PreviewPanel";
 import type {
   AgentTask,
   ChatMessage,
@@ -28,8 +28,8 @@ import type {
   User,
   Workspace,
   WorkspaceArtifact,
-} from "../../types";
-import type { StreamState } from "../../store/useMessageStore";
+} from "@/types";
+import type { StreamState } from "@/store/useMessageStore";
 
 const { Text } = Typography;
 

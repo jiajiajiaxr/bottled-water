@@ -1,6 +1,6 @@
 import { request } from "./client";
-import { demoFiles } from "../mock";
-import type { UploadedFile } from "../types";
+import { demoFiles } from "@/mock";
+import type { UploadedFile } from "@/types";
 
 export async function uploadFile(
   file: File,

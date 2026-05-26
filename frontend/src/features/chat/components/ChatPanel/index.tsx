@@ -27,13 +27,13 @@ import {
 } from "antd";
 // rc-upload 类型声明缺失，使用 any 绕过
 type UploadRequestOption = any;
-import { MessageBubble } from "../MessageBubble";
-import { useMessageStore } from "../../../../store";
+import { MessageBubble } from "@/features/chat/components/MessageBubble";
+import { useMessageStore } from "@/store";
 import type {
   ChatMessage,
   Conversation,
   UploadedFile,
-} from "../../../../types";
+} from "@/types";
 
 const { Content } = Layout;
 const { TextArea } = Input;

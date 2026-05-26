@@ -1,19 +1,19 @@
 import { useRef } from "react";
 import { App as AntApp } from "antd";
-import { api } from "../api";
+import { api } from "@/api";
 import {
   useConversationStore,
   useMessageStore,
   useArtifactStore,
   useTaskStore,
-} from "../store";
-import type { ChatMessage, UploadedFile, MessageAttachment } from "../types";
+} from "@/store";
+import type { ChatMessage, UploadedFile, MessageAttachment } from "@/types";
 import {
   makeMessage,
   stripInternalAgentOutput,
   isLikelyArtifactRequest,
   participantName,
-} from "../lib/message";
+} from "@/lib/message";
 
 export function useMessageOperations(currentUserName: string) {
   const { message } = AntApp.useApp();

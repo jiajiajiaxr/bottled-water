@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { AuditLog, SecurityPermission, SecurityRole, SecurityUser } from "../types";
+import type { AuditLog, SecurityPermission, SecurityRole, SecurityUser } from "@/types";
 
 export async function auditLogs(): Promise<AuditLog[]> {
   const result = await request<{ items: AuditLog[] }>(

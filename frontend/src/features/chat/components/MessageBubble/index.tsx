@@ -20,16 +20,16 @@ import {
   Tooltip,
   Typography,
 } from "antd";
-import { api } from "../../../../api";
-import { formatFileSize } from "../../../../lib/format";
-import { MarkdownContent } from "../../../../lib/markdown";
+import { api } from "@/api";
+import { formatFileSize } from "@/lib/format";
+import { MarkdownContent } from "@/lib/markdown";
 import {
   attachmentName,
   messageAttachments,
   stripInternalAgentOutput,
-} from "../../../../lib/message";
-import { formatTime } from "../../../../lib/format";
-import type { ChatMessage, MessageAttachment } from "../../../../types";
+} from "@/lib/message";
+import { formatTime } from "@/lib/format";
+import type { ChatMessage, MessageAttachment } from "@/types";
 
 const { Text, Paragraph } = Typography;
 

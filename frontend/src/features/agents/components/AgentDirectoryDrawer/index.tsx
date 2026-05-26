@@ -26,7 +26,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { api } from "../../../../api";
+import { api } from "@/api";
 import type {
   Agent,
   AgentCapability,
@@ -34,7 +34,7 @@ import type {
   ModelConfig,
   Skill,
   ToolDefinition,
-} from "../../../../types";
+} from "@/types";
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;

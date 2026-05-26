@@ -35,7 +35,7 @@ import {
   ToolOutlined,
 } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../../../../api";
+import { api } from "@/api";
 import type {
   AuditLog,
   Conversation,
@@ -54,8 +54,8 @@ import type {
   ToolDefinition,
   WorkflowRun,
   Workspace,
-} from "../../../../types";
-import { formatTime } from "../../../../lib/format";
+} from "@/types";
+import { formatTime } from "@/lib/format";
 
 const { TextArea } = Input;
 

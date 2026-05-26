@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Checkbox, Form, Input, Modal, Select } from "antd";
-import { normalizeConversationCategory } from "../../../lib/conversation";
-import type { Agent } from "../../../types";
+import { normalizeConversationCategory } from "@/lib/conversation";
+import type { Agent } from "@/types";
 
 export function CreateConversationModal({
   open,

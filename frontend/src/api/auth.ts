@@ -1,6 +1,6 @@
 import { request } from "./client";
-import { demoUser } from "../mock";
-import type { User } from "../types";
+import { demoUser } from "@/mock";
+import type { User } from "@/types";
 
 export async function login(name: string, password = "agenthub"): Promise<User> {
   try {

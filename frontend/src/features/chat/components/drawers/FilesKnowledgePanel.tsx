@@ -11,7 +11,7 @@ import {
   Tabs,
   Tag,
 } from "antd";
-import type { UploadedFile, KnowledgeBase } from "../../../../types";
+import type { UploadedFile, KnowledgeBase } from "@/types";
 
 const { TextArea } = Input;
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useTaskStore } from "../store";
-import { api } from "../api";
+import { useTaskStore } from "@/store";
+import { api } from "@/api";
 
 const POLLING_ACTIVE_MS = 5000;
 const POLLING_IDLE_MS = 30000;

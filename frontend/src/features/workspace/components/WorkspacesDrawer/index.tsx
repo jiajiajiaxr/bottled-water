@@ -14,7 +14,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import type { Project, Workspace } from "../../../../types";
+import type { Project, Workspace } from "@/types";
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;

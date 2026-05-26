@@ -1,6 +1,6 @@
 import { request } from "./client";
-import { demoMcpServers, demoSkills } from "../mock";
-import type { Skill } from "../types";
+import { demoMcpServers, demoSkills } from "@/mock";
+import type { Skill } from "@/types";
 
 function normalizeSkill(
   value: Skill & {

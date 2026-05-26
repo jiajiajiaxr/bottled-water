@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { useConversationStore } from "../store";
-import type { Conversation } from "../types";
+import { useConversationStore } from "@/store";
+import type { Conversation } from "@/types";
 import {
   CONVERSATION_CATEGORY_OPTIONS,
   LEGACY_DEFAULT_CONVERSATION_CATEGORIES,
   mergeConversationCategories,
-} from "../lib/conversation";
+} from "@/lib/conversation";
 
 export function useConversationCategories(
   activeWorkspaceId: string | undefined,

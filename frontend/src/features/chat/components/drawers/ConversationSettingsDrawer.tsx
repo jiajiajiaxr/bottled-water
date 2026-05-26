@@ -25,14 +25,14 @@ import {
   Tabs,
   Typography,
 } from "antd";
-import { api } from "../../../../api";
-import { mergeConversationCategories } from "../../../../lib/conversation";
+import { api } from "@/api";
+import { mergeConversationCategories } from "@/lib/conversation";
 import {
   createWorkflowNode,
   WORKFLOW_NODE_TYPE_LABEL,
   WORKFLOW_NODE_TYPE_OPTIONS,
   workflowNodeType,
-} from "../../../../lib/workflow";
+} from "@/lib/workflow";
 import type {
   Agent,
   Conversation,
@@ -42,7 +42,7 @@ import type {
   ToolDefinition,
   WorkflowNode,
   WorkflowRun,
-} from "../../../../types";
+} from "@/types";
 
 const { Text } = Typography;
 const { TextArea } = Input;

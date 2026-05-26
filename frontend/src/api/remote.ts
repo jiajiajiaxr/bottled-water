@@ -1,6 +1,6 @@
 import { request } from "./client";
-import { demoRemoteConnections } from "../mock";
-import type { RemoteConnection } from "../types";
+import { demoRemoteConnections } from "@/mock";
+import type { RemoteConnection } from "@/types";
 
 export async function remoteConnections(): Promise<RemoteConnection[]> {
   try {

@@ -1,6 +1,6 @@
 import { request } from "./client";
-import { demoKnowledgeBases } from "../mock";
-import type { KnowledgeBase, KnowledgeDocument } from "../types";
+import { demoKnowledgeBases } from "@/mock";
+import type { KnowledgeBase, KnowledgeDocument } from "@/types";
 
 export async function knowledgeBases(): Promise<KnowledgeBase[]> {
   try {

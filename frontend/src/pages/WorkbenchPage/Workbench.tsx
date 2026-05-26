@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../../api";
+import { api } from "@/api";
 import {
   useUIStore,
   useAgentStore,
@@ -8,17 +8,17 @@ import {
   useArtifactStore,
   useConversationStore,
   useMessageStore,
-} from "../../store";
+} from "@/store";
 import { WorkbenchLayout } from "./WorkbenchLayout";
 import { WorkbenchDrawers } from "./WorkbenchDrawers";
-import type { User } from "../../types";
+import type { User } from "@/types";
 import {
   useConversationCategories,
   useBackgroundTaskPolling,
   useMessageOperations,
   useWorkbenchActions,
-} from "../../hooks";
-import { isTaskRunning } from "../../lib/message";
+} from "@/hooks";
+import { isTaskRunning } from "@/lib/message";
 
 export function Workbench({
   user,

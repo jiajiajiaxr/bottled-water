@@ -1,6 +1,6 @@
 import { request, wait } from "./client";
-import { demoDeployment } from "../mock";
-import type { Deployment } from "../types";
+import { demoDeployment } from "@/mock";
+import type { Deployment } from "@/types";
 
 export async function deploy(
   conversationId: string,

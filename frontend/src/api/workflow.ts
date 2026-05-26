@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { ConversationWorkflow, WorkflowRun } from "../types";
+import type { ConversationWorkflow, WorkflowRun } from "@/types";
 
 export async function conversationWorkflow(
   conversationId: string,

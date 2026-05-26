@@ -17,8 +17,8 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { api } from "../../../../api";
-import type { ModelConfig, ModelProvider, User } from "../../../../types";
+import { api } from "@/api";
+import type { ModelConfig, ModelProvider, User } from "@/types";
 
 const { Text } = Typography;
 

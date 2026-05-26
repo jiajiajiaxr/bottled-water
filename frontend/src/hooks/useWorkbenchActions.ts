@@ -1,16 +1,16 @@
 import { App as AntApp } from "antd";
-import { api } from "../api";
+import { api } from "@/api";
 import {
   useConversationStore,
   useMessageStore,
   useArtifactStore,
   useUIStore,
-} from "../store";
+} from "@/store";
 import type {
   ChatMessage,
   Conversation,
   WorkspaceArtifact,
-} from "../types";
+} from "@/types";
 
 export function useWorkbenchActions(
   activeWorkspaceId: string | undefined,

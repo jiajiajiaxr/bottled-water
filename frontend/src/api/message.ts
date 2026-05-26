@@ -4,8 +4,8 @@ import {
   eventPayload,
   type StreamAssistantHandlers,
 } from "./client";
-import { demoUser, demoMessages } from "../mock";
-import type { ChatMessage, UploadedFile } from "../types";
+import { demoUser, demoMessages } from "@/mock";
+import type { ChatMessage, UploadedFile } from "@/types";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
   try {

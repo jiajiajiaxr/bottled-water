@@ -1,6 +1,6 @@
 import { request } from "./client";
-import { demoSandboxes } from "../mock";
-import type { SandboxSession, SandboxCommandResult } from "../types";
+import { demoSandboxes } from "@/mock";
+import type { SandboxSession, SandboxCommandResult } from "@/types";
 
 export async function sandboxes(): Promise<SandboxSession[]> {
   try {

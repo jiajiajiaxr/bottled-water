@@ -1,6 +1,6 @@
 import { request } from "./client";
-import { demoConversations, demoAgents } from "../mock";
-import type { Conversation } from "../types";
+import { demoConversations, demoAgents } from "@/mock";
+import type { Conversation } from "@/types";
 
 export async function conversations(workspaceId?: string): Promise<Conversation[]> {
   try {

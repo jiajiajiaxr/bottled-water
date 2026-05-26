@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { ToolDefinition, ToolInvokeResponse } from "../types";
+import type { ToolDefinition, ToolInvokeResponse } from "@/types";
 
 export async function tools(workspaceId?: string): Promise<ToolDefinition[]> {
   try {

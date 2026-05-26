@@ -9,8 +9,8 @@ import {
   App as AntApp,
 } from "antd";
 import { LoginOutlined, ApiOutlined } from "@ant-design/icons";
-import { api } from "../../../../api";
-import type { User } from "../../../../types";
+import { api } from "@/api";
+import type { User } from "@/types";
 
 const { Text, Title, Paragraph } = Typography;
 

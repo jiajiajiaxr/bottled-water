@@ -1,6 +1,6 @@
 import { request, requestWithTimeout } from "./client";
-import { demoAgents } from "../mock";
-import type { Agent, AgentCapability, AgentConfigDraft } from "../types";
+import { demoAgents } from "@/mock";
+import type { Agent, AgentCapability, AgentConfigDraft } from "@/types";
 
 export async function agents(params?: {
   search?: string;

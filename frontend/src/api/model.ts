@@ -1,6 +1,6 @@
 import { request } from "./client";
-import { demoModelProviders, demoModelConfigs } from "../mock";
-import type { ModelProvider, ModelConfig } from "../types";
+import { demoModelProviders, demoModelConfigs } from "@/mock";
+import type { ModelProvider, ModelConfig } from "@/types";
 
 export async function modelProviders(): Promise<ModelProvider[]> {
   try {

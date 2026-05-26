@@ -1,4 +1,4 @@
-import type { ChatMessage } from "../types";
+import type { ChatMessage } from "@/types";
 
 export const API_BASE = "/api/v1";
 

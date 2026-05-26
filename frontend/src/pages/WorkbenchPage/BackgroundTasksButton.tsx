@@ -13,9 +13,9 @@ import {
   Typography,
 } from "antd";
 import { ApiOutlined } from "@ant-design/icons";
-import { isTaskRunning } from "../../lib/message";
-import { formatTime } from "../../lib/format";
-import type { AgentTask, Conversation } from "../../types";
+import { isTaskRunning } from "@/lib/message";
+import { formatTime } from "@/lib/format";
+import type { AgentTask, Conversation } from "@/types";
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;

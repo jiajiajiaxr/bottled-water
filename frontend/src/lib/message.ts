@@ -2,7 +2,7 @@ import type {
   ChatMessage,
   Conversation,
   MessageAttachment,
-} from "../types";
+} from "@/types";
 
 export function makeMessage(
   partial: Omit<ChatMessage, "id" | "createdAt">,

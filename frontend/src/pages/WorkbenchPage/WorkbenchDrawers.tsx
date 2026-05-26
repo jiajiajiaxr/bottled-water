@@ -1,12 +1,12 @@
 import { App as AntApp } from "antd";
-import { api } from "../../api";
-import { CreateConversationModal } from "../../features/chat/components/CreateConversationModal";
-import { MembersDrawer } from "../../features/chat/components/drawers/MembersDrawer";
-import { ConversationSettingsDrawer } from "../../features/chat/components/drawers/ConversationSettingsDrawer";
-import { AgentDirectoryDrawer } from "../../features/agents/components/AgentDirectoryDrawer";
-import { GlobalSettingsDrawer } from "../../features/settings/components/GlobalSettingsDrawer";
-import { PlatformControlDrawer } from "../../features/platform/components/PlatformControlDrawer";
-import type { Agent, Conversation, Project, User, Workspace } from "../../types";
+import { api } from "@/api";
+import { CreateConversationModal } from "@/features/chat/components/CreateConversationModal";
+import { MembersDrawer } from "@/features/chat/components/drawers/MembersDrawer";
+import { ConversationSettingsDrawer } from "@/features/chat/components/drawers/ConversationSettingsDrawer";
+import { AgentDirectoryDrawer } from "@/features/agents/components/AgentDirectoryDrawer";
+import { GlobalSettingsDrawer } from "@/features/settings/components/GlobalSettingsDrawer";
+import { PlatformControlDrawer } from "@/features/platform/components/PlatformControlDrawer";
+import type { Agent, Conversation, Project, User, Workspace } from "@/types";
 
 export interface WorkbenchDrawersProps {
   // AgentDirectoryDrawer

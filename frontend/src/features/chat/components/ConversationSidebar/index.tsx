@@ -31,9 +31,9 @@ import {
   Tooltip,
   Typography,
 } from "antd";
-import { mergeConversationCategories } from "../../../../lib/conversation";
-import { formatTime } from "../../../../lib/format";
-import type { Conversation } from "../../../../types";
+import { mergeConversationCategories } from "@/lib/conversation";
+import { formatTime } from "@/lib/format";
+import type { Conversation } from "@/types";
 
 const { Sider } = Layout;
 const { Text, Title } = Typography;

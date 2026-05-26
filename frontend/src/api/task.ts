@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { AgentTask } from "../types";
+import type { AgentTask } from "@/types";
 
 export async function tasks(): Promise<AgentTask[]> {
   try {

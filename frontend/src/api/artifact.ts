@@ -1,5 +1,5 @@
 import { request, requestFile } from "./client";
-import type { WorkspaceArtifact } from "../types";
+import type { WorkspaceArtifact } from "@/types";
 
 export async function artifact(
   conversationId: string,

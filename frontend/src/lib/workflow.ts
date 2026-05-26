@@ -1,4 +1,4 @@
-import type { Agent, WorkflowNode } from "../types";
+import type { Agent, WorkflowNode } from "@/types";
 
 export const WORKFLOW_NODE_TYPE_OPTIONS = [
   { label: "Agent", value: "agent" },

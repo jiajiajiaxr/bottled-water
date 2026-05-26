@@ -1,6 +1,6 @@
 import { request } from "./client";
-import { demoWorkspaces, demoProjects } from "../mock";
-import type { Workspace, Project } from "../types";
+import { demoWorkspaces, demoProjects } from "@/mock";
+import type { Workspace, Project } from "@/types";
 
 export async function workspaces(): Promise<Workspace[]> {
   try {

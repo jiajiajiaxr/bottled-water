@@ -21,16 +21,16 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { api } from "../../../../api";
-import { diffLines } from "../../../../lib/diff";
-import { buildPreviewDocument } from "../../../../lib/preview";
-import { FilesKnowledgePanel } from "../../../chat/components/drawers/FilesKnowledgePanel";
+import { api } from "@/api";
+import { diffLines } from "@/lib/diff";
+import { buildPreviewDocument } from "@/lib/preview";
+import { FilesKnowledgePanel } from "@/features/chat/components/drawers/FilesKnowledgePanel";
 import type {
   Deployment,
   KnowledgeBase,
   UploadedFile,
   WorkspaceArtifact,
-} from "../../../../types";
+} from "@/types";
 
 const { Sider } = Layout;
 const { TextArea } = Input;

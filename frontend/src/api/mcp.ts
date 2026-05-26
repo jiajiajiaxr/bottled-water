@@ -1,6 +1,6 @@
 import { request } from "./client";
-import { demoMcpServers } from "../mock";
-import type { McpServer, McpInvocation } from "../types";
+import { demoMcpServers } from "@/mock";
+import type { McpServer, McpInvocation } from "@/types";
 
 export async function mcpServers(workspaceId?: string): Promise<McpServer[]> {
   try {
