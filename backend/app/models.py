@@ -233,6 +233,8 @@ class ToolDefinition(Base, TimestampMixin):
     description: Mapped[str] = mapped_column(Text, default="")
     category: Mapped[str] = mapped_column(String(80), default="custom", index=True)
     type: Mapped[str] = mapped_column(String(60), default="custom_python", index=True)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    builtin_handler: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
     version: Mapped[str] = mapped_column(String(50), default="1.0.0")
     input_schema: Mapped[dict] = mapped_column(JSON, default=dict)

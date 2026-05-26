@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Agent, Conversation, McpServer, Skill, User
+from app.models import Agent, Conversation, McpServer, Skill, ToolDefinition, User
 from app.services.realtime.event_bus import event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
 from app.services.skills.runtime import SkillRuntime
@@ -354,25 +354,48 @@ async def run_agentic_tool_loop(
 def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
     """将 Agent 配置的 tools/skills/mcp 转为 OpenAI Function Calling 格式。"""
     from app.services.skills.adapters.legacy import legacy_skill_manifest
+    from app.services.tools.catalog import sync_builtin_tool_definitions
     from app.services.tools.registry import BUILTIN_TOOLS
 
     tools: list[dict[str, Any]] = []
     config = agent.config or {}
 
-    # 内置工具
+    # Tool 目录（内置工具和自定义工具都从数据库目录读取元数据）
     allowed_tool_names = normalize_tool_names(config.get("tools") or [])
-    for name in allowed_tool_names:
-        if name not in BUILTIN_TOOLS:
-            continue
-        builtin = BUILTIN_TOOLS[name]
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": builtin.description,
-                "parameters": builtin.input_schema,
-            },
-        })
+    if allowed_tool_names:
+        tool_rows: list[ToolDefinition] = []
+        try:
+            sync_builtin_tool_definitions(db)
+            tool_query = select(ToolDefinition).where(
+                ToolDefinition.deleted_at.is_(None),
+                ToolDefinition.status == "active",
+                (ToolDefinition.name.in_(allowed_tool_names)) | (ToolDefinition.id.in_(allowed_tool_names)),
+            )
+            tool_rows = [item for item in db.scalars(tool_query).all() if isinstance(item, ToolDefinition)]
+        except Exception:
+            tool_rows = []
+        for tool in tool_rows:
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description or tool.display_name or tool.name,
+                    "parameters": tool.input_schema or {"type": "object", "properties": {}},
+                },
+            })
+        if not tool_rows:
+            for name in allowed_tool_names:
+                builtin = BUILTIN_TOOLS.get(name)
+                if not builtin:
+                    continue
+                tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": builtin.description,
+                        "parameters": builtin.input_schema,
+                    },
+                })
 
     # Skill（作为 function 暴露）
     allowed_skill_ids = [str(item) for item in config.get("skill_ids") or [] if item]

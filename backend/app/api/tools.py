@@ -17,7 +17,8 @@ from app.models import ToolDefinition, User, Workspace, utcnow
 from app.schemas.requests import CreateToolRequest, GenerateToolRequest, InvokeToolRequest, UpdateToolRequest
 from app.services.ark import ark_client
 from app.services.serialization import redact_sensitive, tool_definition_to_dict
-from app.services.tools.registry import BUILTIN_TOOLS, ensure_tool_tables, invoke_tool, list_tools
+from app.services.tools.catalog import get_tool_definition
+from app.services.tools.registry import BUILTIN_TOOLS, ensure_tool_tables, invoke_tool_async, list_tools
 
 
 router = APIRouter(tags=["tools"])
@@ -270,9 +271,7 @@ async def get_tool(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if tool_id in BUILTIN_TOOLS:
-        return ok(BUILTIN_TOOLS[tool_id].to_dict())
-    return ok(tool_definition_to_dict(_owned_tool(db, user, tool_id)))
+    return ok(tool_definition_to_dict(get_tool_definition(db, user, tool_id)))
 
 
 @router.patch("/tools/{tool_id}")
@@ -320,5 +319,5 @@ async def invoke_tool_endpoint(
     user: User = Depends(get_current_user),
 ):
     _validate_workspace(db, user, payload.workspace_id)
-    result = invoke_tool(db, user, tool_id, payload.arguments)
+    result = await invoke_tool_async(db, user, tool_id, payload.arguments)
     return ok(result, "工具调用完成")

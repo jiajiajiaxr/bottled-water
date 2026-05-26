@@ -7,13 +7,15 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
-from app.models import Agent, McpServer, Skill, ToolInvocation, User
+from app.models import Agent, McpServer, Skill, ToolDefinition, ToolInvocation, User
+from app.services.demo_cleanup import cleanup_acceptance_residue
 from app.services.mcp.discovery import discover_server_tools, import_server_manifest, probe_server
 from app.services.mcp.schema import validate_mcp_arguments
 from app.services.mcp.transports import tool_allowed
 from app.services.skills.context import activated_skill_context
 from app.services.skills.package import parse_skill_package
 from app.services.tools.executor import invoke_tool
+from app.services.tools.catalog import sync_builtin_tool_definitions
 
 
 def test_tool_invocation_records_builtin_run() -> None:
@@ -29,6 +31,39 @@ def test_tool_invocation_records_builtin_run() -> None:
     assert invocation is not None
     assert invocation.tool_name == "api.test"
     assert invocation.status == "succeeded"
+
+
+def test_builtin_tools_sync_to_database_catalog() -> None:
+    db = _memory_session()
+
+    sync_builtin_tool_definitions(db)
+    tool = db.scalar(select(ToolDefinition).where(ToolDefinition.name == "api.test"))
+
+    assert tool is not None
+    assert tool.type == "builtin"
+    assert tool.is_builtin is True
+    assert tool.builtin_handler == "api.test"
+    assert tool.owner_id is None
+
+
+def test_cleanup_acceptance_residue_soft_deletes_catalog_noise() -> None:
+    db = _memory_session()
+    db.add_all(
+        [
+            McpServer(name="Acceptance HTTP MCP", transport="httpStream", url="http://127.0.0.1", enabled=True),
+            ToolDefinition(name="custom_echo_acceptance", display_name="custom_echo_acceptance", type="custom_python"),
+            Skill(name="Release Notes Skill", source="ai", status="active"),
+            Skill(name="需求分析 Skill", source="system", status="active"),
+        ]
+    )
+    db.commit()
+
+    cleanup_acceptance_residue(db)
+
+    assert db.scalar(select(McpServer).where(McpServer.name == "Acceptance HTTP MCP")).deleted_at is not None
+    assert db.scalar(select(ToolDefinition).where(ToolDefinition.name == "custom_echo_acceptance")).status == "deleted"
+    assert db.scalar(select(Skill).where(Skill.name == "Release Notes Skill")).status == "deleted"
+    assert db.scalar(select(Skill).where(Skill.name == "需求分析 Skill")).status == "active"
 
 
 def test_mcp_catalog_discovery_and_probe() -> None:
