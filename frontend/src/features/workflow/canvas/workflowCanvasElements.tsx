@@ -22,7 +22,6 @@ import {
   edgeTarget,
   edgeTargetHandle,
 } from "../utils";
-import type { WorkflowFlowEdgeData } from "./WorkflowFlowEdge";
 import type { WorkflowFlowNodeData } from "./WorkflowFlowNode";
 
 type WorkflowEdge = ConversationWorkflow["edges"][number];
@@ -153,10 +152,7 @@ export function layoutWorkflowCanvasEdges(
   latestRun?: WorkflowRun,
   selectedEdgeIds: string[] = [],
   invalidEdgeIssues: Map<string, WorkflowValidationIssue> = new Map(),
-  actions: {
-    onSelect?: (edgeId: string) => void;
-  } = {},
-): FlowEdge<WorkflowFlowEdgeData>[] {
+): FlowEdge[] {
   return (workflow.edges ?? [])
     .map((edge) => {
       const from = edgeSource(edge);
@@ -170,22 +166,20 @@ export function layoutWorkflowCanvasEdges(
       const id = workflowEdgeId(edge);
       const issue = invalidEdgeIssues.get(id);
       const selected = selectedEdgeIds.includes(id);
+      const stroke = selected ? "#1677ff" : issue ? "#ff4d4f" : statusColor(status);
       return {
         id,
-        type: "workflowEdge",
         source: from,
         target: to,
         sourceHandle: edgeSourceHandle(edge),
         targetHandle: edgeTargetHandle(edge),
-        interactionWidth: 34,
+        interactionWidth: 40,
         label: issue ? condition || "连线错误" : condition,
         selected,
         data: {
           condition,
           issueLabel: issue?.message,
-          selected,
-          statusColor: statusColor(status),
-          onSelect: actions.onSelect,
+          statusColor: stroke,
         },
         className: [
           issue ? "xy-workflow-edge-invalid" : "",
@@ -196,10 +190,21 @@ export function layoutWorkflowCanvasEdges(
         animated: status === "running",
         markerEnd: { type: MarkerType.ArrowClosed },
         style: {
-          stroke: selected ? "#1677ff" : issue ? "#ff4d4f" : statusColor(status),
-          strokeWidth: selected || issue || status === "running" ? 2.8 : 1.6,
+          stroke,
+          strokeWidth: selected || issue || status === "running" ? 2.8 : 2.0,
         },
-      } satisfies FlowEdge<WorkflowFlowEdgeData>;
+        labelStyle: {
+          fill: issue ? "#ff4d4f" : "#596579",
+          fontSize: 12,
+          fontWeight: issue ? 600 : 400,
+        },
+        labelBgPadding: [6, 4],
+        labelBgBorderRadius: 6,
+        labelBgStyle: {
+          fill: "rgba(255, 255, 255, 0.94)",
+          stroke: issue ? "#ffccc7" : "#dbe3ef",
+        },
+      } satisfies FlowEdge;
     })
-    .filter(Boolean) as FlowEdge<WorkflowFlowEdgeData>[];
+    .filter(Boolean) as FlowEdge[];
 }

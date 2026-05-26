@@ -747,37 +747,9 @@ button {
 
 .xy-workflow-canvas .react-flow__edge-interaction {
   stroke: transparent;
-  stroke-width: 34;
+  stroke-width: 40;
   pointer-events: stroke;
   cursor: pointer;
-}
-
-.xy-workflow-edge-visible {
-  pointer-events: none;
-  transition:
-    stroke 0.16s ease,
-    stroke-width 0.16s ease,
-    filter 0.16s ease;
-}
-
-.xy-workflow-edge-hit {
-  cursor: pointer;
-  pointer-events: stroke;
-  stroke-linecap: round;
-}
-
-.xy-workflow-edge-label {
-  position: absolute;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 5px;
-  border: 1px solid #dbe3ef;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 8px 18px rgba(31, 64, 120, 0.12);
-  font-size: 12px;
-  pointer-events: all;
 }
 
 .xy-workflow-edge-invalid .react-flow__edge-path,
