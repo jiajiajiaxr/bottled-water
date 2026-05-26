@@ -527,6 +527,9 @@ export function useMessageOperations(currentUserName: string) {
         attachments,
         thinkingEnabled,
       );
+
+      console.log("sendMessage response:", userMessage);
+
       replaceHistoryMessage(localMessage.id, userMessage);
       if (isLikelyArtifactRequest(content)) {
         const freshArtifact = await api

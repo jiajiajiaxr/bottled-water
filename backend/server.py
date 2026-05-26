@@ -13,7 +13,7 @@ def main() -> None:
         host=settings.api_host,
         port=settings.api_port,
         reload=settings.debug,
-        reload_dir=["./app"],
+        reload_dirs=["./app"],
     )
 
 
