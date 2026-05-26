@@ -201,6 +201,7 @@ class CreateSkillRequest(BaseModel):
     tools: list[dict[str, Any]] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
+    manifest: dict[str, Any] = Field(default_factory=dict)
 
 
 class UpdateSkillRequest(BaseModel):
@@ -217,6 +218,7 @@ class UpdateSkillRequest(BaseModel):
     tools: list[dict[str, Any]] | None = None
     tags: list[str] | None = None
     config: dict[str, Any] | None = None
+    manifest: dict[str, Any] | None = None
 
 
 class ImportMcpSkillRequest(BaseModel):

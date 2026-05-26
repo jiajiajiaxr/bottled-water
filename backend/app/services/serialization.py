@@ -22,6 +22,7 @@ from app.models import (
     PromptTemplate,
     ShortcutCommand,
     Skill,
+    SkillRun,
     ToolDefinition,
     SandboxSession,
     RemoteConnection,
@@ -512,6 +513,9 @@ def shortcut_command_to_dict(command: ShortcutCommand) -> dict[str, Any]:
 
 
 def skill_to_dict(skill: Skill) -> dict[str, Any]:
+    from app.services.skills.adapters.legacy import legacy_skill_manifest
+
+    manifest = legacy_skill_manifest(skill)
     return {
         "id": skill.id,
         "skill_id": skill.id,
@@ -530,9 +534,30 @@ def skill_to_dict(skill: Skill) -> dict[str, Any]:
         "tags": skill.tags or [],
         "config": redact_sensitive(skill.config or {}),
         "metadata": redact_sensitive(skill.extra or {}),
+        "manifest": redact_sensitive(manifest),
         "created_by": skill.owner_id,
         "created_at": iso(skill.created_at),
         "updated_at": iso(skill.updated_at),
+    }
+
+
+def skill_run_to_dict(run: SkillRun) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "skill_id": run.skill_id,
+        "owner_id": run.owner_id,
+        "conversation_id": run.conversation_id,
+        "runtime_type": run.runtime_type,
+        "status": run.status,
+        "input": redact_sensitive(run.input or {}),
+        "output": redact_sensitive(run.output or {}),
+        "error_message": run.error_message,
+        "duration_ms": run.duration_ms,
+        "started_at": iso(run.started_at),
+        "completed_at": iso(run.completed_at),
+        "metadata": redact_sensitive(run.extra or {}),
+        "created_at": iso(run.created_at),
+        "updated_at": iso(run.updated_at),
     }
 
 

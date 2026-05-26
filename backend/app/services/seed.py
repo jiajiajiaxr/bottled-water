@@ -25,6 +25,7 @@ from app.models import (
     WorkspaceMember,
     utcnow,
 )
+from app.services.skills.catalog import ensure_skill_tables
 from app.services.tools.registry import get_official_toolbox, ensure_tool_tables
 
 
@@ -313,7 +314,7 @@ def ensure_seed_data(db: Session) -> User:
                 "avatar_color": spec["avatar_color"],
             }
 
-    Skill.__table__.create(bind=db.get_bind(), checkfirst=True)
+    ensure_skill_tables(db)
     existing_skill_names = {item.name for item in db.scalars(select(Skill).where(Skill.source == "system")).all()}
     for spec in DEFAULT_SKILLS:
         if spec["name"] in existing_skill_names:

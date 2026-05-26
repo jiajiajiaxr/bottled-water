@@ -4,14 +4,14 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import or_, select, true
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import McpServer, Skill, User, Workspace, utcnow
+from app.models import McpServer, Skill, User
 from app.schemas.requests import (
     CreateSkillRequest,
     GenerateSkillRequest,
@@ -21,44 +21,20 @@ from app.schemas.requests import (
 )
 from app.services.ark import ark_client
 from app.services.serialization import redact_sensitive, skill_to_dict
+from app.services.skills.adapters.legacy import legacy_skill_manifest
+from app.services.skills.catalog import (
+    ensure_skill_owner,
+    ensure_skill_tables,
+    get_skill_for_user,
+    validate_workspace,
+    visible_skill_filter,
+)
+from app.services.skills.package import soft_delete_skill_package
+from app.services.skills.testing import run_skill_test
+from app.services.skills.versions import set_skill_manifest
 
 
 router = APIRouter(tags=["skills"])
-
-
-def ensure_skill_tables(db: Session) -> None:
-    Skill.__table__.create(bind=db.get_bind(), checkfirst=True)
-
-
-def _visible_skill_filter(user: User):
-    if user.role == "admin":
-        return true()
-    return (Skill.owner_id == user.id) | (Skill.owner_id.is_(None))
-
-
-def _validate_workspace(db: Session, user: User, workspace_id: str | None) -> None:
-    if not workspace_id:
-        return
-    workspace = db.get(Workspace, workspace_id)
-    if not workspace or workspace.deleted_at is not None:
-        raise NotFoundError("Workspace not found")
-    if workspace.owner_id != user.id and user.role != "admin":
-        raise ForbiddenError("No permission for this workspace")
-
-
-def _get_skill(db: Session, user: User, skill_id: str) -> Skill:
-    ensure_skill_tables(db)
-    skill = db.scalar(select(Skill).where(Skill.id == skill_id, Skill.deleted_at.is_(None)))
-    if not skill:
-        raise NotFoundError("Skill not found")
-    if skill.owner_id not in {None, user.id} and user.role != "admin":
-        raise ForbiddenError("No permission for this skill")
-    return skill
-
-
-def _ensure_owned(skill: Skill, user: User) -> None:
-    if skill.owner_id != user.id and user.role != "admin":
-        raise ForbiddenError("Only the owner can modify this skill")
 
 
 def _get_mcp_server(db: Session, user: User, server_id: str) -> McpServer:
@@ -265,8 +241,8 @@ async def list_skills(
     user: User = Depends(get_current_user),
 ):
     ensure_skill_tables(db)
-    _validate_workspace(db, user, workspace_id)
-    query = select(Skill).where(Skill.deleted_at.is_(None)).where(_visible_skill_filter(user))
+    validate_workspace(db, user, workspace_id)
+    query = select(Skill).where(Skill.deleted_at.is_(None)).where(visible_skill_filter(user))
     if workspace_id:
         query = query.where(or_(Skill.workspace_id == workspace_id, Skill.workspace_id.is_(None)))
     if status:
@@ -287,7 +263,7 @@ async def create_skill(
     user: User = Depends(get_current_user),
 ):
     ensure_skill_tables(db)
-    _validate_workspace(db, user, payload.workspace_id)
+    validate_workspace(db, user, payload.workspace_id)
     skill = Skill(
         owner_id=user.id,
         workspace_id=payload.workspace_id,
@@ -305,6 +281,7 @@ async def create_skill(
         tags=payload.tags,
         config=redact_sensitive(payload.config),
     )
+    set_skill_manifest(skill, payload.manifest or legacy_skill_manifest(skill), user=user)
     db.add(skill)
     db.commit()
     db.refresh(skill)
@@ -321,7 +298,7 @@ async def import_mcp_skill(
     ensure_skill_tables(db)
     server = _get_mcp_server(db, user, payload.mcp_server_id)
     workspace_id = payload.workspace_id or server.workspace_id
-    _validate_workspace(db, user, workspace_id)
+    validate_workspace(db, user, workspace_id)
     tools = _select_mcp_tools(server, payload.tool_names)
     tool_refs = [_mcp_tool_ref(server, item) for item in tools]
     name = payload.name or f"{server.name} Skill"
@@ -356,6 +333,7 @@ async def import_mcp_skill(
             }
         ),
     )
+    set_skill_manifest(skill, legacy_skill_manifest(skill), user=user)
     db.add(skill)
     db.commit()
     db.refresh(skill)
@@ -370,7 +348,7 @@ async def generate_skill(
     user: User = Depends(get_current_user),
 ):
     ensure_skill_tables(db)
-    _validate_workspace(db, user, payload.workspace_id)
+    validate_workspace(db, user, payload.workspace_id)
     spec = await _generate_skill_spec(payload)
     skill = Skill(
         owner_id=user.id,
@@ -389,6 +367,7 @@ async def generate_skill(
         tags=spec["tags"],
         config=redact_sensitive(spec["config"]),
     )
+    set_skill_manifest(skill, spec.get("manifest") or legacy_skill_manifest(skill), user=user)
     db.add(skill)
     db.commit()
     db.refresh(skill)
@@ -401,7 +380,7 @@ async def get_skill(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return ok(skill_to_dict(_get_skill(db, user, skill_id)))
+    return ok(skill_to_dict(get_skill_for_user(db, user, skill_id)))
 
 
 @router.patch("/skills/{skill_id}")
@@ -411,15 +390,18 @@ async def update_skill(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    skill = _get_skill(db, user, skill_id)
-    _ensure_owned(skill, user)
+    skill = get_skill_for_user(db, user, skill_id)
+    ensure_skill_owner(skill, user)
     data = payload.model_dump(exclude_unset=True)
+    manifest = data.pop("manifest", None)
     if "workspace_id" in data:
-        _validate_workspace(db, user, data["workspace_id"])
+        validate_workspace(db, user, data["workspace_id"])
     for key, value in data.items():
         if key in {"tools", "config"} and value is not None:
             value = redact_sensitive(value)
         setattr(skill, key, value)
+    if manifest is not None:
+        set_skill_manifest(skill, manifest or legacy_skill_manifest(skill), user=user)
     db.commit()
     db.refresh(skill)
     return ok(skill_to_dict(skill), "Skill updated")
@@ -431,10 +413,8 @@ async def delete_skill(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    skill = _get_skill(db, user, skill_id)
-    _ensure_owned(skill, user)
-    skill.deleted_at = utcnow()
-    skill.status = "deleted"
+    skill = get_skill_for_user(db, user, skill_id)
+    soft_delete_skill_package(db, skill, user)
     db.commit()
     return ok({"id": skill.id, "deleted": True})
 
@@ -446,54 +426,27 @@ async def test_skill(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    skill = _get_skill(db, user, skill_id)
+    skill = get_skill_for_user(db, user, skill_id)
     input_text = _skill_input_text(payload)
-    system_prompt = skill.prompt or skill.content or f"You are the AgentHub skill {skill.name}."
-    try:
-        result = await ark_client.chat(
-            [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {"input": input_text, "context": payload.context}, ensure_ascii=False
-                    ),
-                },
-            ],
-            temperature=0.2,
-            max_tokens=800,
-            purpose="skill_test",
-        )
-        response = result.text
-        model = result.model
-        usage = result.usage
-        provider_status = getattr(result, "provider_status", "ok")
-    except Exception as exc:
-        response = f"[mock-skill-test] {skill.name} received: {input_text[:160]}"
-        model = "mock-skill-test"
-        usage = {"input_tokens": len(input_text) // 2, "output_tokens": 32}
-        provider_status = f"mock_fallback:{exc.__class__.__name__}"
-
-    skill.extra = {
-        **(skill.extra or {}),
-        "last_test": {
-            "status": "passed",
-            "input_preview": input_text[:160],
-            "provider_status": provider_status,
-            "model": model,
-            "tested_at": utcnow().isoformat().replace("+00:00", "Z"),
-        },
-    }
+    report = await run_skill_test(
+        db,
+        skill=skill,
+        user=user,
+        payload={"prompt": input_text, "input": payload.input, "context": payload.context},
+        context=payload.context,
+    )
+    runtime_result = report["result"]
     db.commit()
     db.refresh(skill)
     return ok(
         {
             "skill": skill_to_dict(skill),
-            "status": "passed",
-            "response": response,
-            "model": model,
-            "usage": usage,
-            "provider_status": provider_status,
+            "status": report["status"],
+            "response": runtime_result.get("output"),
+            "model": runtime_result.get("model"),
+            "usage": runtime_result.get("usage"),
+            "provider_status": runtime_result.get("provider_status") or runtime_result.get("status"),
+            "run_id": runtime_result.get("run_id"),
         },
         "Skill test completed",
     )

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -8,9 +7,9 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, McpServer, Skill, User
-from app.services.ark import ark_client
 from app.services.realtime.event_bus import event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
+from app.services.skills.runtime import SkillRuntime
 from app.services.tools.registry import BUILTIN_TOOLS, invoke_tool, normalize_tool_names
 
 
@@ -34,10 +33,6 @@ def _score_text(prompt: str, *values: Any) -> int:
         if token in haystack:
             score += 2 if len(token) > 3 else 1
     return score
-
-
-def _skill_tool_refs(skill: Skill) -> list[dict[str, Any]]:
-    return [item for item in (skill.tools or []) if isinstance(item, dict)]
 
 
 def _mcp_tool_args(prompt: str, name: str) -> dict[str, Any]:
@@ -206,56 +201,17 @@ async def execute_skill(
     user: User | None,
     conversation: Conversation,
     prompt: str,
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     channel = f"conversation:{conversation.id}"
     await event_bus.publish(channel, "tool:started", {"type": "skill", "skill_id": skill.id, "name": skill.name})
-    mcp_refs = [item for item in _skill_tool_refs(skill) if item.get("type") == "mcp" and item.get("server_id") and item.get("name")]
-    if mcp_refs:
-        ref = mcp_refs[0]
-        server = db.get(McpServer, str(ref["server_id"]))
-        if server:
-            invocation = await invoke_mcp_tool_recorded(
-                db,
-                server=server,
-                tool_name_value=str(ref["name"]),
-                arguments=_mcp_tool_args(prompt, str(ref["name"])),
-                user=user,
-                conversation_id=conversation.id,
-                timeout_ms=min(server.timeout_ms or 30000, 5000),
-            )
-            result = {
-                "type": "skill_mcp",
-                "skill_id": skill.id,
-                "skill_name": skill.name,
-                "status": invocation["status"],
-                "output": invocation.get("result") or invocation.get("error_message"),
-                "invocation_id": invocation["id"],
-            }
-            await event_bus.publish(channel, "tool:finished", result)
-            return result
-
-    system_prompt = skill.prompt or skill.content or f"You are the AgentHub skill {skill.name}."
-    try:
-        response = await ark_client.chat(
-            [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": json.dumps({"input": prompt, "skill": skill.name}, ensure_ascii=False),
-                },
-            ],
-            temperature=0.2,
-            max_tokens=600,
-            purpose="skill_execution",
-        )
-        output = response.text
-        model = response.model
-        status = "succeeded"
-    except Exception as exc:
-        output = f"[skill-fallback] {skill.name}: {prompt[:180]}"
-        model = "mock-skill-execution"
-        status = f"fallback:{exc.__class__.__name__}"
-    result = {"type": "skill", "skill_id": skill.id, "skill_name": skill.name, "status": status, "output": output, "model": model}
+    result = await SkillRuntime().run(
+        db,
+        skill=skill,
+        user=user,
+        conversation=conversation,
+        payload=payload or {"prompt": prompt, "input": prompt, "skill": skill.name},
+    )
     await event_bus.publish(channel, "tool:finished", result)
     return result
 
@@ -397,6 +353,7 @@ async def run_agentic_tool_loop(
 
 def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
     """将 Agent 配置的 tools/skills/mcp 转为 OpenAI Function Calling 格式。"""
+    from app.services.skills.adapters.legacy import legacy_skill_manifest
     from app.services.tools.registry import BUILTIN_TOOLS
 
     tools: list[dict[str, Any]] = []
@@ -426,12 +383,13 @@ def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
             Skill.status == "active",
         )
         for skill in db.scalars(skill_query).all():
+            manifest = legacy_skill_manifest(skill)
             tools.append({
                 "type": "function",
                 "function": {
                     "name": f"skill.{skill.id}",
-                    "description": skill.description or skill.prompt or f"Skill: {skill.name}",
-                    "parameters": {
+                    "description": manifest.get("description") or skill.description or f"Skill: {skill.name}",
+                    "parameters": manifest.get("input_schema") or {
                         "type": "object",
                         "properties": {"prompt": {"type": "string", "description": "用户请求内容"}},
                         "required": ["prompt"],
@@ -489,7 +447,15 @@ async def execute_tool_by_name(
         skill = db.get(Skill, skill_id)
         if not skill or skill.deleted_at is not None or skill.status != "active":
             return {"type": "skill", "skill_id": skill_id, "status": "failed", "output": "Skill 不存在或未启用"}
-        return await execute_skill(db, skill=skill, user=user, conversation=conversation, prompt=arguments.get("prompt", ""))
+        prompt = arguments.get("prompt") or arguments.get("input") or ""
+        return await execute_skill(
+            db,
+            skill=skill,
+            user=user,
+            conversation=conversation,
+            prompt=str(prompt),
+            payload=arguments,
+        )
 
     # MCP
     if tool_name.startswith("mcp."):

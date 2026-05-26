@@ -201,6 +201,26 @@ class Skill(Base, TimestampMixin):
     extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 
 
+class SkillRun(Base, TimestampMixin):
+    __tablename__ = "skill_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    skill_id: Mapped[str] = mapped_column(ForeignKey("skills.id"), index=True)
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id"), nullable=True, index=True
+    )
+    runtime_type: Mapped[str] = mapped_column(String(40), default="prompt_skill", index=True)
+    status: Mapped[str] = mapped_column(String(40), default="running", index=True)
+    input: Mapped[dict] = mapped_column(JSON, default=dict)
+    output: Mapped[dict] = mapped_column(JSON, default=dict)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+
+
 class ToolDefinition(Base, TimestampMixin):
     __tablename__ = "tool_definitions"
     __table_args__ = (UniqueConstraint("owner_id", "workspace_id", "name", name="uq_tool_owner_workspace_name"),)
