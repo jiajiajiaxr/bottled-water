@@ -28,6 +28,7 @@ export function Workbench({
   routeTab = "chat",
   onRouteChange,
   onRouteTabChange,
+  onOpenWorkflowPage,
 }: {
   user: User;
   onLogout: () => void;
@@ -43,6 +44,7 @@ export function Workbench({
     tab: "chat" | "agents" | "workspace" | "settings",
     options?: { replace?: boolean },
   ) => void;
+  onOpenWorkflowPage: (workspaceId: string, conversationId: string) => void;
 }) {
   const [currentUser, setCurrentUser] = useState(user);
   const {
@@ -158,6 +160,13 @@ export function Workbench({
     setWorkspacesOpen(tab === "workspace");
     setGlobalSettingsOpen(tab === "settings");
     onRouteTabChange(tab);
+  };
+
+  const openWorkflowPage = () => {
+    if (!active?.id || active.chat_type !== "group") return;
+    const workspaceId = active.workspace_id || activeWorkspaceId || activeWorkspace?.id;
+    if (!workspaceId) return;
+    onOpenWorkflowPage(workspaceId, active.id);
   };
 
   const closeMainTab = (tab: "agents" | "workspace" | "settings") => {
@@ -339,6 +348,7 @@ export function Workbench({
         stopStreaming={stopStreaming}
         setMembersOpen={setMembersOpen}
         setConversationSettingsOpen={setConversationSettingsOpen}
+        openWorkflowPage={openWorkflowPage}
         uploadFile={uploadFile}
         artifactPanelOpen={artifactPanelOpen}
         artifact={artifact}
@@ -378,6 +388,7 @@ export function Workbench({
         onCloseConversationSettings={() => setConversationSettingsOpen(false)}
         conversationCategories={conversationCategories}
         onPatchConversation={patchConversation}
+        onOpenWorkflow={openWorkflowPage}
         createOpen={createOpen}
         onCancelCreate={() => setCreateOpen({ open: false, group: false })}
         onCreateConversation={createConversation}

@@ -75,6 +75,7 @@ export interface WorkbenchLayoutProps {
   // UI state setters
   setMembersOpen: (open: boolean) => void;
   setConversationSettingsOpen: (open: boolean) => void;
+  openWorkflowPage: () => void;
 
   // File upload
   uploadFile: (file: File) => Promise<UploadedFile>;
@@ -130,6 +131,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     stopStreaming,
     setMembersOpen,
     setConversationSettingsOpen,
+    openWorkflowPage,
     uploadFile,
     artifactPanelOpen,
     artifact,
@@ -276,6 +278,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
           onRegenerate={regenerate}
           onOpenMembers={() => setMembersOpen(true)}
           onOpenSettings={() => setConversationSettingsOpen(true)}
+          onOpenWorkflow={openWorkflowPage}
           onUploadFile={uploadFile}
           onOpenPreview={openArtifactPreview}
           onStopStreaming={stopStreaming}

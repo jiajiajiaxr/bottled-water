@@ -13,6 +13,11 @@ import {
 import { api } from "./api";
 import { LoginScreen } from "./features/auth/components/LoginScreen";
 import { Workbench } from "./pages/WorkbenchPage/Workbench";
+import { WorkflowStudioPage } from "./pages/WorkflowStudioPage";
+import {
+  conversationRoutePath,
+  workflowRoutePath,
+} from "./lib/workflowRoutes";
 import type { User } from "./types";
 
 const MAIN_TABS = new Set(["chat", "agents", "workspace", "settings"]);
@@ -86,17 +91,16 @@ function WorkbenchRoute({
       routeConversationId={routeConversationId}
       routeTab={routeTab}
       onRouteChange={(workspaceId, conversationId, options) => {
-        const path = workspaceId
-          ? conversationId
-            ? `/app/${encodeURIComponent(workspaceId)}/c/${encodeURIComponent(conversationId)}`
-            : `/app/${encodeURIComponent(workspaceId)}`
-          : "/app";
+        const path = conversationRoutePath(workspaceId, conversationId);
         navigate(`${path}${buildSearch()}`, { replace: options?.replace });
       }}
       onRouteTabChange={(tab, options) => {
         navigate(`${location.pathname}${buildSearch(tab)}`, {
           replace: options?.replace,
         });
+      }}
+      onOpenWorkflowPage={(workspaceId, conversationId) => {
+        navigate(workflowRoutePath(workspaceId, conversationId));
       }}
     />
   );
@@ -168,6 +172,10 @@ function RoutedApp() {
               }}
             />
           }
+        />
+        <Route
+          path="/workspaces/:workspaceId/conversations/:conversationId/workflow"
+          element={<WorkflowStudioPage user={user} />}
         />
         <Route
           path="*"

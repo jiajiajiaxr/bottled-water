@@ -5,6 +5,7 @@ import {
   BulbOutlined,
   ReloadOutlined,
   SendOutlined,
+  SettingOutlined,
   UserAddOutlined,
 } from "@ant-design/icons";
 import {
@@ -47,6 +48,7 @@ export function ChatPanel({
   onRegenerate,
   onOpenMembers,
   onOpenSettings,
+  onOpenWorkflow,
   onUploadFile,
   onOpenPreview,
   onStopStreaming,
@@ -65,6 +67,7 @@ export function ChatPanel({
   onRegenerate: (message: ChatMessage) => void;
   onOpenMembers: () => void;
   onOpenSettings: () => void;
+  onOpenWorkflow: () => void;
   onUploadFile: (file: File) => Promise<UploadedFile>;
   onOpenPreview: (message: ChatMessage) => void;
   onStopStreaming: () => void;
@@ -182,6 +185,14 @@ export function ChatPanel({
                 <Button
                   size="small"
                   icon={<BranchesOutlined />}
+                  onClick={onOpenWorkflow}
+                  data-testid="conversation-workflow"
+                >
+                  工作流画布
+                </Button>
+                <Button
+                  size="small"
+                  icon={<SettingOutlined />}
                   onClick={onOpenSettings}
                   data-testid="conversation-settings"
                 >

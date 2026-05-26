@@ -698,6 +698,7 @@ button {
   width: 248px !important;
   height: 116px;
   box-sizing: border-box;
+  visibility: visible !important;
   padding: 0 !important;
   border: 1px solid #d9e8ff;
   border-radius: 8px;
@@ -1023,4 +1024,126 @@ button {
 
 .workflow-node[draggable="true"]:active {
   cursor: grabbing;
+}
+
+.workflow-studio-loading {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: #f5f7fb;
+}
+
+.workflow-studio-page {
+  display: flex;
+  min-width: 1120px;
+  min-height: 100vh;
+  flex-direction: column;
+  background: #f5f7fb;
+  color: #1f2937;
+}
+
+.workflow-studio-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 72px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #d9e2ef;
+  background: #fff;
+}
+
+.workflow-studio-header h4 {
+  margin: 0;
+}
+
+.workflow-studio-main {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 224px minmax(640px, 1fr) 360px;
+  gap: 12px;
+  min-height: 0;
+  padding: 12px;
+}
+
+.workflow-studio-left,
+.workflow-studio-right,
+.workflow-studio-canvas-wrap {
+  min-height: 0;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.workflow-studio-left {
+  overflow: auto;
+  padding: 14px;
+}
+
+.workflow-node-palette {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.workflow-node-palette .ant-btn {
+  justify-content: flex-start;
+}
+
+.workflow-studio-canvas-wrap {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workflow-studio-toolbar {
+  display: grid;
+  grid-template-columns: minmax(360px, auto) 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border-bottom: 1px solid #e8eef7;
+}
+
+.workflow-studio-canvas-wrap .xy-workflow-canvas {
+  height: min(70vh, 680px);
+  min-height: 520px;
+  border: 0;
+  border-radius: 0;
+}
+
+.workflow-studio-bottom {
+  min-height: 188px;
+  max-height: 240px;
+  padding: 0 12px;
+  border-top: 1px solid #e8eef7;
+  overflow: auto;
+}
+
+.workflow-run-log,
+.workflow-node-output,
+.workflow-run-history {
+  max-height: 148px;
+  overflow: auto;
+  padding: 4px 0 10px;
+}
+
+.workflow-studio-right {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.workflow-node-config-form .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.workflow-studio-run-card,
+.workflow-json-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid #edf1f7;
 }
