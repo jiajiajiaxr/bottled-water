@@ -51,7 +51,6 @@ function ThinkingBlock({
   streaming?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  if (!thinking.trim()) return null;
   return (
     <div className="thinking-block">
       <button
@@ -65,7 +64,9 @@ function ThinkingBlock({
       </button>
       {expanded && (
         <div className="thinking-content">
-          {streaming ? thinking : <MarkdownContent text={thinking} />}
+          {thinking.trim()
+            ? (streaming ? thinking : <MarkdownContent text={thinking} />)
+            : <Text type="secondary">思考中...</Text>}
         </div>
       )}
     </div>
@@ -218,7 +219,7 @@ function MessageBubbleComponent({
             </Text>
           </Flex>
           {quoted && <div className="quote-block">{quoted.content}</div>}
-          {thinkingEnabled && message.thinking && (
+          {thinkingEnabled && !isUser && (message.thinking || message.streamState === "streaming") && (
             <ThinkingBlock
               thinking={message.thinking}
               streaming={message.streamState === "streaming"}
