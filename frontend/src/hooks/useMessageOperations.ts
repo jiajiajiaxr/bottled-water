@@ -284,13 +284,11 @@ export function useMessageOperations(currentUserName: string) {
           const messageId = String(
             payload.agent_message_id || payload.message_id || "",
           );
-          console.log("[onReasoningDelta] messageId=", messageId, "delta=", delta.slice(0, 50));
           if (messageId) currentMessageId = messageId;
           if (!messageId) return;
           const existing = latestThinkingById.get(messageId) ?? "";
           const nextThinking = existing + delta;
           latestThinkingById.set(messageId, nextThinking);
-          console.log("[onReasoningDelta] updating thinking, msgId=", messageId, "thinking=", nextThinking.slice(0, 50));
           updateStreamingThinking(messageId, nextThinking);
         },
         onMessageUpdated: upsertFinalMessage,
@@ -527,8 +525,6 @@ export function useMessageOperations(currentUserName: string) {
         attachments,
         thinkingEnabled,
       );
-
-      console.log("sendMessage response:", userMessage);
 
       replaceHistoryMessage(localMessage.id, userMessage);
       if (isLikelyArtifactRequest(content)) {

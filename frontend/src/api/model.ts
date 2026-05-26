@@ -1,16 +1,11 @@
-import { request } from "./client";
-import { demoModelProviders, demoModelConfigs } from "@/mock";
+import { get, post } from "./client";
 import type { ModelProvider, ModelConfig } from "@/types";
 
 export async function modelProviders(): Promise<ModelProvider[]> {
-  try {
-    const result = await request<{ items: ModelProvider[] }>(
-      "/model-providers",
-    );
-    return result.items;
-  } catch {
-    return demoModelProviders;
-  }
+  const result = await get<{ items: ModelProvider[] }>(
+    "/model-providers",
+  );
+  return result.items;
 }
 
 export async function createModelProvider(payload: {
@@ -23,33 +18,12 @@ export async function createModelProvider(payload: {
   supports_embeddings?: boolean;
   config?: Record<string, unknown>;
 }): Promise<ModelProvider> {
-  try {
-    return await request<ModelProvider>("/model-providers", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    return {
-      id: `provider-${Date.now()}`,
-      name: payload.name,
-      provider_type: payload.provider_type,
-      base_url: payload.base_url,
-      default_model: payload.default_model,
-      supports_streaming: payload.supports_streaming ?? true,
-      supports_embeddings: payload.supports_embeddings ?? false,
-      config: payload.config,
-      status: "active",
-    };
-  }
+  return await post<ModelProvider>("/model-providers", payload);
 }
 
 export async function modelConfigs(): Promise<ModelConfig[]> {
-  try {
-    const result = await request<{ items: ModelConfig[] }>("/model-configs");
-    return result.items;
-  } catch {
-    return demoModelConfigs;
-  }
+  const result = await get<{ items: ModelConfig[] }>("/model-configs");
+  return result.items;
 }
 
 export async function createModelConfig(payload: {
@@ -62,25 +36,7 @@ export async function createModelConfig(payload: {
   temperature_default?: number;
   config?: Record<string, unknown>;
 }): Promise<ModelConfig> {
-  try {
-    return await request<ModelConfig>("/model-configs", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    return {
-      id: `model-${Date.now()}`,
-      provider_id: payload.provider_id,
-      name: payload.name,
-      model_id: payload.model_id,
-      purpose: payload.purpose,
-      context_window: payload.context_window ?? 128000,
-      max_output_tokens: payload.max_output_tokens ?? 4096,
-      temperature_default: payload.temperature_default ?? 0.4,
-      config: payload.config,
-      status: "active",
-    };
-  }
+  return await post<ModelConfig>("/model-configs", payload);
 }
 
 export async function testModel(
@@ -91,12 +47,9 @@ export async function testModel(
   model: string;
   usage?: Record<string, unknown>;
 }> {
-  return await request<{
+  return await post<{
     response: string;
     model: string;
     usage?: Record<string, unknown>;
-  }>("/model-configs/test", {
-    method: "POST",
-    body: JSON.stringify({ prompt, model_config_id }),
-  });
+  }>("/model-configs/test", { prompt, model_config_id });
 }

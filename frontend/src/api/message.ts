@@ -1,21 +1,18 @@
 import {
-  request,
+  API_BASE,
+  get,
+  post,
   wait,
   eventPayload,
   type StreamAssistantHandlers,
 } from "./client";
-import { demoUser, demoMessages } from "@/mock";
 import type { ChatMessage, UploadedFile } from "@/types";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
-  try {
-    const result = await request<{ items: ChatMessage[] } | ChatMessage[]>(
-      `/conversations/${conversationId}/messages`,
-    );
-    return Array.isArray(result) ? result : result.items;
-  } catch {
-    return demoMessages[conversationId] ?? [];
-  }
+  const result = await get<{ items: ChatMessage[] } | ChatMessage[]>(
+    `/conversations/${conversationId}/messages`,
+  );
+  return Array.isArray(result) ? result : result.items;
 }
 
 export async function sendMessage(
@@ -25,51 +22,24 @@ export async function sendMessage(
   attachments: UploadedFile[] = [],
   thinkingEnabled?: boolean,
 ): Promise<ChatMessage> {
-  try {
-    return await request<ChatMessage>(
-      `/conversations/${conversationId}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          client_message_id: `client-${Date.now()}`,
-          content_type: "text",
-          content: {
-            text: content,
-            attachments: attachments.map((file) => ({
-              file_id: file.file_id ?? file.id,
-              filename: file.original_filename,
-              content_type: file.content_type,
-              size: file.size,
-            })),
-          },
-          reply_to_message_id: quotedMessageId,
-          thinking_enabled: thinkingEnabled,
-        }),
+  return await post<ChatMessage>(
+    `/conversations/${conversationId}/messages`,
+    {
+      client_message_id: `client-${Date.now()}`,
+      content_type: "text",
+      content: {
+        text: content,
+        attachments: attachments.map((file) => ({
+          file_id: file.file_id ?? file.id,
+          filename: file.original_filename,
+          content_type: file.content_type,
+          size: file.size,
+        })),
       },
-    );
-  } catch {
-    const normalizedAttachments = attachments.map((file) => ({
-      file_id: file.file_id ?? file.id,
-      filename: file.original_filename,
-      original_filename: file.original_filename,
-      content_type: file.content_type,
-      size: file.size,
-      parse_status: file.parse_status,
-      public_url: file.public_url,
-    }));
-    return {
-      id: `msg-${Date.now()}`,
-      conversationId,
-      role: "user",
-      kind: "text",
-      author: demoUser.name,
-      content,
-      rawContent: { text: content, attachments: normalizedAttachments },
-      attachments: normalizedAttachments,
-      quotedMessageId,
-      createdAt: new Date().toISOString(),
-    };
-  }
+      reply_to_message_id: quotedMessageId,
+      thinking_enabled: thinkingEnabled,
+    },
+  );
 }
 
 export async function streamAssistantReply(
@@ -87,7 +57,7 @@ export async function streamAssistantReply(
     return await new Promise<string>((resolve, reject) => {
       let buffer = "";
       const source = new EventSource(
-        `${"/api/v1"}/conversations/${conversationId}/stream?replay=false${token ? `&token=${encodeURIComponent(token)}` : ""}`,
+        `${API_BASE}/conversations/${conversationId}/stream?replay=false${token ? `&token=${encodeURIComponent(token)}` : ""}`,
       );
       let timeout = 0;
       const stop = () => {
@@ -119,12 +89,6 @@ export async function streamAssistantReply(
             ? String((deltaPayload as { text?: unknown }).text ?? "")
             : "";
         if (deltaType === "reasoning_delta" && deltaText) {
-          console.log(
-            "[SSE reasoning_delta] text=",
-            deltaText.slice(0, 50),
-            "payload=",
-            payload,
-          );
           handlers.onReasoningDelta?.(deltaText, payload);
         } else if (deltaText) {
           buffer += deltaText;
@@ -183,8 +147,8 @@ export async function assistantReply(
 export async function cancelAssistantReply(
   conversationId: string,
 ): Promise<{ cancelled: boolean }> {
-  return await request<{ cancelled: boolean }>(
+  return await post<{ cancelled: boolean }>(
     `/conversations/${conversationId}/stream/cancel`,
-    { method: "POST" },
+    {},
   );
 }

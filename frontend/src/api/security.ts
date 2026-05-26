@@ -1,8 +1,8 @@
-import { request } from "./client";
+import { get } from "./client";
 import type { AuditLog, SecurityPermission, SecurityRole, SecurityUser } from "@/types";
 
 export async function auditLogs(): Promise<AuditLog[]> {
-  const result = await request<{ items: AuditLog[] }>(
+  const result = await get<{ items: AuditLog[] }>(
     "/audit-logs?page_size=100",
   );
   return result.items;
@@ -14,7 +14,7 @@ export async function auditStats(): Promise<{
   by_action: Record<string, number>;
   latest_at?: string;
 }> {
-  return await request<{
+  return await get<{
     total: number;
     high_risk: number;
     by_action: Record<string, number>;
@@ -23,18 +23,18 @@ export async function auditStats(): Promise<{
 }
 
 export async function securityRoles(): Promise<SecurityRole[]> {
-  const result = await request<{ items: SecurityRole[] }>("/security/roles");
+  const result = await get<{ items: SecurityRole[] }>("/security/roles");
   return result.items;
 }
 
 export async function securityPermissions(): Promise<SecurityPermission[]> {
-  const result = await request<{ items: SecurityPermission[] }>(
+  const result = await get<{ items: SecurityPermission[] }>(
     "/security/permissions",
   );
   return result.items;
 }
 
 export async function securityUsers(): Promise<SecurityUser[]> {
-  const result = await request<{ items: SecurityUser[] }>("/security/users");
+  const result = await get<{ items: SecurityUser[] }>("/security/users");
   return result.items;
 }

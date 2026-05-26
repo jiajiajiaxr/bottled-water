@@ -1,16 +1,11 @@
-import { request } from "./client";
-import { demoKnowledgeBases } from "@/mock";
+import { get, post } from "./client";
 import type { KnowledgeBase, KnowledgeDocument } from "@/types";
 
 export async function knowledgeBases(): Promise<KnowledgeBase[]> {
-  try {
-    const result = await request<{ items: KnowledgeBase[] }>(
-      "/knowledge-bases",
-    );
-    return result.items;
-  } catch {
-    return demoKnowledgeBases;
-  }
+  const result = await get<{ items: KnowledgeBase[] }>(
+    "/knowledge-bases",
+  );
+  return result.items;
 }
 
 export async function createKnowledgeBase(payload: {
@@ -19,33 +14,16 @@ export async function createKnowledgeBase(payload: {
   scope: string;
   visibility: string;
 }): Promise<KnowledgeBase> {
-  try {
-    return await request<KnowledgeBase>("/knowledge-bases", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    return {
-      id: `kb-${Date.now()}`,
-      document_count: 0,
-      chunk_count: 0,
-      total_tokens: 0,
-      status: "ready",
-      ...payload,
-    };
-  }
+  return await post<KnowledgeBase>("/knowledge-bases", payload);
 }
 
 export async function importKnowledgeText(
   kbId: string,
   payload: { title: string; content: string },
 ): Promise<KnowledgeDocument> {
-  return await request<KnowledgeDocument>(
+  return await post<KnowledgeDocument>(
     `/knowledge-bases/${kbId}/documents`,
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
+    payload,
   );
 }
 
@@ -56,15 +34,8 @@ export async function retrieveKnowledge(
   items: Array<{ title: string; score: number; text: string }>;
   context: string;
 }> {
-  try {
-    return await request<{
-      items: Array<{ title: string; score: number; text: string }>;
-      context: string;
-    }>(`/knowledge-bases/${kbId}/retrieve`, {
-      method: "POST",
-      body: JSON.stringify({ query, top_k: 5, mode: "hybrid" }),
-    });
-  } catch {
-    return { items: [], context: "暂无检索结果" };
-  }
+  return await post<{
+    items: Array<{ title: string; score: number; text: string }>;
+    context: string;
+  }>(`/knowledge-bases/${kbId}/retrieve`, { query, top_k: 5, mode: "hybrid" });
 }

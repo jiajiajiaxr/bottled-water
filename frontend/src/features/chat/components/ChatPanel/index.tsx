@@ -80,11 +80,6 @@ export function ChatPanel({
       (a, b) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
     );
-    const assistantMsgs = merged.filter((m) => m.role === "assistant");
-    if (assistantMsgs.length) {
-      const last = assistantMsgs[assistantMsgs.length - 1];
-      console.log("[ChatPanel] last assistant msg id=", last.id, "thinking=", last.thinking?.slice(0, 30), "streamState=", last.streamState);
-    }
     return merged;
   }, [historyMessages, streamingMessages]);
 

@@ -1,4 +1,19 @@
-export { API_BASE, request, requestWithTimeout, requestFile, wait, eventPayload } from "./client";
+export {
+  API_BASE,
+  ApiError,
+  request,
+  get,
+  post,
+  patch,
+  del,
+  requestWithTimeout,
+  requestFile,
+  wait,
+  eventPayload,
+  requestInterceptors,
+  responseInterceptors,
+  errorInterceptors,
+} from "./client";
 export type { StreamAssistantHandlers } from "./client";
 
 export {

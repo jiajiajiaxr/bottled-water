@@ -1,16 +1,11 @@
-import { request } from "./client";
-import { demoRemoteConnections } from "@/mock";
+import { get, post } from "./client";
 import type { RemoteConnection } from "@/types";
 
 export async function remoteConnections(): Promise<RemoteConnection[]> {
-  try {
-    const result = await request<{ items: RemoteConnection[] }>(
-      "/remote-connections",
-    );
-    return result.items;
-  } catch {
-    return demoRemoteConnections;
-  }
+  const result = await get<{ items: RemoteConnection[] }>(
+    "/remote-connections",
+  );
+  return result.items;
 }
 
 export async function createRemoteConnection(payload: {
@@ -20,38 +15,12 @@ export async function createRemoteConnection(payload: {
   endpoint: string;
   capabilities?: string[];
 }): Promise<RemoteConnection> {
-  try {
-    return await request<RemoteConnection>("/remote-connections", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    return {
-      id: `remote-${Date.now()}`,
-      workspace_id: payload.workspace_id,
-      name: payload.name,
-      connection_type: payload.connection_type,
-      endpoint: payload.endpoint,
-      capabilities: payload.capabilities ?? [],
-      status: "disconnected",
-    };
-  }
+  return await post<RemoteConnection>("/remote-connections", payload);
 }
 
 export async function connectRemote(id: string): Promise<RemoteConnection> {
-  try {
-    return await request<RemoteConnection>(
-      `/remote-connections/${id}/connect`,
-      { method: "POST" },
-    );
-  } catch {
-    const current =
-      demoRemoteConnections.find((item) => item.id === id) ??
-      demoRemoteConnections[0];
-    return {
-      ...current,
-      status: "connected",
-      last_connected_at: new Date().toISOString(),
-    };
-  }
+  return await post<RemoteConnection>(
+    `/remote-connections/${id}/connect`,
+    {},
+  );
 }

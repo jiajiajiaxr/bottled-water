@@ -96,11 +96,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   updateStreamingThinking: (messageId, thinking) =>
     set((state) => {
       const msg = state.streamingMessages.get(messageId);
-      console.log("[store] updateStreamingThinking msgId=", messageId, "found=", !!msg, "currentThinking=", msg?.thinking, "newThinking=", thinking.slice(0, 30));
       if (!msg || msg.thinking === thinking) return state;
       const next = new Map(state.streamingMessages);
       next.set(messageId, { ...msg, thinking });
-      console.log("[store] updated, streamingMessages keys=", Array.from(next.keys()));
       return { streamingMessages: next };
     }),
 

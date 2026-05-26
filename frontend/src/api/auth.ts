@@ -1,30 +1,14 @@
-import { request } from "./client";
-import { demoUser } from "@/mock";
+import { get, post, patch } from "./client";
 import type { User } from "@/types";
 
 export async function login(name: string, password = "agenthub"): Promise<User> {
-  try {
-    const result = await request<{ access_token: string; user: User }>(
-      "/auth/login",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          username: name || "demo",
-          email: name,
-          password,
-        }),
-      },
-    );
-    window.localStorage.setItem("agenthub_token", result.access_token);
-    return result.user;
-  } catch {
-    return {
-      ...demoUser,
-      id: `user-${Date.now()}`,
-      name: name || demoUser.name,
-      role: "member",
-    };
-  }
+  const result = await post<{ access_token: string; user: User }>("/auth/login", {
+    username: name || "demo",
+    email: name,
+    password,
+  });
+  window.localStorage.setItem("agenthub_token", result.access_token);
+  return result.user;
 }
 
 export async function register(payload: {
@@ -33,13 +17,7 @@ export async function register(payload: {
   password: string;
   display_name?: string;
 }): Promise<User> {
-  const result = await request<{ access_token: string; user: User }>(
-    "/auth/signup",
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-  );
+  const result = await post<{ access_token: string; user: User }>("/auth/signup", payload);
   window.localStorage.setItem("agenthub_token", result.access_token);
   return result.user;
 }
@@ -50,42 +28,29 @@ export async function updateProfile(payload: {
   avatar_url?: string;
   settings?: Record<string, unknown>;
 }): Promise<User> {
-  return await request<User>("/auth/me", {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
+  return await patch<User>("/auth/me", payload);
 }
 
 export async function changePassword(payload: {
   current_password: string;
   new_password: string;
 }): Promise<{ changed: boolean }> {
-  return await request<{ changed: boolean }>("/auth/password", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return await post<{ changed: boolean }>("/auth/password", payload);
 }
 
 export async function demoLogin(): Promise<User> {
-  try {
-    const result = await request<{ access_token: string; user: User }>(
-      "/auth/demo",
-      { method: "POST" },
-    );
-    window.localStorage.setItem("agenthub_token", result.access_token);
-    return result.user;
-  } catch {
-    return demoUser;
-  }
+  const result = await post<{ access_token: string; user: User }>("/auth/demo", {});
+  window.localStorage.setItem("agenthub_token", result.access_token);
+  return result.user;
 }
 
 export async function me(): Promise<User> {
-  return await request<User>("/auth/me");
+  return await get<User>("/auth/me");
 }
 
 export async function logout(): Promise<void> {
   try {
-    await request<{ ok: boolean }>("/auth/logout", { method: "POST" });
+    await post<{ ok: boolean }>("/auth/logout", {});
   } finally {
     window.localStorage.removeItem("agenthub_token");
   }

@@ -1,6 +1,25 @@
 import type { ChatMessage } from "@/types";
+import { logger } from "@/utils/logger";
 
 export const API_BASE = "/api/v1";
+
+/** 统一 API 错误类型。 */
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: number,
+    message: string,
+    public readonly data?: unknown,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/** 从 localStorage 读取认证 token。 */
+function getAuthToken(): string | null {
+  return window.localStorage.getItem("agenthub_token");
+}
 
 export function unwrap<T>(payload: unknown): T {
   if (
@@ -14,35 +33,106 @@ export function unwrap<T>(payload: unknown): T {
   return payload as T;
 }
 
+/** 请求拦截器：在请求发送前执行。 */
+export type RequestInterceptor = (path: string, init: RequestInit) => void;
+/** 响应拦截器：在请求成功后执行。 */
+export type ResponseInterceptor = <T>(path: string, response: Response, data: T) => void;
+/** 错误拦截器：在请求失败后执行。 */
+export type ErrorInterceptor = (path: string, error: ApiError) => void;
+
+export const requestInterceptors: RequestInterceptor[] = [];
+export const responseInterceptors: ResponseInterceptor[] = [];
+export const errorInterceptors: ErrorInterceptor[] = [];
+
+/** 默认注册日志拦截器，自动记录所有 API 请求和响应。 */
+requestInterceptors.push((path, init) => {
+  logger.debug("api", `${init.method ?? "GET"} ${path}`, { body: init.body });
+});
+
+responseInterceptors.push((path, _response, _data) => {
+  logger.debug("api", `OK ${path}`);
+});
+
+errorInterceptors.push((path, error) => {
+  logger.error("api", `FAIL ${path}: ${error.message}`, {
+    status: error.status,
+    code: error.code,
+  });
+});
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = window.localStorage.getItem("agenthub_token");
+  const token = getAuthToken();
   const isForm = init?.body instanceof FormData;
-  const response = await fetch(`${API_BASE}${path}`, {
+
+  const controller = new AbortController();
+  const signal = init?.signal;
+  if (signal) {
+    signal.addEventListener("abort", () => controller.abort());
+  }
+
+  const mergedInit: RequestInit = {
     ...init,
+    signal: controller.signal,
     headers: {
       ...(isForm ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
-  });
+  };
 
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const payload = await response.clone().json();
-      detail = payload?.message || payload?.detail || payload?.error || detail;
-    } catch {
+  requestInterceptors.forEach((fn) => fn(path, mergedInit));
+
+  const start = performance.now();
+  try {
+    const response = await fetch(`${API_BASE}${path}`, mergedInit);
+    const duration = Math.round(performance.now() - start);
+
+    if (!response.ok) {
+      let detail = response.statusText;
+      let payload: Record<string, unknown> | undefined;
       try {
-        detail = await response.clone().text();
+        payload = await response.clone().json();
+        detail = String(payload?.message || payload?.detail || payload?.error || detail);
       } catch {
-        detail = response.statusText;
+        try {
+          detail = await response.clone().text();
+        } catch {
+          detail = response.statusText;
+        }
       }
+      const err = new ApiError(
+        response.status,
+        Number(payload?.code ?? 0),
+        `${response.status} ${detail}`,
+        payload,
+      );
+      errorInterceptors.forEach((fn) => fn(path, err));
+      throw err;
     }
-    throw new Error(`${response.status} ${detail}`);
-  }
 
-  return unwrap<T>(await response.json());
+    const data = unwrap<T>(await response.json());
+    responseInterceptors.forEach((fn) => fn(path, response, data));
+    logger.debug("api", `${response.status} ${path} (${duration}ms)`);
+    return data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    const err = new ApiError(
+      0,
+      0,
+      error instanceof Error ? error.message : "网络请求失败",
+    );
+    errorInterceptors.forEach((fn) => fn(path, err));
+    throw err;
+  }
 }
+
+/** HTTP 快捷方法。 */
+export const get = <T>(path: string) => request<T>(path);
+export const post = <T>(path: string, body: unknown) =>
+  request<T>(path, { method: "POST", body: JSON.stringify(body) });
+export const patch = <T>(path: string, body: unknown) =>
+  request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+export const del = <T>(path: string) => request<T>(path, { method: "DELETE" });
 
 export async function requestWithTimeout<T>(
   path: string,
@@ -66,13 +156,13 @@ export async function requestFile(
   contentType: string;
   filename?: string;
 }> {
-  const token = window.localStorage.getItem("agenthub_token");
+  const token = getAuthToken();
   const response = await fetch(`${API_BASE}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
 
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
+    throw new ApiError(response.status, 0, `${response.status} ${response.statusText}`);
   }
 
   const contentType =
@@ -118,3 +208,96 @@ export function eventPayload(event: Event): Record<string, unknown> {
     return {};
   }
 }
+
+export async function streamAssistantReply(
+  conversationId: string,
+  handlersOrDelta: StreamAssistantHandlers | ((delta: string) => void),
+  onDone?: () => void,
+  onControl?: (stop: () => void) => void,
+): Promise<string> {
+  const handlers: StreamAssistantHandlers =
+    typeof handlersOrDelta === "function"
+      ? { onDelta: (delta) => handlersOrDelta(delta), onDone, onControl }
+      : handlersOrDelta;
+  try {
+    const token = getAuthToken();
+    return await new Promise<string>((resolve, reject) => {
+      let buffer = "";
+      const source = new EventSource(
+        `${API_BASE}/conversations/${conversationId}/stream?replay=false${token ? `&token=${encodeURIComponent(token)}` : ""}`,
+      );
+      let timeout = 0;
+      const stop = () => {
+        window.clearTimeout(timeout);
+        source.close();
+        handlers.onDone?.();
+        resolve(buffer);
+      };
+      handlers.onControl?.(stop);
+      timeout = window.setTimeout(() => {
+        source.close();
+        handlers.onDone?.();
+        resolve(buffer || "任务正在后台执行，稍后刷新可查看完整结果。");
+      }, 120000);
+      source.addEventListener("message_start", (event) => {
+        handlers.onMessageStart?.(eventPayload(event));
+      });
+      source.addEventListener("content_block_delta", (event) => {
+        const payload = eventPayload(event);
+        const deltaPayload = payload.delta;
+        const deltaType =
+          deltaPayload && typeof deltaPayload === "object"
+            ? String((deltaPayload as { type?: unknown }).type ?? "text_delta")
+            : "text_delta";
+        const deltaText =
+          deltaPayload &&
+          typeof deltaPayload === "object" &&
+          "text" in deltaPayload
+            ? String((deltaPayload as { text?: unknown }).text ?? "")
+            : "";
+        if (deltaType === "reasoning_delta" && deltaText) {
+          handlers.onReasoningDelta?.(deltaText, payload);
+        } else if (deltaText) {
+          buffer += deltaText;
+          handlers.onDelta?.(deltaText, payload);
+        }
+      });
+      source.addEventListener("message:updated", (event) => {
+        handlers.onMessageUpdated?.(
+          eventPayload(event) as unknown as ChatMessage,
+        );
+      });
+      source.addEventListener("message:new", (event) => {
+        handlers.onMessageNew?.(eventPayload(event) as unknown as ChatMessage);
+      });
+      source.addEventListener("tool_call_start", (event) => {
+        handlers.onToolCallStart?.(eventPayload(event));
+      });
+      source.addEventListener("tool_call_done", (event) => {
+        handlers.onToolCallDone?.(eventPayload(event));
+      });
+      source.addEventListener("message_stop", (event) => {
+        window.clearTimeout(timeout);
+        source.close();
+        handlers.onDone?.(eventPayload(event));
+        resolve(buffer || "主控 Agent 已完成任务编排。");
+      });
+      source.addEventListener("error", () => {
+        window.clearTimeout(timeout);
+        source.close();
+        if (buffer) {
+          handlers.onDone?.();
+          resolve(buffer);
+        } else reject(new Error("stream failed"));
+      });
+    });
+  } catch {
+    await wait(350);
+    const fallback =
+      "模型流式连接暂不可用，任务已进入后台处理，可稍后刷新查看完整结果。";
+    handlers.onDelta?.(fallback, {});
+    handlers.onDone?.();
+    return fallback;
+  }
+}
+

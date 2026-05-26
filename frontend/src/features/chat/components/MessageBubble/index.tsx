@@ -79,7 +79,6 @@ function MessageBubbleComponent({
   onCopy,
   onPreview,
 }: MessageBubbleProps) {
-  console.log("[MessageBubble] id=", message.id, "thinking=", message.thinking?.slice(0, 30), "streamState=", message.streamState);
   const isUser = message.role === "user";
   const isEvent =
     message.kind === "event" ||
@@ -375,9 +374,6 @@ export const MessageBubble = React.memo(
       prev.quoted?.id === next.quoted?.id &&
       ((prev.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0) ===
       ((next.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0);
-    if (prev.message.id.startsWith("431db571") || next.message.id.startsWith("431db571")) {
-      console.log("[memo] id=", prev.message.id, "skip=", skip, "prevThink=", prev.message.thinking?.slice(0,20), "nextThink=", next.message.thinking?.slice(0,20));
-    }
     return skip;
   },
 );

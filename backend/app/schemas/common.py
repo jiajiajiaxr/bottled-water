@@ -485,3 +485,21 @@ class MessageResponse(BaseModel):
 class OkResponse(BaseModel):
     ok: bool
 
+
+class FrontendLogEntry(BaseModel):
+    """前端单条日志条目。"""
+
+    timestamp: str
+    level: str
+    module: str
+    message: str
+    data: dict[str, Any] | None = None
+    url: str | None = None
+    user_agent: str | None = None
+
+
+class FrontendLogBatch(BaseModel):
+    """前端批量日志请求体。"""
+
+    logs: list[FrontendLogEntry]
+
