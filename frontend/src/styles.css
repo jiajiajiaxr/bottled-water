@@ -766,6 +766,41 @@ button {
   stroke-width: 3;
 }
 
+.xy-workflow-step-edge-path {
+  pointer-events: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition:
+    stroke 0.14s ease,
+    stroke-width 0.14s ease,
+    filter 0.14s ease;
+}
+
+.xy-workflow-step-edge-hit {
+  cursor: pointer;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.xy-workflow-canvas .react-flow__edge:hover .xy-workflow-step-edge-path {
+  stroke: #1677ff;
+  stroke-width: 3;
+}
+
+.xy-workflow-step-edge-label {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 6px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 18px rgba(31, 64, 120, 0.12);
+  color: #596579;
+  font-size: 12px;
+  pointer-events: all;
+}
+
 .xy-workflow-edge-invalid .react-flow__edge-path,
 .xy-workflow-edge-selected .react-flow__edge-path,
 .xy-workflow-canvas .react-flow__edge.selected .react-flow__edge-path {

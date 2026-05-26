@@ -23,6 +23,7 @@ import {
   edgeTargetHandle,
 } from "../utils";
 import type { WorkflowFlowNodeData } from "./WorkflowFlowNode";
+import type { WorkflowStepEdgeData } from "./WorkflowStepEdge";
 
 type WorkflowEdge = ConversationWorkflow["edges"][number];
 
@@ -152,7 +153,10 @@ export function layoutWorkflowCanvasEdges(
   latestRun?: WorkflowRun,
   selectedEdgeIds: string[] = [],
   invalidEdgeIssues: Map<string, WorkflowValidationIssue> = new Map(),
-): FlowEdge[] {
+  actions: {
+    onSelect?: (edgeId: string) => void;
+  } = {},
+): FlowEdge<WorkflowStepEdgeData>[] {
   return (workflow.edges ?? [])
     .map((edge) => {
       const from = edgeSource(edge);
@@ -173,12 +177,12 @@ export function layoutWorkflowCanvasEdges(
           : statusColor(status);
       return {
         id,
-        type: "straight",
+        type: "workflowStep",
         source: from,
         target: to,
         sourceHandle: edgeSourceHandle(edge),
         targetHandle: edgeTargetHandle(edge),
-        interactionWidth: 64,
+        interactionWidth: 0,
         label: issue ? condition || "连线错误" : condition,
         selected,
         selectable: true,
@@ -186,7 +190,9 @@ export function layoutWorkflowCanvasEdges(
         data: {
           condition,
           issueLabel: issue?.message,
+          selected,
           statusColor: stroke,
+          onSelect: actions.onSelect,
         },
         className: [
           issue ? "xy-workflow-edge-invalid" : "",
@@ -200,18 +206,7 @@ export function layoutWorkflowCanvasEdges(
           stroke,
           strokeWidth: selected || issue || status === "running" ? 2.8 : 2.0,
         },
-        labelStyle: {
-          fill: issue ? "#ff4d4f" : "#596579",
-          fontSize: 12,
-          fontWeight: issue ? 600 : 400,
-        },
-        labelBgPadding: [6, 4],
-        labelBgBorderRadius: 6,
-        labelBgStyle: {
-          fill: "rgba(255, 255, 255, 0.94)",
-          stroke: issue ? "#ffccc7" : "#dbe3ef",
-        },
-      } satisfies FlowEdge;
+      } satisfies FlowEdge<WorkflowStepEdgeData>;
     })
-    .filter(Boolean) as FlowEdge[];
+    .filter(Boolean) as FlowEdge<WorkflowStepEdgeData>[];
 }

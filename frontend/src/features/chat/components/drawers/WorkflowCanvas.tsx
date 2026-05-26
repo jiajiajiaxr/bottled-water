@@ -31,6 +31,7 @@ import {
 } from "../../../workflow/canvas/workflowCanvasElements";
 import { WorkflowConnectionPreview } from "../../../workflow/canvas/WorkflowConnectionPreview";
 import { WorkflowFlowNode } from "../../../workflow/canvas/WorkflowFlowNode";
+import { WorkflowStepEdge } from "../../../workflow/canvas/WorkflowStepEdge";
 import {
   canCreateWorkflowEdge,
   createWorkflowEdge,
@@ -126,6 +127,7 @@ export function WorkflowCanvas({
     [workflow.edges],
   );
   const nodeTypes = useMemo(() => ({ workflow: WorkflowFlowNode }), []);
+  const edgeTypes = useMemo(() => ({ workflowStep: WorkflowStepEdge }), []);
   const canConnectNodes = useCallback(
     (sourceId?: string | null, targetId?: string | null) =>
       canCreateWorkflowEdge({
@@ -233,12 +235,14 @@ export function WorkflowCanvas({
         latestRun,
         selectedEdgeIds,
         invalidEdgeIssues,
+        { onSelect: handleEdgeSelect },
       ),
     [
       workflow,
       latestRun,
       selectedEdgeIds,
       invalidEdgeIssues,
+      handleEdgeSelect,
     ],
   );
 
@@ -420,6 +424,7 @@ export function WorkflowCanvas({
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         fitViewOptions={{ padding: 0.18 }}
         connectOnClick={false}
