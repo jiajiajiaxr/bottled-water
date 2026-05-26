@@ -129,6 +129,9 @@ export function WorkflowFloatingPanels({
   ] as const;
   const cardSide =
     activePanel === "config" || activePanel === "logs" ? "right" : "left";
+  const validationErrorCount = validationIssues.filter(
+    (issue) => issue.severity === "error",
+  ).length;
 
   return (
     <>
@@ -148,8 +151,8 @@ export function WorkflowFloatingPanels({
             disabled={item.disabled}
             loading={item.key === "ai" && generating}
             badgeCount={
-              item.key === "settings" && validationIssues.length
-                ? validationIssues.length
+              item.key === "settings" && validationErrorCount
+                ? validationErrorCount
                 : undefined
             }
             onClick={() => openPanel(item.key)}

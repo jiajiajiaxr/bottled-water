@@ -5,6 +5,7 @@ import {
   applyNodeChanges,
   Background,
   ConnectionMode,
+  ConnectionLineType,
   Controls,
   MarkerType,
   MiniMap,
@@ -13,191 +14,33 @@ import {
   type Connection,
   type Edge as FlowEdge,
   type EdgeChange,
-  type Node as FlowNode,
   type NodeChange,
-  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Spin, Tag, Typography } from "antd";
+import { Spin, Typography } from "antd";
 import type {
   ConversationWorkflow,
   WorkflowNode,
   WorkflowRun,
 } from "../../../../types";
-import {
-  WORKFLOW_NODE_TYPE_LABEL,
-  workflowNodeType,
-} from "../../../../lib/workflow";
-import {
-  layoutWorkflowPositions,
-  workflowNodeSavedPosition,
-} from "../../../../lib/workflowLayout";
+import { workflowNodeType } from "../../../../lib/workflow";
+import { edgeId, edgeSource, edgeTarget } from "../../../workflow/utils";
 import type { WorkflowValidationIssue } from "../../../workflow/validation";
+import {
+  layoutWorkflowCanvasEdges,
+  layoutWorkflowCanvasNodes,
+  toWorkflowEdge,
+} from "../../../workflow/canvas/workflowCanvasElements";
+import { WorkflowFlowNode } from "../../../workflow/canvas/WorkflowFlowNode";
 
 const { Text } = Typography;
-
-type WorkflowEdge = ConversationWorkflow["edges"][number];
-
-function edgeSource(edge: WorkflowEdge): string {
-  return Array.isArray(edge)
-    ? String(edge[0])
-    : String(edge.from ?? edge.source ?? "");
-}
-
-function edgeTarget(edge: WorkflowEdge): string {
-  return Array.isArray(edge)
-    ? String(edge[1])
-    : String(edge.to ?? edge.target ?? "");
-}
-
-function edgeCondition(edge: WorkflowEdge): string | undefined {
-  return Array.isArray(edge) ? undefined : edge.condition;
-}
-
-function edgeId(edge: WorkflowEdge): string {
-  const from = edgeSource(edge);
-  const to = edgeTarget(edge);
-  return `${from}-${to}-${edgeCondition(edge) ?? "edge"}`;
-}
-
-function toWorkflowEdge(edge: FlowEdge): WorkflowEdge {
-  return edge.data?.condition
-    ? {
-        from: edge.source,
-        to: edge.target,
-        condition: String(edge.data.condition),
-      }
-    : [edge.source, edge.target];
-}
-
-function runtimeNode(workflowNode: WorkflowNode, latestRun?: WorkflowRun) {
-  return latestRun?.node_states?.find((state) => state.id === workflowNode.id);
-}
-
-function runtimeEdge(edge: WorkflowEdge, latestRun?: WorkflowRun) {
-  const from = edgeSource(edge);
-  const to = edgeTarget(edge);
-  return latestRun?.edge_states?.find(
-    (state) => state.from === from && state.to === to,
-  );
-}
-
-function normalizeStatus(status?: string) {
-  if (!status || status === "ready") return "queued";
-  if (status === "completed") return "succeeded";
-  return status;
-}
-
-function statusColor(status?: string) {
-  const value = normalizeStatus(status);
-  if (value === "succeeded") return "#52c41a";
-  if (value === "running" || value === "reviewing") return "#1677ff";
-  if (value === "failed") return "#ff4d4f";
-  if (value === "skipped") return "#8c8c8c";
-  return "#d9d9d9";
-}
-
-function layoutNodes(
-  workflow: ConversationWorkflow,
-  latestRun?: WorkflowRun,
-  selectedNodeIds: string[] = [],
-  invalidNodeIds: Set<string> = new Set(),
-  onNodeClick?: (node: WorkflowNode) => void,
-): FlowNode[] {
-  const positionedWorkflow = layoutWorkflowPositions(workflow);
-  return (positionedWorkflow.nodes ?? []).map((node) => {
-    const state = runtimeNode(node, latestRun);
-    const status = normalizeStatus(state?.status ?? node.status);
-    const type = workflowNodeType(node);
-    return {
-      id: node.id,
-      position: workflowNodeSavedPosition(node) ?? { x: 48, y: 64 },
-      selected: selectedNodeIds.includes(node.id),
-      selectable: true,
-      draggable: true,
-      focusable: true,
-      className: [
-        "xy-workflow-node",
-        `xy-workflow-node-${status}`,
-        invalidNodeIds.has(node.id) ? "xy-workflow-node-invalid" : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-      data: {
-        label: (
-          <div
-            className="xy-workflow-node-content"
-            onClick={(event) => {
-              event.stopPropagation();
-              onNodeClick?.(node);
-            }}
-          >
-            <div className="xy-workflow-node-header">
-              <Text strong className="xy-workflow-node-title">
-                {node.title}
-              </Text>
-              <Tag className="xy-workflow-node-type" color={statusColor(status)}>
-                {WORKFLOW_NODE_TYPE_LABEL[type] ?? type}
-              </Tag>
-            </div>
-            <Text className="xy-workflow-node-meta" type="secondary">
-              {state?.message || node.meta || node.role || "-"}
-            </Text>
-            <div className="xy-workflow-node-footer">
-              <span style={{ backgroundColor: statusColor(status) }} />
-              <Text
-                className="xy-workflow-node-status"
-                type={status === "failed" ? "danger" : "secondary"}
-              >
-                {status}
-                {typeof state?.progress === "number"
-                  ? ` / ${state.progress}%`
-                  : ""}
-              </Text>
-            </div>
-          </div>
-        ),
-      },
-    };
-  });
-}
-
-function layoutEdges(
-  workflow: ConversationWorkflow,
-  latestRun?: WorkflowRun,
-  selectedEdgeIds: string[] = [],
-  invalidEdgeIssues: Map<string, WorkflowValidationIssue> = new Map(),
-): FlowEdge[] {
-  return (workflow.edges ?? [])
-    .map((edge) => {
-      const from = edgeSource(edge);
-      const to = edgeTarget(edge);
-      if (!from || !to) return undefined;
-      const state = runtimeEdge(edge, latestRun);
-      const status = normalizeStatus(
-        state?.status ?? (Array.isArray(edge) ? "queued" : edge.status),
-      );
-      const condition = edgeCondition(edge);
-      const id = edgeId(edge);
-      const issue = invalidEdgeIssues.get(id);
-      return {
-        id,
-        source: from,
-        target: to,
-        label: issue ? condition || "连线错误" : condition,
-        selected: selectedEdgeIds.includes(id),
-        data: { condition },
-        className: issue ? "xy-workflow-edge-invalid" : undefined,
-        animated: status === "running",
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: {
-          stroke: issue ? "#ff4d4f" : statusColor(status),
-          strokeWidth: issue || status === "running" ? 2.5 : 1.5,
-        },
-      } satisfies FlowEdge;
-    })
-    .filter(Boolean) as FlowEdge[];
-}
+type WorkflowFlowInstance = {
+  fitView: (options?: { padding?: number }) => void;
+  screenToFlowPosition: (position: { x: number; y: number }) => {
+    x: number;
+    y: number;
+  };
+};
 
 export function WorkflowCanvas({
   workflow,
@@ -231,11 +74,22 @@ export function WorkflowCanvas({
   onCopySelection?: () => void;
 }) {
   const lastNodePointerAt = useRef(0);
-  const flowInstance = useRef<ReactFlowInstance | null>(null);
+  const flowInstance = useRef<WorkflowFlowInstance | null>(null);
   const invalidNodeIds = useMemo(
     () =>
       new Set(
         validationIssues
+          .filter((issue) => issue.severity === "error")
+          .map((issue) => issue.nodeId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    [validationIssues],
+  );
+  const warningNodeIds = useMemo(
+    () =>
+      new Set(
+        validationIssues
+          .filter((issue) => issue.severity === "warning")
           .map((issue) => issue.nodeId)
           .filter((id): id is string => Boolean(id)),
       ),
@@ -255,23 +109,45 @@ export function WorkflowCanvas({
   }, []);
   const flowNodes = useMemo(
     () =>
-      layoutNodes(
+      layoutWorkflowCanvasNodes(
         workflow,
         latestRun,
         selectedNodeIds,
         invalidNodeIds,
+        warningNodeIds,
         onNodeClick,
       ),
-    [workflow, latestRun, selectedNodeIds, invalidNodeIds, onNodeClick],
+    [
+      workflow,
+      latestRun,
+      selectedNodeIds,
+      invalidNodeIds,
+      warningNodeIds,
+      onNodeClick,
+    ],
   );
   const flowEdges = useMemo(
-    () => layoutEdges(workflow, latestRun, selectedEdgeIds, invalidEdgeIssues),
+    () =>
+      layoutWorkflowCanvasEdges(
+        workflow,
+        latestRun,
+        selectedEdgeIds,
+        invalidEdgeIssues,
+      ),
     [workflow, latestRun, selectedEdgeIds, invalidEdgeIssues],
   );
   const nodeById = useMemo(
     () => new Map((workflow.nodes ?? []).map((node) => [node.id, node])),
     [workflow.nodes],
   );
+  const edgeKeys = useMemo(
+    () =>
+      new Set(
+        (workflow.edges ?? []).map((edge) => `${edgeSource(edge)}->${edgeTarget(edge)}`),
+      ),
+    [workflow.edges],
+  );
+  const nodeTypes = useMemo(() => ({ workflow: WorkflowFlowNode }), []);
 
   useEffect(() => {
     if (!fitViewSignal || !flowInstance.current) return;
@@ -324,15 +200,31 @@ export function WorkflowCanvas({
   };
 
   const handleConnect = (connection: Connection) => {
-    if (locked || !connection.source || !connection.target) return;
+    if (!isValidConnection(connection)) return;
     const nextEdges = addEdge(
       {
         ...connection,
+        id: `${connection.source}-${connection.target}-edge`,
+        sourceHandle: connection.sourceHandle ?? "output",
+        targetHandle: connection.targetHandle ?? "input",
         markerEnd: { type: MarkerType.ArrowClosed },
       },
       flowEdges,
     ).map(toWorkflowEdge);
     onChange({ ...workflow, edges: nextEdges });
+  };
+
+  const isValidConnection = (connection: Connection | FlowEdge) => {
+    if (locked || !connection.source || !connection.target) return false;
+    if (connection.source === connection.target) return false;
+    if ((connection.sourceHandle ?? null) !== "output") return false;
+    if ((connection.targetHandle ?? null) !== "input") return false;
+    const source = nodeById.get(connection.source);
+    const target = nodeById.get(connection.target);
+    if (!source || !target) return false;
+    if (workflowNodeType(source) === "end") return false;
+    if (workflowNodeType(target) === "start") return false;
+    return !edgeKeys.has(`${connection.source}->${connection.target}`);
   };
 
   const hasNodeDragPayload = (event: DragEvent<HTMLDivElement>) =>
@@ -353,6 +245,29 @@ export function WorkflowCanvas({
     onDropNodeType(type, position);
   };
 
+  const deleteSelectedElements = () => {
+    if (locked || (!selectedNodeIds.length && !selectedEdgeIds.length)) return;
+    const protectedIds = new Set(
+      workflow.nodes
+        .filter((node) => ["start", "end"].includes(workflowNodeType(node)))
+        .map((node) => node.id),
+    );
+    const removableNodeIds = new Set(
+      selectedNodeIds.filter((id) => !protectedIds.has(id)),
+    );
+    const removableEdgeIds = new Set(selectedEdgeIds);
+    const nodes = workflow.nodes.filter((node) => !removableNodeIds.has(node.id));
+    const edges = (workflow.edges ?? []).filter((edge) => {
+      if (removableEdgeIds.has(edgeId(edge))) return false;
+      return (
+        !removableNodeIds.has(edgeSource(edge)) &&
+        !removableNodeIds.has(edgeTarget(edge))
+      );
+    });
+    onSelectionChange?.([], []);
+    onChange({ ...workflow, nodes, edges });
+  };
+
   return (
     <div
       className="xy-workflow-canvas"
@@ -364,8 +279,20 @@ export function WorkflowCanvas({
       }}
       onDrop={handleDrop}
       onClickCapture={(event) => {
+        const target = event.target;
+        if (target instanceof HTMLElement) {
+          const edgeElement = target.closest(".react-flow__edge");
+          const edgeDomId = edgeElement?.getAttribute("data-id");
+          if (edgeDomId) {
+            event.currentTarget.focus();
+            onSelectionChange?.([], [edgeDomId]);
+            event.stopPropagation();
+            return;
+          }
+        }
         const workflowNode = nodeFromEventTarget(event.target);
         if (!workflowNode) return;
+        event.currentTarget.focus();
         markNodePointer();
         onNodeClick(workflowNode);
         event.stopPropagation();
@@ -379,19 +306,29 @@ export function WorkflowCanvas({
           event.preventDefault();
           onCopySelection?.();
         }
+        if (event.key === "Delete" || event.key === "Backspace") {
+          event.preventDefault();
+          deleteSelectedElements();
+        }
       }}
     >
       <ReactFlow
         nodes={flowNodes}
         edges={flowEdges}
+        nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.18 }}
-        connectionMode={ConnectionMode.Loose}
+        connectionMode={ConnectionMode.Strict}
+        connectionLineType={ConnectionLineType.SmoothStep}
+        connectionLineStyle={{ stroke: "#d0d3d6", strokeWidth: 2.6 }}
+        connectOnClick={false}
         deleteKeyCode={locked ? null : ["Backspace", "Delete"]}
         multiSelectionKeyCode={["Shift", "Control", "Meta"]}
         nodesDraggable={!locked}
         nodesConnectable={!locked}
+        edgesFocusable={!locked}
         elementsSelectable={!locked}
+        elevateEdgesOnSelect
         panOnScroll
         panOnDrag={!locked}
         selectionOnDrag={false}
@@ -401,6 +338,7 @@ export function WorkflowCanvas({
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
+        isValidConnection={isValidConnection}
         onInit={(instance) => {
           flowInstance.current = instance;
         }}
@@ -415,6 +353,10 @@ export function WorkflowCanvas({
           if (locked) return;
           const workflowNode = nodeById.get(node.id);
           if (workflowNode) onNodeClick(workflowNode);
+        }}
+        onEdgeClick={(_, edge) => {
+          if (locked) return;
+          onSelectionChange?.([], [edge.id]);
         }}
         onPaneClick={() => {
           if (Date.now() - lastNodePointerAt.current < 250) return;

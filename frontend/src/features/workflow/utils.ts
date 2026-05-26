@@ -18,6 +18,18 @@ export function edgeCondition(edge: WorkflowEdge) {
   return Array.isArray(edge) ? undefined : edge.condition;
 }
 
+export function edgeSourceHandle(edge: WorkflowEdge) {
+  if (Array.isArray(edge)) return "output";
+  const config = edge.config ?? {};
+  return String(edge.sourceHandle ?? config.source_handle ?? config.sourceHandle ?? "output");
+}
+
+export function edgeTargetHandle(edge: WorkflowEdge) {
+  if (Array.isArray(edge)) return "input";
+  const config = edge.config ?? {};
+  return String(edge.targetHandle ?? config.target_handle ?? config.targetHandle ?? "input");
+}
+
 export function edgeId(edge: WorkflowEdge) {
   return `${edgeSource(edge)}-${edgeTarget(edge)}-${edgeCondition(edge) ?? "edge"}`;
 }

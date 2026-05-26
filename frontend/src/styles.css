@@ -717,7 +717,7 @@ button {
   cursor: pointer;
   user-select: none;
   touch-action: none;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .xy-workflow-node.selected {
@@ -734,13 +734,47 @@ button {
     0 10px 24px rgba(255, 77, 79, 0.12);
 }
 
+.xy-workflow-node-warning {
+  border-color: #faad14;
+  box-shadow:
+    0 0 0 3px rgba(250, 173, 20, 0.16),
+    0 10px 24px rgba(250, 173, 20, 0.12);
+}
+
+.xy-workflow-canvas .react-flow__edge {
+  cursor: pointer;
+  pointer-events: visibleStroke;
+}
+
+.xy-workflow-canvas .react-flow__edge-interaction {
+  stroke: transparent;
+  stroke-width: 24;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.xy-workflow-canvas .react-flow__edge-path {
+  pointer-events: stroke;
+}
+
+.xy-workflow-canvas .react-flow__connection-path {
+  stroke: #d0d3d6;
+  stroke-width: 2.6;
+}
+
 .xy-workflow-edge-invalid .react-flow__edge-path,
+.xy-workflow-edge-selected .react-flow__edge-path,
 .xy-workflow-canvas .react-flow__edge.selected .react-flow__edge-path {
   stroke-width: 2.5;
 }
 
 .xy-workflow-edge-invalid .react-flow__edge-text {
   fill: #ff4d4f;
+}
+
+.xy-workflow-edge-selected .react-flow__edge-path,
+.xy-workflow-canvas .react-flow__edge.selected .react-flow__edge-path {
+  filter: drop-shadow(0 0 4px rgba(22, 119, 255, 0.35));
 }
 
 .xy-workflow-node-running {
@@ -772,6 +806,52 @@ button {
   box-sizing: border-box;
   pointer-events: auto;
   overflow: hidden;
+}
+
+.xy-workflow-handle {
+  width: 28px !important;
+  height: 28px !important;
+  border: 2px solid #ffffff;
+  background: #8aa4c4;
+  z-index: 5;
+  cursor: grab;
+  pointer-events: all;
+  box-shadow:
+    0 0 0 1px #c7d7eb,
+    0 6px 12px rgba(31, 64, 120, 0.18);
+  transition:
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.xy-workflow-handle::before {
+  position: absolute;
+  inset: -8px;
+  content: "";
+}
+
+.xy-workflow-handle-input {
+  left: -14px;
+}
+
+.xy-workflow-handle-output {
+  right: -14px;
+}
+
+.xy-workflow-handle:hover,
+.xy-workflow-handle:active,
+.xy-workflow-handle.react-flow__handle-connecting,
+.xy-workflow-handle.react-flow__handle-valid {
+  background: #1677ff;
+  box-shadow:
+    0 0 0 5px rgba(22, 119, 255, 0.16),
+    0 8px 16px rgba(22, 119, 255, 0.24);
+  transform: scale(1.08);
+}
+
+.xy-workflow-handle:active {
+  cursor: grabbing;
 }
 
 .xy-workflow-node-header {

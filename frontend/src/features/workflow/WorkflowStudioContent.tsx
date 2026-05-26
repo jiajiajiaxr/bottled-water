@@ -47,8 +47,11 @@ export function WorkflowStudioContent({
     () => validateWorkflowDefinition(studio.workflow),
     [studio.workflow],
   );
+  const validationErrors = validationIssues.filter(
+    (issue) => issue.severity === "error",
+  );
   const workflowErrorText = () =>
-    `当前工作流配置不完整，请先修复画布：${validationIssues
+    `当前工作流配置不完整，请先修复画布：${validationErrors
       .map((issue) => issue.message)
       .join("；")}`;
 
@@ -103,7 +106,7 @@ export function WorkflowStudioContent({
 
   const runWorkflow = async () => {
     if (!studio.workflow) return;
-    if (validationIssues.length) {
+    if (validationErrors.length) {
       onError(workflowErrorText());
       setActivePanel("settings");
       return;

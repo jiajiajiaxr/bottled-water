@@ -16,7 +16,7 @@ export interface ConversationWorkflow {
   mode: string;
   output_mode?: "independent_messages" | "aggregate" | string;
   nodes: WorkflowNode[];
-  edges: Array<string[] | { from?: string; to?: string; source?: string; target?: string; condition?: string; status?: string; config?: Record<string, unknown> }>;
+  edges: Array<string[] | { from?: string; to?: string; source?: string; target?: string; sourceHandle?: string; targetHandle?: string; condition?: string; status?: string; config?: Record<string, unknown> }>;
   settings?: Record<string, unknown>;
 }
 

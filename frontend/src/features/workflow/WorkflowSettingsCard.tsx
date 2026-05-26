@@ -33,7 +33,10 @@ export function WorkflowSettingsCard({
             校验问题 {validationIssues.length}
           </Text>
           {validationIssues.slice(0, 8).map((issue) => (
-            <Text key={issue.id} type="danger">
+            <Text
+              key={issue.id}
+              type={issue.severity === "error" ? "danger" : "warning"}
+            >
               {issue.message}
             </Text>
           ))}

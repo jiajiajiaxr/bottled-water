@@ -5,7 +5,7 @@ import { edgeId, edgeSource, edgeTarget } from "./utils";
 export type WorkflowValidationIssue = {
   id: string;
   message: string;
-  severity: "error";
+  severity: "error" | "warning";
   nodeId?: string;
   edgeId?: string;
 };
@@ -73,6 +73,8 @@ export function validateWorkflowDefinition(
 
   const nodes = workflow.nodes ?? [];
   const nodeIds = new Set(nodes.map((node) => node.id));
+  const incoming = new Map(nodes.map((node) => [node.id, 0]));
+  const outgoing = new Map(nodes.map((node) => [node.id, 0]));
   const startNodes = nodes.filter((node) => workflowNodeType(node) === "start");
   const endNodes = nodes.filter((node) => workflowNodeType(node) === "end");
   const executableNodes = nodes.filter((node) =>
@@ -109,7 +111,10 @@ export function validateWorkflowDefinition(
         edgeId: id,
         message: `连线 ${source || "空"} -> ${target || "空"} 引用了不存在的节点。`,
       });
+      return;
     }
+    outgoing.set(source, (outgoing.get(source) ?? 0) + 1);
+    incoming.set(target, (incoming.get(target) ?? 0) + 1);
   });
 
   if (startNodes.length) {
@@ -140,6 +145,22 @@ export function validateWorkflowDefinition(
   nodes.forEach((node) => {
     const type = workflowNodeType(node);
     const config = node.config ?? {};
+    if (type !== "start" && (incoming.get(node.id) ?? 0) === 0) {
+      issues.push({
+        id: `warning-no-input-${node.id}`,
+        severity: "warning",
+        nodeId: node.id,
+        message: `节点「${node.title}」没有入边，运行时不会收到上游数据。`,
+      });
+    }
+    if (type !== "end" && (outgoing.get(node.id) ?? 0) === 0) {
+      issues.push({
+        id: `warning-no-output-${node.id}`,
+        severity: "warning",
+        nodeId: node.id,
+        message: `节点「${node.title}」没有出边，下游不会继续执行。`,
+      });
+    }
     if ((type === "agent" || type === "review") && !agentId(node)) {
       issues.push({
         id: `missing-agent-${node.id}`,
@@ -179,4 +200,3 @@ export function validateWorkflowDefinition(
 
   return issues;
 }
-
