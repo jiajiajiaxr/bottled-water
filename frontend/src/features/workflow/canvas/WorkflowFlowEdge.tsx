@@ -1,5 +1,4 @@
 import {
-  BaseEdge,
   EdgeLabelRenderer,
   getSmoothStepPath,
   type Edge,
@@ -50,10 +49,11 @@ export function WorkflowFlowEdge({
 
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={path}
+      <path
+        d={path}
+        fill="none"
         markerEnd={markerEnd}
+        vectorEffect="non-scaling-stroke"
         className="xy-workflow-edge-visible"
         style={{
           stroke,
@@ -63,8 +63,12 @@ export function WorkflowFlowEdge({
       <path
         d={path}
         fill="none"
-        stroke="transparent"
-        strokeWidth={34}
+        stroke="rgba(22, 119, 255, 0.01)"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={40}
+        vectorEffect="non-scaling-stroke"
+        pointerEvents="stroke"
         className="xy-workflow-edge-hit"
         onClick={selectEdge}
         onMouseDown={selectEdge}
