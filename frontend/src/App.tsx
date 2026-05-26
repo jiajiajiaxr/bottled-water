@@ -13,7 +13,6 @@ import {
 import { api } from "./api";
 import { LoginScreen } from "./features/auth/components/LoginScreen";
 import { Workbench } from "./pages/WorkbenchPage/Workbench";
-import { WorkflowStudioPage } from "./pages/WorkflowStudioPage";
 import {
   conversationRoutePath,
   workflowRoutePath,
@@ -62,9 +61,11 @@ function LoginRoute({
 function WorkbenchRoute({
   user,
   onLogout,
+  routeView = "chat",
 }: {
   user?: User;
   onLogout: () => void;
+  routeView?: "chat" | "workflow";
 }) {
   const params = useParams();
   const navigate = useNavigate();
@@ -90,6 +91,7 @@ function WorkbenchRoute({
       routeWorkspaceId={routeWorkspaceId}
       routeConversationId={routeConversationId}
       routeTab={routeTab}
+      routeView={routeView}
       onRouteChange={(workspaceId, conversationId, options) => {
         const path = conversationRoutePath(workspaceId, conversationId);
         navigate(`${path}${buildSearch()}`, { replace: options?.replace });
@@ -101,6 +103,11 @@ function WorkbenchRoute({
       }}
       onOpenWorkflowPage={(workspaceId, conversationId) => {
         navigate(workflowRoutePath(workspaceId, conversationId));
+      }}
+      onCloseWorkflowPage={(workspaceId, conversationId) => {
+        navigate(conversationRoutePath(workspaceId, conversationId), {
+          replace: true,
+        });
       }}
     />
   );
@@ -175,7 +182,15 @@ function RoutedApp() {
         />
         <Route
           path="/workspaces/:workspaceId/conversations/:conversationId/workflow"
-          element={<WorkflowStudioPage user={user} />}
+          element={
+            <WorkbenchRoute
+              user={user}
+              routeView="workflow"
+              onLogout={() => {
+                api.logout().finally(() => setUser(undefined));
+              }}
+            />
+          }
         />
         <Route
           path="*"

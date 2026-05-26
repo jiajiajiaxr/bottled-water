@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   addEdge,
   applyEdgeChanges,
@@ -15,6 +15,7 @@ import {
   type EdgeChange,
   type Node as FlowNode,
   type NodeChange,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Spin, Tag, Typography } from "antd";
@@ -194,6 +195,7 @@ export function WorkflowCanvas({
   overlayText,
   selectedNodeIds = [],
   selectedEdgeIds = [],
+  fitViewSignal = 0,
   onChange,
   onNodeClick,
   onPaneClick,
@@ -206,6 +208,7 @@ export function WorkflowCanvas({
   overlayText?: string;
   selectedNodeIds?: string[];
   selectedEdgeIds?: string[];
+  fitViewSignal?: number;
   onChange: (workflow: ConversationWorkflow) => void;
   onNodeClick: (node: WorkflowNode) => void;
   onPaneClick?: () => void;
@@ -213,6 +216,7 @@ export function WorkflowCanvas({
   onCopySelection?: () => void;
 }) {
   const lastNodePointerAt = useRef(0);
+  const flowInstance = useRef<ReactFlowInstance | null>(null);
   const markNodePointer = useCallback(() => {
     lastNodePointerAt.current = Date.now();
   }, []);
@@ -228,6 +232,11 @@ export function WorkflowCanvas({
     () => new Map((workflow.nodes ?? []).map((node) => [node.id, node])),
     [workflow.nodes],
   );
+
+  useEffect(() => {
+    if (!fitViewSignal || !flowInstance.current) return;
+    flowInstance.current.fitView({ padding: 0.18 });
+  }, [fitViewSignal]);
 
   const nodeFromEventTarget = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) return undefined;
@@ -328,6 +337,9 @@ export function WorkflowCanvas({
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
+        onInit={(instance) => {
+          flowInstance.current = instance;
+        }}
         onNodeDragStart={markNodePointer}
         onSelectionChange={({ nodes, edges }) => {
           onSelectionChange?.(

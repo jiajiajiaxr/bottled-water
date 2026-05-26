@@ -220,6 +220,10 @@ button {
   background: #ffffff;
 }
 
+.chat-panel.workflow-mode {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .chat-header {
   height: auto;
   padding: 18px 22px;
@@ -236,6 +240,12 @@ button {
   overflow: auto;
   padding: 24px 24px 10px;
   background: #fbfcff;
+}
+
+.workflow-chat-host {
+  min-height: 0;
+  overflow: hidden;
+  background: #f5f7fb;
 }
 
 .message-row {
@@ -1033,6 +1043,14 @@ button {
   background: #f5f7fb;
 }
 
+.workflow-embedded-loading {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  place-items: center;
+  background: #f5f7fb;
+}
+
 .workflow-studio-page {
   display: flex;
   min-width: 1120px;
@@ -1064,6 +1082,35 @@ button {
   gap: 12px;
   min-height: 0;
   padding: 12px;
+}
+
+.workflow-studio-embedded {
+  display: grid;
+  grid-template-columns: 178px minmax(0, 1fr) 340px;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 10px;
+  background: #f5f7fb;
+}
+
+.workflow-mode-toolbar {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.workflow-mode-switches,
+.workflow-mode-add,
+.workflow-mode-output {
+  display: grid;
+  gap: 8px;
 }
 
 .workflow-studio-left,
@@ -1112,12 +1159,22 @@ button {
   border-radius: 0;
 }
 
+.workflow-studio-embedded .workflow-studio-canvas-wrap .xy-workflow-canvas {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+
 .workflow-studio-bottom {
-  min-height: 188px;
+  min-height: 0;
   max-height: 240px;
   padding: 0 12px;
   border-top: 1px solid #e8eef7;
   overflow: auto;
+}
+
+.workflow-studio-bottom .ant-collapse-content-box {
+  padding: 0 0 8px;
 }
 
 .workflow-run-log,
@@ -1134,6 +1191,10 @@ button {
   gap: 14px;
   overflow: auto;
   padding: 14px;
+}
+
+.workflow-studio-embedded .workflow-studio-right {
+  border-radius: 8px;
 }
 
 .workflow-node-config-form .ant-form-item {

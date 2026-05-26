@@ -1,4 +1,5 @@
 import { Form, Spin } from "antd";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api";
 import { layoutWorkflowPositions } from "../../lib/workflowLayout";
@@ -7,6 +8,7 @@ import type { ConversationWorkflow } from "../../types";
 import { workflowSettings } from "./utils";
 import { useWorkflowStudio } from "./useWorkflowStudio";
 import { WorkflowCanvasPanel } from "./WorkflowCanvasPanel";
+import { WorkflowModeToolbar } from "./WorkflowModeToolbar";
 import { WorkflowNodeConfigPanel } from "./WorkflowNodeConfigPanel";
 import { WorkflowNodePalette } from "./WorkflowNodePalette";
 import { WorkflowStudioHeader } from "./WorkflowStudioHeader";
@@ -14,15 +16,20 @@ import { WorkflowStudioHeader } from "./WorkflowStudioHeader";
 export function WorkflowStudioContent({
   workspaceId,
   conversationId,
+  embedded = false,
+  onBack,
   onError,
   onSuccess,
 }: {
   workspaceId: string;
   conversationId: string;
+  embedded?: boolean;
+  onBack?: () => void;
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
 }) {
   const [nodeForm] = Form.useForm();
+  const [fitViewSignal, setFitViewSignal] = useState(0);
   const navigate = useNavigate();
   const studio = useWorkflowStudio({
     workspaceId,
@@ -34,9 +41,11 @@ export function WorkflowStudioContent({
 
   const patchWorkflowSettings = (patch: Record<string, unknown>) => {
     if (!studio.workflow) return;
+    const { output_mode: outputMode, ...settingsPatch } = patch;
     studio.setWorkflowDraft({
       ...studio.workflow,
-      settings: { ...workflowSettings(studio.workflow), ...patch },
+      ...(typeof outputMode === "string" ? { output_mode: outputMode } : {}),
+      settings: { ...workflowSettings(studio.workflow), ...settingsPatch },
     });
   };
 
@@ -88,9 +97,88 @@ export function WorkflowStudioContent({
 
   if (studio.loading) {
     return (
-      <main className="workflow-studio-loading">
+      <main className={embedded ? "workflow-embedded-loading" : "workflow-studio-loading"}>
         <Spin />
       </main>
+    );
+  }
+
+  const canvasPanel = (
+    <WorkflowCanvasPanel
+      workflow={studio.workflow}
+      latestRun={studio.latestRun}
+      workflowGenerating={studio.workflowGenerating}
+      selectedNodeIds={studio.selectedNodeIds}
+      selectedEdgeIds={studio.selectedEdgeIds}
+      editingNodeState={studio.editingNodeState}
+      workflowRuns={studio.workflowRuns}
+      fitViewSignal={fitViewSignal}
+      onCopySelection={studio.copySelection}
+      onWorkflowChange={studio.setWorkflowDraft}
+      onOpenNode={studio.openNodeEditor}
+      onClearSelection={() => {
+        studio.setSelectedNodeIds([]);
+        studio.setSelectedEdgeIds([]);
+        studio.setEditingNodeId(undefined);
+      }}
+      onSelectionChange={(nodeIds, edgeIds) => {
+        studio.setSelectedNodeIds(nodeIds);
+        studio.setSelectedEdgeIds(edgeIds);
+        if (nodeIds.length === 1 && studio.workflow) {
+          const node = studio.workflow.nodes.find(
+            (item) => item.id === nodeIds[0],
+          );
+          if (node) studio.openNodeEditor(node);
+        } else if (nodeIds.length > 1 || edgeIds.length) {
+          studio.setEditingNodeId(undefined);
+        }
+      }}
+    />
+  );
+
+  const nodeConfigPanel = (
+    <WorkflowNodeConfigPanel
+      nodeForm={nodeForm}
+      editingNode={studio.editingNode}
+      editingNodeState={studio.editingNodeState}
+      latestRun={studio.latestRun}
+      workflowEdges={studio.workflowEdges}
+      workflowJson={studio.workflowJson}
+      agentOptions={studio.agentOptions}
+      toolOptions={studio.toolOptions}
+      skillOptions={studio.skillOptions}
+      mcpServerOptions={studio.mcpServerOptions}
+      mcpToolOptions={studio.mcpToolOptions}
+      onSaveNode={studio.saveWorkflowNode}
+      onWorkflowJsonChange={studio.setWorkflowJson}
+    />
+  );
+
+  if (embedded) {
+    return (
+      <section className="workflow-studio-embedded">
+        <WorkflowModeToolbar
+          workflow={studio.workflow}
+          generating={studio.workflowGenerating}
+          workflowInstruction={studio.workflowInstruction}
+          newNodeType={studio.newNodeType}
+          selectedNodeIds={studio.selectedNodeIds}
+          selectedEdgeIds={studio.selectedEdgeIds}
+          onBack={onBack ?? (() => navigate(backPath))}
+          onSave={saveWorkflow}
+          onGenerate={generateWorkflow}
+          onRun={runWorkflow}
+          onFitView={() => setFitViewSignal((value) => value + 1)}
+          onInstructionChange={studio.setWorkflowInstruction}
+          onNodeTypeChange={studio.setNewNodeType}
+          onAddNode={studio.addWorkflowNode}
+          onCopySelection={studio.copySelection}
+          onDeleteSelection={studio.deleteSelection}
+          onPatchSettings={patchWorkflowSettings}
+        />
+        {canvasPanel}
+        {nodeConfigPanel}
+      </section>
     );
   }
 
@@ -111,56 +199,8 @@ export function WorkflowStudioContent({
           disabled={studio.workflowGenerating}
           onAdd={studio.addWorkflowNode}
         />
-        <WorkflowCanvasPanel
-          workflow={studio.workflow}
-          latestRun={studio.latestRun}
-          workflowGenerating={studio.workflowGenerating}
-          workflowInstruction={studio.workflowInstruction}
-          newNodeType={studio.newNodeType}
-          selectedNodeIds={studio.selectedNodeIds}
-          selectedEdgeIds={studio.selectedEdgeIds}
-          editingNodeState={studio.editingNodeState}
-          workflowRuns={studio.workflowRuns}
-          onInstructionChange={studio.setWorkflowInstruction}
-          onNodeTypeChange={studio.setNewNodeType}
-          onAddNode={studio.addWorkflowNode}
-          onCopySelection={studio.copySelection}
-          onDeleteSelection={studio.deleteSelection}
-          onWorkflowChange={studio.setWorkflowDraft}
-          onOpenNode={studio.openNodeEditor}
-          onClearSelection={() => {
-            studio.setSelectedNodeIds([]);
-            studio.setSelectedEdgeIds([]);
-            studio.setEditingNodeId(undefined);
-          }}
-          onSelectionChange={(nodeIds, edgeIds) => {
-            studio.setSelectedNodeIds(nodeIds);
-            studio.setSelectedEdgeIds(edgeIds);
-            if (nodeIds.length === 1 && studio.workflow) {
-              const node = studio.workflow.nodes.find(
-                (item) => item.id === nodeIds[0],
-              );
-              if (node) studio.openNodeEditor(node);
-            } else if (nodeIds.length > 1 || edgeIds.length) {
-              studio.setEditingNodeId(undefined);
-            }
-          }}
-        />
-        <WorkflowNodeConfigPanel
-          nodeForm={nodeForm}
-          editingNode={studio.editingNode}
-          editingNodeState={studio.editingNodeState}
-          latestRun={studio.latestRun}
-          workflowEdges={studio.workflowEdges}
-          workflowJson={studio.workflowJson}
-          agentOptions={studio.agentOptions}
-          toolOptions={studio.toolOptions}
-          skillOptions={studio.skillOptions}
-          mcpServerOptions={studio.mcpServerOptions}
-          mcpToolOptions={studio.mcpToolOptions}
-          onSaveNode={studio.saveWorkflowNode}
-          onWorkflowJsonChange={studio.setWorkflowJson}
-        />
+        {canvasPanel}
+        {nodeConfigPanel}
       </div>
     </section>
   );

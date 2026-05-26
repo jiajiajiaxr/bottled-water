@@ -26,15 +26,18 @@ export function Workbench({
   routeWorkspaceId,
   routeConversationId,
   routeTab = "chat",
+  routeView = "chat",
   onRouteChange,
   onRouteTabChange,
   onOpenWorkflowPage,
+  onCloseWorkflowPage,
 }: {
   user: User;
   onLogout: () => void;
   routeWorkspaceId?: string;
   routeConversationId?: string;
   routeTab?: string;
+  routeView?: "chat" | "workflow";
   onRouteChange: (
     workspaceId?: string,
     conversationId?: string,
@@ -45,8 +48,11 @@ export function Workbench({
     options?: { replace?: boolean },
   ) => void;
   onOpenWorkflowPage: (workspaceId: string, conversationId: string) => void;
+  onCloseWorkflowPage: (workspaceId: string, conversationId: string) => void;
 }) {
   const [currentUser, setCurrentUser] = useState(user);
+  const [loadingConversationsList, setLoadingConversationsList] =
+    useState(false);
   const {
     messages,
     setMessages,
@@ -164,9 +170,18 @@ export function Workbench({
 
   const openWorkflowPage = () => {
     if (!active?.id || active.chat_type !== "group") return;
-    const workspaceId = active.workspace_id || activeWorkspaceId || activeWorkspace?.id;
+    const workspaceId =
+      active.workspace_id || activeWorkspaceId || activeWorkspace?.id;
     if (!workspaceId) return;
     onOpenWorkflowPage(workspaceId, active.id);
+  };
+
+  const closeWorkflowPage = () => {
+    if (!active?.id) return;
+    const workspaceId =
+      active.workspace_id || activeWorkspaceId || activeWorkspace?.id;
+    if (!workspaceId) return;
+    onCloseWorkflowPage(workspaceId, active.id);
   };
 
   const closeMainTab = (tab: "agents" | "workspace" | "settings") => {
@@ -249,6 +264,7 @@ export function Workbench({
   useEffect(() => {
     if (!activeWorkspaceId && workspaces.length) return;
     let cancelled = false;
+    setLoadingConversationsList(true);
     setConversations([]);
     setActiveId(undefined);
     setMessages([]);
@@ -256,11 +272,21 @@ export function Workbench({
     setArtifactPanelOpen(false);
     api.conversations(activeWorkspaceId).then((items) => {
       if (!cancelled) setConversations(items);
+    }).finally(() => {
+      if (!cancelled) setLoadingConversationsList(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen, setArtifact, setActiveId, setConversations, setMessages]);
+  }, [
+    activeWorkspaceId,
+    workspaces.length,
+    setArtifactPanelOpen,
+    setArtifact,
+    setActiveId,
+    setConversations,
+    setMessages,
+  ]);
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
@@ -269,6 +295,7 @@ export function Workbench({
     );
     if (!scopedConversations.length) {
       setActiveId(undefined);
+      if (loadingConversationsList) return;
       if (routeConversationId)
         navigateToConversation(activeWorkspaceId, undefined, true);
       return;
@@ -298,6 +325,7 @@ export function Workbench({
     activeWorkspaceId,
     activeId,
     conversations,
+    loadingConversationsList,
     routeConversationId,
     routeWorkspaceId,
   ]);
@@ -349,6 +377,8 @@ export function Workbench({
         setMembersOpen={setMembersOpen}
         setConversationSettingsOpen={setConversationSettingsOpen}
         openWorkflowPage={openWorkflowPage}
+        closeWorkflowPage={closeWorkflowPage}
+        workflowMode={routeView === "workflow" && active?.chat_type === "group"}
         uploadFile={uploadFile}
         artifactPanelOpen={artifactPanelOpen}
         artifact={artifact}

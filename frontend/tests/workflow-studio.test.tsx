@@ -1,15 +1,14 @@
-import React from "react";
+import React, { useState } from "react";
 import { App as AntApp } from "antd";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../src/api";
-import { WorkflowStudioPage } from "../src/pages/WorkflowStudioPage";
+import { WorkflowStudioContent } from "../src/features/workflow/WorkflowStudioContent";
 import type {
   Agent,
   Conversation,
   ConversationWorkflow,
-  User,
   WorkflowRun,
 } from "../src/types";
 
@@ -45,12 +44,6 @@ vi.mock("../src/features/chat/components/drawers/WorkflowCanvas", () => ({
     </div>
   ),
 }));
-
-const user: User = {
-  id: "u1",
-  name: "演示用户",
-  role: "demo",
-};
 
 const conversation: Conversation = {
   id: "c1",
@@ -88,28 +81,15 @@ const workflow: ConversationWorkflow = {
   output_mode: "independent_messages",
   settings: { enabled: true, published: false },
   nodes: [
-    {
-      id: "start",
-      title: "Start",
-      type: "start",
-      status: "queued",
-      position: { x: 0, y: 0 },
-    },
+    { id: "start", title: "Start", type: "start", status: "queued" },
     {
       id: "agent_1",
       title: "Frontend Worker",
       type: "agent",
       agent_id: "a1",
       status: "queued",
-      position: { x: 260, y: 0 },
     },
-    {
-      id: "end",
-      title: "End",
-      type: "end",
-      status: "queued",
-      position: { x: 520, y: 0 },
-    },
+    { id: "end", title: "End", type: "end", status: "queued" },
   ],
   edges: [
     ["start", "agent_1"],
@@ -136,25 +116,32 @@ const run: WorkflowRun = {
   progress: 30,
 };
 
-function renderWorkflowStudio() {
+function EmbeddedHarness() {
+  const [mode, setMode] = useState<"chat" | "workflow">("workflow");
+  if (mode === "chat") return <div>聊天内容</div>;
+  return (
+    <WorkflowStudioContent
+      workspaceId="w1"
+      conversationId="c1"
+      embedded
+      onBack={() => setMode("chat")}
+      onError={vi.fn()}
+      onSuccess={vi.fn()}
+    />
+  );
+}
+
+function renderEmbeddedWorkflow() {
   return render(
     <AntApp>
-      <MemoryRouter
-        initialEntries={["/workspaces/w1/conversations/c1/workflow"]}
-      >
-        <Routes>
-          <Route
-            path="/workspaces/:workspaceId/conversations/:conversationId/workflow"
-            element={<WorkflowStudioPage user={user} />}
-          />
-          <Route path="/app/:workspaceId/c/:conversationId" element={<div>群聊页</div>} />
-        </Routes>
+      <MemoryRouter>
+        <EmbeddedHarness />
       </MemoryRouter>
     </AntApp>,
   );
 }
 
-describe("WorkflowStudioPage", () => {
+describe("embedded workflow studio", () => {
   beforeEach(() => {
     vi.mocked(api.conversations).mockResolvedValue([conversation]);
     vi.mocked(api.agents).mockResolvedValue([agent]);
@@ -168,30 +155,31 @@ describe("WorkflowStudioPage", () => {
     vi.mocked(api.startWorkflowRun).mockResolvedValue(run);
   });
 
-  it("loads the routed canvas and returns to the conversation", async () => {
-    renderWorkflowStudio();
+  it("renders inside the chat area and returns without a page topbar", async () => {
+    const { container } = renderEmbeddedWorkflow();
 
-    expect(await screen.findByText("Demo 群聊")).toBeInTheDocument();
-    expect(screen.getByTestId("workflow-canvas")).toBeInTheDocument();
+    expect(await screen.findByTestId("workflow-canvas")).toBeInTheDocument();
+    expect(container.querySelector(".workflow-studio-header")).toBeNull();
+    expect(screen.queryByText("conversation.extra.workflow")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("workflow-back"));
-    expect(await screen.findByText("群聊页")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /聊天/ }));
+    expect(await screen.findByText("聊天内容")).toBeInTheDocument();
   });
 
-  it("saves, generates and starts a workflow run", async () => {
-    renderWorkflowStudio();
+  it("saves, generates and starts a workflow run from the side toolbar", async () => {
+    renderEmbeddedWorkflow();
 
-    await screen.findByText("Demo 群聊");
-    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    await screen.findByTestId("workflow-canvas");
+    fireEvent.click(screen.getByTestId("workflow-save"));
     await waitFor(() => {
       expect(api.saveConversationWorkflow).toHaveBeenCalledWith("c1", expect.any(Object));
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /AI 生成/ }));
+    fireEvent.click(screen.getByTestId("workflow-generate"));
     expect(await screen.findByText("Generated Agent")).toBeInTheDocument();
     expect(api.generateConversationWorkflow).toHaveBeenCalledWith("c1", "");
 
-    fireEvent.click(screen.getByRole("button", { name: /运行/ }));
+    fireEvent.click(screen.getByTestId("workflow-run"));
     await waitFor(() => {
       expect(api.startWorkflowRun).toHaveBeenCalledWith("c1", expect.any(Object));
     });
