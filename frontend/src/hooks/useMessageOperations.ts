@@ -220,6 +220,10 @@ export function useMessageOperations(currentUserName: string) {
     const latestContentById = new Map<string, string>();
     const latestThinkingById = new Map<string, string>();
 
+    // 节流：用 requestAnimationFrame 批处理高频 SSE delta 更新，避免 React 渲染循环溢出
+    let contentRafId = 0;
+    let thinkingRafId = 0;
+
     let rawBuffer = "";
     let completedPreview = "";
     // 追踪当前消息上正在执行的工具调用
@@ -278,7 +282,14 @@ export function useMessageOperations(currentUserName: string) {
           const existing = latestContentById.get(messageId) ?? "";
           const nextContent = existing + delta;
           latestContentById.set(messageId, nextContent);
-          updateStreamingContent(messageId, nextContent);
+          // 节流：避免高频 SSE delta 导致 React 渲染循环溢出
+          if (contentRafId) return;
+          contentRafId = requestAnimationFrame(() => {
+            contentRafId = 0;
+            for (const [id, content] of latestContentById) {
+              updateStreamingContent(id, content);
+            }
+          });
         },
         onReasoningDelta: (delta, payload) => {
           const messageId = String(
@@ -289,7 +300,14 @@ export function useMessageOperations(currentUserName: string) {
           const existing = latestThinkingById.get(messageId) ?? "";
           const nextThinking = existing + delta;
           latestThinkingById.set(messageId, nextThinking);
-          updateStreamingThinking(messageId, nextThinking);
+          // 节流
+          if (thinkingRafId) return;
+          thinkingRafId = requestAnimationFrame(() => {
+            thinkingRafId = 0;
+            for (const [id, thinking] of latestThinkingById) {
+              updateStreamingThinking(id, thinking);
+            }
+          });
         },
         onMessageUpdated: upsertFinalMessage,
         onMessageNew: (incoming) => {

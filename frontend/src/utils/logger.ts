@@ -64,14 +64,24 @@ class Logger {
     this.log("ERROR", module, message, data);
   }
 
+  /** 获取认证 token。 */
+  private getToken(): string | null {
+    return window.localStorage.getItem("agenthub_token");
+  }
+
   /** 立即发送队列中的日志（批量）。 */
   private async flush() {
     if (this.queue.length === 0) return;
     const batch = this.queue.splice(0, this.BATCH_SIZE);
+    const token = this.getToken();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     try {
       await fetch("/api/v1/logs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ logs: batch }),
         keepalive: true,
       });
@@ -80,13 +90,20 @@ class Logger {
     }
   }
 
-  /** 页面卸载时通过 sendBeacon 发送剩余日志。 */
+  /** 页面卸载时通过 sendBeacon 发送剩余日志。
+   *
+   * sendBeacon 不支持自定义 header，因此通过 URL query param 传递 token。
+   */
   sendBeacon() {
     if (this.queue.length === 0) return;
+    const token = this.getToken();
+    const url = token
+      ? `/api/v1/logs?token=${encodeURIComponent(token)}`
+      : "/api/v1/logs";
     const blob = new Blob([JSON.stringify({ logs: this.queue })], {
       type: "application/json",
     });
-    navigator.sendBeacon("/api/v1/logs", blob);
+    navigator.sendBeacon(url, blob);
     this.queue = [];
   }
 }
