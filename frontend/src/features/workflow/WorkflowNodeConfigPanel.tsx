@@ -1,4 +1,5 @@
 import { CheckCircleOutlined } from "@ant-design/icons";
+import type { ReactNode } from "react";
 import {
   Button,
   Empty,
@@ -32,6 +33,10 @@ export function WorkflowNodeConfigPanel({
   mcpToolOptions,
   onSaveNode,
   onWorkflowJsonChange,
+  className = "workflow-studio-right",
+  showRunState = true,
+  showWorkflowJson = true,
+  extraActions,
 }: {
   nodeForm: FormInstance;
   editingNode?: WorkflowNode;
@@ -46,9 +51,13 @@ export function WorkflowNodeConfigPanel({
   mcpToolOptions: Array<{ label: string; value: string }>;
   onSaveNode: () => void;
   onWorkflowJsonChange: (value: string) => void;
+  className?: string;
+  showRunState?: boolean;
+  showWorkflowJson?: boolean;
+  extraActions?: ReactNode;
 }) {
   return (
-    <aside className="workflow-studio-right">
+    <aside className={className}>
       <Text strong>节点配置</Text>
       {editingNode ? (
         <Form form={nodeForm} layout="vertical" className="workflow-node-config-form">
@@ -132,6 +141,7 @@ export function WorkflowNodeConfigPanel({
           <Button type="primary" icon={<CheckCircleOutlined />} onClick={onSaveNode}>
             应用配置
           </Button>
+          {extraActions}
         </Form>
       ) : (
         <Empty
@@ -139,15 +149,19 @@ export function WorkflowNodeConfigPanel({
           description="点击画布节点后在这里配置"
         />
       )}
-      <RunStateCard latestRun={latestRun} workflowEdges={workflowEdges} />
-      <div className="workflow-json-panel">
-        <Text strong>Workflow JSON</Text>
-        <TextArea
-          rows={10}
-          value={workflowJson}
-          onChange={(event) => onWorkflowJsonChange(event.target.value)}
-        />
-      </div>
+      {showRunState && (
+        <RunStateCard latestRun={latestRun} workflowEdges={workflowEdges} />
+      )}
+      {showWorkflowJson && (
+        <div className="workflow-json-panel">
+          <Text strong>Workflow JSON</Text>
+          <TextArea
+            rows={10}
+            value={workflowJson}
+            onChange={(event) => onWorkflowJsonChange(event.target.value)}
+          />
+        </div>
+      )}
     </aside>
   );
 }

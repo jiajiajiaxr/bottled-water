@@ -162,27 +162,31 @@ describe("embedded workflow studio", () => {
     expect(container.querySelector(".workflow-studio-header")).toBeNull();
     expect(screen.queryByText("conversation.extra.workflow")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /聊天/ }));
+    fireEvent.click(screen.getByRole("button", { name: /返回聊天/ }));
     expect(await screen.findByText("聊天内容")).toBeInTheDocument();
   });
 
-  it("saves, generates and starts a workflow run from the side toolbar", async () => {
+  it("saves, generates and starts a workflow run from the settings card", async () => {
     renderEmbeddedWorkflow();
 
     await screen.findByTestId("workflow-canvas");
+    fireEvent.click(screen.getByRole("button", { name: "工作流设置" }));
     fireEvent.click(screen.getByTestId("workflow-save"));
     await waitFor(() => {
       expect(api.saveConversationWorkflow).toHaveBeenCalledWith("c1", expect.any(Object));
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "AI生成" }));
     fireEvent.click(screen.getByTestId("workflow-generate"));
     expect(await screen.findByText("Generated Agent")).toBeInTheDocument();
     expect(api.generateConversationWorkflow).toHaveBeenCalledWith("c1", "");
 
+    fireEvent.click(screen.getByRole("button", { name: "工作流设置" }));
     fireEvent.click(screen.getByTestId("workflow-run"));
     await waitFor(() => {
       expect(api.startWorkflowRun).toHaveBeenCalledWith("c1", expect.any(Object));
     });
-    expect(await screen.findByText("running")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "运行日志" }));
+    expect((await screen.findAllByText("running")).length).toBeGreaterThan(0);
   });
 });

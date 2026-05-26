@@ -329,7 +329,7 @@ export function WorkflowCanvas({
         nodesConnectable={!locked}
         elementsSelectable={!locked}
         panOnScroll
-        panOnDrag={locked ? false : [1, 2]}
+        panOnDrag={!locked}
         selectionOnDrag={false}
         selectionKeyCode={locked ? null : "Shift"}
         selectionMode={SelectionMode.Partial}
