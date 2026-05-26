@@ -93,6 +93,73 @@
                     "kind": "test",
                     "isDefault": true
                 }
+            },
+            {
+                "label": "Setup .env",
+                "type": "shell",
+                "command": "if (-not (Test-Path .env)) { Copy-Item .env.sample .env; Write-Host '已复制 .env.sample 到 .env，请按需修改配置。' } else { Write-Host '.env 已存在，跳过复制。' }",
+                "options": {
+                    "cwd": "${workspaceFolder:Root}"
+                },
+                "problemMatcher": [],
+                "presentation": {
+                    "panel": "dedicated",
+                    "group": "setup"
+                }
+            },
+            {
+                "label": "Setup Backend",
+                "type": "shell",
+                "command": "uv sync --extra dev",
+                "options": {
+                    "cwd": "${workspaceFolder:Backend}"
+                },
+                "problemMatcher": [],
+                "presentation": {
+                    "panel": "dedicated",
+                    "group": "setup"
+                }
+            },
+            {
+                "label": "Setup Frontend",
+                "type": "shell",
+                "command": "pnpm install",
+                "options": {
+                    "cwd": "${workspaceFolder:Frontend}"
+                },
+                "problemMatcher": [],
+                "presentation": {
+                    "panel": "dedicated",
+                    "group": "setup"
+                }
+            },
+            {
+                "label": "Run Migrations",
+                "type": "shell",
+                "command": "uv run alembic upgrade head",
+                "options": {
+                    "cwd": "${workspaceFolder:Backend}"
+                },
+                "problemMatcher": [],
+                "presentation": {
+                    "panel": "dedicated",
+                    "group": "setup"
+                }
+            },
+            {
+                "label": "Setup All",
+                "dependsOn": [
+                    "Setup .env",
+                    "Setup Backend",
+                    "Run Migrations",
+                    "Setup Frontend"
+                ],
+                "dependsOrder": "sequence",
+                "problemMatcher": [],
+                "presentation": {
+                    "panel": "dedicated",
+                    "group": "setup"
+                }
             }
         ]
     }
