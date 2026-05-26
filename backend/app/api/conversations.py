@@ -18,6 +18,10 @@ from app.services.audit import write_audit_log
 from app.services.serialization import conversation_to_dict, participant_to_dict, workflow_run_to_dict
 from app.services.workflows.graph import Edge
 from app.services.workflows.runtime import build_edge_states, build_node_states
+from app.services.workflows.validator import (
+    format_workflow_validation_message,
+    validate_workflow_graph,
+)
 
 
 router = APIRouter(tags=["conversations"])
@@ -325,7 +329,8 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
     fallback = _fallback_workflow(conversation)
     active_agent_ids = {item.agent_id for item in _active_participants(conversation) if item.agent_id}
     nodes = value.get("nodes") if isinstance(value.get("nodes"), list) else fallback["nodes"]
-    edges = value.get("edges") if isinstance(value.get("edges"), list) else fallback["edges"]
+    has_explicit_edges = isinstance(value.get("edges"), list)
+    edges = value.get("edges") if has_explicit_edges else fallback["edges"]
     normalized_nodes = []
     for index, node in enumerate(nodes[:40]):
         if not isinstance(node, dict):
@@ -353,6 +358,18 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
                 **({"agent_id": agent_id} if agent_id else {}),
             }
         )
+        position = node.get("position") or config.get("position")
+        if (
+            isinstance(position, dict)
+            and isinstance(position.get("x"), (int, float))
+            and isinstance(position.get("y"), (int, float))
+        ):
+            normalized_nodes[-1]["position"] = {
+                "x": float(position["x"]),
+                "y": float(position["y"]),
+            }
+        if isinstance(node.get("data"), dict):
+            normalized_nodes[-1]["data"] = node["data"]
     node_ids = {node["id"] for node in normalized_nodes}
     normalized_edges = []
     for raw_edge in edges[:80]:
@@ -374,7 +391,7 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
         **fallback,
         **{key: value[key] for key in ("mode", "output_mode", "settings") if key in value},
         "nodes": normalized_nodes or fallback["nodes"],
-        "edges": normalized_edges or fallback["edges"],
+        "edges": normalized_edges if has_explicit_edges else fallback["edges"],
     }
 
 
@@ -604,7 +621,14 @@ async def start_workflow_run(
     workflow = (conversation.extra or {}).get("workflow")
     if not isinstance(workflow, dict):
         workflow = _fallback_workflow(conversation)
-    workflow = _normalize_workflow(payload.get("workflow") if isinstance(payload.get("workflow"), dict) else workflow, conversation)
+    workflow = _normalize_workflow(
+        payload.get("workflow") if isinstance(payload.get("workflow"), dict) else workflow,
+        conversation,
+    )
+    agents = [item.agent for item in _active_participants(conversation) if item.agent]
+    validation = validate_workflow_graph(workflow, agents=agents)
+    if not validation.ok:
+        raise ValidationAppError(format_workflow_validation_message(validation))
     run = WorkflowRun(
         conversation_id=conversation.id,
         trigger_message_id=payload.get("trigger_message_id"),

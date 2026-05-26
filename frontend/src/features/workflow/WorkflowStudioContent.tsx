@@ -1,5 +1,5 @@
 import { Form, Spin } from "antd";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api";
 import { layoutWorkflowPositions } from "../../lib/workflowLayout";
@@ -15,6 +15,7 @@ import {
 import { WorkflowNodeConfigPanel } from "./WorkflowNodeConfigPanel";
 import { WorkflowNodePalette } from "./WorkflowNodePalette";
 import { WorkflowStudioHeader } from "./WorkflowStudioHeader";
+import { validateWorkflowDefinition } from "./validation";
 
 export function WorkflowStudioContent({
   workspaceId,
@@ -42,6 +43,14 @@ export function WorkflowStudioContent({
     onError,
   });
   const backPath = conversationRoutePath(workspaceId, conversationId);
+  const validationIssues = useMemo(
+    () => validateWorkflowDefinition(studio.workflow),
+    [studio.workflow],
+  );
+  const workflowErrorText = () =>
+    `当前工作流配置不完整，请先修复画布：${validationIssues
+      .map((issue) => issue.message)
+      .join("；")}`;
 
   const patchWorkflowSettings = (patch: Record<string, unknown>) => {
     if (!studio.workflow) return;
@@ -94,6 +103,11 @@ export function WorkflowStudioContent({
 
   const runWorkflow = async () => {
     if (!studio.workflow) return;
+    if (validationIssues.length) {
+      onError(workflowErrorText());
+      setActivePanel("settings");
+      return;
+    }
     const run = await api.startWorkflowRun(conversationId, studio.workflow);
     studio.setWorkflowRuns((current) => [run, ...current]);
     onSuccess("工作流运行已创建");
@@ -111,9 +125,12 @@ export function WorkflowStudioContent({
     if (embedded) setActivePanel("config");
   };
 
-  const addWorkflowNode = (type: string) => {
+  const addWorkflowNode = (
+    type: string,
+    position?: { x: number; y: number },
+  ) => {
     studio.setNewNodeType(type);
-    studio.addWorkflowNode(type);
+    studio.addWorkflowNode(type, position);
     if (embedded) setActivePanel("config");
   };
 
@@ -144,10 +161,11 @@ export function WorkflowStudioContent({
       selectedEdgeIds={studio.selectedEdgeIds}
       editingNodeState={studio.editingNodeState}
       workflowRuns={studio.workflowRuns}
+      validationIssues={validationIssues}
       fitViewSignal={fitViewSignal}
       showRuntimePanel={!embedded}
       onCopySelection={copySelection}
-      onDropNodeType={embedded ? addWorkflowNode : undefined}
+      onDropNodeType={addWorkflowNode}
       onWorkflowChange={studio.setWorkflowDraft}
       onOpenNode={openNodeEditor}
       onClearSelection={clearCanvasSelection}
@@ -201,6 +219,7 @@ export function WorkflowStudioContent({
           workflowRuns={studio.workflowRuns}
           workflowEdges={studio.workflowEdges}
           workflowJson={studio.workflowJson}
+          validationIssues={validationIssues}
           nodeForm={nodeForm}
           agentOptions={studio.agentOptions}
           toolOptions={studio.toolOptions}

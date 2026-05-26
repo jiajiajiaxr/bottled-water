@@ -195,16 +195,20 @@ export function useWorkflowStudio({
     hydrateNodeForm(node);
   };
 
-  const addWorkflowNode = (type: string) => {
+  const addWorkflowNode = (
+    type: string,
+    position?: { x: number; y: number },
+  ) => {
     if (!workflow || workflowGenerating) return;
     const node = createWorkflowNode(type, activeAgents[0] ?? agents[0]);
     const nodes = [...workflow.nodes];
     const selectedNode = nodes.find((item) => item.id === editingNodeId);
     const anchor = selectedNode ?? nodes[nodes.length - 1];
-    node.position = {
-      x: (anchor?.position?.x ?? 48) + 300,
-      y: selectedNode ? anchor?.position?.y ?? 64 : 80 + nodes.length * 36,
-    };
+    node.position =
+      position ?? {
+        x: (anchor?.position?.x ?? 48) + 300,
+        y: selectedNode ? anchor?.position?.y ?? 64 : 80 + nodes.length * 36,
+      };
     const endIndex = nodes.findIndex((item) => workflowNodeType(item) === "end");
     nodes.splice(endIndex >= 0 ? endIndex : nodes.length, 0, node);
     const edges = [...(workflow.edges ?? [])];

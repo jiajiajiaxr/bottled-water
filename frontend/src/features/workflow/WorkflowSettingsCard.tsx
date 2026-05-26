@@ -5,18 +5,21 @@ import {
 import { Button, Select, Space, Switch, Typography } from "antd";
 import type { ConversationWorkflow } from "../../types";
 import { workflowSettings } from "./utils";
+import type { WorkflowValidationIssue } from "./validation";
 
 const { Text } = Typography;
 
 export function WorkflowSettingsCard({
   workflow,
   generating,
+  validationIssues = [],
   onPatchSettings,
   onSave,
   onRun,
 }: {
   workflow?: ConversationWorkflow;
   generating: boolean;
+  validationIssues?: WorkflowValidationIssue[];
   onPatchSettings: (patch: Record<string, unknown>) => void;
   onSave: () => void;
   onRun: () => void;
@@ -24,6 +27,18 @@ export function WorkflowSettingsCard({
   const settings = workflowSettings(workflow);
   return (
     <Space direction="vertical" size={14} className="full-width">
+      {validationIssues.length > 0 && (
+        <div className="workflow-validation-summary">
+          <Text strong type="danger">
+            校验问题 {validationIssues.length}
+          </Text>
+          {validationIssues.slice(0, 8).map((issue) => (
+            <Text key={issue.id} type="danger">
+              {issue.message}
+            </Text>
+          ))}
+        </div>
+      )}
       <div className="workflow-floating-setting-row">
         <div>
           <Text strong>启用状态</Text>

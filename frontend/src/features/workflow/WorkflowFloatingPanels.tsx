@@ -24,6 +24,7 @@ import { WorkflowHistoryCard, WorkflowRunLogCard } from "./WorkflowRuntimeCards"
 import { WorkflowNodeConfigPanel } from "./WorkflowNodeConfigPanel";
 import { WorkflowNodeLibraryCard } from "./WorkflowNodeLibraryCard";
 import { WorkflowSettingsCard } from "./WorkflowSettingsCard";
+import type { WorkflowValidationIssue } from "./validation";
 
 const { Text } = Typography;
 
@@ -57,6 +58,7 @@ export function WorkflowFloatingPanels({
   workflowRuns,
   workflowEdges,
   workflowJson,
+  validationIssues = [],
   nodeForm,
   agentOptions,
   toolOptions,
@@ -90,6 +92,7 @@ export function WorkflowFloatingPanels({
   workflowRuns: WorkflowRun[];
   workflowEdges: string[][];
   workflowJson: string;
+  validationIssues?: WorkflowValidationIssue[];
   nodeForm: FormInstance;
   agentOptions: Array<{ label: string; value: string }>;
   toolOptions: Array<{ label: string; value: string }>;
@@ -144,6 +147,11 @@ export function WorkflowFloatingPanels({
             active={activePanel === item.key}
             disabled={item.disabled}
             loading={item.key === "ai" && generating}
+            badgeCount={
+              item.key === "settings" && validationIssues.length
+                ? validationIssues.length
+                : undefined
+            }
             onClick={() => openPanel(item.key)}
           />
         ))}
@@ -261,6 +269,7 @@ export function WorkflowFloatingPanels({
               <WorkflowSettingsCard
                 workflow={workflow}
                 generating={generating}
+                validationIssues={validationIssues}
                 onPatchSettings={onPatchSettings}
                 onSave={onSave}
                 onRun={onRun}

@@ -5,6 +5,7 @@ import type {
   WorkflowNode,
   WorkflowRun,
 } from "../../types";
+import type { WorkflowValidationIssue } from "./validation";
 import { WorkflowRunPanels } from "./WorkflowRunPanels";
 
 export function WorkflowCanvasPanel({
@@ -15,6 +16,7 @@ export function WorkflowCanvasPanel({
   selectedEdgeIds,
   editingNodeState,
   workflowRuns,
+  validationIssues,
   fitViewSignal,
   showRuntimePanel = true,
   onCopySelection,
@@ -31,33 +33,18 @@ export function WorkflowCanvasPanel({
   selectedEdgeIds: string[];
   editingNodeState?: WorkflowRun["node_states"][number];
   workflowRuns: WorkflowRun[];
+  validationIssues?: WorkflowValidationIssue[];
   fitViewSignal: number;
   showRuntimePanel?: boolean;
   onCopySelection: () => void;
-  onDropNodeType?: (type: string) => void;
+  onDropNodeType?: (type: string, position?: { x: number; y: number }) => void;
   onWorkflowChange: (workflow: ConversationWorkflow) => void;
   onOpenNode: (node: WorkflowNode) => void;
   onClearSelection: () => void;
   onSelectionChange: (nodeIds: string[], edgeIds: string[]) => void;
 }) {
   return (
-    <main
-      className="workflow-studio-canvas-wrap"
-      onDragOver={(event) => {
-        if (!onDropNodeType) return;
-        if (!event.dataTransfer.types.includes("application/x-agenthub-node")) {
-          return;
-        }
-        event.preventDefault();
-      }}
-      onDrop={(event) => {
-        if (!onDropNodeType) return;
-        const type = event.dataTransfer.getData("application/x-agenthub-node");
-        if (!type) return;
-        event.preventDefault();
-        onDropNodeType(type);
-      }}
-    >
+    <main className="workflow-studio-canvas-wrap">
       {workflow ? (
         <WorkflowCanvas
           workflow={workflow}
@@ -67,7 +54,9 @@ export function WorkflowCanvasPanel({
           fitViewSignal={fitViewSignal}
           selectedNodeIds={selectedNodeIds}
           selectedEdgeIds={selectedEdgeIds}
+          validationIssues={validationIssues}
           onChange={onWorkflowChange}
+          onDropNodeType={onDropNodeType}
           onNodeClick={onOpenNode}
           onPaneClick={onClearSelection}
           onCopySelection={onCopySelection}

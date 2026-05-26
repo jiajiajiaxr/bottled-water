@@ -158,8 +158,18 @@ def _sanitize_workflow(conversation: Conversation, agents: list[Agent], value: d
                 **({"agent_id": str(agent_id)} if agent_id else {}),
             }
         )
+        position = node.get("position") or config.get("position")
+        if (
+            isinstance(position, dict)
+            and isinstance(position.get("x"), (int, float))
+            and isinstance(position.get("y"), (int, float))
+        ):
+            nodes[-1]["position"] = {"x": float(position["x"]), "y": float(position["y"])}
+        if isinstance(node.get("data"), dict):
+            nodes[-1]["data"] = node["data"]
     node_ids = {node["id"] for node in nodes}
-    raw_edges = source.get("edges") if isinstance(source.get("edges"), list) else fallback["edges"]
+    has_explicit_edges = isinstance(source.get("edges"), list)
+    raw_edges = source.get("edges") if has_explicit_edges else fallback["edges"]
     edges: list[list[str] | dict[str, Any]] = []
     for raw_edge in raw_edges[:80]:
         edge = Edge.from_value(raw_edge)
@@ -181,7 +191,7 @@ def _sanitize_workflow(conversation: Conversation, agents: list[Agent], value: d
         **{key: source[key] for key in ("mode", "output_mode", "settings") if key in source},
         "conversation_id": conversation.id,
         "nodes": nodes or fallback["nodes"],
-        "edges": edges or fallback["edges"],
+        "edges": edges if has_explicit_edges else fallback["edges"],
     }
 
 

@@ -1,4 +1,4 @@
-import { Button, Tooltip } from "antd";
+import { Badge, Button, Tooltip } from "antd";
 import type { ReactNode } from "react";
 
 export function WorkflowFloatingButton({
@@ -8,6 +8,7 @@ export function WorkflowFloatingButton({
   disabled,
   danger,
   loading,
+  badgeCount,
   placement = "right",
   onClick,
 }: {
@@ -17,21 +18,24 @@ export function WorkflowFloatingButton({
   disabled?: boolean;
   danger?: boolean;
   loading?: boolean;
+  badgeCount?: number;
   placement?: "left" | "right";
   onClick: () => void;
 }) {
   return (
     <Tooltip title={title} placement={placement}>
-      <Button
-        aria-label={title}
-        shape="circle"
-        type={active ? "primary" : "default"}
-        danger={danger}
-        disabled={disabled}
-        loading={loading}
-        icon={icon}
-        onClick={onClick}
-      />
+      <Badge count={badgeCount} size="small" offset={[-2, 2]}>
+        <Button
+          aria-label={title}
+          shape="circle"
+          type={active ? "primary" : "default"}
+          danger={danger}
+          disabled={disabled}
+          loading={loading}
+          icon={icon}
+          onClick={onClick}
+        />
+      </Badge>
     </Tooltip>
   );
 }

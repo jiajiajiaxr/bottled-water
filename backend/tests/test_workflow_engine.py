@@ -92,6 +92,25 @@ def test_workflow_validator_rejects_cycles_and_loop_overflow() -> None:
     assert any("max_iterations" in item for item in result.errors)
 
 
+def test_workflow_validator_requires_reachable_complete_canvas() -> None:
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {"id": "agent", "type": "agent"},
+            {"id": "tool", "type": "tool", "config": {}},
+            {"id": "end", "type": "end"},
+        ],
+        "edges": [["start", "agent"]],
+    }
+
+    result = validate_workflow_graph(workflow)
+
+    assert not result.ok
+    assert any("must select an agent" in item for item in result.errors)
+    assert any("tool_name" in item for item in result.errors)
+    assert any("End node end is not reachable" in item for item in result.errors)
+
+
 def test_node_output_reference_resolution() -> None:
     value = {
         "prompt": "Use {{agent.text}}",
@@ -204,6 +223,7 @@ async def test_engine_agent_node_uses_function_call_loop() -> None:
 async def test_agent_node_receives_upstream_output_in_model_context() -> None:
     workflow = {
         "nodes": [
+            {"id": "start", "type": "start"},
             {
                 "id": "source",
                 "type": "tool",
@@ -219,8 +239,9 @@ async def test_agent_node_receives_upstream_output_in_model_context() -> None:
                 "title": "Writer",
                 "config": {"input": {"brief": "{{nodes.source.text}}", "all": "{{upstream.text}}"}},
             },
+            {"id": "end", "type": "end"},
         ],
-        "edges": [["source", "agent"]],
+        "edges": [["start", "source"], ["source", "agent"], ["agent", "end"]],
     }
     db, conversation, user_message, task, run = _runtime(workflow)
     agent = SimpleNamespace(id="agent-1", name="Writer", deleted_at=None, config={})
@@ -271,6 +292,7 @@ async def test_agent_node_receives_upstream_output_in_model_context() -> None:
 async def test_tool_node_uses_upstream_reference_as_arguments() -> None:
     workflow = {
         "nodes": [
+            {"id": "start", "type": "start"},
             {
                 "id": "source",
                 "type": "tool",
@@ -284,8 +306,9 @@ async def test_tool_node_uses_upstream_reference_as_arguments() -> None:
                 "type": "tool",
                 "config": {"tool_name": "target.tool", "input": {"query": "{{nodes.source.text}}"}},
             },
+            {"id": "end", "type": "end"},
         ],
-        "edges": [["source", "target"]],
+        "edges": [["start", "source"], ["source", "target"], ["target", "end"]],
     }
     db, conversation, user_message, task, run = _runtime(workflow)
     db.get.side_effect = lambda model, item_id: (
@@ -349,14 +372,19 @@ class SlowParallelExecutor(WorkflowNodeExecutor):
 async def test_engine_retry_and_cancel_paths() -> None:
     workflow = {
         "nodes": [
+            {"id": "start", "type": "start"},
             {"id": "tool", "type": "tool", "config": {"retry": 1, "tool_name": "api.test"}},
+            {"id": "end", "type": "end"},
         ],
-        "edges": [],
+        "edges": [["start", "tool"], ["tool", "end"]],
     }
     db, conversation, user_message, task, run = _runtime(workflow)
     flaky = FlakyExecutor()
 
-    with patch("app.services.workflows.engine.get_executor", return_value=flaky):
+    with patch(
+        "app.services.workflows.engine.get_executor",
+        side_effect=lambda node_type: flaky if node_type == "tool" else WorkflowNodeExecutor(),
+    ):
         with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
             result = await WorkflowEngine(
                 db,

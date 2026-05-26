@@ -25,6 +25,10 @@ from app.services.workflows.definition import (
 )
 from app.services.workflows.planning import _maybe_replan_workflow
 from app.services.workflows.runtime import _sync_workflow_run, build_edge_states, build_node_states
+from app.services.workflows.validator import (
+    format_workflow_validation_message,
+    validate_workflow_graph,
+)
 
 
 async def run_orchestration(message_id: str) -> None:
@@ -80,6 +84,32 @@ async def run_orchestration(message_id: str) -> None:
             workflow=workflow,
             channel=channel,
         )
+        validation = validate_workflow_graph(workflow, agents=agents)
+        if not validation.ok:
+            warning_text = format_workflow_validation_message(validation)
+            assistant = Message(
+                conversation_id=conversation.id,
+                sender_type="agent",
+                sender_id=None,
+                sender_name="Workflow Engine",
+                content_type="text",
+                content={"text": warning_text, "validation_errors": validation.errors},
+                status="completed",
+            )
+            db.add(assistant)
+            conversation.last_message_preview = warning_text[:300]
+            conversation.last_message_sender = "Workflow Engine"
+            conversation.last_message_at = utcnow()
+            conversation.message_count += 1
+            db.commit()
+            db.refresh(assistant)
+            await event_bus.publish(channel, "message:new", message_to_dict(assistant))
+            await event_bus.publish(
+                channel,
+                "generation_finished",
+                {"conversation_id": conversation.id, "reason": "workflow_invalid"},
+            )
+            return
         output_mode = str(workflow.get("output_mode") or (workflow.get("settings") or {}).get("output_mode") or "independent_messages")
         independent_group_mode = conversation.chat_type == "group" and output_mode == "independent_messages"
         independent_agent_replies: list[dict[str, str]] = []

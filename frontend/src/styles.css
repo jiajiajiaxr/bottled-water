@@ -727,6 +727,22 @@ button {
     0 10px 24px rgba(22, 119, 255, 0.16);
 }
 
+.xy-workflow-node-invalid {
+  border-color: #ff4d4f;
+  box-shadow:
+    0 0 0 3px rgba(255, 77, 79, 0.14),
+    0 10px 24px rgba(255, 77, 79, 0.12);
+}
+
+.xy-workflow-edge-invalid .react-flow__edge-path,
+.xy-workflow-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 2.5;
+}
+
+.xy-workflow-edge-invalid .react-flow__edge-text {
+  fill: #ff4d4f;
+}
+
 .xy-workflow-node-running {
   border-color: #1677ff;
   box-shadow: 0 10px 24px rgba(22, 119, 255, 0.18);
@@ -1277,6 +1293,15 @@ button {
 .workflow-runtime-section {
   display: grid;
   gap: 8px;
+}
+
+.workflow-validation-summary {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #ffccc7;
+  border-radius: 8px;
+  background: #fff2f0;
 }
 
 .workflow-floating-setting-row {
