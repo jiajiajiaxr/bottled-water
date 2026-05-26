@@ -743,23 +743,49 @@ button {
 
 .xy-workflow-canvas .react-flow__edge {
   cursor: pointer;
-  pointer-events: visibleStroke;
 }
 
-.xy-workflow-canvas .react-flow__edge-interaction {
-  stroke: transparent;
-  stroke-width: 24;
-  pointer-events: stroke;
+.xy-workflow-edge-visible {
+  pointer-events: none;
+  transition:
+    stroke 0.16s ease,
+    stroke-width 0.16s ease,
+    filter 0.16s ease;
+}
+
+.xy-workflow-edge-hit {
   cursor: pointer;
-}
-
-.xy-workflow-canvas .react-flow__edge-path {
   pointer-events: stroke;
 }
 
-.xy-workflow-canvas .react-flow__connection-path {
-  stroke: #d0d3d6;
-  stroke-width: 2.6;
+.xy-workflow-edge-label {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 18px rgba(31, 64, 120, 0.12);
+  font-size: 12px;
+  pointer-events: all;
+}
+
+.xy-workflow-edge-delete {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid #ffccc7;
+  border-radius: 6px;
+  background: #fff2f0;
+  color: #cf1322;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.xy-workflow-edge-delete:hover {
+  border-color: #ff7875;
+  background: #fff1f0;
 }
 
 .xy-workflow-edge-invalid .react-flow__edge-path,
@@ -808,50 +834,112 @@ button {
   overflow: hidden;
 }
 
-.xy-workflow-handle {
-  width: 28px !important;
-  height: 28px !important;
-  border: 2px solid #ffffff;
+.xy-workflow-anchor-handle {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  border: 0;
   background: #8aa4c4;
-  z-index: 5;
-  cursor: grab;
-  pointer-events: all;
+  opacity: 0.01;
+  pointer-events: none;
+}
+
+.xy-workflow-anchor-input {
+  left: -8px;
+}
+
+.xy-workflow-anchor-output {
+  right: -8px;
+}
+
+.xy-workflow-port {
+  position: absolute;
+  top: 50%;
+  z-index: 22;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  background: #8aa4c4;
   box-shadow:
     0 0 0 1px #c7d7eb,
-    0 6px 12px rgba(31, 64, 120, 0.18);
+    0 8px 18px rgba(31, 64, 120, 0.2);
+  cursor: grab;
+  pointer-events: all;
+  transform: translateY(-50%);
   transition:
     background 0.16s ease,
     box-shadow 0.16s ease,
     transform 0.16s ease;
 }
 
-.xy-workflow-handle::before {
+.xy-workflow-port::before {
   position: absolute;
-  inset: -8px;
+  inset: -10px;
   content: "";
 }
 
-.xy-workflow-handle-input {
-  left: -14px;
+.xy-workflow-port-input {
+  left: -20px;
+  cursor: default;
+  z-index: 23;
 }
 
-.xy-workflow-handle-output {
-  right: -14px;
+.xy-workflow-port-output {
+  right: -20px;
+  z-index: 26;
 }
 
-.xy-workflow-handle:hover,
-.xy-workflow-handle:active,
-.xy-workflow-handle.react-flow__handle-connecting,
-.xy-workflow-handle.react-flow__handle-valid {
+.xy-workflow-port-output:active,
+.xy-workflow-port.is-connecting-source {
+  cursor: grabbing;
+}
+
+.xy-workflow-port:hover,
+.xy-workflow-port-output:active,
+.xy-workflow-port.is-connecting-source,
+.xy-workflow-port.is-connectable-target,
+.xy-workflow-port.is-hot-target {
   background: #1677ff;
   box-shadow:
-    0 0 0 5px rgba(22, 119, 255, 0.16),
-    0 8px 16px rgba(22, 119, 255, 0.24);
-  transform: scale(1.08);
+    0 0 0 7px rgba(22, 119, 255, 0.15),
+    0 10px 20px rgba(22, 119, 255, 0.26);
+  transform: translateY(-50%) scale(1.08);
 }
 
-.xy-workflow-handle:active {
-  cursor: grabbing;
+.xy-workflow-port.is-hot-target {
+  background: #52c41a;
+  box-shadow:
+    0 0 0 7px rgba(82, 196, 26, 0.16),
+    0 10px 20px rgba(82, 196, 26, 0.24);
+}
+
+.xy-workflow-canvas.is-connecting .xy-workflow-port-input.is-connectable-target {
+  z-index: 34;
+}
+
+.xy-workflow-connection-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 18;
+  pointer-events: none;
+}
+
+.xy-workflow-connection-preview-path {
+  fill: none;
+  stroke: #d0d3d6;
+  stroke-width: 2.8;
+  stroke-linecap: round;
+}
+
+.xy-workflow-connection-preview-dot {
+  fill: #d0d3d6;
+}
+
+.xy-workflow-connection-preview-dot.is-valid {
+  fill: #52c41a;
 }
 
 .xy-workflow-node-header {

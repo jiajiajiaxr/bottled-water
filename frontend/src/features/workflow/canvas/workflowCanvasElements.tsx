@@ -3,6 +3,7 @@ import {
   type Edge as FlowEdge,
   type Node as FlowNode,
 } from "@xyflow/react";
+import type { MouseEvent, PointerEvent } from "react";
 import type {
   ConversationWorkflow,
   WorkflowNode,
@@ -21,6 +22,7 @@ import {
   edgeTarget,
   edgeTargetHandle,
 } from "../utils";
+import type { WorkflowFlowEdgeData } from "./WorkflowFlowEdge";
 import type { WorkflowFlowNodeData } from "./WorkflowFlowNode";
 
 type WorkflowEdge = ConversationWorkflow["edges"][number];
@@ -80,25 +82,49 @@ export function layoutWorkflowCanvasNodes(
   invalidNodeIds: Set<string> = new Set(),
   warningNodeIds: Set<string> = new Set(),
   onNodeClick?: (node: WorkflowNode) => void,
+  connection?: {
+    connectingSourceId?: string;
+    connectingTargetId?: string;
+    canConnectToNode?: (nodeId: string) => boolean;
+    onStartConnection?: (
+      nodeId: string,
+      event: PointerEvent<HTMLElement>,
+    ) => void;
+    onStartConnectionFromMouse?: (
+      nodeId: string,
+      event: MouseEvent<HTMLElement>,
+    ) => void;
+    onArmConnection?: (
+      nodeId: string,
+      event: MouseEvent<HTMLElement>,
+    ) => void;
+    onCompleteConnection?: (
+      nodeId: string,
+      event: MouseEvent<HTMLElement> | PointerEvent<HTMLElement>,
+    ) => void;
+  },
 ): FlowNode<WorkflowFlowNodeData>[] {
   const positionedWorkflow = layoutWorkflowPositions(workflow);
   return (positionedWorkflow.nodes ?? []).map((node) => {
     const state = nodeRuntime(node, latestRun);
     const status = normalizeStatus(state?.status ?? node.status);
     const type = workflowNodeType(node);
+    const nodeId = String(node.id);
     return {
-      id: node.id,
+      id: nodeId,
       type: "workflow",
       position: workflowNodeSavedPosition(node) ?? { x: 48, y: 64 },
-      selected: selectedNodeIds.includes(node.id),
+      style: { width: 248, height: 116 },
+      measured: { width: 248, height: 116 },
+      selected: selectedNodeIds.includes(nodeId),
       selectable: true,
       draggable: true,
       focusable: true,
       className: [
         "xy-workflow-node",
         `xy-workflow-node-${status}`,
-        invalidNodeIds.has(node.id) ? "xy-workflow-node-invalid" : "",
-        warningNodeIds.has(node.id) ? "xy-workflow-node-warning" : "",
+        invalidNodeIds.has(nodeId) ? "xy-workflow-node-invalid" : "",
+        warningNodeIds.has(nodeId) ? "xy-workflow-node-warning" : "",
       ]
         .filter(Boolean)
         .join(" "),
@@ -110,6 +136,13 @@ export function layoutWorkflowCanvasNodes(
         message: state?.message || node.meta || node.role || "-",
         progress: state?.progress,
         onNodeClick,
+        canReceiveConnection: connection?.canConnectToNode?.(nodeId),
+        connectingSourceId: connection?.connectingSourceId,
+        connectingTargetId: connection?.connectingTargetId,
+        onStartConnection: connection?.onStartConnection,
+        onStartConnectionFromMouse: connection?.onStartConnectionFromMouse,
+        onArmConnection: connection?.onArmConnection,
+        onCompleteConnection: connection?.onCompleteConnection,
       },
     };
   });
@@ -120,7 +153,11 @@ export function layoutWorkflowCanvasEdges(
   latestRun?: WorkflowRun,
   selectedEdgeIds: string[] = [],
   invalidEdgeIssues: Map<string, WorkflowValidationIssue> = new Map(),
-): FlowEdge[] {
+  actions: {
+    onDelete?: (edgeId: string) => void;
+    onSelect?: (edgeId: string) => void;
+  } = {},
+): FlowEdge<WorkflowFlowEdgeData>[] {
   return (workflow.edges ?? [])
     .map((edge) => {
       const from = edgeSource(edge);
@@ -136,13 +173,21 @@ export function layoutWorkflowCanvasEdges(
       const selected = selectedEdgeIds.includes(id);
       return {
         id,
+        type: "workflowEdge",
         source: from,
         target: to,
         sourceHandle: edgeSourceHandle(edge),
         targetHandle: edgeTargetHandle(edge),
         label: issue ? condition || "连线错误" : condition,
         selected,
-        data: { condition },
+        data: {
+          condition,
+          issueLabel: issue?.message,
+          selected,
+          statusColor: statusColor(status),
+          onDelete: actions.onDelete,
+          onSelect: actions.onSelect,
+        },
         className: [
           issue ? "xy-workflow-edge-invalid" : "",
           selected ? "xy-workflow-edge-selected" : "",
@@ -155,7 +200,7 @@ export function layoutWorkflowCanvasEdges(
           stroke: selected ? "#1677ff" : issue ? "#ff4d4f" : statusColor(status),
           strokeWidth: selected || issue || status === "running" ? 2.8 : 1.6,
         },
-      } satisfies FlowEdge;
+      } satisfies FlowEdge<WorkflowFlowEdgeData>;
     })
-    .filter(Boolean) as FlowEdge[];
+    .filter(Boolean) as FlowEdge<WorkflowFlowEdgeData>[];
 }

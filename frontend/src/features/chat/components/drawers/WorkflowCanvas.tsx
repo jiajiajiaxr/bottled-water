@@ -1,19 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, type DragEvent } from "react";
 import {
-  addEdge,
-  applyEdgeChanges,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+} from "react";
+import {
   applyNodeChanges,
   Background,
-  ConnectionMode,
-  ConnectionLineType,
   Controls,
-  MarkerType,
   MiniMap,
   ReactFlow,
   SelectionMode,
-  type Connection,
-  type Edge as FlowEdge,
-  type EdgeChange,
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -29,9 +28,15 @@ import type { WorkflowValidationIssue } from "../../../workflow/validation";
 import {
   layoutWorkflowCanvasEdges,
   layoutWorkflowCanvasNodes,
-  toWorkflowEdge,
 } from "../../../workflow/canvas/workflowCanvasElements";
+import { WorkflowConnectionPreview } from "../../../workflow/canvas/WorkflowConnectionPreview";
+import { WorkflowFlowEdge } from "../../../workflow/canvas/WorkflowFlowEdge";
 import { WorkflowFlowNode } from "../../../workflow/canvas/WorkflowFlowNode";
+import {
+  canCreateWorkflowEdge,
+  createWorkflowEdge,
+} from "../../../workflow/canvas/workflowConnectionRules";
+import { useManualWorkflowConnection } from "../../../workflow/canvas/useManualWorkflowConnection";
 
 const { Text } = Typography;
 type WorkflowFlowInstance = {
@@ -74,7 +79,10 @@ export function WorkflowCanvas({
   onCopySelection?: () => void;
 }) {
   const lastNodePointerAt = useRef(0);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const flowInstance = useRef<WorkflowFlowInstance | null>(null);
+  const armedSourceIdRef = useRef<string>();
+  const [armedSourceId, setArmedSourceId] = useState<string>();
   const invalidNodeIds = useMemo(
     () =>
       new Set(
@@ -107,37 +115,8 @@ export function WorkflowCanvas({
   const markNodePointer = useCallback(() => {
     lastNodePointerAt.current = Date.now();
   }, []);
-  const flowNodes = useMemo(
-    () =>
-      layoutWorkflowCanvasNodes(
-        workflow,
-        latestRun,
-        selectedNodeIds,
-        invalidNodeIds,
-        warningNodeIds,
-        onNodeClick,
-      ),
-    [
-      workflow,
-      latestRun,
-      selectedNodeIds,
-      invalidNodeIds,
-      warningNodeIds,
-      onNodeClick,
-    ],
-  );
-  const flowEdges = useMemo(
-    () =>
-      layoutWorkflowCanvasEdges(
-        workflow,
-        latestRun,
-        selectedEdgeIds,
-        invalidEdgeIssues,
-      ),
-    [workflow, latestRun, selectedEdgeIds, invalidEdgeIssues],
-  );
   const nodeById = useMemo(
-    () => new Map((workflow.nodes ?? []).map((node) => [node.id, node])),
+    () => new Map((workflow.nodes ?? []).map((node) => [String(node.id), node])),
     [workflow.nodes],
   );
   const edgeKeys = useMemo(
@@ -148,11 +127,147 @@ export function WorkflowCanvas({
     [workflow.edges],
   );
   const nodeTypes = useMemo(() => ({ workflow: WorkflowFlowNode }), []);
+  const edgeTypes = useMemo(() => ({ workflowEdge: WorkflowFlowEdge }), []);
+  const canConnectNodes = useCallback(
+    (sourceId?: string | null, targetId?: string | null) =>
+      canCreateWorkflowEdge({
+        sourceId,
+        targetId,
+        nodeById,
+        edgeKeys,
+        locked,
+      }),
+    [edgeKeys, locked, nodeById],
+  );
+  const handleEdgeSelect = useCallback(
+    (edgeIdValue: string) => {
+      onSelectionChange?.([], [edgeIdValue]);
+    },
+    [onSelectionChange],
+  );
+  const handleEdgeDelete = useCallback(
+    (edgeIdValue: string) => {
+      if (locked) return;
+      onSelectionChange?.([], []);
+      onChange({
+        ...workflow,
+        edges: (workflow.edges ?? []).filter(
+          (edge) => edgeId(edge) !== edgeIdValue,
+        ),
+      });
+    },
+    [locked, onChange, onSelectionChange, workflow],
+  );
+  const handleManualConnect = useCallback(
+    (sourceId: string, targetId: string) => {
+      if (locked || sourceId === targetId) return;
+      const source = nodeById.get(sourceId);
+      const target = nodeById.get(targetId);
+      if (!source || !target) return;
+      if (workflowNodeType(source) === "end") return;
+      if (workflowNodeType(target) === "start") return;
+      if (
+        (workflow.edges ?? []).some(
+          (edge) =>
+            edgeSource(edge) === sourceId && edgeTarget(edge) === targetId,
+        )
+      ) {
+        return;
+      }
+      const nextEdge = createWorkflowEdge(sourceId, targetId);
+      onSelectionChange?.([], [edgeId(nextEdge)]);
+      armedSourceIdRef.current = undefined;
+      setArmedSourceId(undefined);
+      onChange({
+        ...workflow,
+        edges: [...(workflow.edges ?? []), nextEdge],
+      });
+    },
+    [locked, nodeById, onChange, onSelectionChange, workflow],
+  );
+  const {
+    connectingSourceId: dragSourceId,
+    connectingTargetId,
+    draftConnection,
+    armConnection,
+    cancelConnection,
+    completeArmedConnection,
+    startConnection,
+    startConnectionFromMouse,
+  } = useManualWorkflowConnection({
+    canvasRef,
+    locked,
+    canConnect: canConnectNodes,
+    onConnect: handleManualConnect,
+  });
+  const connectingSourceId = dragSourceId ?? armedSourceId;
+  const canConnectToNode = useCallback(
+    (nodeId: string) =>
+      connectingSourceId ? canConnectNodes(connectingSourceId, nodeId) : false,
+    [canConnectNodes, connectingSourceId],
+  );
+  const flowNodes = useMemo(
+    () =>
+      layoutWorkflowCanvasNodes(
+        workflow,
+        latestRun,
+        selectedNodeIds,
+        invalidNodeIds,
+        warningNodeIds,
+        onNodeClick,
+        {
+          connectingSourceId,
+          connectingTargetId,
+          canConnectToNode,
+          onStartConnection: startConnection,
+          onStartConnectionFromMouse: startConnectionFromMouse,
+          onArmConnection: armConnection,
+          onCompleteConnection: completeArmedConnection,
+        },
+      ),
+    [
+      workflow,
+      latestRun,
+      selectedNodeIds,
+      invalidNodeIds,
+      warningNodeIds,
+      onNodeClick,
+      connectingSourceId,
+      connectingTargetId,
+      canConnectToNode,
+      armConnection,
+      completeArmedConnection,
+      startConnection,
+      startConnectionFromMouse,
+    ],
+  );
+  const flowEdges = useMemo(
+    () =>
+      layoutWorkflowCanvasEdges(
+        workflow,
+        latestRun,
+        selectedEdgeIds,
+        invalidEdgeIssues,
+        { onDelete: handleEdgeDelete, onSelect: handleEdgeSelect },
+      ),
+    [
+      workflow,
+      latestRun,
+      selectedEdgeIds,
+      invalidEdgeIssues,
+      handleEdgeDelete,
+      handleEdgeSelect,
+    ],
+  );
 
   useEffect(() => {
     if (!fitViewSignal || !flowInstance.current) return;
     flowInstance.current.fitView({ padding: 0.18 });
   }, [fitViewSignal]);
+
+  useEffect(() => {
+    armedSourceIdRef.current = armedSourceId;
+  }, [armedSourceId]);
 
   const nodeFromEventTarget = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) return undefined;
@@ -165,7 +280,7 @@ export function WorkflowCanvas({
     if (locked) return;
     const structuralChanges = changes.filter((change) => {
       if (change.type === "remove") {
-        const node = nodeById.get(change.id);
+        const node = nodeById.get(String(change.id));
         return node && !["start", "end"].includes(workflowNodeType(node));
       }
       return change.type === "position";
@@ -177,54 +292,16 @@ export function WorkflowCanvas({
       nextFlowNodes.map((node) => [node.id, node.position]),
     );
     const nodes = workflow.nodes
-      .filter((node) => nextNodeIds.has(node.id))
+      .filter((node) => nextNodeIds.has(String(node.id)))
       .map((node) => ({
         ...node,
-        position: positionById.get(node.id) ?? node.position,
+        position: positionById.get(String(node.id)) ?? node.position,
       }));
     const edges = (workflow.edges ?? []).filter(
       (edge) =>
         nextNodeIds.has(edgeSource(edge)) && nextNodeIds.has(edgeTarget(edge)),
     );
     onChange({ ...workflow, nodes, edges });
-  };
-
-  const handleEdgesChange = (changes: EdgeChange[]) => {
-    if (locked) return;
-    const structuralChanges = changes.filter((change) => change.type !== "select");
-    if (!structuralChanges.length) return;
-    onChange({
-      ...workflow,
-      edges: applyEdgeChanges(structuralChanges, flowEdges).map(toWorkflowEdge),
-    });
-  };
-
-  const handleConnect = (connection: Connection) => {
-    if (!isValidConnection(connection)) return;
-    const nextEdges = addEdge(
-      {
-        ...connection,
-        id: `${connection.source}-${connection.target}-edge`,
-        sourceHandle: connection.sourceHandle ?? "output",
-        targetHandle: connection.targetHandle ?? "input",
-        markerEnd: { type: MarkerType.ArrowClosed },
-      },
-      flowEdges,
-    ).map(toWorkflowEdge);
-    onChange({ ...workflow, edges: nextEdges });
-  };
-
-  const isValidConnection = (connection: Connection | FlowEdge) => {
-    if (locked || !connection.source || !connection.target) return false;
-    if (connection.source === connection.target) return false;
-    if ((connection.sourceHandle ?? null) !== "output") return false;
-    if ((connection.targetHandle ?? null) !== "input") return false;
-    const source = nodeById.get(connection.source);
-    const target = nodeById.get(connection.target);
-    if (!source || !target) return false;
-    if (workflowNodeType(source) === "end") return false;
-    if (workflowNodeType(target) === "start") return false;
-    return !edgeKeys.has(`${connection.source}->${connection.target}`);
   };
 
   const hasNodeDragPayload = (event: DragEvent<HTMLDivElement>) =>
@@ -245,18 +322,31 @@ export function WorkflowCanvas({
     onDropNodeType(type, position);
   };
 
+  const completePortConnection = (target: EventTarget | null) => {
+    const sourceId = armedSourceIdRef.current;
+    if (!(target instanceof HTMLElement) || !sourceId) return false;
+    const port = target.closest(".xy-workflow-port") as HTMLElement | null;
+    if (port?.dataset.workflowPort !== "input" || !port.dataset.nodeId) {
+      return false;
+    }
+    handleManualConnect(sourceId, port.dataset.nodeId);
+    return true;
+  };
+
   const deleteSelectedElements = () => {
     if (locked || (!selectedNodeIds.length && !selectedEdgeIds.length)) return;
     const protectedIds = new Set(
       workflow.nodes
         .filter((node) => ["start", "end"].includes(workflowNodeType(node)))
-        .map((node) => node.id),
+        .map((node) => String(node.id)),
     );
     const removableNodeIds = new Set(
       selectedNodeIds.filter((id) => !protectedIds.has(id)),
     );
     const removableEdgeIds = new Set(selectedEdgeIds);
-    const nodes = workflow.nodes.filter((node) => !removableNodeIds.has(node.id));
+    const nodes = workflow.nodes.filter(
+      (node) => !removableNodeIds.has(String(node.id)),
+    );
     const edges = (workflow.edges ?? []).filter((edge) => {
       if (removableEdgeIds.has(edgeId(edge))) return false;
       return (
@@ -270,7 +360,13 @@ export function WorkflowCanvas({
 
   return (
     <div
-      className="xy-workflow-canvas"
+      ref={canvasRef}
+      className={[
+        "xy-workflow-canvas",
+        draftConnection || armedSourceId ? "is-connecting" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       tabIndex={0}
       onDragOver={(event) => {
         if (locked || !onDropNodeType || !hasNodeDragPayload(event)) return;
@@ -281,12 +377,25 @@ export function WorkflowCanvas({
       onClickCapture={(event) => {
         const target = event.target;
         if (target instanceof HTMLElement) {
-          const edgeElement = target.closest(".react-flow__edge");
-          const edgeDomId = edgeElement?.getAttribute("data-id");
-          if (edgeDomId) {
-            event.currentTarget.focus();
-            onSelectionChange?.([], [edgeDomId]);
+          const port = target.closest(".xy-workflow-port") as HTMLElement | null;
+          if (port) {
+            const nodeId = port.dataset.nodeId;
+            const portType = port.dataset.workflowPort;
+            event.preventDefault();
             event.stopPropagation();
+            if (!nodeId) return;
+            if (portType === "output") {
+              setArmedSourceId((current) => {
+                const next = current === nodeId ? undefined : nodeId;
+                armedSourceIdRef.current = next;
+                return next;
+              });
+              onSelectionChange?.([], []);
+              return;
+            }
+            if (portType === "input" && armedSourceIdRef.current) {
+              handleManualConnect(armedSourceIdRef.current, nodeId);
+            }
             return;
           }
         }
@@ -298,6 +407,19 @@ export function WorkflowCanvas({
         event.stopPropagation();
       }}
       onMouseDownCapture={(event) => {
+        if (completePortConnection(event.target)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        if (nodeFromEventTarget(event.target)) markNodePointer();
+      }}
+      onPointerDownCapture={(event) => {
+        if (completePortConnection(event.target)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if (nodeFromEventTarget(event.target)) markNodePointer();
       }}
       onKeyDown={(event) => {
@@ -316,13 +438,11 @@ export function WorkflowCanvas({
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         fitViewOptions={{ padding: 0.18 }}
-        connectionMode={ConnectionMode.Strict}
-        connectionLineType={ConnectionLineType.SmoothStep}
-        connectionLineStyle={{ stroke: "#d0d3d6", strokeWidth: 2.6 }}
         connectOnClick={false}
-        deleteKeyCode={locked ? null : ["Backspace", "Delete"]}
+        deleteKeyCode={null}
         multiSelectionKeyCode={["Shift", "Control", "Meta"]}
         nodesDraggable={!locked}
         nodesConnectable={!locked}
@@ -336,9 +456,6 @@ export function WorkflowCanvas({
         selectionMode={SelectionMode.Partial}
         selectNodesOnDrag={false}
         onNodesChange={handleNodesChange}
-        onEdgesChange={handleEdgesChange}
-        onConnect={handleConnect}
-        isValidConnection={isValidConnection}
         onInit={(instance) => {
           flowInstance.current = instance;
         }}
@@ -356,10 +473,13 @@ export function WorkflowCanvas({
         }}
         onEdgeClick={(_, edge) => {
           if (locked) return;
-          onSelectionChange?.([], [edge.id]);
+          handleEdgeSelect(edge.id);
         }}
         onPaneClick={() => {
           if (Date.now() - lastNodePointerAt.current < 250) return;
+          cancelConnection();
+          armedSourceIdRef.current = undefined;
+          setArmedSourceId(undefined);
           onSelectionChange?.([], []);
           onPaneClick?.();
         }}
@@ -368,6 +488,7 @@ export function WorkflowCanvas({
         <Controls />
         <Background gap={20} />
       </ReactFlow>
+      <WorkflowConnectionPreview draft={draftConnection} />
       {overlayText && (
         <div className="xy-workflow-overlay">
           <Spin />
