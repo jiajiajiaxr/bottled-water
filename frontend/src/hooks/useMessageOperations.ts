@@ -12,6 +12,7 @@ import {
   makeMessage,
   stripInternalAgentOutput,
   isLikelyArtifactRequest,
+  isTaskRunning,
   participantName,
 } from "../lib/message";
 
@@ -265,6 +266,29 @@ export function useMessageOperations(currentUserName: string) {
         ),
       );
     };
+    const finishConversationRunningState = () => {
+      updateLocalRunningConversationIds((current) => {
+        const next = new Set(current);
+        next.delete(conversationId);
+        return next;
+      });
+      const { backgroundTasks, setBackgroundTasks: setTasks } =
+        useTaskStore.getState();
+      const now = new Date().toISOString();
+      setTasks(
+        backgroundTasks.map((task) =>
+          task.conversation_id === conversationId &&
+          isTaskRunning(task.status)
+            ? {
+                ...task,
+                status: "COMPLETED",
+                progress: 100,
+                updated_at: now,
+              }
+            : task,
+        ),
+      );
+    };
 
     try {
       await api.streamAssistantReply(conversationId, {
@@ -436,11 +460,7 @@ export function useMessageOperations(currentUserName: string) {
       );
       throw error;
     } finally {
-      updateLocalRunningConversationIds((current) => {
-        const next = new Set(current);
-        next.delete(conversationId);
-        return next;
-      });
+      finishConversationRunningState();
       if (completedPreview) {
         updateConversations((current) =>
           current.map((item) =>

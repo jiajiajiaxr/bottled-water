@@ -110,15 +110,18 @@ Persistence
 - `backend/app/core`：配置、数据库、安全、日志、错误处理和统一响应。
 - `backend/app/api`：REST、SSE、WebSocket API。
 - `backend/app/models.py`：平台数据模型。
-- `backend/app/services/orchestrator.py`：多 Agent 编排运行时，支持单聊 Function Calling 和群聊工作流画布。
-- `backend/app/services/agentic_runtime.py`：Agent 短循环，负责选择并调用工具、Skills、MCP。
+- `backend/app/services/chat/orchestrator.py`：多 Agent 编排入口，负责单聊、群聊和工作流触发。
+- `backend/app/services/agents/function_loop.py`：单聊和群聊共用的 Agent Function Call Loop。
+- `backend/app/services/agents/tool_loop.py`：工具 schema 构造，以及 Tool、Skill、MCP 执行分发。
+- `backend/app/services/workflows`：Dify 风格工作流图、调度引擎、节点执行器、运行态和校验。
 - `backend/app/services/ark.py`：火山方舟 OpenAI-compatible 模型适配，支持流式输出、工具调用和思考模式。
 - `backend/app/services/llm_gateway.py`：模型配置和真实连通性测试。
-- `backend/app/services/tool_registry.py`：统一工具目录、内置工具、自定义工具和官方 Agent 工具箱。
+- `backend/app/services/tools/registry.py`：统一工具目录、内置工具、自定义工具和官方 Agent 工具箱。
+- `backend/app/services/tools/executor.py`：工具权限校验、参数校验和执行分发。
 - `backend/app/services/file_tools.py`：文件解析、预览、转换、摘要和本地向量入口。
 - `backend/app/services/mcp_runtime.py`：MCP 工具调用和调用记录。
 - `backend/app/services/artifacts.py`：产物创建、预览卡片和导出入口。
-- `backend/app/services/events.py`：SSE 事件总线，支持会话级消息流。
+- `backend/app/services/realtime`：SSE 事件总线、消息流和 WebSocket 分发。
 - `backend/app/services/queue.py`：异步任务队列。
 - `backend/alembic`：数据库迁移。
 
@@ -204,7 +207,7 @@ workflow 数据保存在 `conversation.extra.workflow`。
 
 ## 官方 Agent 与工具箱
 
-官方 Agent 的工具箱在 `backend/app/services/tool_registry.py` 中维护。
+官方 Agent 的工具箱在 `backend/app/services/tools/registry.py` 中维护。
 
 - Master Agent：任务理解、权限判断、规划、补全、聚合。
 - Frontend Worker：文件读写、Web App 产物、沙箱运行、浏览器预览。
@@ -270,8 +273,9 @@ DATABASE_URL=...
 - `backend/app/core/config.py`
 - `backend/app/services/ark.py`
 - `backend/app/services/llm_gateway.py`
-- `backend/app/services/orchestrator.py`
-- `backend/app/services/agentic_runtime.py`
+- `backend/app/services/chat/orchestrator.py`
+- `backend/app/services/agents/function_loop.py`
+- `backend/app/services/agents/tool_loop.py`
 
 `LLM_PROVIDER=ark` 时使用真实火山方舟适配器；`LLM_PROVIDER=mock` 时使用本地模拟响应；`LLM_PROVIDER=auto` 时根据是否存在 Key 自动选择。
 

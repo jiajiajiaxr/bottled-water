@@ -25,7 +25,7 @@ from app.models import (
     WorkspaceMember,
     utcnow,
 )
-from app.services.tool_registry import get_official_toolbox, ensure_tool_tables
+from app.services.tools.registry import get_official_toolbox, ensure_tool_tables
 
 
 DEFAULT_AGENTS = [
@@ -444,10 +444,10 @@ def ensure_seed_data(db: Session) -> User:
 
     has_conversation = db.scalar(select(Conversation).where(Conversation.creator_id == user.id))
     if workspace:
-        legacy_conversations = db.scalars(
+        existing_uncategorized_conversations = db.scalars(
             select(Conversation).where(Conversation.creator_id == user.id, Conversation.deleted_at.is_(None))
         ).all()
-        for conversation in legacy_conversations:
+        for conversation in existing_uncategorized_conversations:
             extra = dict(conversation.extra or {})
             if not extra.get("workspace_id"):
                 extra["workspace_id"] = workspace.id

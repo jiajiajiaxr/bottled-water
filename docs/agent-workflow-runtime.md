@@ -1,4 +1,4 @@
-# Agent 与工作流运行机制
+﻿# Agent 与工作流运行机制
 
 本文说明 AgentHub 的核心运行时：Agentic Loop、画布优先群聊编排、工具权限、工作流运行态和产物生成。
 
@@ -28,9 +28,13 @@ User message
 
 关键文件：
 
-- `backend/app/services/orchestrator.py`：判断会话类型，选择单聊或群聊路径。
-- `backend/app/services/agentic_runtime.py`：执行 Agent 的小循环。
-- `backend/app/services/tool_registry.py`：执行工具。
+- `backend/app/services/chat/orchestrator.py`：判断会话类型，选择单聊或群聊路径。
+- `backend/app/services/workflows/engine.py`：群聊工作流执行入口，严格按画布节点和边运行。
+- `backend/app/services/workflows/graph.py`：拓扑排序、并行层级、条件分支路径。
+- `backend/app/services/workflows/nodes/`：不同节点类型的独立执行器。
+- `backend/app/services/agents/function_loop.py`：执行 Agent 的完整 Function Call Loop。
+- `backend/app/services/agents/tool_loop.py`：构造工具 schema 并分发 Tool、Skill、MCP。
+- `backend/app/services/tools/registry.py`：执行工具。
 - `backend/app/services/mcp_runtime.py`：执行 MCP。
 
 ## 3. Agentic Loop
@@ -260,7 +264,7 @@ Agent 调用工具时走统一工具层：
 ```text
 Agentic Loop
   -> select builtin/custom tool
-  -> tool_registry.invoke_tool
+  -> tools.registry.invoke_tool
   -> builtin handler or custom python
   -> result returned to Agent
   -> optional artifact/message/event

@@ -13,10 +13,10 @@ from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Agent, User, utcnow
 from app.schemas.requests import CreateAgentRequest, GenerateAgentRequest, ParseCapabilitiesRequest, TestAgentRequest, UpdateAgentRequest
-from app.services.ark import ArkClient, ArkProviderError
+from app.services.ark import ArkClient
 from app.services.llm_gateway import test_model_config
 from app.services.serialization import agent_to_dict
-from app.services.tool_registry import normalize_tool_names
+from app.services.tools.registry import normalize_tool_names
 
 
 router = APIRouter(tags=["agents"])

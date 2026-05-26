@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, McpServer, Skill, User
 from app.services.ark import ark_client
-from app.services.events import event_bus
+from app.services.realtime.event_bus import event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
-from app.services.tool_registry import BUILTIN_TOOLS, invoke_tool, normalize_tool_names
+from app.services.tools.registry import BUILTIN_TOOLS, invoke_tool, normalize_tool_names
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -397,7 +397,7 @@ async def run_agentic_tool_loop(
 
 def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
     """将 Agent 配置的 tools/skills/mcp 转为 OpenAI Function Calling 格式。"""
-    from app.services.tool_registry import BUILTIN_TOOLS
+    from app.services.tools.registry import BUILTIN_TOOLS
 
     tools: list[dict[str, Any]] = []
     config = agent.config or {}
@@ -477,11 +477,11 @@ async def execute_tool_by_name(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     """根据 tool_name 路由到内置工具/Skill/MCP 执行器。"""
-    from app.services.tool_registry import BUILTIN_TOOLS, invoke_builtin_tool
+    from app.services.tools import registry
 
     # 内置工具
-    if tool_name in BUILTIN_TOOLS:
-        return invoke_builtin_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
+    if tool_name in registry.BUILTIN_TOOLS:
+        return registry.invoke_builtin_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
 
     # Skill
     if tool_name.startswith("skill."):

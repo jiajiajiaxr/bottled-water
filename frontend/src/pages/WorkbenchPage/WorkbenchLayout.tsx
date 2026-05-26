@@ -18,6 +18,7 @@ import { BackgroundTasksButton } from "./BackgroundTasksButton";
 import { ConversationSidebar } from "../../features/chat/components/ConversationSidebar";
 import { ChatPanel } from "../../features/chat/components/ChatPanel";
 import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
+import { WorkflowStudioContent } from "../../features/workflow/WorkflowStudioContent";
 import type {
   AgentTask,
   ChatMessage,
@@ -75,6 +76,9 @@ export interface WorkbenchLayoutProps {
   // UI state setters
   setMembersOpen: (open: boolean) => void;
   setConversationSettingsOpen: (open: boolean) => void;
+  openWorkflowPage: () => void;
+  closeWorkflowPage: () => void;
+  workflowMode: boolean;
 
   // File upload
   uploadFile: (file: File) => Promise<UploadedFile>;
@@ -130,6 +134,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     stopStreaming,
     setMembersOpen,
     setConversationSettingsOpen,
+    openWorkflowPage,
+    closeWorkflowPage,
+    workflowMode,
     uploadFile,
     artifactPanelOpen,
     artifact,
@@ -146,6 +153,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     updateLocalRunningConversationIds,
     runningConversationIds,
   } = props;
+  const workflowWorkspaceId = active?.workspace_id || activeWorkspaceId;
 
   return (
     <Layout className="workbench">
@@ -276,6 +284,20 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
           onRegenerate={regenerate}
           onOpenMembers={() => setMembersOpen(true)}
           onOpenSettings={() => setConversationSettingsOpen(true)}
+          onOpenWorkflow={openWorkflowPage}
+          workflowMode={workflowMode}
+          workflowContent={
+            workflowMode && activeId && workflowWorkspaceId ? (
+              <WorkflowStudioContent
+                workspaceId={workflowWorkspaceId}
+                conversationId={activeId}
+                embedded
+                onBack={closeWorkflowPage}
+                onError={(value) => message.error(value)}
+                onSuccess={(value) => message.success(value)}
+              />
+            ) : undefined
+          }
           onUploadFile={uploadFile}
           onOpenPreview={openArtifactPreview}
           onStopStreaming={stopStreaming}

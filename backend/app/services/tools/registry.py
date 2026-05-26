@@ -10,7 +10,7 @@ from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
-from app.models import Artifact, Conversation, Deployment, FileAsset, SandboxSession, ToolDefinition, User, utcnow
+from app.models import Artifact, Conversation, Deployment, FileAsset, ToolDefinition, User, utcnow
 from app.services.artifacts import build_demo_html, create_artifact, create_preview_message, update_artifact_files
 from app.services.artifact_exports import default_export_format
 from app.services.file_tools import (

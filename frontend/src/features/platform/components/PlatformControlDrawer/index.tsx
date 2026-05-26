@@ -251,7 +251,7 @@ export function PlatformControlDrawer({
     return <RobotOutlined />;
   };
   const workflowNodes = conversationWorkflow?.nodes ?? [];
-  const workflowEdges = conversationWorkflow?.edges ?? [];
+  const workflowEdges = (conversationWorkflow?.edges ?? []) as Array<[string, string]>;
 
   const setWorkflowDraft = (next: ConversationWorkflow) => {
     setConversationWorkflow(next);

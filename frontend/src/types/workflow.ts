@@ -6,14 +6,17 @@ export interface WorkflowNode {
   status?: string;
   meta?: string;
   agent_id?: string;
+  position?: { x: number; y: number };
+  data?: Record<string, unknown>;
   config?: Record<string, unknown>;
 }
 
 export interface ConversationWorkflow {
   conversation_id?: string;
   mode: string;
+  output_mode?: "independent_messages" | "aggregate" | string;
   nodes: WorkflowNode[];
-  edges: string[][];
+  edges: Array<string[] | { from?: string; to?: string; source?: string; target?: string; sourceHandle?: string; targetHandle?: string; condition?: string; status?: string; config?: Record<string, unknown> }>;
   settings?: Record<string, unknown>;
 }
 
@@ -23,8 +26,8 @@ export interface WorkflowRun {
   status: string;
   mode: string;
   workflow_snapshot: ConversationWorkflow;
-  node_states: Array<WorkflowNode & { progress?: number; output?: Record<string, unknown>; message?: string; started_at?: string; completed_at?: string }>;
-  edge_states: Array<{ from: string; to: string; status: string }>;
+  node_states: Array<WorkflowNode & { progress?: number; input?: Record<string, unknown>; output?: Record<string, unknown>; error?: string | null; message?: string; started_at?: string; completed_at?: string }>;
+  edge_states: Array<{ from: string; to: string; condition?: string; status: string }>;
   events: Array<Record<string, unknown>>;
   progress: number;
   started_at?: string;

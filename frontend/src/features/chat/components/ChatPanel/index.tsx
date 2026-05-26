@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   BranchesOutlined,
   CloudUploadOutlined,
   BulbOutlined,
   ReloadOutlined,
   SendOutlined,
+  SettingOutlined,
   UserAddOutlined,
 } from "@ant-design/icons";
 import {
@@ -22,7 +24,7 @@ import {
   Typography,
   Upload,
 } from "antd";
-import type { UploadRequestOption } from "rc-upload/lib/interface";
+import type { UploadProps } from "antd";
 import { participantName } from "../../../../lib/message";
 import { MessageBubble } from "../MessageBubble";
 import type {
@@ -35,6 +37,7 @@ import type {
 const { Content, Header } = Layout;
 const { TextArea } = Input;
 const { Title, Text } = Typography;
+type UploadRequestOption = Parameters<NonNullable<UploadProps["customRequest"]>>[0];
 
 export function ChatPanel({
   user,
@@ -46,6 +49,9 @@ export function ChatPanel({
   onRegenerate,
   onOpenMembers,
   onOpenSettings,
+  onOpenWorkflow,
+  workflowMode = false,
+  workflowContent,
   onUploadFile,
   onOpenPreview,
   onStopStreaming,
@@ -64,6 +70,9 @@ export function ChatPanel({
   onRegenerate: (message: ChatMessage) => void;
   onOpenMembers: () => void;
   onOpenSettings: () => void;
+  onOpenWorkflow: () => void;
+  workflowMode?: boolean;
+  workflowContent?: ReactNode;
   onUploadFile: (file: File) => Promise<UploadedFile>;
   onOpenPreview: (message: ChatMessage) => void;
   onStopStreaming: () => void;
@@ -139,7 +148,7 @@ export function ChatPanel({
   }, [messages, streamState]);
 
   return (
-    <Content className="chat-panel">
+    <Content className={`chat-panel${workflowMode ? " workflow-mode" : ""}`}>
       <Header className="chat-header">
         <div>
           <Space align="center" wrap>
@@ -181,6 +190,14 @@ export function ChatPanel({
                 <Button
                   size="small"
                   icon={<BranchesOutlined />}
+                  onClick={onOpenWorkflow}
+                  data-testid="conversation-workflow"
+                >
+                  工作流画布
+                </Button>
+                <Button
+                  size="small"
+                  icon={<SettingOutlined />}
                   onClick={onOpenSettings}
                   data-testid="conversation-settings"
                 >
@@ -195,29 +212,34 @@ export function ChatPanel({
           <Avatar>{user.avatar ?? user.name.slice(0, 1)}</Avatar>
         </Space>
       </Header>
-      <div ref={messageListRef} className="message-list">
-        {loading ? (
-          <Spin />
-        ) : messages.length ? (
-          messages.map((item) => (
-            <MessageBubble
-              key={item.id}
-              message={item}
-              quoted={
-                item.quotedMessageId
-                  ? messageById.get(item.quotedMessageId)
-                  : undefined
-              }
-              onQuote={handleQuote}
-              onRegenerate={handleRegenerate}
-              onCopy={handleCopy}
-              onPreview={handlePreview}
-            />
-          ))
-        ) : (
-          <Empty description="暂无消息" />
-        )}
-      </div>
+      {workflowMode && workflowContent ? (
+        <div className="workflow-chat-host">{workflowContent}</div>
+      ) : (
+        <div ref={messageListRef} className="message-list">
+          {loading ? (
+            <Spin />
+          ) : messages.length ? (
+            messages.map((item) => (
+              <MessageBubble
+                key={item.id}
+                message={item}
+                quoted={
+                  item.quotedMessageId
+                    ? messageById.get(item.quotedMessageId)
+                    : undefined
+                }
+                onQuote={handleQuote}
+                onRegenerate={handleRegenerate}
+                onCopy={handleCopy}
+                onPreview={handlePreview}
+              />
+            ))
+          ) : (
+            <Empty description="暂无消息" />
+          )}
+        </div>
+      )}
+      {!workflowMode && (
       <div className="composer">
         {quoted && (
           <div className="composer-quote">
@@ -312,6 +334,7 @@ export function ChatPanel({
           </Space>
         </Flex>
       </div>
+      )}
     </Content>
   );
 }

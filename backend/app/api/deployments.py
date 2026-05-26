@@ -10,7 +10,7 @@ from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Artifact, Conversation, Deployment, User, utcnow
 from app.services.artifacts import create_deployment
-from app.services.events import event_bus
+from app.services.realtime.event_bus import event_bus
 from app.services.serialization import deployment_to_dict
 
 

@@ -36,6 +36,7 @@ export interface WorkbenchDrawersProps {
     item: Conversation,
     patch: Partial<Conversation>,
   ) => Promise<void>;
+  onOpenWorkflow: () => void;
 
   // CreateConversationModal
   createOpen: { open: boolean; group: boolean };
@@ -88,6 +89,7 @@ export function WorkbenchDrawers(props: WorkbenchDrawersProps) {
     onCloseConversationSettings,
     conversationCategories,
     onPatchConversation,
+    onOpenWorkflow,
 
     createOpen,
     onCancelCreate,
@@ -155,6 +157,7 @@ export function WorkbenchDrawers(props: WorkbenchDrawersProps) {
         categoryOptions={conversationCategories}
         onClose={onCloseConversationSettings}
         onSaveConversation={onPatchConversation}
+        onOpenWorkflow={onOpenWorkflow}
       />
       <CreateConversationModal
         open={createOpen.open}

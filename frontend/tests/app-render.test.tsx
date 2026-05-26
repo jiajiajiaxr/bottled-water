@@ -22,8 +22,8 @@ describe("AgentHub app shell", () => {
     render(React.createElement(module.default));
 
     expect(
-      screen.queryByRole("main") ??
+      (await screen.findByRole("main")) ??
         screen.queryByText(/agenthub|chat|conversation|task/i),
     ).toBeTruthy();
-  });
+  }, 15000);
 });

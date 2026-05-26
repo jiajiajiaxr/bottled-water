@@ -1,4 +1,4 @@
-# 文件职责地图
+﻿# 文件职责地图
 
 本文说明主要目录和关键文件负责什么，方便二次开发时快速定位。
 
@@ -75,18 +75,24 @@ agenthub/
 
 ## 后端 services
 
-- `backend/app/services/orchestrator.py`：核心编排服务。负责单聊 Agent 执行、群聊工作流执行、任务拆解、运行态同步、产物卡片生成。
-- `backend/app/services/agentic_runtime.py`：Agent 小循环。根据 Agent 权限选择并执行工具、Skill、MCP，然后汇总回复。
+- `backend/app/services/chat/orchestrator.py`：核心编排服务。负责单聊/群聊入口、工作流执行、任务拆解、运行态同步、产物卡片生成。
+- `backend/app/services/workflows/engine.py`：Dify 风格工作流执行入口，按画布节点和边调度执行。
+- `backend/app/services/workflows/graph.py`：WorkflowGraph、Node、Edge、拓扑排序、并行层级和分支路径。
+- `backend/app/services/workflows/nodes/`：start、agent、tool、skill、mcp、condition、loop、review、artifact、end 节点执行器。
+- `backend/app/services/workflows/runtime.py`：WorkflowRun/NodeRun/EdgeRun JSON 运行态持久化和会话同步。
+- `backend/app/services/workflows/validator.py`：节点配置、边、权限引用、循环上限和 DAG 校验。
+- `backend/app/services/agents/function_loop.py`：单聊和群聊共用的 Agent Function Call Loop，负责 tool_calls、role=tool 回填和最终回复。
+- `backend/app/services/agents/tool_loop.py`：工具 schema 构造，以及 Tool、Skill、MCP 执行分发。
 - `backend/app/services/ark.py`：火山方舟和 OpenAI-compatible 模型适配，包括普通调用、流式调用和 mock fallback。
 - `backend/app/services/llm_gateway.py`：模型配置测试和模型调用统一入口。
-- `backend/app/services/tool_registry.py`：内置工具目录、官方 Agent 工具箱、自定义工具调用、工具权限归一化。
+- `backend/app/services/tools/registry.py`：内置工具目录、官方 Agent 工具箱、自定义工具调用、工具权限归一化。
 - `backend/app/services/file_tools.py`：文件解析、预览、摘要、向量入口、PDF/DOCX/XLSX/PPTX/HTML/Markdown/ZIP 生成和转换。
 - `backend/app/services/files.py`：上传文件落盘、路径计算、安全文件名。
 - `backend/app/services/artifacts.py`：产物对象创建和基础内容组织。
 - `backend/app/services/artifact_exports.py`：产物导出为不同格式。
 - `backend/app/services/mcp_runtime.py`：HTTP/stdio MCP 调用、超时、环境变量过滤、调用记录。
 - `backend/app/services/knowledge.py`：轻量知识库切片、索引、检索和上下文片段构造。
-- `backend/app/services/events.py`：事件总线，优先 Redis PubSub，缺省使用内存队列；用于 SSE/实时状态。
+- `backend/app/services/realtime/event_bus.py`：事件总线，优先 Redis PubSub，缺省使用内存队列；用于 SSE/实时状态。
 - `backend/app/services/queue.py`：后台任务队列，优先 Redis，缺省使用内存队列。
 - `backend/app/services/audit.py`：权限判断和审计日志写入。
 - `backend/app/services/serialization.py`：后端模型转前端 JSON，负责敏感字段脱敏。

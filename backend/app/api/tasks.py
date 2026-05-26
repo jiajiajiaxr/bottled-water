@@ -10,8 +10,8 @@ from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Conversation, Subtask, Task, User, utcnow
-from app.services.orchestrator import create_task_for_prompt
-from app.services.events import event_bus
+from app.services.tasks.service import create_task_for_prompt
+from app.services.realtime.event_bus import event_bus
 from app.services.serialization import subtask_to_dict, task_to_dict
 
 
@@ -97,7 +97,7 @@ async def get_task_status(task_id: str, db: Session = Depends(get_db), user: Use
 
 @router.get("/tasks/{task_id}/subtasks")
 async def list_subtasks(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    task = _get_task(db, user, task_id)
+    _get_task(db, user, task_id)
     subtasks = db.scalars(select(Subtask).where(Subtask.parent_task_id == task_id)).all()
     return ok([subtask_to_dict(item) for item in subtasks])
 
