@@ -235,14 +235,12 @@ export function WorkflowCanvas({
         latestRun,
         selectedEdgeIds,
         invalidEdgeIssues,
-        { onSelect: handleEdgeSelect },
       ),
     [
       workflow,
       latestRun,
       selectedEdgeIds,
       invalidEdgeIssues,
-      handleEdgeSelect,
     ],
   );
 

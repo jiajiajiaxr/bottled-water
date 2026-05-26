@@ -153,9 +153,6 @@ export function layoutWorkflowCanvasEdges(
   latestRun?: WorkflowRun,
   selectedEdgeIds: string[] = [],
   invalidEdgeIssues: Map<string, WorkflowValidationIssue> = new Map(),
-  actions: {
-    onSelect?: (edgeId: string) => void;
-  } = {},
 ): FlowEdge<WorkflowStepEdgeData>[] {
   return (workflow.edges ?? [])
     .map((edge) => {
@@ -192,7 +189,6 @@ export function layoutWorkflowCanvasEdges(
           issueLabel: issue?.message,
           selected,
           statusColor: stroke,
-          onSelect: actions.onSelect,
         },
         className: [
           issue ? "xy-workflow-edge-invalid" : "",

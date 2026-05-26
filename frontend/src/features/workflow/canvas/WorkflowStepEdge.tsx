@@ -1,16 +1,14 @@
 import {
-  EdgeLabelRenderer,
+  BaseEdge,
   type Edge,
   type EdgeProps,
 } from "@xyflow/react";
-import type { MouseEvent, PointerEvent } from "react";
 
 export type WorkflowStepEdgeData = {
   condition?: string;
   issueLabel?: string;
   statusColor: string;
   selected: boolean;
-  onSelect?: (edgeId: string) => void;
 };
 
 export type WorkflowStepEdgeModel = Edge<
@@ -24,22 +22,52 @@ function buildOrthogonalPath(
   targetX: number,
   targetY: number,
 ) {
-  const distance = Math.abs(targetX - sourceX);
-  const offset = targetX >= sourceX
-    ? Math.max(56, distance / 2)
+  const distanceX = targetX - sourceX;
+  const closeHorizontalPorts = distanceX >= 0 && distanceX < 96;
+  if (closeHorizontalPorts) {
+    if (Math.abs(targetY - sourceY) > 24) {
+      const midX = sourceX + distanceX / 2;
+      return {
+        labelX: midX,
+        labelY: sourceY + (targetY - sourceY) / 2,
+        path: [
+          `M ${sourceX} ${sourceY}`,
+          `L ${midX} ${sourceY}`,
+          `L ${midX} ${targetY}`,
+          `L ${targetX} ${targetY}`,
+        ].join(" "),
+      };
+    }
+
+    const upperLaneY = Math.min(sourceY, targetY) - 72;
+    const laneY = upperLaneY > 24
+      ? upperLaneY
+      : Math.max(sourceY, targetY) + 72;
+    return {
+      labelX: sourceX + (targetX - sourceX) / 2,
+      labelY: laneY,
+      path: [
+        `M ${sourceX} ${sourceY}`,
+        `L ${sourceX} ${laneY}`,
+        `L ${targetX} ${laneY}`,
+        `L ${targetX} ${targetY}`,
+      ].join(" "),
+    };
+  }
+
+  const distance = Math.abs(distanceX);
+  const offset = distanceX >= 0
+    ? distance / 2
     : Math.max(72, Math.min(160, distance / 2 + 72));
   const midX = sourceX + offset;
-  const labelX = midX;
-  const labelY = sourceY + (targetY - sourceY) / 2;
   return {
-    labelX,
-    labelY,
+    labelX: midX,
+    labelY: sourceY + (targetY - sourceY) / 2,
     path: `M ${sourceX} ${sourceY} L ${midX} ${sourceY} L ${midX} ${targetY} L ${targetX} ${targetY}`,
   };
 }
 
 export function WorkflowStepEdge({
-  id,
   sourceX,
   sourceY,
   targetX,
@@ -63,53 +91,31 @@ export function WorkflowStepEdge({
       : data?.statusColor ?? "#d0d3d6";
   const label = data?.issueLabel ?? data?.condition;
 
-  const selectEdge = (event: MouseEvent | PointerEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const canvas = event.currentTarget.closest(".xy-workflow-canvas");
-    if (canvas instanceof HTMLElement) canvas.focus();
-    data?.onSelect?.(id);
-  };
-
   return (
-    <>
-      <path
-        d={path}
-        fill="none"
-        markerEnd={markerEnd}
-        className="react-flow__edge-path xy-workflow-step-edge-path"
-        style={{
-          stroke,
-          strokeWidth: isSelected || hasIssue ? 2.8 : 2,
-        }}
-      />
-      <path
-        d={path}
-        fill="none"
-        stroke="rgba(22, 119, 255, 0.02)"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={32}
-        pointerEvents="stroke"
-        className="xy-workflow-step-edge-hit"
-        onClick={selectEdge}
-        onMouseDown={selectEdge}
-        onPointerDown={selectEdge}
-      />
-      {label && (
-        <EdgeLabelRenderer>
-          <div
-            className="xy-workflow-step-edge-label nodrag nopan"
-            style={{
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            }}
-            onClick={selectEdge}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <span>{label}</span>
-          </div>
-        </EdgeLabelRenderer>
-      )}
-    </>
+    <BaseEdge
+      path={path}
+      labelX={labelX}
+      labelY={labelY}
+      label={label}
+      labelShowBg
+      labelStyle={{
+        fill: hasIssue ? "#ff4d4f" : "#596579",
+        fontSize: 12,
+        fontWeight: hasIssue ? 600 : 400,
+      }}
+      labelBgPadding={[6, 4]}
+      labelBgBorderRadius={6}
+      labelBgStyle={{
+        fill: "rgba(255, 255, 255, 0.96)",
+        stroke: hasIssue ? "#ffccc7" : "#dbe3ef",
+      }}
+      markerEnd={markerEnd}
+      interactionWidth={40}
+      className="xy-workflow-step-edge-path"
+      style={{
+        stroke,
+        strokeWidth: isSelected || hasIssue ? 2.8 : 2,
+      }}
+    />
   );
 }
