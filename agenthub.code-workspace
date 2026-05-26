@@ -34,23 +34,7 @@
                 "name": "Debug Backend",
                 "type": "debugpy",
                 "request": "launch",
-                "module": "uvicorn",
-                "args": [
-                    "app:app",
-                    "--reload",
-                    "--reload-exclude",
-                    "logs/*",
-                    "--reload-exclude",
-                    "*.db",
-                    "--reload-exclude",
-                    "*.db-shm",
-                    "--reload-exclude",
-                    "*.db-wal",
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    "8000"
-                ],
+                "program": "${workspaceFolder:Backend}/server.py",
                 "cwd": "${workspaceFolder:Backend}",
                 "jinja": true,
                 "justMyCode": false
@@ -63,7 +47,7 @@
             {
                 "label": "Start Backend",
                 "type": "shell",
-                "command": "uv run uvicorn app:app --reload --reload-dir ./app",
+                "command": "uv run server.py",
                 "options": {
                     "cwd": "${workspaceFolder:Backend}"
                 },

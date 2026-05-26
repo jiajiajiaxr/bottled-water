@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 
@@ -38,14 +38,24 @@ class Settings(BaseSettings):
 
     secret_key: str = "agenthub-dev-secret-change-me"
     access_token_expire_minutes: int = 60 * 24
-    cors_origins: list[str] = Field(
-        default_factory=lambda: [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:4173",
-            "http://127.0.0.1:4173",
-        ]
-    )
+
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+    frontend_port: int = 5173
+
+    cors_origins: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def populate_cors_origins(self) -> "Settings":
+        """当 cors_origins 未通过环境变量指定时，根据 frontend_port 动态填充默认值。"""
+        if not self.cors_origins:
+            self.cors_origins = [
+                f"http://localhost:{self.frontend_port}",
+                f"http://127.0.0.1:{self.frontend_port}",
+                "http://localhost:4173",
+                "http://127.0.0.1:4173",
+            ]
+        return self
 
     database_url: str = "postgresql+psycopg://agenthub:agenthub@localhost:54326/agenthub"
     redis_url: str = "redis://localhost:6380/0"

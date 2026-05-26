@@ -340,7 +340,7 @@ uv run alembic upgrade head
 
 ```powershell
 cd backend
-uv run uvicorn app:app --reload --reload-dir ./app
+uv run server.py
 ```
 
 启动前端：
@@ -356,7 +356,7 @@ pnpm dev
 
 - **文件夹**：`Backend`（后端）、`Frontend`（前端）、`E2E Tests`（端到端测试）、`Root`（项目根目录）
 - **任务**（`Ctrl+Shift+P` → `Tasks: Run Task`）：
-  - `Start Backend` — 在 Backend 目录下启动 `uv run uvicorn app:app --reload --reload-dir ./app`
+  - `Start Backend` — 在 Backend 目录下启动 `uv run server.py`
   - `Start Frontend` — 在 Frontend 目录下启动 `pnpm dev`
   - `Start All` — 并行启动前后端
   - `Backend Tests` — 在 Root 目录下运行 `uv run pytest tests -q`
