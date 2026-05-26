@@ -118,18 +118,18 @@ export function useMessageOperations(currentUserName: string) {
         return;
       }
 
-      // 创建新消息
-      startStreamingMessage(
-        makeMessage({
-          conversationId,
-          role: "assistant",
-          kind: "text",
-          author,
-          content: "",
-          rawContent: agentId ? { agent_id: agentId } : {},
-          streamState: "streaming",
-        }),
-      );
+      // 创建新消息（用后端提供的 messageId，确保和 delta 事件中的 ID 一致）
+      startStreamingMessage({
+        id: messageId,
+        conversationId,
+        role: "assistant",
+        kind: "text",
+        author,
+        content: "",
+        rawContent: agentId ? { agent_id: agentId } : {},
+        streamState: "streaming",
+        createdAt: new Date().toISOString(),
+      });
     };
 
     /** 插入或更新最终消息（后端推送的完整消息） */
@@ -231,8 +231,6 @@ export function useMessageOperations(currentUserName: string) {
 
     // 节流：用 requestAnimationFrame 批处理高频 SSE delta 更新，避免 React 渲染循环溢出
     let contentRafId = 0;
-    let thinkingRafId = 0;
-
     let rawBuffer = "";
     let completedPreview = "";
     // 追踪当前消息上正在执行的工具调用
@@ -306,17 +304,15 @@ export function useMessageOperations(currentUserName: string) {
           );
           if (messageId) currentMessageId = messageId;
           if (!messageId) return;
+          ensureStreamingMessage(
+            messageId,
+            String(payload.agent_name || "Agent"),
+            payload.agent_id ? String(payload.agent_id) : undefined,
+          );
           const existing = latestThinkingById.get(messageId) ?? "";
           const nextThinking = existing + delta;
           latestThinkingById.set(messageId, nextThinking);
-          // 节流
-          if (thinkingRafId) return;
-          thinkingRafId = requestAnimationFrame(() => {
-            thinkingRafId = 0;
-            for (const [id, thinking] of latestThinkingById) {
-              updateStreamingThinking(id, thinking);
-            }
-          });
+          updateStreamingThinking(messageId, nextThinking);
         },
         onMessageUpdated: upsertFinalMessage,
         onMessageNew: (incoming) => {
