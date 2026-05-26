@@ -745,6 +745,13 @@ button {
   cursor: pointer;
 }
 
+.xy-workflow-canvas .react-flow__edge-interaction {
+  stroke: transparent;
+  stroke-width: 34;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
 .xy-workflow-edge-visible {
   pointer-events: none;
   transition:
@@ -756,6 +763,7 @@ button {
 .xy-workflow-edge-hit {
   cursor: pointer;
   pointer-events: stroke;
+  stroke-linecap: round;
 }
 
 .xy-workflow-edge-label {
@@ -770,22 +778,6 @@ button {
   box-shadow: 0 8px 18px rgba(31, 64, 120, 0.12);
   font-size: 12px;
   pointer-events: all;
-}
-
-.xy-workflow-edge-delete {
-  height: 22px;
-  padding: 0 7px;
-  border: 1px solid #ffccc7;
-  border-radius: 6px;
-  background: #fff2f0;
-  color: #cf1322;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.xy-workflow-edge-delete:hover {
-  border-color: #ff7875;
-  background: #fff1f0;
 }
 
 .xy-workflow-edge-invalid .react-flow__edge-path,

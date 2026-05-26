@@ -154,7 +154,6 @@ export function layoutWorkflowCanvasEdges(
   selectedEdgeIds: string[] = [],
   invalidEdgeIssues: Map<string, WorkflowValidationIssue> = new Map(),
   actions: {
-    onDelete?: (edgeId: string) => void;
     onSelect?: (edgeId: string) => void;
   } = {},
 ): FlowEdge<WorkflowFlowEdgeData>[] {
@@ -178,6 +177,7 @@ export function layoutWorkflowCanvasEdges(
         target: to,
         sourceHandle: edgeSourceHandle(edge),
         targetHandle: edgeTargetHandle(edge),
+        interactionWidth: 34,
         label: issue ? condition || "连线错误" : condition,
         selected,
         data: {
@@ -185,7 +185,6 @@ export function layoutWorkflowCanvasEdges(
           issueLabel: issue?.message,
           selected,
           statusColor: statusColor(status),
-          onDelete: actions.onDelete,
           onSelect: actions.onSelect,
         },
         className: [

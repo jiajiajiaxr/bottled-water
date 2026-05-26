@@ -145,19 +145,6 @@ export function WorkflowCanvas({
     },
     [onSelectionChange],
   );
-  const handleEdgeDelete = useCallback(
-    (edgeIdValue: string) => {
-      if (locked) return;
-      onSelectionChange?.([], []);
-      onChange({
-        ...workflow,
-        edges: (workflow.edges ?? []).filter(
-          (edge) => edgeId(edge) !== edgeIdValue,
-        ),
-      });
-    },
-    [locked, onChange, onSelectionChange, workflow],
-  );
   const handleManualConnect = useCallback(
     (sourceId: string, targetId: string) => {
       if (locked || sourceId === targetId) return;
@@ -248,14 +235,13 @@ export function WorkflowCanvas({
         latestRun,
         selectedEdgeIds,
         invalidEdgeIssues,
-        { onDelete: handleEdgeDelete, onSelect: handleEdgeSelect },
+        { onSelect: handleEdgeSelect },
       ),
     [
       workflow,
       latestRun,
       selectedEdgeIds,
       invalidEdgeIssues,
-      handleEdgeDelete,
       handleEdgeSelect,
     ],
   );

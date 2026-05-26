@@ -12,7 +12,6 @@ export type WorkflowFlowEdgeData = {
   issueLabel?: string;
   statusColor: string;
   selected: boolean;
-  onDelete?: (edgeId: string) => void;
   onSelect?: (edgeId: string) => void;
 };
 
@@ -65,12 +64,13 @@ export function WorkflowFlowEdge({
         d={path}
         fill="none"
         stroke="transparent"
-        strokeWidth={30}
+        strokeWidth={34}
         className="xy-workflow-edge-hit"
         onClick={selectEdge}
+        onMouseDown={selectEdge}
         onPointerDown={selectEdge}
       />
-      {(label || isSelected) && (
+      {label && (
         <EdgeLabelRenderer>
           <div
             className="xy-workflow-edge-label nodrag nopan"
@@ -79,20 +79,7 @@ export function WorkflowFlowEdge({
             }}
             onPointerDown={(event) => event.stopPropagation()}
           >
-            {label && <span>{label}</span>}
-            {isSelected && (
-              <button
-                type="button"
-                className="xy-workflow-edge-delete"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  data?.onDelete?.(id);
-                }}
-              >
-                删除
-              </button>
-            )}
+            <span>{label}</span>
           </div>
         </EdgeLabelRenderer>
       )}
