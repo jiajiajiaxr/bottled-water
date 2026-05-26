@@ -50,7 +50,7 @@ function ThinkingBlock({
   thinking: string;
   streaming?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   if (!thinking.trim()) return null;
   return (
     <div className="thinking-block">
