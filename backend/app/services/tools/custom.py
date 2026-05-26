@@ -50,5 +50,5 @@ def invoke_custom_tool(
         **(tool.extra or {}),
         "last_invocation_at": utcnow().isoformat().replace("+00:00", "Z"),
     }
-    db.commit()
+    db.flush()
     return {"tool": tool_definition_to_dict(tool), "result": result}

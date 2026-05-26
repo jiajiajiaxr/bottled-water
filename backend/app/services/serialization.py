@@ -24,6 +24,7 @@ from app.models import (
     Skill,
     SkillRun,
     ToolDefinition,
+    ToolInvocation,
     SandboxSession,
     RemoteConnection,
     Subtask,
@@ -585,6 +586,28 @@ def tool_definition_to_dict(tool: ToolDefinition) -> dict[str, Any]:
         "created_by": tool.owner_id,
         "created_at": iso(tool.created_at),
         "updated_at": iso(tool.updated_at),
+    }
+
+
+def tool_invocation_to_dict(invocation: ToolInvocation) -> dict[str, Any]:
+    return {
+        "id": invocation.id,
+        "tool_id": invocation.tool_id,
+        "owner_id": invocation.owner_id,
+        "workspace_id": invocation.workspace_id,
+        "conversation_id": invocation.conversation_id,
+        "tool_name": invocation.tool_name,
+        "tool_type": invocation.tool_type,
+        "arguments": redact_sensitive(invocation.arguments or {}),
+        "result": redact_sensitive(invocation.result or {}),
+        "status": invocation.status,
+        "error_message": invocation.error_message,
+        "duration_ms": invocation.duration_ms,
+        "started_at": iso(invocation.started_at),
+        "completed_at": iso(invocation.completed_at),
+        "metadata": redact_sensitive(invocation.extra or {}),
+        "created_at": iso(invocation.created_at),
+        "updated_at": iso(invocation.updated_at),
     }
 
 

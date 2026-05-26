@@ -1,52 +1,32 @@
 from __future__ import annotations
 
-import json
-
-import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
+from app.core.errors import ValidationAppError, NotFoundError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import McpServer, McpToolInvocation, User, Workspace, utcnow
+from app.models import McpServer, McpToolInvocation, User, utcnow
 from app.schemas.requests import CreateMcpServerRequest, ImportMcpServerRequest, InvokeMcpToolRequest
-from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_allowed
+from app.services.mcp.catalog import (
+    ensure_mcp_tables,
+    ensure_server_owner,
+    get_server_for_user,
+    validate_workspace,
+    visible_server_query,
+)
+from app.services.mcp.discovery import discover_server_tools, import_server_manifest, probe_server
+from app.services.mcp.invocation import invoke_mcp_tool_recorded
 from app.services.serialization import mcp_invocation_to_dict, mcp_server_to_dict
 
 
 router = APIRouter(tags=["mcp"])
 
 
-def ensure_mcp_tables(db: Session) -> None:
-    McpServer.__table__.create(bind=db.get_bind(), checkfirst=True)
-    McpToolInvocation.__table__.create(bind=db.get_bind(), checkfirst=True)
-
-
 def _get_server(db: Session, user: User, server_id: str) -> McpServer:
-    ensure_mcp_tables(db)
-    server = db.scalar(select(McpServer).where(McpServer.id == server_id, McpServer.deleted_at.is_(None)))
-    if not server:
-        raise NotFoundError("MCP服务不存在")
-    if server.owner_id not in {None, user.id} and user.role != "admin":
-        raise ForbiddenError("无权访问该MCP服务")
-    return server
-
-
-def _validate_workspace(db: Session, user: User, workspace_id: str | None) -> None:
-    if not workspace_id:
-        return
-    workspace = db.get(Workspace, workspace_id)
-    if not workspace or workspace.deleted_at is not None:
-        raise NotFoundError("工作区不存在")
-    if workspace.owner_id != user.id and user.role != "admin":
-        raise ForbiddenError("无权配置该工作区 MCP")
-
-
-def _tool_allowed(server: McpServer, tool_name: str) -> bool:
-    return tool_allowed(server, tool_name)
+    return get_server_for_user(db, user, server_id)
 
 
 @router.get("/mcp-servers")
@@ -56,9 +36,7 @@ async def list_mcp_servers(
     user: User = Depends(get_current_user),
 ):
     ensure_mcp_tables(db)
-    query = select(McpServer).where(McpServer.deleted_at.is_(None)).where((McpServer.owner_id == user.id) | (McpServer.owner_id.is_(None)))
-    if workspace_id:
-        query = query.where(McpServer.workspace_id == workspace_id)
+    query = visible_server_query(user, workspace_id)
     servers = db.scalars(query.order_by(McpServer.created_at.desc())).all()
     return ok({"items": [mcp_server_to_dict(item) for item in servers], "total": len(servers)})
 
@@ -70,7 +48,7 @@ async def create_mcp_server(
     user: User = Depends(get_current_user),
 ):
     ensure_mcp_tables(db)
-    _validate_workspace(db, user, payload.workspace_id)
+    validate_workspace(db, user, payload.workspace_id)
     if payload.transport in {"httpStream", "ws", "sse"} and not payload.url:
         raise ValidationAppError("远程MCP服务必须配置URL")
     if payload.transport == "stdio" and not payload.command:
@@ -104,21 +82,8 @@ async def import_mcp_server(
     user: User = Depends(get_current_user),
 ):
     ensure_mcp_tables(db)
-    _validate_workspace(db, user, payload.workspace_id)
-    if payload.source_type == "manifest_url":
-        try:
-            response = httpx.get(payload.source, timeout=10)
-            response.raise_for_status()
-            manifest = response.json()
-        except Exception as exc:
-            raise ValidationAppError(f"MCP manifest 导入失败：{exc}") from exc
-    else:
-        try:
-            manifest = json.loads(payload.source)
-        except json.JSONDecodeError as exc:
-            raise ValidationAppError("MCP JSON 配置格式错误") from exc
-    if not isinstance(manifest, dict):
-        raise ValidationAppError("MCP 配置必须是 JSON Object")
+    validate_workspace(db, user, payload.workspace_id)
+    manifest = import_server_manifest(payload.source_type, payload.source)
     transport = manifest.get("transport") or manifest.get("type") or "stdio"
     server = McpServer(
         owner_id=user.id,
@@ -156,9 +121,8 @@ async def update_mcp_server(
     user: User = Depends(get_current_user),
 ):
     server = _get_server(db, user, server_id)
-    if server.owner_id != user.id and user.role != "admin":
-        raise ForbiddenError("只有创建者可修改MCP服务")
-    _validate_workspace(db, user, payload.workspace_id)
+    ensure_server_owner(server, user)
+    validate_workspace(db, user, payload.workspace_id)
     server.workspace_id = payload.workspace_id
     server.name = payload.name
     server.transport = payload.transport
@@ -182,13 +146,7 @@ async def probe_mcp_server(
     user: User = Depends(get_current_user),
 ):
     server = _get_server(db, user, server_id)
-    server.health_status = "online" if server.enabled else "disabled"
-    server.last_checked_at = utcnow()
-    server.tools = server.tools or [
-        {"name": "file.read", "description": "读取工作区文件", "enabled": True},
-        {"name": "browser.open", "description": "打开浏览器页面", "enabled": server.transport != "stdio"},
-        {"name": "sandbox.run", "description": "在沙箱执行命令", "enabled": True},
-    ]
+    probe_server(server)
     db.commit()
     return ok(mcp_server_to_dict(server), "MCP服务探测完成")
 
@@ -200,10 +158,7 @@ async def list_mcp_tools(
     user: User = Depends(get_current_user),
 ):
     server = _get_server(db, user, server_id)
-    tools = server.tools or [
-        {"name": pattern, "description": "Allowed by tool_filter", "enabled": True}
-        for pattern in (server.tool_filter or [])
-    ]
+    tools = discover_server_tools(server)
     return ok({"server_id": server.id, "items": tools, "total": len(tools)})
 
 
@@ -268,8 +223,7 @@ async def delete_mcp_server(
     user: User = Depends(get_current_user),
 ):
     server = _get_server(db, user, server_id)
-    if server.owner_id != user.id and user.role != "admin":
-        raise ForbiddenError("只有创建者可删除MCP服务")
+    ensure_server_owner(server, user)
     server.deleted_at = utcnow()
     server.enabled = False
     db.commit()

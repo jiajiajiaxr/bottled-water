@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -50,3 +51,45 @@ def soft_delete_skill_package(db: Session, skill: Skill, user: User) -> None:
     skill.deleted_at = utcnow()
     skill.status = "deleted"
     db.flush()
+
+
+def parse_skill_package(package_dir: str | Path) -> dict[str, Any]:
+    """解析 Anthropic Skills 风格目录：SKILL.md + manifest + scripts/references/assets。"""
+
+    root = Path(package_dir)
+    if not root.exists() or not root.is_dir():
+        raise ValueError("Skill package directory does not exist")
+    manifest = _read_manifest(root)
+    skill_md = root / "SKILL.md"
+    if skill_md.exists():
+        content = skill_md.read_text(encoding="utf-8")
+        entry = manifest.get("entry") if isinstance(manifest.get("entry"), dict) else {}
+        manifest["entry"] = {"prompt": content, "skill_md": content, **entry}
+    manifest.setdefault("name", root.name)
+    manifest.setdefault("version", "1.0.0")
+    manifest.setdefault("runtime", "prompt_skill")
+    manifest["metadata"] = {
+        **(manifest.get("metadata") if isinstance(manifest.get("metadata"), dict) else {}),
+        "package_root": str(root),
+        "scripts": _relative_files(root / "scripts", root),
+        "references": _relative_files(root / "references", root),
+        "assets": _relative_files(root / "assets", root),
+    }
+    return manifest
+
+
+def _read_manifest(root: Path) -> dict[str, Any]:
+    for name in ("skill.json", "manifest.json", "skill.manifest.json"):
+        path = root / name
+        if path.exists():
+            import json
+
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+    return {}
+
+
+def _relative_files(path: Path, root: Path) -> list[str]:
+    if not path.exists():
+        return []
+    return [item.relative_to(root).as_posix() for item in path.rglob("*") if item.is_file()]

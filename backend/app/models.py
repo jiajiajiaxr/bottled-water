@@ -245,6 +245,26 @@ class ToolDefinition(Base, TimestampMixin):
     extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 
 
+class ToolInvocation(Base, TimestampMixin):
+    __tablename__ = "tool_invocations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    tool_id: Mapped[str | None] = mapped_column(ForeignKey("tool_definitions.id"), nullable=True, index=True)
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), nullable=True, index=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True, index=True)
+    tool_name: Mapped[str] = mapped_column(String(200), index=True)
+    tool_type: Mapped[str] = mapped_column(String(60), default="builtin", index=True)
+    arguments: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(40), default="running", index=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+
+
 class ModelProvider(Base, TimestampMixin):
     __tablename__ = "model_providers"
 

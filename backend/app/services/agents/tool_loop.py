@@ -439,7 +439,16 @@ async def execute_tool_by_name(
 
     # 内置工具
     if tool_name in registry.BUILTIN_TOOLS:
-        return registry.invoke_builtin_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
+        if not user:
+            user = db.get(User, conversation.creator_id)
+        payload = registry.invoke_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
+        return {
+            "type": "tool",
+            "tool_name": tool_name,
+            "status": payload.get("result", {}).get("status", "succeeded"),
+            "output": payload.get("result"),
+            "invocation_id": payload.get("invocation_id"),
+        }
 
     # Skill
     if tool_name.startswith("skill."):

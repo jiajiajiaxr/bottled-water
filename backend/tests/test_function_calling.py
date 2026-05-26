@@ -202,10 +202,11 @@ class TestExecuteToolByName:
 
         from app.services.tools import registry
 
-        with patch.object(
-            registry, "invoke_builtin_tool"
-        ) as mock_invoke:
-            mock_invoke.return_value = {"status": "succeeded", "path": "/health"}
+        with patch.object(registry, "invoke_tool") as mock_invoke:
+            mock_invoke.return_value = {
+                "result": {"status": "succeeded", "path": "/health"},
+                "invocation_id": "tool-run-1",
+            }
             result = await execute_tool_by_name(
                 db,
                 agent=agent,
@@ -216,6 +217,7 @@ class TestExecuteToolByName:
             )
 
         assert result["status"] == "succeeded"
+        assert result["invocation_id"] == "tool-run-1"
         mock_invoke.assert_called_once()
 
     @pytest.mark.asyncio

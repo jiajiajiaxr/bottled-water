@@ -4,13 +4,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import NotFoundError
-from app.models import ToolDefinition, User
+from app.models import ToolDefinition, ToolInvocation, User
 from app.services.serialization import tool_definition_to_dict
 from app.services.tools.builtins import builtin_tool_dicts
 
 
 def ensure_tool_tables(db: Session) -> None:
-    ToolDefinition.__table__.create(bind=db.get_bind(), checkfirst=True)
+    for table in (ToolDefinition.__table__, ToolInvocation.__table__):
+        table.create(bind=db.get_bind(), checkfirst=True)
 
 
 def visible_tool_query(user: User, workspace_id: str | None = None):

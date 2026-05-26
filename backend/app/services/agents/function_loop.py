@@ -15,6 +15,7 @@ from app.services.llm_gateway import stream_model_config_chat
 from app.services.output_filter import strip_internal_agent_output
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import message_to_dict, task_to_dict
+from app.services.skills.context import activated_skill_context
 from app.services.workflows.runtime import _set_workflow_node_state, mutate_workflow_run_locked
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,13 @@ async def _publish_workflow_update(
     )
 
 
-def _agent_system_prompt(agent: Agent, *, mode: str, node_title: str | None = None) -> str:
+def _agent_system_prompt(
+    agent: Agent,
+    *,
+    mode: str,
+    node_title: str | None = None,
+    skill_context: str = "",
+) -> str:
     base = (agent.config or {}).get("system_prompt") or agent.description or f"你是 {agent.name}。"
     node_hint = f"\n当前工作流节点：{node_title}" if node_title else ""
     return (
@@ -77,6 +84,7 @@ def _agent_system_prompt(agent: Agent, *, mode: str, node_title: str | None = No
         "没有必要调用工具时可以直接回答。"
         "如果调用了工具，必须结合工具结果继续推理，然后给用户自然语言最终回复。"
         "不要伪装成 Master Agent，也不要暴露内部 JSON。"
+        f"{skill_context}"
     )
 
 
@@ -215,8 +223,17 @@ async def run_agent_function_call_loop(
         message=f"{agent.name} 正在组织回复",
     )
 
+    skill_context = activated_skill_context(db, agent)
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": _agent_system_prompt(agent, mode=mode, node_title=node_title)},
+        {
+            "role": "system",
+            "content": _agent_system_prompt(
+                agent,
+                mode=mode,
+                node_title=node_title,
+                skill_context=skill_context,
+            ),
+        },
         {"role": "user", "content": prompt},
     ]
     stream_text = ""
