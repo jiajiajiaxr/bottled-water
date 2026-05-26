@@ -166,16 +166,23 @@ export function layoutWorkflowCanvasEdges(
       const id = workflowEdgeId(edge);
       const issue = invalidEdgeIssues.get(id);
       const selected = selectedEdgeIds.includes(id);
-      const stroke = selected ? "#1677ff" : issue ? "#ff4d4f" : statusColor(status);
+      const stroke = selected
+        ? "#1677ff"
+        : issue
+          ? "#ff4d4f"
+          : statusColor(status);
       return {
         id,
+        type: "straight",
         source: from,
         target: to,
         sourceHandle: edgeSourceHandle(edge),
         targetHandle: edgeTargetHandle(edge),
-        interactionWidth: 40,
+        interactionWidth: 64,
         label: issue ? condition || "连线错误" : condition,
         selected,
+        selectable: true,
+        focusable: true,
         data: {
           condition,
           issueLabel: issue?.message,

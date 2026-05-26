@@ -745,11 +745,25 @@ button {
   cursor: pointer;
 }
 
+.xy-workflow-canvas .react-flow__edge-path {
+  stroke-linecap: round;
+  transition:
+    stroke 0.14s ease,
+    stroke-width 0.14s ease,
+    filter 0.14s ease;
+}
+
 .xy-workflow-canvas .react-flow__edge-interaction {
-  stroke: transparent;
-  stroke-width: 40;
+  stroke: rgba(22, 119, 255, 0.01);
+  stroke-linecap: round;
+  stroke-width: 64;
   pointer-events: stroke;
   cursor: pointer;
+}
+
+.xy-workflow-canvas .react-flow__edge:hover .react-flow__edge-path {
+  stroke: #1677ff;
+  stroke-width: 3;
 }
 
 .xy-workflow-edge-invalid .react-flow__edge-path,
