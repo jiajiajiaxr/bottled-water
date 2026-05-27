@@ -9,9 +9,12 @@ import pytest
 from agent_runtime.runtime.orchestrator import Orchestrator
 from agent_runtime.runtime.watchdog import WatchdogConfig
 from agent_runtime.core.types import (
-    AgentConfig, AgentState, AgentWill, AgentReport, Event, SchedulingDecision,
+    AgentConfig,
+    SchedulingDecision,
 )
 from agent_runtime.strategies.base import Scheduler
+
+from model_provider import ChatResponse
 
 
 class SimpleScheduler(Scheduler):
@@ -74,10 +77,14 @@ class TestOrchestratorRun:
 
     @pytest.fixture
     def scheduler(self):
-        return SimpleScheduler([
-            SchedulingDecision(decision_type="assign", target_agent_id="coder", task_description="写代码"),
-            SchedulingDecision(decision_type="complete"),
-        ])
+        return SimpleScheduler(
+            [
+                SchedulingDecision(
+                    decision_type="assign", target_agent_id="coder", task_description="写代码"
+                ),
+                SchedulingDecision(decision_type="complete"),
+            ]
+        )
 
     @pytest.fixture
     def orch(self, sample_agents, scheduler, mock_provider):
@@ -92,7 +99,9 @@ class TestOrchestratorRun:
     async def test_run_basic(self, orch, mock_provider):
         """测试基本运行流程"""
         mock_provider.responses = [
-            ChatResponse(content="代码写好了。\n```status_report\n{\"state\": \"completed\", \"will\": \"complete\"}\n```"),
+            ChatResponse(
+                content='代码写好了。\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            ),
         ]
 
         events = []
@@ -110,7 +119,9 @@ class TestOrchestratorRun:
     async def test_run_with_persistence(self, orch, mock_provider, mock_persistence):
         """测试带持久化的运行"""
         mock_provider.responses = [
-            ChatResponse(content="完成。\n```status_report\n{\"state\": \"completed\", \"will\": \"complete\"}\n```"),
+            ChatResponse(
+                content='完成。\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            ),
         ]
         orch.persistence = mock_persistence
 
@@ -128,9 +139,11 @@ class TestOrchestratorRun:
     async def test_run_watchdog_max_rounds(self, sample_agents, mock_provider):
         """测试看门狗轮数上限"""
         # 调度器总是返回 assign，不会 complete
-        scheduler = SimpleScheduler([
-            SchedulingDecision(decision_type="assign", target_agent_id="coder"),
-        ])
+        scheduler = SimpleScheduler(
+            [
+                SchedulingDecision(decision_type="assign", target_agent_id="coder"),
+            ]
+        )
         orch = Orchestrator(
             session_id="sess_1",
             agents=sample_agents,
@@ -140,7 +153,9 @@ class TestOrchestratorRun:
         )
 
         mock_provider.responses = [
-            ChatResponse(content="工作中。\n```status_report\n{\"state\": \"running\", \"will\": \"execute\"}\n```"),
+            ChatResponse(
+                content='工作中。\n```status_report\n{"state": "running", "will": "execute"}\n```'
+            ),
         ] * 5
 
         events = []
@@ -155,7 +170,9 @@ class TestOrchestratorRun:
     async def test_run_with_event_sink(self, orch, mock_provider, mock_event_sink):
         """测试事件接收器"""
         mock_provider.responses = [
-            ChatResponse(content="完成。\n```status_report\n{\"state\": \"completed\", \"will\": \"complete\"}\n```"),
+            ChatResponse(
+                content='完成。\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            ),
         ]
         orch.event_sink = mock_event_sink
 
@@ -189,9 +206,11 @@ class TestOrchestratorUserInput:
 
     @pytest.mark.asyncio
     async def test_handle_user_input(self, sample_agents, mock_provider):
-        scheduler = SimpleScheduler([
-            SchedulingDecision(decision_type="complete"),
-        ])
+        scheduler = SimpleScheduler(
+            [
+                SchedulingDecision(decision_type="complete"),
+            ]
+        )
         orch = Orchestrator(
             session_id="sess_1",
             agents=sample_agents,

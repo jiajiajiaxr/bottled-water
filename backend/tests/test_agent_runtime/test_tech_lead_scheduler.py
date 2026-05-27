@@ -10,8 +10,8 @@
 import pytest
 
 from agent_runtime.strategies.tech_lead import TechLeadScheduler
-from agent_runtime.core.types import AgentConfig, AgentReport, AgentState, AgentWill, SchedulingDecision, ChatResponse
-
+from agent_runtime.core.types import AgentConfig, AgentReport, AgentState, AgentWill
+from model_provider import ChatResponse
 
 class TestTechLeadSchedulerFallback:
     """测试回退策略"""

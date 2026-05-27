@@ -8,9 +8,6 @@ agent_runtime 适配器层
 - OrchestratorV2: 暴露与旧 run_orchestration 兼容的入口
 """
 
-from __future__ import annotations
-
-import json
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -20,8 +17,9 @@ from agent_runtime.core.interfaces import PersistenceBackend, EventSink, ToolExe
 from agent_runtime.core.types import Event, Message as RuntimeMessage, AgentConfig
 from agent_runtime.runtime.session import Session as AgentSession
 from agent_runtime.strategies.tech_lead import TechLeadScheduler
-from model_provider.core.config import ModelConfig
-from model_provider.factory import create_provider
+from model_provider import ModelConfig
+from model_provider import BaseModelProvider
+from model_provider import create_provider
 
 from app.models import Agent, Conversation, Message
 from app.services.events import event_bus
@@ -32,6 +30,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # ToolExecutorAdapter
 # ---------------------------------------------------------------------------
+
 
 class ToolExecutorAdapter(ToolExecutor):
     """工具执行器适配器
@@ -57,6 +56,7 @@ class ToolExecutorAdapter(ToolExecutor):
         """列出可用工具（OpenAI Function Calling 格式）"""
         if self._tools_cache is None:
             from app.services.agentic_runtime import build_tools_for_agent
+
             self._tools_cache = build_tools_for_agent(self.db, self.agent)
         return self._tools_cache
 
@@ -79,6 +79,7 @@ class ToolExecutorAdapter(ToolExecutor):
 # ---------------------------------------------------------------------------
 # EventBusSink
 # ---------------------------------------------------------------------------
+
 
 class EventBusSink(EventSink):
     """事件总线接收器
@@ -130,6 +131,7 @@ class EventBusSink(EventSink):
 # SQLAlchemyPersistenceBackend
 # ---------------------------------------------------------------------------
 
+
 class SQLAlchemyPersistenceBackend(PersistenceBackend):
     """SQLAlchemy 持久化后端
 
@@ -148,21 +150,31 @@ class SQLAlchemyPersistenceBackend(PersistenceBackend):
         """加载消息历史"""
         from app.services.serialization import message_to_dict
 
-        messages = self.db.query(Message).filter(
-            Message.conversation_id == conversation_id,
-            Message.deleted_at.is_(None),
-        ).order_by(Message.created_at.asc()).limit(limit).all()
+        messages = (
+            self.db.query(Message)
+            .filter(
+                Message.conversation_id == conversation_id,
+                Message.deleted_at.is_(None),
+            )
+            .order_by(Message.created_at.asc())
+            .limit(limit)
+            .all()
+        )
 
         result = []
         for msg in messages:
-            content = msg.content.get("text", "") if isinstance(msg.content, dict) else str(msg.content)
-            result.append(RuntimeMessage(
-                id=msg.id,
-                conversation_id=msg.conversation_id,
-                agent_id=msg.sender_id if msg.sender_type == "agent" else None,
-                content=content,
-                role="assistant" if msg.sender_type == "agent" else "user",
-            ))
+            content = (
+                msg.content.get("text", "") if isinstance(msg.content, dict) else str(msg.content)
+            )
+            result.append(
+                RuntimeMessage(
+                    id=msg.id,
+                    conversation_id=msg.conversation_id,
+                    agent_id=msg.sender_id if msg.sender_type == "agent" else None,
+                    content=content,
+                    role="assistant" if msg.sender_type == "agent" else "user",
+                )
+            )
         return result
 
     async def save_message(self, message: RuntimeMessage) -> None:
@@ -193,7 +205,9 @@ class SQLAlchemyPersistenceBackend(PersistenceBackend):
             return contexts.get(agent_id, [])
         return []
 
-    async def save_agent_context(self, agent_id: str, conversation_id: str, frames: List[dict]) -> None:
+    async def save_agent_context(
+        self, agent_id: str, conversation_id: str, frames: List[dict]
+    ) -> None:
         """保存 Agent 上下文"""
         conv = self.db.get(Conversation, conversation_id)
         if conv:
@@ -206,6 +220,7 @@ class SQLAlchemyPersistenceBackend(PersistenceBackend):
 # ---------------------------------------------------------------------------
 # OrchestratorV2
 # ---------------------------------------------------------------------------
+
 
 class OrchestratorV2:
     """新编排器 V2 入口
@@ -228,7 +243,11 @@ class OrchestratorV2:
         """运行 tech_lead 调度模式的多 Agent 协作"""
         from app.services.agentic_runtime import select_skills, execute_skill
 
-        prompt = self.user_message.content.get("text", "") if isinstance(self.user_message.content, dict) else str(self.user_message.content)
+        prompt = (
+            self.user_message.content.get("text", "")
+            if isinstance(self.user_message.content, dict)
+            else str(self.user_message.content)
+        )
 
         # 获取参与会话的 Agent
         agents = self._get_conversation_agents()
@@ -238,6 +257,7 @@ class OrchestratorV2:
 
         # 获取当前用户
         from app.models import User
+
         user = self.db.get(User, self.conversation.creator_id)
 
         # 构建 AgentConfig 列表
@@ -246,7 +266,9 @@ class OrchestratorV2:
             config = AgentConfig(
                 id=agent.id,
                 name=agent.name,
-                system_prompt=(agent.config or {}).get("system_prompt", "") or agent.description or f"你是 {agent.name}。",
+                system_prompt=(agent.config or {}).get("system_prompt", "")
+                or agent.description
+                or f"你是 {agent.name}。",
                 role=agent.type or "worker",
                 tools=(agent.config or {}).get("tools", []),
             )
@@ -279,17 +301,25 @@ class OrchestratorV2:
             tool_executor=tool_executor,
         )
 
-        logger.info("OrchestratorV2 启动", session_id=session.session_id, agent_count=len(agent_configs))
+        logger.info(
+            "OrchestratorV2 启动", session_id=session.session_id, agent_count=len(agent_configs)
+        )
 
         try:
             async for event in session.run(prompt):
-                logger.debug("OrchestratorV2 事件", type=event.type, payload_keys=list(event.payload.keys()))
+                logger.debug(
+                    "OrchestratorV2 事件", type=event.type, payload_keys=list(event.payload.keys())
+                )
         except Exception as e:
             logger.error("OrchestratorV2 运行失败", error=str(e), exc_info=True)
-            await event_bus.publish(self.channel, "orchestrator:error", {
-                "error": str(e),
-                "error_type": type(e).__name__,
-            })
+            await event_bus.publish(
+                self.channel,
+                "orchestrator:error",
+                {
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
             raise
 
         logger.info("OrchestratorV2 完成", session_id=session.session_id)
@@ -312,7 +342,9 @@ class OrchestratorV2:
             if item.agent_id
         ]
 
-        base_query = select(Agent).where(Agent.deleted_at.is_(None), Agent.status.in_(["online", "degraded"]))
+        base_query = select(Agent).where(
+            Agent.deleted_at.is_(None), Agent.status.in_(["online", "degraded"])
+        )
         if participant_agent_ids:
             agents = self.db.scalars(base_query.where(Agent.id.in_(participant_agent_ids))).all()
             order = {agent_id: index for index, agent_id in enumerate(participant_agent_ids)}
@@ -324,6 +356,7 @@ class OrchestratorV2:
         # TODO: 从 Conversation 或系统配置中读取模型配置
         # 简化版：使用默认 Ark 配置
         from app.core.config import get_settings
+
         settings = get_settings()
 
         # 尝试从环境或配置中获取
@@ -335,16 +368,19 @@ class OrchestratorV2:
             # 返回一个 mock provider 用于测试
             return _MockModelProvider()
 
-        return create_provider(ModelConfig(
-            provider="ark",
-            model=model,
-            api_key=api_key,
-        ))
+        return create_provider(
+            ModelConfig(
+                provider="ark",
+                model=model,
+                api_key=api_key,
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
 # Mock Model Provider（用于测试/降级）
 # ---------------------------------------------------------------------------
+
 
 class _MockModelProvider(BaseModelProvider):
     """降级用的 mock 模型提供者"""
@@ -352,12 +388,18 @@ class _MockModelProvider(BaseModelProvider):
     def __init__(self):
         super().__init__({"model": "mock"})
 
-    async def chat(self, messages, system_prompt=None, tools=None, temperature=0.7, max_tokens=None):
+    async def chat(
+        self, messages, system_prompt=None, tools=None, temperature=0.7, max_tokens=None
+    ):
         from model_provider.core.interfaces import ChatResponse
+
         return ChatResponse(content="Mock response: 这是一个降级回复。")
 
-    async def chat_stream(self, messages, system_prompt=None, tools=None, temperature=0.7, max_tokens=None):
+    async def chat_stream(
+        self, messages, system_prompt=None, tools=None, temperature=0.7, max_tokens=None
+    ):
         from model_provider.core.interfaces import StreamChunk
+
         yield StreamChunk(content="Mock stream response.")
 
     def count_tokens(self, text: str) -> int:

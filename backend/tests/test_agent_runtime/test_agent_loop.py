@@ -9,10 +9,9 @@
 
 import pytest
 
+from model_provider import ChatResponse
 from agent_runtime.runtime.agent_loop import AgentLoop
-from agent_runtime.core.types import (
-    AgentConfig, AgentState, AgentWill, ChatMessage, ChatResponse, ToolCall,
-)
+from agent_runtime.core.types import AgentConfig, AgentState, AgentWill
 
 
 class TestAgentLoopBasic:
@@ -30,7 +29,9 @@ class TestAgentLoopBasic:
     async def test_run_without_tools(self, agent_config, mock_provider):
         """测试无工具时的基本执行"""
         mock_provider.responses = [
-            ChatResponse(content="任务已完成。\n```status_report\n{\"state\": \"completed\", \"will\": \"complete\", \"rationale\": \"完成\"}\n```"),
+            ChatResponse(
+                content='任务已完成。\n```status_report\n{"state": "completed", "will": "complete", "rationale": "完成"}\n```'
+            ),
         ]
 
         loop = AgentLoop(agent_config, mock_provider)
@@ -52,7 +53,9 @@ class TestAgentLoopBasic:
     async def test_run_parses_status_report(self, agent_config, mock_provider):
         """测试状态报告解析"""
         mock_provider.responses = [
-            ChatResponse(content="```status_report\n{\"state\": \"running\", \"will\": \"execute\", \"rationale\": \"继续工作\", \"confidence\": 0.9}\n```"),
+            ChatResponse(
+                content='```status_report\n{"state": "running", "will": "execute", "rationale": "继续工作", "confidence": 0.9}\n```'
+            ),
         ]
 
         loop = AgentLoop(agent_config, mock_provider)
@@ -71,20 +74,26 @@ class TestAgentLoopBasic:
             # 第一轮：LLM 返回 tool_calls
             ChatResponse(
                 content="",
-                tool_calls=[{
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "file_read", "arguments": '{"path": "/tmp/test.txt"}'},
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "file_read", "arguments": '{"path": "/tmp/test.txt"}'},
+                    }
+                ],
             ),
             # 第二轮：LLM 总结工具结果
-            ChatResponse(content="文件内容已读取。\n```status_report\n{\"state\": \"completed\", \"will\": \"complete\"}\n```"),
+            ChatResponse(
+                content='文件内容已读取。\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            ),
         ]
 
-        mock_tool_executor._tools = [{
-            "type": "function",
-            "function": {"name": "file_read", "description": "读文件"},
-        }]
+        mock_tool_executor._tools = [
+            {
+                "type": "function",
+                "function": {"name": "file_read", "description": "读文件"},
+            }
+        ]
 
         loop = AgentLoop(agent_config, mock_provider)
         result = await loop.run("读文件", {}, mock_tool_executor)
@@ -100,13 +109,17 @@ class TestAgentLoopBasic:
         mock_provider.responses = [
             ChatResponse(
                 content="",
-                tool_calls=[{
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "unknown_tool", "arguments": "{}"},
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "unknown_tool", "arguments": "{}"},
+                    }
+                ],
             ),
-            ChatResponse(content="工具未找到。\n```status_report\n{\"state\": \"completed\", \"will\": \"complete\"}\n```"),
+            ChatResponse(
+                content='工具未找到。\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            ),
         ]
 
         loop = AgentLoop(agent_config, mock_provider)
@@ -121,14 +134,18 @@ class TestAgentLoopBasic:
         # 模拟 LLM 总是返回 tool_calls
         responses = []
         for _ in range(AgentLoop.MAX_TOOL_ROUNDS + 1):
-            responses.append(ChatResponse(
-                content="",
-                tool_calls=[{
-                    "id": f"call_{_}",
-                    "type": "function",
-                    "function": {"name": "noop", "arguments": "{}"},
-                }],
-            ))
+            responses.append(
+                ChatResponse(
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": f"call_{_}",
+                            "type": "function",
+                            "function": {"name": "noop", "arguments": "{}"},
+                        }
+                    ],
+                )
+            )
         mock_provider.responses = responses
 
         loop = AgentLoop(agent_config, mock_provider)
@@ -196,13 +213,13 @@ class TestAgentLoopStatusParsing:
         assert report.confidence == 0.95
 
     def test_extract_invalid_json(self, loop):
-        content = '```status_report\nnot json\n```'
+        content = "```status_report\nnot json\n```"
         report = loop._extract_status_report(content)
         assert report.state == AgentState.UNKNOWN
         assert report.will == AgentWill.WAIT
 
     def test_extract_missing_block(self, loop):
-        content = '没有任何状态报告'
+        content = "没有任何状态报告"
         report = loop._extract_status_report(content)
         assert report.state == AgentState.UNKNOWN
 
