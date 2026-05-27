@@ -76,11 +76,21 @@ export interface ChatMessage {
 export interface WorkspaceArtifact {
   id: string;
   conversationId: string;
+  type?: string;
   title: string;
   language: string;
   code: string;
   previousCode: string;
   previewUrl?: string;
+  preview_url?: string;
+  content?: {
+    tool_output?: {
+      format?: string;
+      media_type?: string;
+      filename?: string;
+    };
+    files?: Record<string, string>;
+  };
   updatedAt: string;
 }
 

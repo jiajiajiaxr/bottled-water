@@ -1,4 +1,9 @@
 import {
+  useCallback,
+  useState,
+} from "react";
+import type { PointerEvent } from "react";
+import {
   App as AntApp,
   Avatar,
   Button,
@@ -106,6 +111,10 @@ export interface WorkbenchLayoutProps {
 
 export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const { message } = AntApp.useApp();
+  const [previewWidth, setPreviewWidth] = useState(() => {
+    const value = Number(window.localStorage.getItem("agenthub_preview_width"));
+    return Number.isFinite(value) && value >= 420 ? value : 640;
+  });
 
   const {
     currentUser,
@@ -154,6 +163,34 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     runningConversationIds,
   } = props;
   const workflowWorkspaceId = active?.workspace_id || activeWorkspaceId;
+  const startPreviewResize = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = previewWidth;
+      let latestWidth = previewWidth;
+      const handleMove = (moveEvent: globalThis.PointerEvent) => {
+        const viewportWidth = window.innerWidth;
+        const maxWidth = Math.max(520, Math.floor(viewportWidth * 0.72));
+        const nextWidth = Math.min(
+          maxWidth,
+          Math.max(420, startWidth + startX - moveEvent.clientX),
+        );
+        latestWidth = nextWidth;
+        setPreviewWidth(nextWidth);
+      };
+      const handleUp = () => {
+        window.localStorage.setItem("agenthub_preview_width", String(latestWidth));
+        window.removeEventListener("pointermove", handleMove);
+        window.removeEventListener("pointerup", handleUp);
+        document.body.classList.remove("is-resizing-preview");
+      };
+      document.body.classList.add("is-resizing-preview");
+      window.addEventListener("pointermove", handleMove);
+      window.addEventListener("pointerup", handleUp, { once: true });
+    },
+    [previewWidth],
+  );
 
   return (
     <Layout className="workbench">
@@ -306,6 +343,8 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
       {artifactPanelOpen && artifact && (
         <PreviewPanel
           artifact={artifact}
+          width={previewWidth}
+          onResizeStart={startPreviewResize}
           deployment={deployment}
           files={files}
           knowledgeBases={knowledgeBases}
