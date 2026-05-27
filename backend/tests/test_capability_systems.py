@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +109,9 @@ def test_office_artifacts_persist_real_files_and_versions(tool_name: str, fmt: s
 
     assert artifact.content["format"] == fmt
     assert artifact.content["preview_html"]
+    assert "AgentHub Artifact" not in artifact.content["preview_html"]
+    assert artifact.content["source_text"]
+    assert artifact.content["content_model"]["kind"] in {"document", "spreadsheet", "slides"}
     assert source_file == artifact.content["export_file"]
     assert Path(source_file["storage_path"]).read_bytes() == exported.content
     assert asset is not None
@@ -129,6 +133,45 @@ def test_office_artifacts_persist_real_files_and_versions(tool_name: str, fmt: s
     assert Path(artifact.content["source_file"]["storage_path"]).exists()
     assert version is not None
     assert version.checksum == artifact.content["source_file"]["checksum"]
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "fmt", "preview_marker"),
+    [
+        ("artifact.create_docx", "docx", "agenthub-word-preview"),
+        ("artifact.create_xlsx", "xlsx", "agenthub-sheet-preview"),
+        ("artifact.create_pptx", "pptx", "agenthub-slides-preview"),
+        ("artifact.create_pdf", "pdf", "agenthub-word-preview"),
+    ],
+)
+def test_artifact_exports_cover_zip_and_text_formats(tool_name: str, fmt: str, preview_marker: str) -> None:
+    db = _memory_session()
+    user = _user()
+    conversation = Conversation(creator_id=user.id, chat_type="single", title="Export Formats")
+    db.add_all([user, conversation])
+    db.commit()
+
+    result = invoke_tool(
+        db,
+        user,
+        tool_name,
+        {"conversation_id": conversation.id, "title": "导出测试", "body": "目标\n计划\n验收"},
+    )
+    artifact = db.get(Artifact, result["result"]["artifact_id"])
+    zip_export = export_artifact(artifact, "zip")
+    html_export = export_artifact(artifact, "html")
+    md_export = export_artifact(artifact, "markdown")
+    json_export = export_artifact(artifact, "json")
+
+    assert preview_marker in artifact.content["preview_html"]
+    assert html_export.media_type.startswith("text/html")
+    assert md_export.media_type.startswith("text/markdown")
+    assert json_export.media_type.startswith("application/json")
+    with zipfile.ZipFile(io.BytesIO(zip_export.content)) as archive:
+        names = set(archive.namelist())
+        source_name = f"source/{artifact.content['source_file']['filename']}"
+        assert {"metadata.json", "README.md", "preview.html", source_name}.issubset(names)
+        assert archive.read(source_name) == Path(artifact.content["source_file"]["storage_path"]).read_bytes()
 
 
 def test_html_artifact_preview_and_export_use_real_html_file() -> None:

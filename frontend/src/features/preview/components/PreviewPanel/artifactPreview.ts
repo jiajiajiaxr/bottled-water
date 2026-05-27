@@ -49,20 +49,30 @@ export function openOrDownloadExport(
   exported: ArtifactExportResult,
   format: string,
 ) {
-  if (!exported.previewUrl) return;
+  const previewUrl = exported.previewUrl ?? previewTextUrl(exported);
+  if (!previewUrl) return;
   const lowerFormat = format.toLowerCase();
   const shouldDownload =
     ["docx", "xlsx", "pptx", "zip"].includes(lowerFormat) ||
     exported.contentType.includes("officedocument") ||
     exported.contentType === "application/zip";
   if (!shouldDownload) {
-    window.open(exported.previewUrl, "_blank", "noopener,noreferrer");
+    window.open(previewUrl, "_blank", "noopener,noreferrer");
     return;
   }
   const anchor = document.createElement("a");
-  anchor.href = exported.previewUrl;
+  anchor.href = previewUrl;
   anchor.download = exported.filename || `agenthub-artifact.${lowerFormat}`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+}
+
+function previewTextUrl(exported: ArtifactExportResult) {
+  if (!exported.previewText) return undefined;
+  return URL.createObjectURL(
+    new Blob([exported.previewText], {
+      type: exported.contentType || "text/plain;charset=utf-8",
+    }),
+  );
 }

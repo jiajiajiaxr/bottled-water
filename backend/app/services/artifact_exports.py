@@ -86,11 +86,13 @@ def _markdown(artifact: Artifact) -> str:
     return "\n".join(line for line in lines if line is not None)
 
 
-def _zip_bytes(files: dict[str, str], metadata: dict[str, Any]) -> bytes:
+def _zip_bytes(files: dict[str, str], metadata: dict[str, Any], binary_files: dict[str, bytes] | None = None) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
         archive.writestr("README.md", metadata.get("readme", "AgentHub artifact export"))
+        for path, content in (binary_files or {}).items():
+            archive.writestr(path, content)
         for path, content in files.items():
             archive.writestr(path, content)
     return buffer.getvalue()
@@ -196,7 +198,7 @@ def export_artifact(artifact: Artifact, export_format: str | None = None) -> Art
         return ArtifactExport(generate_pdf(artifact.name, body), OFFICE_MIME_TYPES["pdf"], f"{base}.pdf")
     if fmt != "zip":
         raise ValueError(f"unsupported export format: {fmt}")
-    content = _zip_bytes(files, metadata)
+    content = _artifact_zip_bytes(artifact, files, metadata)
     return ArtifactExport(content, "application/zip", f"{base}.zip")
 
 
@@ -216,3 +218,25 @@ def _stored_artifact_export(artifact: Artifact, fmt: str) -> ArtifactExport | No
     media_type = str(descriptor.get("media_type") or OFFICE_MIME_TYPES.get(fmt) or artifact.mime_type)
     filename = str(descriptor.get("filename") or f"{_safe_name(artifact.name, artifact.id[:8])}.{fmt}")
     return ArtifactExport(path.read_bytes(), media_type, filename)
+
+
+def _artifact_zip_bytes(artifact: Artifact, files: dict[str, str], metadata: dict[str, Any]) -> bytes:
+    content = artifact.content or {}
+    preview_html = str(content.get("preview_html") or files.get("index.html") or "")
+    text_files = {"preview.html": preview_html, **files}
+    binary_files = _artifact_binary_files(artifact)
+    return _zip_bytes(text_files, metadata, binary_files)
+
+
+def _artifact_binary_files(artifact: Artifact) -> dict[str, bytes]:
+    descriptor = ((artifact.content or {}).get("export_file") or (artifact.content or {}).get("source_file"))
+    if not isinstance(descriptor, dict):
+        return {}
+    path_value = descriptor.get("storage_path")
+    if not path_value:
+        return {}
+    path = Path(str(path_value))
+    if not path.exists() or not path.is_file():
+        return {}
+    filename = str(descriptor.get("filename") or path.name)
+    return {f"source/{filename}": path.read_bytes()}

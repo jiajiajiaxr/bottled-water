@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models import Artifact, FileAsset
+from app.services.artifact_content_model import build_content_model
 from app.services.file_tools import GeneratedFile, generate_file
 
 
@@ -153,8 +154,8 @@ def regenerate_binary_from_preview(
     preview_html: str,
     version: int,
 ) -> dict[str, Any]:
-    body = preview_html_to_text(preview_html) or artifact.description or artifact.name
-    generated = build_artifact_file(format_name, title=artifact.name, body=body)
+    source_text = preview_html_to_text(preview_html) or artifact.description or artifact.name
+    generated = build_artifact_file(format_name, title=artifact.name, body=source_text)
     descriptor = persist_artifact_file(
         db,
         owner_id=owner_id,
@@ -170,6 +171,8 @@ def regenerate_binary_from_preview(
         "filename": descriptor["filename"],
         "media_type": descriptor["media_type"],
         "file_size": descriptor["size"],
+        "source_text": source_text,
+        "content_model": build_content_model(format_name, title=artifact.name, source_text=source_text),
         "source_generation": "preview_html_fallback",
     }
 

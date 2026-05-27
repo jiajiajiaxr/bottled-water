@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.models import Conversation, User, utcnow
+from app.services.artifact_content_model import build_content_model, render_preview_html
 from app.services.artifact_storage import (
     artifact_type_for_format,
     build_artifact_file,
@@ -14,7 +15,6 @@ from app.services.artifact_storage import (
     persist_artifact_file,
 )
 from app.services.artifacts import (
-    build_demo_html,
     create_artifact,
     create_preview_message,
     sync_current_artifact_version,
@@ -35,12 +35,14 @@ def make_artifact_from_content(
     conversation = _get_conversation(db, user, conversation_id)
     artifact_type = artifact_type_for_format(format_name)
     export_format = "html" if format_name in {"html", "web_app"} else format_name
+    source_text = body or title
+    content_model = build_content_model(export_format, title=title, source_text=source_text)
     generated = (
         html_artifact_file(title=title, html_content=html_content)
         if export_format == "html" and html_content
-        else build_artifact_file(format_name, title=title, body=body)
+        else build_artifact_file(format_name, title=title, body=source_text)
     )
-    html_preview = _preview_html(format_name, generated.content, title, body, artifact_type, html_content)
+    html_preview = _preview_html(export_format, generated.content, content_model, html_content)
     artifact = create_artifact(
         db,
         conversation,
@@ -59,7 +61,16 @@ def make_artifact_from_content(
         version=artifact.current_version,
         role="source",
     )
-    _attach_file_content(artifact, format_name, export_format, generated, html_preview, source_file)
+    _attach_file_content(
+        artifact,
+        format_name,
+        export_format,
+        generated,
+        html_preview,
+        source_file,
+        source_text,
+        content_model,
+    )
     sync_current_artifact_version(db, artifact, change_summary="初始真实文件产物")
     preview = create_preview_message(db, conversation, artifact)
     _touch_conversation(conversation)
@@ -88,16 +99,12 @@ def _get_conversation(db: Session, user: User, conversation_id: str | None) -> C
 def _preview_html(
     format_name: str,
     generated_content: bytes,
-    title: str,
-    body: str,
-    artifact_type: str,
+    content_model: dict[str, Any],
     html_content: str | None,
 ) -> str:
-    if html_content:
-        return html_content
     if format_name in {"html", "web_app"}:
-        return generated_content.decode("utf-8", errors="ignore")
-    return build_demo_html(title, body[:500], artifact_type=artifact_type)
+        return html_content or generated_content.decode("utf-8", errors="ignore")
+    return render_preview_html(format_name, content_model)
 
 
 def _attach_file_content(
@@ -107,6 +114,8 @@ def _attach_file_content(
     generated,
     html_preview: str,
     source_file: dict[str, Any],
+    source_text: str,
+    content_model: dict[str, Any],
 ) -> None:
     content = dict(artifact.content or {})
     content.update(
@@ -117,6 +126,8 @@ def _attach_file_content(
             "filename": generated.filename,
             "source_file": source_file,
             "export_file": source_file,
+            "source_text": source_text,
+            "content_model": content_model,
         }
     )
     content["tool_output"] = {

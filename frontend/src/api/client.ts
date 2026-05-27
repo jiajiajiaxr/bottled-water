@@ -80,11 +80,7 @@ export async function requestFile(
   const disposition = response.headers.get("content-disposition") ?? "";
   const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
 
-  if (
-    contentType.startsWith("text/") ||
-    contentType.includes("json") ||
-    contentType.includes("xml")
-  ) {
+  if (isTextResponse(contentType)) {
     return { previewText: await response.text(), contentType, filename };
   }
 
@@ -93,6 +89,24 @@ export async function requestFile(
     contentType,
     filename,
   };
+}
+
+function isTextResponse(contentType: string) {
+  const normalized = contentType.toLowerCase();
+  if (
+    normalized.includes("officedocument") ||
+    normalized.includes("application/pdf") ||
+    normalized.includes("application/zip")
+  ) {
+    return false;
+  }
+  return (
+    normalized.startsWith("text/") ||
+    normalized.includes("application/json") ||
+    normalized.includes("+json") ||
+    normalized.includes("application/xml") ||
+    normalized.includes("+xml")
+  );
 }
 
 export const wait = (ms: number) =>
