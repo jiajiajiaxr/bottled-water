@@ -299,7 +299,7 @@ class Orchestrator:
 
         # 构建 Agent 上下文
         agent_ctx = self.agent_ctx_mgr.get(agent_id, self.session_id)
-        agent_ctx.push("task", task)
+        agent_ctx.add("task", task)
         agent_ctx.current_round = self.round_num
         agent_ctx.current_task = task
 
@@ -344,7 +344,7 @@ class Orchestrator:
             })
 
             # 归档到 Agent 上下文
-            agent_ctx.push("thought", status_report.rationale)
+            agent_ctx.add("thought", status_report.rationale)
             if self.persistence:
                 archive = self.agent_ctx_mgr.after_round(agent_id, self.session_id, archive=True)
                 if archive:

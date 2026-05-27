@@ -152,56 +152,72 @@ class TestAgentContext:
         ctx = AgentContext(agent_id="coder", conversation_id="conv_1")
         assert ctx.agent_id == "coder"
         assert ctx.conversation_id == "conv_1"
-        assert ctx.stack == []
+        assert ctx.frames == []
         assert ctx.current_round == 0
 
-    def test_push_pop(self):
+    def test_add_and_find_last(self):
         ctx = AgentContext("coder", "conv_1")
-        ctx.push("task", "实现登录功能")
-        ctx.push("thought", "需要分析需求")
+        ctx.add("task", "实现登录功能")
+        ctx.add("thought", "需要分析需求")
 
-        assert len(ctx.stack) == 2
+        assert len(ctx.frames) == 2
 
-        top = ctx.pop()
-        assert top.frame_type == "thought"
-        assert top.content == "需要分析需求"
+        last = ctx.find_last()
+        assert last.frame_type == "thought"
+        assert last.content == "需要分析需求"
 
-        assert len(ctx.stack) == 1
+        last_task = ctx.find_last("task")
+        assert last_task.content == "实现登录功能"
 
-    def test_peek(self):
+        assert ctx.find_last("nonexistent") is None
+
+    def test_find_all(self):
         ctx = AgentContext("coder", "conv_1")
-        ctx.push("task", "任务A")
-        ctx.push("thought", "思考A")
+        ctx.add("task", "任务1")
+        ctx.add("thought", "思考1")
+        ctx.add("task", "任务2")
 
-        assert ctx.peek().content == "思考A"
-        assert ctx.peek("task").content == "任务A"
-        assert ctx.peek("nonexistent") is None
+        tasks = ctx.find_all("task")
+        assert len(tasks) == 2
+        assert tasks[0].content == "任务1"
+        assert tasks[1].content == "任务2"
 
     def test_get_full_context(self):
         ctx = AgentContext("coder", "conv_1")
         ctx.system_prompt = "你是一个程序员。"
-        ctx.push("task", "写代码")
-        ctx.push("thought", "好的")
+        ctx.add("task", "写代码")
+        ctx.add("thought", "好的")
 
         text = ctx.get_full_context()
         assert "你是一个程序员" in text
         assert "写代码" in text
         assert "好的" in text
 
+    def test_trim(self):
+        ctx = AgentContext("coder", "conv_1")
+        for i in range(10):
+            ctx.add("thought", f"思考{i}")
+
+        assert len(ctx.frames) == 10
+        ctx.trim(max_frames=3)
+        assert len(ctx.frames) == 3
+        assert ctx.frames[0].content == "思考7"
+        assert ctx.frames[2].content == "思考9"
+
     def test_archive(self):
         ctx = AgentContext("coder", "conv_1")
-        ctx.push("task", "任务")
+        ctx.add("task", "任务")
         archive = ctx.archive()
         assert archive["agent_id"] == "coder"
-        assert len(archive["stack"]) == 1
+        assert len(archive["frames"]) == 1
         assert "archived_at" in archive
 
     def test_clear(self):
         ctx = AgentContext("coder", "conv_1")
-        ctx.push("task", "任务")
-        assert len(ctx.stack) == 1
+        ctx.add("task", "任务")
+        assert len(ctx.frames) == 1
         ctx.clear()
-        assert len(ctx.stack) == 0
+        assert len(ctx.frames) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -228,19 +244,19 @@ class TestAgentContextManager:
 
     def test_after_round(self, mgr):
         mgr.initialize("coder", "conv_1", system_prompt="prompt")
-        mgr.get("coder", "conv_1").push("task", "任务")
+        mgr.get("coder", "conv_1").add("task", "任务")
 
         archive = mgr.after_round("coder", "conv_1", archive=True)
         assert archive is not None
         assert archive["agent_id"] == "coder"
 
-        # 清理后 stack 为空
+        # 清理后 frames 为空
         ctx = mgr.get("coder", "conv_1")
-        assert len(ctx.stack) == 0
+        assert len(ctx.frames) == 0
 
     def test_after_round_no_archive(self, mgr):
         mgr.initialize("coder", "conv_1")
-        mgr.get("coder", "conv_1").push("task", "任务")
+        mgr.get("coder", "conv_1").add("task", "任务")
 
         archive = mgr.after_round("coder", "conv_1", archive=False)
         assert archive is None
