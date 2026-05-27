@@ -29,13 +29,14 @@ import {
   stripInternalAgentOutput,
 } from "@/lib/message";
 import { formatTime } from "@/lib/format";
-import { useMessageStore } from "@/store";
+import { useConversationStore } from "@/store";
 import type { ChatMessage, MessageAttachment } from "@/types";
 
 const { Text, Paragraph } = Typography;
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  version: number;
   quoted?: ChatMessage;
   onQuote: (message: ChatMessage) => void;
   onRegenerate: (message: ChatMessage) => void;
@@ -75,6 +76,7 @@ function ThinkingBlock({
 
 function MessageBubbleComponent({
   message,
+  version: _version,
   quoted,
   onQuote,
   onRegenerate,
@@ -86,7 +88,7 @@ function MessageBubbleComponent({
     message.kind === "event" ||
     message.role === "system" ||
     message.role === "tool";
-  const thinkingEnabled = useMessageStore((s) =>
+  const thinkingEnabled = useConversationStore((s) =>
     s.getThinkingEnabled(message.conversationId),
   );
   const attachments = messageAttachments(message);
@@ -369,16 +371,6 @@ function MessageBubbleComponent({
 
 export const MessageBubble = React.memo(
   MessageBubbleComponent,
-  (prev, next) => {
-    const skip =
-      prev.message.id === next.message.id &&
-      prev.message.content === next.message.content &&
-      prev.message.thinking === next.message.thinking &&
-      prev.message.streamState === next.message.streamState &&
-      prev.message.kind === next.message.kind &&
-      prev.quoted?.id === next.quoted?.id &&
-      ((prev.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0) ===
-      ((next.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0);
-    return skip;
-  },
+  (prev, next) =>
+    prev.version === next.version && prev.quoted?.id === next.quoted?.id,
 );

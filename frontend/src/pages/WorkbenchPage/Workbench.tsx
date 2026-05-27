@@ -15,7 +15,6 @@ import type { User } from "@/types";
 import {
   useConversationCategories,
   useBackgroundTaskPolling,
-  useMessageOperations,
   useWorkbenchActions,
 } from "@/hooks";
 import { isTaskRunning } from "@/lib/message";
@@ -45,13 +44,11 @@ export function Workbench({
   ) => void;
 }) {
   const [currentUser, setCurrentUser] = useState(user);
+  const { setMessages, clearMessages } = useMessageStore();
   const {
-    setHistoryMessages,
-    clearMessages,
-    streamState,
     localRunningConversationIds,
     updateLocalRunningConversationIds,
-  } = useMessageStore();
+  } = useConversationStore();
   const {
     workspaces,
     setWorkspaces,
@@ -100,10 +97,6 @@ export function Workbench({
     setCreateOpen,
     setArtifactPanelOpen,
   } = useUIStore();
-  const { send, regenerate, stopStreaming } = useMessageOperations(
-    currentUser.name,
-  );
-
   const active = conversations.find((item) => item.id === activeId);
   const activeWorkspace =
     workspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
@@ -303,12 +296,12 @@ export function Workbench({
       api.files(activeId),
     ])
       .then(([nextMessages, nextArtifact, nextFiles]) => {
-        setHistoryMessages(nextMessages);
+        setMessages(nextMessages);
         setArtifact(nextArtifact);
         setFiles(nextFiles);
       })
       .finally(() => setLoadingMessages(false));
-  }, [activeId, setArtifactPanelOpen, setArtifact, setFiles, setLoadingMessages, setHistoryMessages]);
+  }, [activeId, setArtifactPanelOpen, setArtifact, setFiles, setLoadingMessages, setMessages]);
 
   return (
     <>
@@ -332,10 +325,6 @@ export function Workbench({
         setActiveId={setActiveId}
         navigateToConversation={navigateToConversation}
         loadingMessages={loadingMessages}
-        streamState={streamState}
-        send={send}
-        regenerate={regenerate}
-        stopStreaming={stopStreaming}
         setMembersOpen={setMembersOpen}
         setConversationSettingsOpen={setConversationSettingsOpen}
         uploadFile={uploadFile}

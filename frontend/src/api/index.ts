@@ -9,12 +9,10 @@ export {
   requestWithTimeout,
   requestFile,
   wait,
-  eventPayload,
   requestInterceptors,
   responseInterceptors,
   errorInterceptors,
 } from "./client";
-export type { StreamAssistantHandlers } from "./client";
 
 export {
   login,
@@ -40,7 +38,6 @@ export {
   messages,
   sendMessage,
   streamAssistantReply,
-  assistantReply,
   cancelAssistantReply,
 } from "./message";
 
@@ -127,11 +124,7 @@ export {
   deleteTool,
 } from "./tool";
 
-export {
-  sandboxes,
-  createSandbox,
-  runSandboxCommand,
-} from "./sandbox";
+export { sandboxes, createSandbox, runSandboxCommand } from "./sandbox";
 
 export {
   remoteConnections,

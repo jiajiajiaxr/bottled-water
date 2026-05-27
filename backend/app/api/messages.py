@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import uuid
 
@@ -12,20 +10,17 @@ from app.core.database import get_db
 from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import Artifact, Conversation, FileAsset, Message, User, utcnow
+from app.models import Conversation, FileAsset, Message, User, utcnow
 from app.schemas.common import ApiResponse
 from app.schemas.requests import SendMessagePayload
 from app.services.events import event_bus
-from app.services.artifacts import build_demo_html, classify_artifact_request, create_artifact, create_preview_message
 from app.services.orchestrator import run_orchestration
-from app.services.serialization import artifact_to_dict, message_to_dict
+from app.services.serialization import message_to_dict
 
 
 router = APIRouter(tags=["messages"])
 compat_router = APIRouter(tags=["messages-compat"])
 ORCHESTRATION_TASKS: dict[str, asyncio.Task] = {}
-
-
 
 
 def _get_conversation(db: Session, user: User, conversation_id: str) -> Conversation:
@@ -60,18 +55,25 @@ def _list_messages(db: Session, user: User, conversation_id: str) -> list[dict]:
     return [message_to_dict(message) for message in messages]
 
 
-def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True) -> Message:
+def _send(
+    db: Session, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True
+) -> Message:
     conversation = _get_conversation(db, user, conversation_id)
     text = _message_text(payload).strip()
+
     if not text:
         raise ValidationAppError("消息内容不能为空")
+
     raw_content = payload.get("content") if isinstance(payload.get("content"), dict) else {}
     attachments = raw_content.get("attachments") or payload.get("attachments") or []
     normalized_attachments: list[dict] = []
+
     for item in attachments:
         file_id = item.get("file_id") or item.get("id") if isinstance(item, dict) else str(item)
+
         if not file_id:
             continue
+
         file_asset = db.scalar(
             select(FileAsset).where(
                 FileAsset.id == file_id,
@@ -79,6 +81,7 @@ def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigg
                 FileAsset.deleted_at.is_(None),
             )
         )
+
         if file_asset:
             normalized_attachments.append(
                 {
@@ -90,6 +93,7 @@ def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigg
                     "extracted_text": file_asset.extracted_text[:12000],
                 }
             )
+
     message = Message(
         client_message_id=payload.get("client_message_id") or str(uuid.uuid4()),
         conversation_id=conversation.id,
@@ -102,21 +106,33 @@ def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigg
         reply_to_message_id=payload.get("reply_to_message_id") or payload.get("quotedMessageId"),
         extra={"thinking_enabled": bool(payload.get("thinking_enabled"))},
     )
+
     conversation.last_message_preview = text[:300]
     conversation.last_message_sender = user.display_name
     conversation.last_message_at = utcnow()
     conversation.activity_score = min(100, conversation.activity_score + 5)
     conversation.message_count += 1
+
     db.add(message)
     db.commit()
     db.refresh(message)
+
     if trigger_agent:
         previous = ORCHESTRATION_TASKS.get(conversation.id)
+
         if previous and not previous.done():
             previous.cancel()
+
         task = asyncio.create_task(run_orchestration(message.id))
+
         ORCHESTRATION_TASKS[conversation.id] = task
-        task.add_done_callback(lambda done, cid=conversation.id: ORCHESTRATION_TASKS.pop(cid, None) if ORCHESTRATION_TASKS.get(cid) is done else None)
+        
+        task.add_done_callback(
+            lambda done, cid=conversation.id: (
+                ORCHESTRATION_TASKS.pop(cid, None) if ORCHESTRATION_TASKS.get(cid) is done else None
+            )
+        )
+
     return message
 
 
@@ -126,126 +142,57 @@ async def list_messages(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return ok({"items": _list_messages(db, user, conversation_id), "next_cursor": None, "has_more": False})
-
-
-@router.post("/conversations/{conversation_id}/messages", response_model=ApiResponse[dict])
-async def send_message(
-    conversation_id: str,
-    payload: SendMessagePayload,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    message = _send(db, user, conversation_id, payload.model_dump(), trigger_agent=True)
-    preview_message = None
-    artifact = None
-    artifact_type = classify_artifact_request(message.content.get("text", ""))
-    if artifact_type:
-        conversation = db.get(Conversation, conversation_id)
-        existing_preview = db.scalar(
-            select(Message)
-            .where(
-                Message.conversation_id == conversation_id,
-                Message.content_type == "preview_card",
-                Message.created_at >= message.created_at,
-                Message.deleted_at.is_(None),
-            )
-            .order_by(Message.created_at.desc())
-        )
-        if not existing_preview and conversation:
-            artifact_name = {
-                "document": "AgentHub 文档产物预览",
-                "spreadsheet": "AgentHub 表格产物预览",
-                "slides": "AgentHub 演示文稿预览",
-                "code": "AgentHub 代码产物预览",
-                "web_app": "AgentHub Web 产物预览",
-            }.get(artifact_type, "AgentHub 协作产物预览")
-            artifact = create_artifact(
-                db,
-                conversation,
-                task=None,
-                name=artifact_name,
-                html=build_demo_html(
-                    message.content.get("text", ""),
-                    "主控 Agent 正在生成最终说明，产物草稿已可先行预览。",
-                    artifact_type=artifact_type,
-                ),
-                artifact_type=artifact_type,
-            )
-            preview_message = create_preview_message(db, conversation, artifact)
-            conversation.last_message_preview = "已生成产物卡片，可点击后在右侧预览、编辑和部署。"
-            conversation.last_message_sender = "Artifact Agent"
-            conversation.last_message_at = utcnow()
-            conversation.message_count += 1
-            db.commit()
-            db.refresh(artifact)
-            db.refresh(preview_message)
-        elif existing_preview:
-            preview_message = existing_preview
-            artifact_id = existing_preview.content.get("artifact_id") if isinstance(existing_preview.content, dict) else None
-            artifact = db.get(Artifact, artifact_id) if artifact_id else None
-    await event_bus.publish(f"conversation:{conversation_id}", "message:new", message_to_dict(message))
-    if artifact:
-        await event_bus.publish(f"conversation:{conversation_id}", "artifact:created", artifact_to_dict(artifact))
-    if preview_message:
-        await event_bus.publish(f"conversation:{conversation_id}", "message:new", message_to_dict(preview_message))
-    return ok(message_to_dict(message), "消息发送成功")
-
-
-@router.post("/conversations/{conversation_id}/messages/{message_id}/regenerate", response_model=ApiResponse[dict])
-async def regenerate_message(
-    conversation_id: str,
-    message_id: str,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    original = db.get(Message, message_id)
-    if not original:
-        raise NotFoundError("消息不存在")
-    prompt = f"请重新生成：{original.content.get('text', '')}"
-    message = _send(
-        db,
-        user,
-        conversation_id,
-        {"client_message_id": str(uuid.uuid4()), "content": {"text": prompt}},
-        trigger_agent=True,
-    )
     return ok(
-        {
-            "original_message_id": message_id,
-            "new_message_id": message.id,
-            "status": "generating",
-            "stream_url": f"/api/v1/conversations/{conversation_id}/stream",
-        },
-        "已触发重新生成",
+        {"items": _list_messages(db, user, conversation_id), "next_cursor": None, "has_more": False}
     )
 
 
-@router.post("/conversations/{conversation_id}/messages/{message_id}/reply", response_model=ApiResponse[dict])
-async def reply_message(
-    conversation_id: str,
-    message_id: str,
-    payload: SendMessagePayload,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    payload_dict = payload.model_dump()
-    payload_dict["reply_to_message_id"] = message_id
-    message = _send(db, user, conversation_id, payload_dict, trigger_agent=True)
-    return ok(message_to_dict(message), "回复成功")
-
-
-@router.get("/conversations/{conversation_id}/stream")
+@router.post("/conversations/{conversation_id}/stream")
 async def stream_conversation(
     conversation_id: str,
-    replay: bool = True,
+    payload: SendMessagePayload,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """标准 SSE 流式接口：POST 发送消息，返回 text/event-stream。
+
+    Args:
+        conversation_id (str): 对话ID。
+        payload (SendMessagePayload): 发送消息请求体。
+        db (Session, optional): Defaults to Depends(get_db).
+        user (User, optional): Defaults to Depends(get_current_user).
+
+    Returns:
+        EventSourceResponse: SSE 流响应。
+
+    Yields:
+        str: SSE 事件字符串。
+    """
     _get_conversation(db, user, conversation_id)
 
+    channel = f"conversation:{conversation_id}"
+
+    # 处理重新生成
+    message_payload: dict = {}
+
+    if payload.regenerate_message_id:
+        original = db.get(Message, payload.regenerate_message_id)
+        prompt = f"请重新生成这条回复：{original.content.get('text', '')}" if original else ""
+        message_payload = {
+            "client_message_id": str(uuid.uuid4()),
+            "content": {"text": prompt},
+        }
+    else:
+        message_payload = payload.model_dump()
+
+    # 保存用户消息并触发编排
+    message = _send(db, user, conversation_id, message_payload, trigger_agent=True)
+
+    await event_bus.publish(channel, "message:new", message_to_dict(message))
+
+    # 返回 SSE 流
     async def generator():
-        async for event in event_bus.subscribe(f"conversation:{conversation_id}", replay=replay):
+        async for event in event_bus.subscribe(channel, replay=False):
             yield event.as_sse()
 
     return EventSourceResponse(generator())
@@ -271,6 +218,9 @@ async def cancel_stream(
     return ok({"conversation_id": conversation.id, "cancelled": cancelled}, "Generation cancelled")
 
 
+# ---- compat routes (只保留列表，删除发送和流式) ----
+
+
 @compat_router.get("/conversations/{conversation_id}/messages", response_model=list[dict])
 async def compat_list_messages(
     conversation_id: str,
@@ -278,14 +228,3 @@ async def compat_list_messages(
     user: User = Depends(get_current_user),
 ):
     return _list_messages(db, user, conversation_id)
-
-
-@compat_router.post("/conversations/{conversation_id}/messages", response_model=dict)
-async def compat_send_message(
-    conversation_id: str,
-    payload: SendMessagePayload,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    message = _send(db, user, conversation_id, payload.model_dump(), trigger_agent=False)
-    return message_to_dict(message)
