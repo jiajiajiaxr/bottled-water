@@ -29,6 +29,7 @@ import { ArtifactPreviewFrame } from "./ArtifactPreviewFrame";
 import { ResizeHandle } from "./ResizeHandle";
 import {
   artifactExportFormats,
+  downloadLabel,
   isPdfArtifact as checkPdfArtifact,
   openOrDownloadExport,
   preferredArtifactFormat,
@@ -112,8 +113,6 @@ export function PreviewPanel({
   }
 
   const exportFormats = artifactExportFormats(preferredFormat);
-  const primaryFormat = preferredFormat === "web_app" ? "html" : preferredFormat;
-
   return (
     <Sider
       width={width}
@@ -144,15 +143,14 @@ export function PreviewPanel({
             <Button
               key={format}
               size="small"
-              type={format === primaryFormat ? "primary" : "default"}
+              type="primary"
               onClick={async () => {
                 const exported = await api.exportArtifact(artifact.id, format);
                 setExportResult(exported);
                 openOrDownloadExport(exported, format);
               }}
             >
-              {format.toUpperCase()}
-              {format === primaryFormat ? " 主下载" : ""}
+              {downloadLabel(format)}
             </Button>
           ),
         )}

@@ -30,6 +30,14 @@ OFFICE_MIME_TYPES = {
     "pdf": "application/pdf",
 }
 
+DOWNLOAD_FORMAT_ALIASES = {
+    "web_app": "html",
+    "htm": "html",
+    "markdown": "md",
+}
+
+DOWNLOAD_FORMATS = {"pdf", "docx", "xlsx", "pptx", "html", "md", "json", "zip"}
+
 
 class TextExtractor(HTMLParser):
     def __init__(self) -> None:
@@ -154,12 +162,13 @@ def _pptx_bytes(title: str, body: str) -> bytes:
 
 
 def default_export_format(artifact: Artifact) -> str:
-    content_format = (artifact.content or {}).get("format")
-    if content_format in {"pdf", "docx", "xlsx", "pptx", "html"}:
-        return str(content_format)
+    content_format = _normalize_export_format((artifact.content or {}).get("format"))
+    if content_format in DOWNLOAD_FORMATS:
+        return content_format
     tool_format = ((artifact.content or {}).get("tool_output") or {}).get("format")
-    if tool_format in {"pdf", "docx", "xlsx", "pptx", "html"}:
-        return str(tool_format)
+    tool_format = _normalize_export_format(tool_format)
+    if tool_format in DOWNLOAD_FORMATS:
+        return tool_format
     return {
         "document": "docx",
         "spreadsheet": "xlsx",
@@ -170,7 +179,7 @@ def default_export_format(artifact: Artifact) -> str:
 
 
 def export_artifact(artifact: Artifact, export_format: str | None = None) -> ArtifactExport:
-    fmt = (export_format or default_export_format(artifact)).lower().strip(".")
+    fmt = _normalize_export_format(export_format or default_export_format(artifact))
     stored = _stored_artifact_export(artifact, fmt)
     if stored:
         return stored
@@ -240,3 +249,8 @@ def _artifact_binary_files(artifact: Artifact) -> dict[str, bytes]:
         return {}
     filename = str(descriptor.get("filename") or path.name)
     return {f"source/{filename}": path.read_bytes()}
+
+
+def _normalize_export_format(value: Any) -> str:
+    fmt = str(value or "").lower().strip(".")
+    return DOWNLOAD_FORMAT_ALIASES.get(fmt, fmt)

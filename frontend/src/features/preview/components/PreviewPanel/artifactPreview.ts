@@ -9,10 +9,10 @@ export interface ArtifactExportResult {
 
 export function preferredArtifactFormat(artifact?: WorkspaceArtifact): string {
   const toolFormat =
-    artifact?.format ??
     artifact?.content?.format ??
+    artifact?.format ??
     artifact?.content?.tool_output?.format;
-  if (toolFormat) return toolFormat.toLowerCase();
+  if (toolFormat) return normalizeArtifactFormat(toolFormat);
   if (artifact?.type === "document") return "pdf";
   if (artifact?.type === "spreadsheet") return "xlsx";
   if (artifact?.type === "slides") return "pptx";
@@ -29,43 +29,42 @@ export function isPdfArtifact(artifact: WorkspaceArtifact | undefined, format: s
 }
 
 export function artifactExportFormats(preferredFormat: string): string[] {
-  const normalized = preferredFormat === "web_app" ? "html" : preferredFormat;
-  return Array.from(
-    new Set([
-      normalized,
-      "pdf",
-      "docx",
-      "xlsx",
-      "pptx",
-      "html",
-      "markdown",
-      "json",
-      "zip",
-    ]),
-  ).filter(Boolean);
+  return [normalizeArtifactFormat(preferredFormat)];
 }
 
 export function openOrDownloadExport(
   exported: ArtifactExportResult,
   format: string,
 ) {
-  const previewUrl = exported.previewUrl ?? previewTextUrl(exported);
-  if (!previewUrl) return;
-  const lowerFormat = format.toLowerCase();
-  const shouldDownload =
-    ["docx", "xlsx", "pptx", "zip"].includes(lowerFormat) ||
-    exported.contentType.includes("officedocument") ||
-    exported.contentType === "application/zip";
-  if (!shouldDownload) {
-    window.open(previewUrl, "_blank", "noopener,noreferrer");
-    return;
-  }
+  const downloadUrl = exported.previewUrl ?? previewTextUrl(exported);
+  if (!downloadUrl) return;
+  const lowerFormat = normalizeArtifactFormat(format);
   const anchor = document.createElement("a");
-  anchor.href = previewUrl;
-  anchor.download = exported.filename || `agenthub-artifact.${lowerFormat}`;
+  anchor.href = downloadUrl;
+  anchor.download = exported.filename || `agenthub-artifact.${extensionForFormat(lowerFormat)}`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+}
+
+export function downloadLabel(format: string) {
+  return `下载 ${displayFormat(format)}`;
+}
+
+function normalizeArtifactFormat(format: string) {
+  const normalized = format.toLowerCase().replace(/^\./, "");
+  if (normalized === "web_app" || normalized === "htm") return "html";
+  if (normalized === "markdown") return "md";
+  return normalized;
+}
+
+function displayFormat(format: string) {
+  const normalized = normalizeArtifactFormat(format);
+  return normalized === "md" ? "MD" : normalized.toUpperCase();
+}
+
+function extensionForFormat(format: string) {
+  return normalizeArtifactFormat(format);
 }
 
 function previewTextUrl(exported: ArtifactExportResult) {

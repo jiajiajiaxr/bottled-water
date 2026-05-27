@@ -78,7 +78,7 @@ export async function requestFile(
   const contentType =
     response.headers.get("content-type") ?? "application/octet-stream";
   const disposition = response.headers.get("content-disposition") ?? "";
-  const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+  const filename = responseFilename(disposition);
 
   if (isTextResponse(contentType)) {
     return { previewText: await response.text(), contentType, filename };
@@ -96,7 +96,8 @@ function isTextResponse(contentType: string) {
   if (
     normalized.includes("officedocument") ||
     normalized.includes("application/pdf") ||
-    normalized.includes("application/zip")
+    normalized.includes("application/zip") ||
+    normalized.includes("application/octet-stream")
   ) {
     return false;
   }
@@ -107,6 +108,12 @@ function isTextResponse(contentType: string) {
     normalized.includes("application/xml") ||
     normalized.includes("+xml")
   );
+}
+
+function responseFilename(disposition: string) {
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  if (encoded) return decodeURIComponent(encoded);
+  return /filename="?([^";]+)"?/i.exec(disposition)?.[1];
 }
 
 export const wait = (ms: number) =>

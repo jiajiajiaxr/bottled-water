@@ -14,6 +14,7 @@ describe("requestFile", () => {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "application/pdf",
     "application/zip",
+    "application/octet-stream",
   ])("treats %s as binary Blob", async (contentType) => {
     const createObjectURL = vi.fn(() => "blob:office-file");
     vi.stubGlobal("URL", { ...URL, createObjectURL });
@@ -35,6 +36,27 @@ describe("requestFile", () => {
     expect(result.previewText).toBeUndefined();
     expect(result.filename).toBe("demo.docx");
     expect(createObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses RFC 5987 filename from Content-Disposition", async () => {
+    const createObjectURL = vi.fn(() => "blob:pdf-file");
+    vi.stubGlobal("URL", { ...URL, createObjectURL });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(new Blob(["pdf"]), {
+          headers: {
+            "content-type": "application/pdf",
+            "content-disposition": "attachment; filename=\"fallback.pdf\"; filename*=UTF-8''%E7%A4%BA%E4%BE%8B.pdf",
+          },
+        }),
+      ),
+    );
+
+    const result = await requestFile("/artifacts/a/export?format=pdf");
+
+    expect(result.previewUrl).toBe("blob:pdf-file");
+    expect(result.filename).toBe("示例.pdf");
   });
 
   it("keeps HTML export as preview text", async () => {

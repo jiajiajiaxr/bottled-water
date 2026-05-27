@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { artifactExportFormats, preferredArtifactFormat, openOrDownloadExport } from "./artifactPreview";
+import {
+  artifactExportFormats,
+  downloadLabel,
+  preferredArtifactFormat,
+  openOrDownloadExport,
+} from "./artifactPreview";
 
 describe("openOrDownloadExport", () => {
   afterEach(() => {
@@ -12,11 +17,12 @@ describe("openOrDownloadExport", () => {
     ["html", "text/html; charset=utf-8"],
     ["markdown", "text/markdown; charset=utf-8"],
     ["json", "application/json; charset=utf-8"],
-  ])("opens %s previewText through a Blob URL", (format, contentType) => {
-    const open = vi.fn();
+  ])("downloads %s previewText through a Blob URL", (format, contentType) => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     const createObjectURL = vi.fn(() => `blob:${format}-preview`);
-    vi.stubGlobal("open", open);
+    const open = vi.fn();
     vi.stubGlobal("URL", { ...URL, createObjectURL });
+    vi.stubGlobal("open", open);
 
     openOrDownloadExport(
       {
@@ -28,7 +34,8 @@ describe("openOrDownloadExport", () => {
     );
 
     expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(open).toHaveBeenCalledWith(`blob:${format}-preview`, "_blank", "noopener,noreferrer");
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -38,8 +45,9 @@ describe("openOrDownloadExport", () => {
     ],
     ["xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
     ["pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+    ["pdf", "application/pdf"],
     ["zip", "application/zip"],
-  ])("downloads %s Blob URLs instead of opening them", (format, contentType) => {
+  ])("downloads %s Blob URLs", (format, contentType) => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     const open = vi.fn();
     vi.stubGlobal("open", open);
@@ -57,30 +65,23 @@ describe("openOrDownloadExport", () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it("opens PDF Blob URLs in a new tab", () => {
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
-
-    openOrDownloadExport(
-      { previewUrl: "blob:pdf", contentType: "application/pdf", filename: "demo.pdf" },
-      "pdf",
-    );
-
-    expect(open).toHaveBeenCalledWith("blob:pdf", "_blank", "noopener,noreferrer");
-  });
 });
 
 describe("artifact export semantics", () => {
-  it.each(["docx", "pptx", "xlsx", "pdf", "html"])(
-    "puts current %s format first and keeps zip secondary",
+  it.each(["docx", "pptx", "xlsx", "pdf", "html", "md", "json", "zip"])(
+    "only exposes the current %s format",
     (format) => {
       const formats = artifactExportFormats(format);
 
-      expect(formats[0]).toBe(format);
-      expect(formats).toContain("zip");
-      expect(formats.indexOf("zip")).toBeGreaterThan(0);
+      expect(formats).toEqual([format]);
     },
   );
+
+  it("normalizes markdown and labels the primary download", () => {
+    expect(artifactExportFormats("markdown")).toEqual(["md"]);
+    expect(downloadLabel("md")).toBe("下载 MD");
+    expect(downloadLabel("pdf")).toBe("下载 PDF");
+  });
 
   it("prefers artifact.content.format over generic artifact type", () => {
     const format = preferredArtifactFormat({

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -48,6 +50,17 @@ def _owned_artifact(db: Session, user: User, artifact_id: str) -> Artifact:
     if not conversation or conversation.creator_id != user.id:
         raise NotFoundError("产物不存在")
     return artifact
+
+
+def _attachment_headers(filename: str) -> dict[str, str]:
+    safe_filename = filename.replace("\\", "_").replace("/", "_").replace('"', "")
+    ascii_filename = safe_filename.encode("ascii", "ignore").decode().strip() or "agenthub-artifact"
+    encoded_filename = quote(safe_filename)
+    return {
+        "Content-Disposition": (
+            f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+        )
+    }
 
 
 def _owned_file(db: Session, user: User, file_id: str) -> FileAsset:
@@ -176,24 +189,13 @@ async def list_artifact_exports(
     user: User = Depends(get_current_user),
 ):
     artifact = _owned_artifact(db, user, artifact_id)
-    formats = ["html", "markdown", "json", "zip"]
-    if artifact.type == "document":
-        formats.insert(0, "pdf")
-        formats.insert(0, "docx")
-    elif artifact.type == "spreadsheet":
-        formats.insert(0, "xlsx")
-    elif artifact.type == "slides":
-        formats.insert(0, "pptx")
-    elif artifact.type in {"web_app", "code"}:
-        formats.insert(0, "zip")
-    formats = list(dict.fromkeys(formats))
+    default_format = default_export_format(artifact)
     return ok(
         {
             "artifact_id": artifact.id,
-            "default_format": default_export_format(artifact),
+            "default_format": default_format,
             "formats": [
-                {"format": item, "url": f"/api/v1/artifacts/{artifact.id}/export?format={item}"}
-                for item in formats
+                {"format": default_format, "url": f"/api/v1/artifacts/{artifact.id}/export?format={default_format}"}
             ],
         }
     )
@@ -226,7 +228,7 @@ async def download_artifact_export(
     return Response(
         content=exported.content,
         media_type=exported.media_type,
-        headers={"Content-Disposition": f'attachment; filename="{exported.filename}"'},
+        headers=_attachment_headers(exported.filename),
     )
 
 
