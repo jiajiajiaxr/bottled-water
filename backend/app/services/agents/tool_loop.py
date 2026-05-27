@@ -10,7 +10,7 @@ from app.models import Agent, Conversation, McpServer, Skill, ToolDefinition, Us
 from app.services.realtime.event_bus import event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
 from app.services.skills.runtime import SkillRuntime
-from app.services.tools.registry import BUILTIN_TOOLS, invoke_tool, normalize_tool_names
+from app.services.tools.registry import BUILTIN_TOOLS, invoke_tool, invoke_tool_async, normalize_tool_names
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -500,4 +500,35 @@ async def execute_tool_by_name(
                 return {"type": "mcp", "server_id": server_id, "tool_name": actual_tool_name, "status": "failed", "output": "MCP server 不存在或未启用"}
             return await execute_mcp_action(db, server=server, name=actual_tool_name, user=user, conversation=conversation, prompt=arguments.get("prompt", ""))
 
+    authorized_tool = _resolve_authorized_db_tool(db, agent, tool_name)
+    if authorized_tool:
+        if not user:
+            user = db.get(User, conversation.creator_id)
+        payload = await invoke_tool_async(db, user, authorized_tool.name, {**arguments, "conversation_id": conversation.id})
+        result = payload.get("result") or {}
+        return {
+            "type": "tool",
+            "tool_name": authorized_tool.name,
+            "status": result.get("status", "succeeded"),
+            "output": result,
+            "invocation_id": payload.get("invocation_id"),
+        }
+
     return {"type": "unknown", "tool_name": tool_name, "status": "failed", "output": f"未知工具: {tool_name}"}
+
+
+def _resolve_authorized_db_tool(db: Session, agent: Agent, tool_name: str) -> ToolDefinition | None:
+    allowed_tool_names = normalize_tool_names((agent.config or {}).get("tools") or [])
+    if not allowed_tool_names:
+        return None
+    tool = db.scalar(
+        select(ToolDefinition).where(
+            ToolDefinition.deleted_at.is_(None),
+            ToolDefinition.status == "active",
+            (ToolDefinition.name == tool_name) | (ToolDefinition.id == tool_name),
+            (ToolDefinition.name.in_(allowed_tool_names)) | (ToolDefinition.id.in_(allowed_tool_names)),
+        )
+    )
+    if not tool or tool.is_builtin or tool.type == "builtin":
+        return None
+    return tool

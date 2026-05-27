@@ -3,11 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
-from app.models import Agent, McpServer, Skill, ToolDefinition, ToolInvocation, User
+from app.models import Agent, Conversation, McpServer, Skill, ToolDefinition, ToolInvocation, User
+from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
 from app.services.demo_cleanup import cleanup_acceptance_residue
 from app.services.mcp.discovery import discover_server_tools, import_server_manifest, probe_server
 from app.services.mcp.schema import validate_mcp_arguments
@@ -44,6 +46,88 @@ def test_builtin_tools_sync_to_database_catalog() -> None:
     assert tool.is_builtin is True
     assert tool.builtin_handler == "api.test"
     assert tool.owner_id is None
+
+
+@pytest.mark.asyncio
+async def test_agent_custom_python_tool_is_exposed_and_executed() -> None:
+    db = _memory_session()
+    user = _user()
+    custom_tool = ToolDefinition(
+        owner_id=user.id,
+        name="agent.custom_echo",
+        display_name="Agent Custom Echo",
+        description="Echoes text for an agent.",
+        type="custom_python",
+        status="active",
+        input_schema={
+            "type": "object",
+            "properties": {"input": {"type": "string"}},
+            "required": ["input"],
+        },
+        implementation={
+            "language": "python",
+            "code": "text = str(arguments.get('input') or '')\nresult = {'echo': text, 'upper': text.upper()}",
+        },
+    )
+    agent = Agent(
+        owner_id=user.id,
+        name="Custom Tool Agent",
+        type="custom",
+        config={"tools": [custom_tool.name]},
+        capabilities=[],
+    )
+    conversation = Conversation(
+        creator_id=user.id,
+        chat_type="single",
+        title="Custom Tool Conversation",
+    )
+    db.add_all([user, custom_tool, agent, conversation])
+    db.commit()
+
+    exposed_tools = build_tools_for_agent(db, agent)
+    exposed_names = {item["function"]["name"] for item in exposed_tools}
+
+    assert custom_tool.name in exposed_names
+
+    result = await execute_tool_by_name(
+        db,
+        agent=agent,
+        user=user,
+        conversation=conversation,
+        tool_name=custom_tool.name,
+        arguments={"input": "agenthub"},
+    )
+    invocation = db.scalar(select(ToolInvocation).where(ToolInvocation.tool_name == custom_tool.name))
+
+    assert result["status"] == "succeeded"
+    assert result["output"]["result"]["echo"] == "agenthub"
+    assert result["output"]["result"]["upper"] == "AGENTHUB"
+    assert invocation is not None
+    assert invocation.status == "succeeded"
+
+    blocked_agent = Agent(
+        owner_id=user.id,
+        name="Blocked Custom Tool Agent",
+        type="custom",
+        config={"tools": []},
+        capabilities=[],
+    )
+    db.add(blocked_agent)
+    db.commit()
+
+    blocked = await execute_tool_by_name(
+        db,
+        agent=blocked_agent,
+        user=user,
+        conversation=conversation,
+        tool_name=custom_tool.name,
+        arguments={"input": "blocked"},
+    )
+    invocations = db.scalars(select(ToolInvocation).where(ToolInvocation.tool_name == custom_tool.name)).all()
+
+    assert blocked["type"] == "unknown"
+    assert blocked["status"] == "failed"
+    assert len(invocations) == 1
 
 
 def test_cleanup_acceptance_residue_soft_deletes_catalog_noise() -> None:
