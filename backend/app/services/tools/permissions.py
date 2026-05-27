@@ -4,7 +4,7 @@ from typing import Any
 
 from app.models import User
 from app.services.audit import has_permission
-from app.services.tools.builtins import BUILTIN_TOOLS
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
 
 
 def normalize_tool_names(values: list[Any]) -> list[str]:

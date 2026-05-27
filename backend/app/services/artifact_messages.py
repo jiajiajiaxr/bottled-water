@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.models import Artifact, Conversation, Message
-from app.services.artifact_exports import default_export_format
+from app.services.tools.builtins.artifact.export import default_export_format
 
 
 def create_preview_message(db, conversation: Conversation, artifact: Artifact) -> Message:

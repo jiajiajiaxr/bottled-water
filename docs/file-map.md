@@ -85,14 +85,17 @@ agenthub/
 - `backend/app/services/agents/tool_loop.py`：工具 schema 构造，以及 Tool、Skill、MCP 执行分发。
 - `backend/app/services/ark.py`：火山方舟和 OpenAI-compatible 模型适配，包括普通调用、流式调用和 mock fallback。
 - `backend/app/services/llm_gateway.py`：模型配置测试和模型调用统一入口。
-- `backend/app/services/tools/`：Tool 数据库目录、内置执行器、自定义工具、权限、schema 校验和 `tool_invocations` 运行记录。
-- `backend/app/services/mcp/`：MCP server catalog、工具发现、transport、schema 校验、调用记录和审计日志。
+- `backend/app/services/tools/`：Tool 数据库目录、自定义工具、权限、schema 校验和 `tool_invocations` 运行记录。
+- `backend/app/services/tools/builtins/`：内置 Tool 分层实现，包含 artifact、file、sandbox 等复杂能力包。
+- `backend/app/services/mcp/`：MCP server catalog、工具发现、schema 校验、调用记录和审计日志。
+- `backend/app/services/mcp/transports/`：MCP HTTP、stdio、SSE/WebSocket transport 分层实现。
 - `backend/app/services/skills/`：Skill manifest、包解析、运行、测试、版本、依赖和 Agent 激活上下文。
+- `backend/app/services/skills/runners/`：prompt、agent、MCP、script Skill runner。
 - `backend/app/services/tools/registry.py`：旧兼容入口，核心逻辑已迁移到 `services/tools/` 分层模块。
-- `backend/app/services/file_tools.py`：文件解析、预览、摘要、向量入口、PDF/DOCX/XLSX/PPTX/HTML/Markdown/ZIP 生成和转换。
+- `backend/app/services/file_tools.py`：旧兼容入口，真实实现见 `services/tools/builtins/file/`。
 - `backend/app/services/files.py`：上传文件落盘、路径计算、安全文件名。
 - `backend/app/services/artifacts.py`：产物对象创建和基础内容组织。
-- `backend/app/services/artifact_exports.py`：产物导出为不同格式。
+- `backend/app/services/artifact_exports.py`：旧兼容入口，真实实现见 `services/tools/builtins/artifact/export.py`。
 - `backend/app/services/mcp_runtime.py`：旧兼容入口，内部转发到 `services/mcp/`。
 - `backend/app/services/knowledge.py`：轻量知识库切片、索引、检索和上下文片段构造。
 - `backend/app/services/realtime/event_bus.py`：事件总线，优先 Redis PubSub，缺省使用内存队列；用于 SSE/实时状态。

@@ -6,7 +6,7 @@ from app.core.errors import ValidationAppError
 from app.services.agents.tool_loop import build_tools_for_agent
 from app.services.chat.orchestrator import run_orchestration
 from app.services.realtime.event_bus import event_bus
-from app.services.tools.builtins import BUILTIN_TOOLS
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.executor import invoke_tool
 from app.services.tools.schema import validate_tool_arguments
 from app.services.workflows.definition import _workflow_execution_order
@@ -17,6 +17,15 @@ def test_domain_service_imports_are_direct() -> None:
     assert callable(build_tools_for_agent)
     assert callable(invoke_tool)
     assert event_bus is not None
+
+
+def test_legacy_capability_imports_are_reexport_shims() -> None:
+    from app.services import artifact_exports, file_tools
+    from app.services.tools import builtin_executor
+
+    assert artifact_exports.export_artifact
+    assert file_tools.extract_text_from_path
+    assert builtin_executor.invoke_builtin_tool
 
 
 def test_tool_schema_validation_rejects_missing_required_field() -> None:

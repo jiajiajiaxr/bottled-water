@@ -17,8 +17,9 @@ from app.models import ToolDefinition, User, Workspace, utcnow
 from app.schemas.requests import CreateToolRequest, GenerateToolRequest, InvokeToolRequest, UpdateToolRequest
 from app.services.ark import ark_client
 from app.services.serialization import redact_sensitive, tool_definition_to_dict
-from app.services.tools.catalog import get_tool_definition
-from app.services.tools.registry import BUILTIN_TOOLS, ensure_tool_tables, invoke_tool_async, list_tools
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.catalog import ensure_tool_tables, get_tool_definition, list_tools
+from app.services.tools.executor import invoke_tool_async
 
 
 router = APIRouter(tags=["tools"])

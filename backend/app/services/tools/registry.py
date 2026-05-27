@@ -1,7 +1,9 @@
+"""Deprecated compatibility shim; use app.services.tools.catalog/executor/permissions."""
+
 from __future__ import annotations
 
-from app.services.tools.builtin_executor import invoke_builtin_tool
-from app.services.tools.builtins import (
+from app.services.tools.builtins.executor import invoke_builtin_tool
+from app.services.tools.builtins.registry import (
     BUILTIN_TOOLS,
     TOOLBOXES,
     BuiltinTool,

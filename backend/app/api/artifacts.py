@@ -18,7 +18,7 @@ from app.services.artifacts import (
     create_artifact,
     update_artifact_files,
 )
-from app.services.artifact_exports import default_export_format, export_artifact
+from app.services.tools.builtins.artifact.export import default_export_format, export_artifact
 from app.services.audit import write_audit_log
 from app.schemas.requests import CreateKnowledgeBaseRequest, ImportKnowledgeTextRequest, RetrieveKnowledgeRequest
 from app.services.files import attachment_path, ensure_extension_tables, save_upload

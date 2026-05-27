@@ -10,12 +10,9 @@ from app.models import Conversation, Skill, SkillRun, User, utcnow
 from app.services.skills.adapters.legacy import legacy_skill_manifest
 from app.services.skills.catalog import ensure_skill_tables
 from app.services.skills.dependencies import ensure_skill_dependencies
-from app.services.skills.execution import (
-    input_text,
-    legacy_mcp_refs,
-    run_legacy_mcp,
-    run_llm_skill,
-)
+from app.services.skills.runners.agent import run_agent_skill
+from app.services.skills.runners.mcp import legacy_mcp_refs, run_legacy_mcp
+from app.services.skills.runners.prompt import input_text, run_prompt_skill
 from app.services.tools.schema import validate_tool_arguments
 
 
@@ -85,8 +82,8 @@ class SkillRuntime:
         if legacy_mcp_refs(manifest):
             return await run_legacy_mcp(db, skill, user, conversation, manifest, runtime_input)
         if manifest["runtime"] == "agent_skill":
-            return await run_llm_skill(skill, manifest, runtime_input, purpose="agent_skill_execution")
-        return await run_llm_skill(skill, manifest, runtime_input, purpose="skill_execution")
+            return await run_agent_skill(skill, manifest, runtime_input)
+        return await run_prompt_skill(skill, manifest, runtime_input, purpose="skill_execution")
 
     def _finish_run(
         self,

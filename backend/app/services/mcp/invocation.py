@@ -9,7 +9,9 @@ from app.core.errors import ForbiddenError, ValidationAppError
 from app.models import McpServer, McpToolInvocation, User, utcnow
 from app.services.audit import write_audit_log
 from app.services.mcp.schema import validate_mcp_arguments
-from app.services.mcp.transports import call_http_mcp, call_stdio_mcp, tool_allowed
+from app.services.mcp.transports.common import tool_allowed
+from app.services.mcp.transports.http import call_http_mcp
+from app.services.mcp.transports.stdio import call_stdio_mcp
 from app.services.serialization import mcp_invocation_to_dict
 
 

@@ -5,7 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import NotFoundError
 from app.models import Artifact, ArtifactVersion, Conversation, utcnow
-from app.services.artifact_storage import BINARY_ARTIFACT_FORMATS, regenerate_binary_from_preview
+from app.services.tools.builtins.artifact.storage import (
+    BINARY_ARTIFACT_FORMATS,
+    regenerate_binary_from_preview,
+)
 
 
 def sync_current_artifact_version(

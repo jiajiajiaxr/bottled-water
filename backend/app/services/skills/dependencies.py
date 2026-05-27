@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ForbiddenError, ValidationAppError
 from app.models import McpServer, Skill, User
-from app.services.tools.builtins import BUILTIN_TOOLS
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.catalog import get_custom_tool
 
 

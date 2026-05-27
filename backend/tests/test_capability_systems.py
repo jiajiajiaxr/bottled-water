@@ -26,12 +26,12 @@ from app.models import (
     User,
 )
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
-from app.services.artifact_exports import default_export_format, export_artifact
+from app.services.tools.builtins.artifact.export import default_export_format, export_artifact
 from app.services.artifacts import update_artifact_files
 from app.services.demo_cleanup import cleanup_acceptance_residue
 from app.services.mcp.discovery import discover_server_tools, import_server_manifest, probe_server
 from app.services.mcp.schema import validate_mcp_arguments
-from app.services.mcp.transports import tool_allowed
+from app.services.mcp.transports.common import tool_allowed
 from app.services.skills.context import activated_skill_context
 from app.services.skills.package import parse_skill_package
 from app.services.tools.executor import invoke_tool

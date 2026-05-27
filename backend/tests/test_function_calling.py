@@ -24,7 +24,7 @@ from app.models import (
 from app.services.ark import LLMStreamEvent, ArkClient
 from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
-from app.services.artifact_exports import export_artifact
+from app.services.tools.builtins.artifact.export import export_artifact
 from app.services.llm_gateway import stream_model_config_chat
 from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.runtime import build_edge_states, build_node_states
@@ -379,9 +379,7 @@ class TestExecuteToolByName:
         conversation = MagicMock()
         conversation.id = "conv-1"
 
-        from app.services.tools import registry
-
-        with patch.object(registry, "invoke_tool") as mock_invoke:
+        with patch("app.services.agents.tool_loop.invoke_tool") as mock_invoke:
             mock_invoke.return_value = {
                 "result": {"status": "succeeded", "path": "/health"},
                 "invocation_id": "tool-run-1",

@@ -29,8 +29,8 @@ from app.models import (
 from app.services.demo_cleanup import cleanup_acceptance_residue
 from app.services.mcp.catalog import ensure_mcp_tables
 from app.services.skills.catalog import ensure_skill_tables
-from app.services.tools.registry import get_official_toolbox, ensure_tool_tables
-from app.services.tools.catalog import sync_builtin_tool_definitions
+from app.services.tools.builtins.registry import get_official_toolbox
+from app.services.tools.catalog import ensure_tool_tables, sync_builtin_tool_definitions
 
 
 DEFAULT_AGENTS = [

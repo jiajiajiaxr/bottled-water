@@ -10,7 +10,9 @@ from app.models import Agent, Conversation, McpServer, Skill, ToolDefinition, Us
 from app.services.realtime.event_bus import event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
 from app.services.skills.runtime import SkillRuntime
-from app.services.tools.registry import BUILTIN_TOOLS, invoke_tool, invoke_tool_async, normalize_tool_names
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.executor import invoke_tool, invoke_tool_async
+from app.services.tools.permissions import normalize_tool_names
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -362,7 +364,6 @@ def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
     """将 Agent 配置的 tools/skills/mcp 转为 OpenAI Function Calling 格式。"""
     from app.services.skills.adapters.legacy import legacy_skill_manifest
     from app.services.tools.catalog import sync_builtin_tool_definitions
-    from app.services.tools.registry import BUILTIN_TOOLS
 
     tools: list[dict[str, Any]] = []
     config = agent.config or {}
@@ -465,15 +466,14 @@ async def execute_tool_by_name(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     """根据 tool_name 路由到内置工具/Skill/MCP 执行器。"""
-    from app.services.tools import registry
 
     # 内置工具
-    if tool_name in registry.BUILTIN_TOOLS:
+    if tool_name in BUILTIN_TOOLS:
         if not _is_configured_tool(db, agent, tool_name):
             return _unauthorized_tool_result(tool_name)
         if not user:
             user = db.get(User, conversation.creator_id)
-        payload = registry.invoke_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
+        payload = invoke_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
         return {
             "type": "tool",
             "tool_name": tool_name,

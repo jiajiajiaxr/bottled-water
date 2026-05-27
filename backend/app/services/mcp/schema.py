@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.models import McpServer
-from app.services.mcp.transports import tool_name
+from app.services.mcp.transports.common import tool_name
 from app.services.tools.schema import validate_tool_arguments
 
 

@@ -7,7 +7,7 @@ import httpx
 
 from app.core.errors import ValidationAppError
 from app.models import McpServer, utcnow
-from app.services.mcp.transports import tool_name
+from app.services.mcp.transports.common import tool_name
 
 
 DEFAULT_DISCOVERED_TOOLS = [

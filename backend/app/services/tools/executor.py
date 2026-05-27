@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ValidationAppError
 from app.models import Conversation, McpServer, Skill, ToolDefinition, User
-from app.services.tools.builtin_executor import invoke_builtin_tool
+from app.services.tools.builtins.executor import invoke_builtin_tool
 from app.services.tools.catalog import ensure_tool_tables, get_tool_definition
 from app.services.tools.custom import invoke_custom_tool
 from app.services.tools.permissions import check_user_tool_permissions

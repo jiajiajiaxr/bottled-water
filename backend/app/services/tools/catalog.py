@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import NotFoundError
 from app.models import ToolDefinition, ToolInvocation, User
 from app.services.serialization import tool_definition_to_dict
-from app.services.tools.builtins import BUILTIN_TOOLS
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
 
 
 def ensure_tool_tables(db: Session) -> None:
@@ -55,7 +55,7 @@ def sync_builtin_tool_definitions(db: Session) -> None:
         tool.output_schema = builtin.output_schema
         tool.permissions = list(builtin.permissions)
         tool.implementation = {"builtin_handler": name}
-        tool.runtime = {"mode": "builtin", "executor": "app.services.tools.builtin_executor"}
+        tool.runtime = {"mode": "builtin", "executor": "app.services.tools.builtins.executor"}
         tool.tags = list(builtin.tags)
         tool.config = {"builtin": True}
     db.flush()
