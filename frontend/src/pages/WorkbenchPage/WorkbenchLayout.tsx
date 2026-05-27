@@ -38,6 +38,8 @@ import type {
 import type { StreamState } from "../../store/useMessageStore";
 
 const { Text } = Typography;
+const PREVIEW_MIN_WIDTH = 360;
+const PREVIEW_DEFAULT_WIDTH = 680;
 
 export interface WorkbenchLayoutProps {
   // User
@@ -113,7 +115,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const { message } = AntApp.useApp();
   const [previewWidth, setPreviewWidth] = useState(() => {
     const value = Number(window.localStorage.getItem("agenthub_preview_width"));
-    return Number.isFinite(value) && value >= 420 ? value : 640;
+    return Number.isFinite(value) && value >= PREVIEW_MIN_WIDTH
+      ? value
+      : PREVIEW_DEFAULT_WIDTH;
   });
 
   const {
@@ -166,16 +170,17 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const startPreviewResize = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
       event.preventDefault();
-      const startX = event.clientX;
-      const startWidth = previewWidth;
-      let latestWidth = previewWidth;
-      const handleMove = (moveEvent: globalThis.PointerEvent) => {
-        const viewportWidth = window.innerWidth;
-        const maxWidth = Math.max(520, Math.floor(viewportWidth * 0.72));
-        const nextWidth = Math.min(
-          maxWidth,
-          Math.max(420, startWidth + startX - moveEvent.clientX),
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      const clampWidth = (width: number) => {
+        const maxWidth = Math.max(
+          PREVIEW_MIN_WIDTH,
+          Math.floor(window.innerWidth * 0.78),
         );
+        return Math.min(maxWidth, Math.max(PREVIEW_MIN_WIDTH, width));
+      };
+      let latestWidth = clampWidth(window.innerWidth - event.clientX);
+      const handleMove = (moveEvent: globalThis.PointerEvent) => {
+        const nextWidth = clampWidth(window.innerWidth - moveEvent.clientX);
         latestWidth = nextWidth;
         setPreviewWidth(nextWidth);
       };
@@ -189,7 +194,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
       window.addEventListener("pointermove", handleMove);
       window.addEventListener("pointerup", handleUp, { once: true });
     },
-    [previewWidth],
+    [],
   );
 
   return (

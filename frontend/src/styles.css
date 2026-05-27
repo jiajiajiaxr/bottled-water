@@ -536,32 +536,34 @@ button {
 
 .preview-resize-handle {
   position: absolute;
-  left: -5px;
+  left: -9px;
   top: 0;
   z-index: 20;
-  width: 10px;
+  width: 18px;
   height: 100%;
-  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ew-resize;
   touch-action: none;
 }
 
-.preview-resize-handle::after {
-  content: "";
-  position: absolute;
-  left: 4px;
-  top: 0;
+.preview-resize-grip {
   width: 2px;
   height: 100%;
-  background: transparent;
+  border-radius: 999px;
+  background: #c7d3e2;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9);
 }
 
-.preview-resize-handle:hover::after,
-body.is-resizing-preview .preview-resize-handle::after {
+.preview-resize-handle:hover .preview-resize-grip,
+body.is-resizing-preview .preview-resize-grip {
   background: #1677ff;
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.14);
 }
 
 body.is-resizing-preview {
-  cursor: col-resize;
+  cursor: ew-resize;
   user-select: none;
 }
 
@@ -1203,9 +1205,7 @@ body.is-resizing-preview {
   }
 
   .preview-panel {
-    width: 360px !important;
-    flex: 0 0 360px !important;
-    max-width: 360px !important;
+    max-width: 78vw !important;
     min-width: 360px !important;
   }
 }
