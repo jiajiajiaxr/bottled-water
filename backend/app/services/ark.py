@@ -11,6 +11,7 @@ from typing import Any, Literal
 import httpx
 
 from app.core.config import ROOT_DIR, Settings, get_settings
+from app.services.llm.tool_calls import select_mock_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,7 @@ class ArkClient:
                 }
                 if tools:
                     body["tools"] = tools
+                    body["tool_choice"] = "auto"
                 if thinking:
                     body["thinking"] = thinking
                 async for item in self._stream_model(model, body):
@@ -296,17 +298,17 @@ class ArkClient:
                                     if "arguments" in func:
                                         acc["function"].setdefault("arguments", "")
                                         acc["function"]["arguments"] += func["arguments"]
-                            finish_reason = choice.get("finish_reason")
-                            if finish_reason == "tool_calls":
-                                yield LLMStreamEvent(
-                                    type="tool_calls",
-                                    tool_calls=[
-                                        {"id": v.get("id", ""), "type": v.get("type", "function"), "function": v.get("function", {})}
-                                        for v in accumulated_tool_calls.values()
-                                        if v.get("function", {}).get("name")
-                                    ],
-                                    model=model,
-                                )
+                        if choice.get("finish_reason") == "tool_calls":
+                            yield LLMStreamEvent(
+                                type="tool_calls",
+                                tool_calls=[
+                                    {"id": v.get("id", ""), "type": v.get("type", "function"), "function": v.get("function", {})}
+                                    for v in accumulated_tool_calls.values()
+                                    if v.get("function", {}).get("name")
+                                ],
+                                model=model,
+                            )
+                            accumulated_tool_calls = {}
         yield LLMStreamEvent(type="done", usage=usage or {}, model=model)
 
     async def _mock_chat(self, messages: list[dict[str, str]], *, purpose: str) -> LLMResult:
@@ -323,19 +325,13 @@ class ArkClient:
         self, messages: list[dict[str, str]], *, purpose: str, tools: list[dict[str, Any]] | None = None
     ) -> AsyncIterator[LLMStreamEvent]:
         text = self._mock_text(messages, purpose)
-        # 如果传入了 tools，模拟工具调用场景
-        if tools and "file" in text.lower():
-            yield LLMStreamEvent(type="delta", text="我来帮您处理文件请求。", model="mock-ark-compatible")
+        mock_tool_call = select_mock_tool_call(messages, tools)
+        if mock_tool_call:
+            yield LLMStreamEvent(type="delta", text="我将调用授权工具处理请求。", model="mock-ark-compatible")
             await asyncio.sleep(0.05)
             yield LLMStreamEvent(
                 type="tool_calls",
-                tool_calls=[
-                    {
-                        "id": "call_mock_001",
-                        "type": "function",
-                        "function": {"name": "file.extract_text", "arguments": '{"file_id": "mock-file-id"}'},
-                    }
-                ],
+                tool_calls=[mock_tool_call],
                 model="mock-ark-compatible",
             )
             yield LLMStreamEvent(

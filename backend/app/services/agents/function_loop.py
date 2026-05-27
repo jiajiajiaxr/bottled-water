@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models import Agent, Conversation, Message, Task, User, WorkflowRun, utcnow
+from app.services.agents.function_messages import agent_system_prompt, tool_arguments, tool_names
+from app.services.agents.function_types import AgentFunctionLoopResult
+from app.services.agents.permission_guard import complete_missing_artifact_tool
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
 from app.services.ark import ark_client
+from app.services.llm.tool_calls import detect_artifact_tool
 from app.services.llm_gateway import stream_model_config_chat
 from app.services.output_filter import strip_internal_agent_output
 from app.services.realtime.event_bus import event_bus
@@ -19,15 +22,6 @@ from app.services.skills.context import activated_skill_context
 from app.services.workflows.runtime import _set_workflow_node_state, mutate_workflow_run_locked
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class AgentFunctionLoopResult:
-    assistant: Message | None
-    text: str
-    thinking: str
-    tool_results: list[dict[str, Any]]
-    tool_context: dict[str, Any]
 
 
 async def _publish_workflow_update(
@@ -66,49 +60,6 @@ async def _publish_workflow_update(
             "node_id": workflow_node_id,
         },
     )
-
-
-def _agent_system_prompt(
-    agent: Agent,
-    *,
-    mode: str,
-    node_title: str | None = None,
-    skill_context: str = "",
-) -> str:
-    base = (agent.config or {}).get("system_prompt") or agent.description or f"你是 {agent.name}。"
-    node_hint = f"\n当前工作流节点：{node_title}" if node_title else ""
-    return (
-        f"{base}{node_hint}\n"
-        f"你正在以 {agent.name} 的身份独立执行 {mode}。"
-        "你可以根据任务自主决定是否调用已授权的 Tool、Skill 或 MCP。"
-        "当用户明确要求生成 PDF、Word、Excel、PPT、HTML/Web 产物时，优先调用对应 artifact.create_* 工具。"
-        "当用户要求运行测试、检查接口、处理文件、预览页面、部署预览时，优先调用 test.run、api.test、file.*、browser.preview 或 deploy.preview。"
-        "如果缺少对应授权，必须说明当前 Agent 没有该工具权限，不能用文字假装已经生成、导出、测试或部署。"
-        "没有必要调用工具时可以直接回答。"
-        "如果调用了工具，必须结合工具结果继续推理，然后给用户自然语言最终回复。"
-        "聊天中的产物卡片、导出入口、部署状态必须来自真实工具结果。"
-        "不要伪装成 Master Agent，也不要暴露内部 JSON。"
-        f"{skill_context}"
-    )
-
-
-def _tool_names(tools: list[dict[str, Any]]) -> set[str]:
-    names: set[str] = set()
-    for item in tools:
-        function = item.get("function") if isinstance(item, dict) else None
-        if isinstance(function, dict) and function.get("name"):
-            names.add(str(function["name"]))
-    return names
-
-
-def _tool_arguments(raw: str) -> dict[str, Any]:
-    if not raw:
-        return {}
-    try:
-        value = json.loads(raw)
-        return value if isinstance(value, dict) else {"value": value}
-    except json.JSONDecodeError:
-        return {"raw": raw}
 
 
 async def _publish_text_delta(
@@ -181,8 +132,16 @@ async def run_agent_function_call_loop(
     settings = get_settings()
     user = db.get(User, conversation.creator_id)
     tools = build_tools_for_agent(db, agent) if settings.enable_function_calling else []
-    allowed_tool_names = _tool_names(tools)
+    allowed_tool_names = tool_names(tools)
     model_config_id = (agent.config or {}).get("model_config_id")
+    logger.info(
+        "[agent_function_loop] start agent=%s/%s mode=%s model_config_id=%s exposed_tools=%s",
+        agent.name,
+        agent.id,
+        mode,
+        model_config_id,
+        sorted(allowed_tool_names),
+    )
 
     assistant: Message | None = None
     if emit_message:
@@ -227,11 +186,31 @@ async def run_agent_function_call_loop(
         message=f"{agent.name} 正在组织回复",
     )
 
+    requested_artifact_tool = detect_artifact_tool(prompt)
+    if requested_artifact_tool and requested_artifact_tool not in allowed_tool_names:
+        logger.info(
+            "[agent_function_loop] missing_artifact_tool agent=%s requested=%s exposed_tools=%s",
+            agent.id,
+            requested_artifact_tool,
+            sorted(allowed_tool_names),
+        )
+        return await complete_missing_artifact_tool(
+            db,
+            conversation=conversation,
+            assistant=assistant,
+            agent=agent,
+            workflow_run=workflow_run,
+            workflow_node_id=workflow_node_id,
+            channel=channel,
+            requested_tool=requested_artifact_tool,
+            publish_workflow_update=_publish_workflow_update,
+        )
+
     skill_context = activated_skill_context(db, agent)
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": _agent_system_prompt(
+            "content": agent_system_prompt(
                 agent,
                 mode=mode,
                 node_title=node_title,
@@ -288,6 +267,16 @@ async def run_agent_function_call_loop(
                         )
                 elif event.type == "tool_calls":
                     current_tool_calls = event.tool_calls or []
+                    logger.info(
+                        "[agent_function_loop] tool_calls_received agent=%s round=%s calls=%s",
+                        agent.id,
+                        round_num,
+                        [
+                            (item.get("function") or {}).get("name")
+                            for item in current_tool_calls
+                            if isinstance(item, dict)
+                        ],
+                    )
                 elif event.type == "usage" and emit_message and assistant:
                     await event_bus.publish(
                         channel,
@@ -318,6 +307,14 @@ async def run_agent_function_call_loop(
             break
 
         if not current_tool_calls or round_num >= max_tool_rounds:
+            if round_num == 0 and not current_tool_calls:
+                logger.info(
+                    "[agent_function_loop] no_tool_calls agent=%s model_config_id=%s requested_artifact_tool=%s exposed_tools=%s",
+                    agent.id,
+                    model_config_id,
+                    requested_artifact_tool,
+                    sorted(allowed_tool_names),
+                )
             break
 
         round_tool_results: list[dict[str, Any]] = []
@@ -326,7 +323,13 @@ async def run_agent_function_call_loop(
             function = function if isinstance(function, dict) else {}
             tool_name = str(function.get("name") or "")
             tool_call_id = str(tool_call.get("id") or f"call_{round_num}_{len(tool_results) + 1}")
-            arguments = _tool_arguments(str(function.get("arguments") or ""))
+            arguments = tool_arguments(str(function.get("arguments") or ""))
+            logger.info(
+                "[agent_function_loop] tool_call agent=%s name=%s arguments=%s",
+                agent.id,
+                tool_name,
+                json.dumps(arguments, ensure_ascii=False, default=str)[:1200],
+            )
             await _publish_message_tool_event(
                 channel=channel,
                 assistant=assistant,
@@ -378,6 +381,13 @@ async def run_agent_function_call_loop(
                     arguments=arguments,
                 )
             status = str(result.get("status") or "unknown")
+            logger.info(
+                "[agent_function_loop] tool_result agent=%s name=%s status=%s invocation_id=%s",
+                agent.id,
+                tool_name,
+                status,
+                result.get("invocation_id"),
+            )
             record = {
                 "tool_name": tool_name,
                 "tool_call_id": tool_call_id,

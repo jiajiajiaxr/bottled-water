@@ -8,10 +8,23 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
-from app.models import Agent, Artifact, Conversation, Message, Task, ToolDefinition, ToolInvocation, User, WorkflowRun
+from app.models import (
+    Agent,
+    Artifact,
+    Conversation,
+    Message,
+    ModelConfig,
+    ModelProvider,
+    Task,
+    ToolDefinition,
+    ToolInvocation,
+    User,
+    WorkflowRun,
+)
 from app.services.ark import LLMStreamEvent, ArkClient
 from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
+from app.services.llm_gateway import stream_model_config_chat
 from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.runtime import build_edge_states, build_node_states
 
@@ -87,6 +100,92 @@ class TestArkClientToolCalls:
         assert tc_event.tool_calls[0]["function"]["name"] == "file.extract_text"
 
     @pytest.mark.asyncio
+    async def test_mock_stream_with_pdf_tool(self) -> None:
+        client = ArkClient()
+        events: list[LLMStreamEvent] = []
+        async for event in client._mock_stream(
+            [{"role": "user", "content": "请生成 PDF 项目方案"}],
+            purpose="chat",
+            tools=[{"type": "function", "function": {"name": "artifact.create_pdf"}}],
+        ):
+            events.append(event)
+
+        tool_call_event = next(event for event in events if event.type == "tool_calls")
+        assert tool_call_event.tool_calls
+        assert tool_call_event.tool_calls[0]["function"]["name"] == "artifact.create_pdf"
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_sends_tool_choice_auto(self, client: ArkClient) -> None:
+        captured: dict[str, Any] = {}
+
+        async def fake_stream_model(model: str, body: dict[str, Any]) -> Any:
+            captured.update(body)
+            yield LLMStreamEvent(type="done", usage={}, model=model)
+
+        with patch.object(client, "_api_key", return_value="test-key"):
+            with patch.object(client, "_stream_model", fake_stream_model):
+                events = [
+                    event
+                    async for event in client.stream_chat(
+                        [{"role": "user", "content": "请生成 PDF"}],
+                        tools=[{"type": "function", "function": {"name": "artifact.create_pdf"}}],
+                    )
+                ]
+
+        assert events[-1].type == "done"
+        assert captured["tools"][0]["function"]["name"] == "artifact.create_pdf"
+        assert captured["tool_choice"] == "auto"
+
+    @pytest.mark.asyncio
+    async def test_stream_model_parses_tool_calls_with_separate_finish_chunk(self, client: ArkClient) -> None:
+        class FakeStreamResponse:
+            status_code = 200
+
+            async def __aenter__(self) -> "FakeStreamResponse":
+                return self
+
+            async def __aexit__(self, *_args: Any) -> None:
+                return None
+
+            async def aiter_lines(self) -> Any:
+                yield (
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_pdf",'
+                    '"type":"function","function":{"name":"artifact.create_pdf","arguments":"{}"}}]}}]}'
+                )
+                yield 'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}'
+                yield "data: [DONE]"
+
+            async def aread(self) -> bytes:
+                return b""
+
+        class FakeAsyncClient:
+            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *_args: Any) -> None:
+                return None
+
+            def stream(self, *_args: Any, **_kwargs: Any) -> FakeStreamResponse:
+                return FakeStreamResponse()
+
+        with patch.object(client, "_api_key", return_value="test-key"):
+            with patch("app.services.ark.httpx.AsyncClient", FakeAsyncClient):
+                events = [
+                    event
+                    async for event in client._stream_model(
+                        "test-model",
+                        {"model": "test-model", "messages": [], "stream": True},
+                    )
+                ]
+
+        tool_call_event = next(event for event in events if event.type == "tool_calls")
+        assert tool_call_event.tool_calls
+        assert tool_call_event.tool_calls[0]["function"]["name"] == "artifact.create_pdf"
+
+    @pytest.mark.asyncio
     async def test_stream_model_requests_once(self, client: ArkClient) -> None:
         """_stream_model should not issue a second HTTP stream after done."""
 
@@ -135,6 +234,77 @@ class TestArkClientToolCalls:
 
         assert FakeAsyncClient.stream_calls == 1
         assert [event.type for event in events] == ["delta", "usage", "done"]
+
+
+class TestOpenAICompatibleToolCalls:
+    @pytest.mark.asyncio
+    async def test_stream_model_config_chat_sends_tool_choice_auto(self) -> None:
+        db = _memory_session()
+        provider = ModelProvider(
+            id="provider-tools",
+            name="Tool Provider",
+            provider_type="openai_compatible",
+            base_url="https://example.test/api/v3",
+            api_key_ref="test-key",
+            default_model="tool-model",
+            status="active",
+            config={"timeout_seconds": 10},
+        )
+        model = ModelConfig(
+            id="model-tools",
+            provider_id=provider.id,
+            name="Tool Model",
+            model_id="tool-model",
+            status="active",
+            max_output_tokens=1024,
+        )
+        db.add_all([provider, model])
+        db.commit()
+        captured: dict[str, Any] = {}
+
+        class FakeStreamResponse:
+            status_code = 200
+
+            async def __aenter__(self) -> "FakeStreamResponse":
+                return self
+
+            async def __aexit__(self, *_args: Any) -> None:
+                return None
+
+            async def aiter_lines(self) -> Any:
+                yield "data: [DONE]"
+
+            async def aread(self) -> bytes:
+                return b""
+
+        class FakeAsyncClient:
+            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *_args: Any) -> None:
+                return None
+
+            def stream(self, *_args: Any, **kwargs: Any) -> FakeStreamResponse:
+                captured.update(kwargs.get("json") or {})
+                return FakeStreamResponse()
+
+        with patch("app.services.llm_gateway.httpx.AsyncClient", FakeAsyncClient):
+            events = [
+                event
+                async for event in stream_model_config_chat(
+                    db,
+                    model.id,
+                    [{"role": "user", "content": "请生成 PDF"}],
+                    tools=[{"type": "function", "function": {"name": "artifact.create_pdf"}}],
+                )
+            ]
+
+        assert events[-1].type == "done"
+        assert captured["tools"][0]["function"]["name"] == "artifact.create_pdf"
+        assert captured["tool_choice"] == "auto"
 
 
 class TestBuildToolsForAgent:
