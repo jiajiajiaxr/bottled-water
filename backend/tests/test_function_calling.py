@@ -24,6 +24,7 @@ from app.models import (
 from app.services.ark import LLMStreamEvent, ArkClient
 from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
+from app.services.artifact_exports import export_artifact
 from app.services.llm_gateway import stream_model_config_chat
 from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.runtime import build_edge_states, build_node_states
@@ -553,6 +554,114 @@ class TestAgentFunctionCallLoop:
         assert tool_output["filename"].endswith(".pdf")
         assert tool_output["media_type"] == "application/pdf"
         assert any(message.get("role") == "tool" for message in calls[1])
+
+    @pytest.mark.parametrize(
+        ("tool_name", "prompt", "expected_format", "expected_media_type", "extension"),
+        [
+            (
+                "artifact.create_docx",
+                "请生成 Word 项目方案",
+                "docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".docx",
+            ),
+            (
+                "artifact.create_xlsx",
+                "请生成 Excel 项目排期表",
+                "xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".xlsx",
+            ),
+            (
+                "artifact.create_pptx",
+                "请生成 PPT 汇报材料",
+                "pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                ".pptx",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_office_artifact_tool_calls_create_cards_and_exports(
+        self,
+        tool_name: str,
+        prompt: str,
+        expected_format: str,
+        expected_media_type: str,
+        extension: str,
+    ) -> None:
+        db = _memory_session()
+        user, conversation, user_message = _user_conversation_message(db, prompt)
+        agent = Agent(
+            owner_id=user.id,
+            name="Office Agent",
+            type="document",
+            description="Writes office artifacts",
+            config={"tools": [tool_name]},
+            capabilities=[],
+        )
+        db.add(agent)
+        db.commit()
+
+        async def fake_stream_chat(messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
+            if not any(message.get("role") == "tool" for message in messages):
+                yield LLMStreamEvent(
+                    type="tool_calls",
+                    tool_calls=[
+                        {
+                            "id": f"call-{expected_format}",
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": json.dumps(
+                                    {"title": f"中文{expected_format}产物", "body": "目标\n- 第一项\n- 第二项"},
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        }
+                    ],
+                )
+                yield LLMStreamEvent(type="done", usage={})
+                return
+            yield LLMStreamEvent(type="delta", text=f"{expected_format} 已生成。")
+            yield LLMStreamEvent(type="done", usage={})
+
+        with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream_chat):
+            with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock):
+                result = await run_agent_function_call_loop(
+                    db,
+                    conversation=conversation,
+                    user_message=user_message,
+                    agent=agent,
+                    prompt=prompt,
+                    channel=f"conversation:{conversation.id}",
+                    mode="unit-test",
+                )
+
+        artifact = db.scalar(select(Artifact).where(Artifact.conversation_id == conversation.id))
+        preview = db.scalar(select(Message).where(Message.content_type == "preview_card"))
+        tool_output = result.tool_results[0]["result"]["output"]
+        exported = export_artifact(artifact, expected_format) if artifact else None
+
+        assert artifact is not None
+        assert preview is not None
+        assert preview.content["artifact_id"] == artifact.id
+        assert preview.content["format"] == expected_format
+        assert preview.content["export_url"].endswith(
+            f"/artifacts/{artifact.id}/export?format={expected_format}"
+        )
+        assert preview.content["media_type"] == expected_media_type
+        assert tool_output["artifact_id"] == artifact.id
+        assert tool_output["format"] == expected_format
+        assert tool_output["export_url"].endswith(
+            f"/artifacts/{artifact.id}/export?format={expected_format}"
+        )
+        assert tool_output["filename"].endswith(extension)
+        assert tool_output["media_type"] == expected_media_type
+        assert exported is not None
+        assert exported.media_type == expected_media_type
+        assert exported.filename.endswith(extension)
+        assert len(exported.content) > 1000
 
     @pytest.mark.asyncio
     async def test_unauthorized_tool_call_does_not_create_artifact(self) -> None:

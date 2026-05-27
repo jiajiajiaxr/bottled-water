@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.errors import NotFoundError
 from app.models import Artifact, ArtifactVersion, Conversation, Deployment, Message, Task, utcnow
+from app.services.artifact_messages import create_preview_message as _create_preview_message
 
 
 def classify_artifact_request(prompt: str) -> str | None:
@@ -181,24 +182,7 @@ def create_artifact(
 
 
 def create_preview_message(db: Session, conversation: Conversation, artifact: Artifact) -> Message:
-    message = Message(
-        conversation_id=conversation.id,
-        sender_type="agent",
-        sender_id=artifact.agent_id,
-        sender_name="Master Agent",
-        content_type="preview_card",
-        content={
-            "artifact_id": artifact.id,
-            "title": artifact.name,
-            "artifact_type": artifact.type,
-            "preview_url": f"/api/v1/artifacts/{artifact.id}/preview",
-            "file_count": len(artifact.content.get("files") or {}),
-            "total_size": len((artifact.content.get("files") or {}).get("index.html", "")),
-        },
-        status="completed",
-    )
-    db.add(message)
-    return message
+    return _create_preview_message(db, conversation, artifact)
 
 
 def compute_artifact_diff(old: str, new: str) -> list[dict[str, Any]]:

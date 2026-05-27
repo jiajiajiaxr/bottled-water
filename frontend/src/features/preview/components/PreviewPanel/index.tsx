@@ -27,6 +27,12 @@ import { diffLines } from "../../../../lib/diff";
 import { FilesKnowledgePanel } from "../../../chat/components/drawers/FilesKnowledgePanel";
 import { ArtifactPreviewFrame } from "./ArtifactPreviewFrame";
 import { ResizeHandle } from "./ResizeHandle";
+import {
+  artifactExportFormats,
+  isPdfArtifact as checkPdfArtifact,
+  openOrDownloadExport,
+  preferredArtifactFormat,
+} from "./artifactPreview";
 import type {
   Deployment,
   KnowledgeBase,
@@ -86,20 +92,11 @@ export function PreviewPanel({
     setDraft(artifact?.code ?? "");
   }, [artifact?.id, artifact?.code]);
 
-  const preferredFormat = useMemo(() => {
-    const toolFormat = artifact?.content?.tool_output?.format;
-    if (toolFormat) return toolFormat.toLowerCase();
-    if (artifact?.type === "document") return "pdf";
-    if (artifact?.type === "spreadsheet") return "xlsx";
-    if (artifact?.type === "slides") return "pptx";
-    return "html";
-  }, [artifact?.content?.tool_output?.format, artifact?.type]);
-  const preferredExportFormat =
-    preferredFormat === "web_app" ? "html" : preferredFormat;
-
-  const isPdfArtifact =
-    preferredFormat === "pdf" ||
-    artifact?.content?.tool_output?.media_type === "application/pdf";
+  const preferredFormat = useMemo(
+    () => preferredArtifactFormat(artifact),
+    [artifact],
+  );
+  const isPdfArtifact = checkPdfArtifact(artifact, preferredFormat);
 
   if (!artifact) {
     return (
@@ -114,19 +111,7 @@ export function PreviewPanel({
     );
   }
 
-  const exportFormats = Array.from(
-    new Set([
-      preferredExportFormat,
-      "pdf",
-      "html",
-      "markdown",
-      "json",
-      "docx",
-      "xlsx",
-      "pptx",
-      "zip",
-    ]),
-  ).filter(Boolean);
+  const exportFormats = artifactExportFormats(preferredFormat);
 
   return (
     <Sider
@@ -161,12 +146,7 @@ export function PreviewPanel({
               onClick={async () => {
                 const exported = await api.exportArtifact(artifact.id, format);
                 setExportResult(exported);
-                if (exported.previewUrl)
-                  window.open(
-                    exported.previewUrl,
-                    "_blank",
-                    "noopener,noreferrer",
-                  );
+                openOrDownloadExport(exported, format);
               }}
             >
               {format.toUpperCase()}
