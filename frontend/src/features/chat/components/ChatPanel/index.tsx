@@ -19,10 +19,10 @@ import {
   Typography,
   Upload,
 } from "antd";
-// rc-upload 类型声明缺失，使用 any 绕过
-type UploadRequestOption = any;
+import type { UploadProps } from "antd";
 import { MessageBubble } from "@/features/chat/components/MessageBubble";
-import { useMessageStore } from "@/store";
+import { useMessageStore, useConversationStore } from "@/store";
+import { useMessageOperations } from "@/hooks";
 import type { ChatMessage, Conversation, UploadedFile } from "@/types";
 
 const { Content } = Layout;
@@ -32,64 +32,58 @@ const { Text } = Typography;
 export function ChatPanel({
   active,
   loading,
-  streamState,
-  onSend,
-  onRegenerate,
+  currentUserName,
   onUploadFile,
   onOpenPreview,
-  onStopStreaming,
 }: {
   active?: Conversation;
   loading: boolean;
-  streamState: "idle" | "streaming" | "done" | "error";
-  onSend: (
-    text: string,
-    quoted?: ChatMessage,
-    attachments?: UploadedFile[],
-    thinkingEnabled?: boolean,
-  ) => void;
-  onRegenerate: (message: ChatMessage) => void;
+  currentUserName: string;
   onUploadFile: (file: File) => Promise<UploadedFile>;
   onOpenPreview: (message: ChatMessage) => void;
-  onStopStreaming: () => void;
 }) {
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
   const { message } = AntApp.useApp();
 
-  // 从 Store 读取当前会话的思考模式状态（持久化）
-  const thinkingEnabled = useMessageStore((s) =>
+  const { send, regenerate, stopStreaming, streamingMessages, streamState } =
+    useMessageOperations(currentUserName);
+
+  // 从 Conversation Store 读取当前会话的思考模式状态（持久化）
+  const thinkingEnabled = useConversationStore((s) =>
     active ? s.getThinkingEnabled(active.id) : false,
   );
   const setThinkingEnabled = useCallback(
     (enabled: boolean) => {
       if (active) {
-        useMessageStore.getState().setThinkingEnabled(active.id, enabled);
+        useConversationStore.getState().setThinkingEnabled(active.id, enabled);
       }
     },
     [active],
   );
 
-  // 从 Store 分别订阅历史消息和流式消息，互不影响
+  // 历史消息从 Store 读取
   const historyMessages = useMessageStore((s) => s.historyMessages);
-  const streamingMessages = useMessageStore((s) => s.streamingMessages);
+  const messageVersions = useMessageStore((s) => s.messageVersions);
 
-  // 合并为渲染列表（保持按时间顺序）
-  const messages = useMemo(() => {
-    const streaming = Array.from(streamingMessages.values());
-    const merged = [...historyMessages, ...streaming].sort(
-      (a, b) =>
-        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-    );
-    return merged;
-  }, [historyMessages, streamingMessages]);
+  // 流式消息列表
+  const streamingList = useMemo(
+    () => Array.from<ChatMessage>(streamingMessages.values()),
+    [streamingMessages],
+  );
+
+  // 合并所有消息用于 quoted 查找
+  const allMessages = useMemo(
+    () => [...historyMessages, ...streamingList],
+    [historyMessages, streamingList],
+  );
 
   const submit = () => {
     const value =
       text.trim() || (pendingFiles.length ? "请结合上传附件继续处理。" : "");
     if (!value || !active) return;
-    onSend(value, quoted, pendingFiles, thinkingEnabled);
+    send(value, quoted, pendingFiles, thinkingEnabled);
     setText("");
     setQuoted(undefined);
     setPendingFiles([]);
@@ -106,16 +100,16 @@ export function ChatPanel({
   // 用 Map 缓存 quoted 查找，避免每条消息渲染时都做 O(n) 遍历
   const messageById = useMemo(() => {
     const map = new Map<string, ChatMessage>();
-    for (const item of messages) {
+    for (const item of allMessages) {
       map.set(item.id, item);
     }
     return map;
-  }, [messages]);
+  }, [allMessages]);
 
   const handleQuote = useCallback((msg: ChatMessage) => setQuoted(msg), []);
   const handleRegenerate = useCallback(
-    (msg: ChatMessage) => onRegenerate(msg),
-    [onRegenerate],
+    (msg: ChatMessage) => regenerate(msg),
+    [regenerate],
   );
   const handleCopy = useCallback((value: string) => copy(value), [copy]);
   const handlePreview = useCallback(
@@ -125,6 +119,15 @@ export function ChatPanel({
 
   const messageListRef = useRef<HTMLDivElement>(null);
   const isAtBottom = useRef(true);
+
+  const uploadProps: UploadProps = {
+    showUploadList: false,
+    customRequest: async (options) => {
+      const uploaded = await onUploadFile(options.file as File);
+      setPendingFiles((current) => [uploaded, ...current]);
+      options.onSuccess?.("ok");
+    },
+  };
 
   useEffect(() => {
     const el = messageListRef.current;
@@ -145,30 +148,33 @@ export function ChatPanel({
     const el = messageListRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, streamState]);
+  }, [historyMessages, streamingList, streamState]);
+
+  const renderMessageBubble = (item: ChatMessage) => (
+    <MessageBubble
+      key={item.id}
+      message={item}
+      version={messageVersions.get(item.id) ?? 0}
+      quoted={
+        item.quotedMessageId ? messageById.get(item.quotedMessageId) : undefined
+      }
+      onQuote={handleQuote}
+      onRegenerate={handleRegenerate}
+      onCopy={handleCopy}
+      onPreview={handlePreview}
+    />
+  );
 
   return (
     <Content className="chat-panel">
       <div ref={messageListRef} className="message-list">
         {loading ? (
           <Spin />
-        ) : messages.length ? (
-          messages.map((item) => (
-            <MessageBubble
-              key={item.id}
-              message={item}
-              state={item.state}
-              quoted={
-                item.quotedMessageId
-                  ? messageById.get(item.quotedMessageId)
-                  : undefined
-              }
-              onQuote={handleQuote}
-              onRegenerate={handleRegenerate}
-              onCopy={handleCopy}
-              onPreview={handlePreview}
-            />
-          ))
+        ) : allMessages.length ? (
+          <>
+            {historyMessages.map(renderMessageBubble)}
+            {streamingList.map(renderMessageBubble)}
+          </>
         ) : (
           <Empty description="暂无消息" />
         )}
@@ -223,14 +229,7 @@ export function ChatPanel({
         />
         <Flex justify="space-between" align="center">
           <Space>
-            <Upload
-              showUploadList={false}
-              customRequest={async (options: UploadRequestOption) => {
-                const uploaded = await onUploadFile(options.file as File);
-                setPendingFiles((current) => [uploaded, ...current]);
-                options.onSuccess?.("ok");
-              }}
-            >
+            <Upload {...uploadProps}>
               <Button icon={<CloudUploadOutlined />} data-testid="file-upload">
                 上传文件
               </Button>
@@ -250,11 +249,7 @@ export function ChatPanel({
               </Button>
             </Tooltip>
             {streamState === "streaming" ? (
-              <Button
-                danger
-                icon={<ReloadOutlined />}
-                onClick={onStopStreaming}
-              >
+              <Button danger icon={<ReloadOutlined />} onClick={stopStreaming}>
                 Stop
               </Button>
             ) : (

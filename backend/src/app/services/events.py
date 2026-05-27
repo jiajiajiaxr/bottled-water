@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import json
 from collections import defaultdict
@@ -49,6 +47,7 @@ class EventBus:
                 socket_timeout=0.5,
             )
             await client.ping()
+
             self._redis = client
         except Exception:
             self._redis = None
@@ -64,8 +63,11 @@ class EventBus:
         client = await self._get_redis()
         if client is not None:
             encoded = json.dumps(payload.as_dict(), ensure_ascii=False)
+
             await client.publish(channel, encoded)
-            await client.xadd(f"stream:{channel}", {"payload": encoded}, maxlen=500, approximate=True)
+            await client.xadd(
+                f"stream:{channel}", {"payload": encoded}, maxlen=500, approximate=True
+            )
 
     async def subscribe(self, channel: str, replay: bool = True) -> AsyncIterator[Event]:
         queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=500)

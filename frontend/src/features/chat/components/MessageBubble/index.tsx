@@ -28,7 +28,7 @@ import {
   stripInternalAgentOutput,
 } from "@/lib/message";
 import { formatTime } from "@/lib/format";
-import { useMessageStore } from "@/store";
+import { useConversationStore } from "@/store";
 import type { ChatMessage, MessageAttachment } from "@/types";
 import ThinkingBlock from "./ThinkingBlock";
 
@@ -36,7 +36,7 @@ const { Text, Paragraph } = Typography;
 
 interface MessageBubbleProps {
   message: ChatMessage;
-  state: "active" | "inactive";
+  version: number;
   quoted?: ChatMessage;
   onQuote: (message: ChatMessage) => void;
   onRegenerate: (message: ChatMessage) => void;
@@ -46,6 +46,7 @@ interface MessageBubbleProps {
 
 function MessageBubbleComponent({
   message,
+  version: _version,
   quoted,
   onQuote,
   onRegenerate,
@@ -57,7 +58,7 @@ function MessageBubbleComponent({
     message.kind === "event" ||
     message.role === "system" ||
     message.role === "tool";
-  const thinkingEnabled = useMessageStore((s) =>
+  const thinkingEnabled = useConversationStore((s) =>
     s.getThinkingEnabled(message.conversationId),
   );
   const attachments = messageAttachments(message);
@@ -341,6 +342,8 @@ function MessageBubbleComponent({
   );
 }
 
-export const MessageBubble = React.memo(MessageBubbleComponent, (_, next) => {
-  return next.state === "active";
-});
+export const MessageBubble = React.memo(
+  MessageBubbleComponent,
+  (prev, next) =>
+    prev.version === next.version && prev.quoted?.id === next.quoted?.id,
+);

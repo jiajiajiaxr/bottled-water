@@ -29,7 +29,6 @@ import type {
   Workspace,
   WorkspaceArtifact,
 } from "@/types";
-import type { StreamState } from "@/store/useMessageStore";
 
 const { Text } = Typography;
 
@@ -66,10 +65,6 @@ export interface WorkbenchLayoutProps {
 
   // Messages
   loadingMessages: boolean;
-  streamState: StreamState;
-  send: (text: string, quoted?: ChatMessage, attachments?: UploadedFile[], thinkingEnabled?: boolean) => Promise<void>;
-  regenerate: (source: ChatMessage) => void;
-  stopStreaming: () => void;
 
   // UI state setters
   setMembersOpen: (open: boolean) => void;
@@ -122,10 +117,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     setActiveId,
     navigateToConversation,
     loadingMessages,
-    streamState,
-    send,
-    regenerate,
-    stopStreaming,
     uploadFile,
     artifactPanelOpen,
     artifact,
@@ -223,9 +214,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
               tasks={visibleBackgroundTasks}
               conversations={conversations}
               activeConversationId={activeId}
+              currentUserName={currentUser.name}
               onOpenConversation={selectConversation}
-              onCreate={async (prompt) => {
-                await send(prompt);
+              onAfterSend={async () => {
                 await loadBackgroundTasks().catch(() => undefined);
               }}
               onCancel={async (task) => {
@@ -265,12 +256,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         <ChatPanel
           active={active}
           loading={loadingMessages}
-          streamState={streamState}
-          onSend={send}
-          onRegenerate={regenerate}
+          currentUserName={currentUser.name}
           onUploadFile={uploadFile}
           onOpenPreview={openArtifactPreview}
-          onStopStreaming={stopStreaming}
         />
       </Layout>
       {artifactPanelOpen && artifact && (

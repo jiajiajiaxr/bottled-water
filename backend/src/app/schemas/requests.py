@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 from typing import Any, Literal
-
 from pydantic import BaseModel, Field
 
 
@@ -458,6 +455,21 @@ class MessageAttachment(BaseModel):
 
 
 class SendMessagePayload(BaseModel):
+    """发送消息请求体（同时用于 /messages 和 /stream）。
+
+    Args:
+        client_message_id (str | None, optional): 客户端消息ID。默认值为None。
+        content_type (str, optional): 消息内容类型。默认值为"text"。
+        content (dict[str, Any], optional): 消息内容。默认值为空字典。
+        text (str | None, optional): 文本消息内容。默认值为None。
+        prompt (str | None, optional): 提示消息内容。默认值为None。
+        attachments (list[dict[str, Any]], optional): 消息附件。默认值为空列表。
+        reply_to_message_id (str | None, optional): 回复的消息ID。默认值为None。
+        quotedMessageId (str | None, optional): 引用的消息ID。默认值为None。
+        thinking_enabled (bool, optional): 是否启用思考状态。默认值为False。
+        regenerate_message_id (str | None, optional): 重新生成的消息ID。默认值为None。
+    """
+
     client_message_id: str | None = None
     content_type: str = "text"
     content: dict[str, Any] = Field(default_factory=dict)
@@ -516,30 +528,3 @@ class DiffPayload(BaseModel):
 
 
 # ===== conversations workflow / participants =====
-
-
-class WorkflowUpdatePayload(BaseModel):
-    nodes: list[dict[str, Any]] = Field(default_factory=list)
-    edges: list[list[str]] = Field(default_factory=list)
-    mode: str | None = None
-    settings: dict[str, Any] = Field(default_factory=dict)
-
-
-class WorkflowGeneratePayload(BaseModel):
-    instruction: str | None = None
-    prompt: str | None = None
-
-
-class WorkflowRunStartPayload(BaseModel):
-    trigger_message_id: str | None = None
-    workflow: dict[str, Any] | None = None
-
-
-class WorkflowNodeUpdatePayload(BaseModel):
-    status: str | None = None
-    progress: int | None = None
-    output: dict[str, Any] = Field(default_factory=dict)
-
-
-class ParticipantRoleUpdatePayload(BaseModel):
-    role: str

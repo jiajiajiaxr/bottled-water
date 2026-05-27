@@ -15,6 +15,7 @@ import {
 import { ApiOutlined } from "@ant-design/icons";
 import { isTaskRunning } from "@/lib/message";
 import { formatTime } from "@/lib/format";
+import { useMessageOperations } from "@/hooks";
 import type { AgentTask, Conversation } from "@/types";
 
 const { Text, Title } = Typography;
@@ -24,22 +25,25 @@ export function BackgroundTasksButton({
   tasks,
   conversations,
   activeConversationId,
+  currentUserName,
   onOpenConversation,
-  onCreate,
+  onAfterSend,
   onCancel,
   onRefresh,
 }: {
   tasks: AgentTask[];
   conversations: Conversation[];
   activeConversationId?: string;
+  currentUserName: string;
   onOpenConversation: (conversationId: string) => void;
-  onCreate: (prompt: string) => Promise<void>;
+  onAfterSend: () => Promise<void>;
   onCancel: (task: AgentTask) => Promise<void>;
   onRefresh: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
+  const { send } = useMessageOperations(currentUserName);
   const conversationMap = useMemo(
     () => new Map(conversations.map((item) => [item.id, item.title])),
     [conversations],
@@ -52,7 +56,8 @@ export function BackgroundTasksButton({
     if (!value || !activeConversationId) return;
     setCreating(true);
     try {
-      await onCreate(value);
+      await send(value);
+      await onAfterSend();
       setDraft("");
       setOpen(false);
     } finally {
