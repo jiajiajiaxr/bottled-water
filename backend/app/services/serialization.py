@@ -298,11 +298,13 @@ def subtask_to_dict(subtask: Subtask) -> dict[str, Any]:
 
 
 def artifact_to_dict(artifact: Artifact) -> dict[str, Any]:
-    files = artifact.content.get("files") or {}
-    html = files.get("index.html") or artifact.content.get("html") or ""
+    content = artifact.content or {}
+    files = content.get("files") or {}
+    html = content.get("preview_html") or files.get("index.html") or content.get("html") or ""
     first_code = next(iter(files.values()), html)
-    previous_files = artifact.content.get("previous_files") or {}
-    previous_code = previous_files.get("index.html") or artifact.content.get("previous_html") or first_code
+    previous_files = content.get("previous_files") or {}
+    previous_code = previous_files.get("index.html") or content.get("previous_html") or first_code
+    export_format = content.get("format") or ((content.get("tool_output") or {}).get("format"))
     return {
         "id": artifact.id,
         "artifact_id": artifact.id,
@@ -318,7 +320,11 @@ def artifact_to_dict(artifact: Artifact) -> dict[str, Any]:
         "status": artifact.status,
         "storage_url": artifact.storage_url,
         "preview_url": f"/api/v1/artifacts/{artifact.id}/preview",
-        "content": artifact.content,
+        "export_url": f"/api/v1/artifacts/{artifact.id}/export?format={export_format}" if export_format else None,
+        "format": export_format,
+        "media_type": content.get("media_type") or artifact.mime_type,
+        "filename": content.get("filename") or ((content.get("source_file") or {}).get("filename")),
+        "content": content,
         "files": files,
         "code": html or first_code,
         "previousCode": previous_code,

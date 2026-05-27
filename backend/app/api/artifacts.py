@@ -492,7 +492,12 @@ async def artifact_preview(artifact_id: str, db: Session = Depends(get_db)):
     artifact = db.get(Artifact, artifact_id)
     if not artifact:
         raise NotFoundError("产物不存在")
-    html = (artifact.content.get("files") or {}).get("index.html") or artifact.content.get("html") or ""
+    html = (
+        artifact.content.get("preview_html")
+        or (artifact.content.get("files") or {}).get("index.html")
+        or artifact.content.get("html")
+        or ""
+    )
     return Response(content=html, media_type="text/html; charset=utf-8")
 
 

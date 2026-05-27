@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.errors import NotFoundError
 from app.models import Artifact, ArtifactVersion, Conversation, Deployment, Message, Task, utcnow
 from app.services.artifact_messages import create_preview_message as _create_preview_message
+from app.services import artifact_versions as artifact_version_service
 
 
 def classify_artifact_request(prompt: str) -> str | None:
@@ -159,6 +160,7 @@ def create_artifact(
         status="published",
         storage_url="/api/v1/artifacts/preview-pending",
         content={
+            "preview_html": html,
             "files": {"index.html": html},
             "previous_files": {"index.html": previous_html},
             "summary": "包含响应式页面、交互按钮和部署入口。",
@@ -185,6 +187,23 @@ def create_preview_message(db: Session, conversation: Conversation, artifact: Ar
     return _create_preview_message(db, conversation, artifact)
 
 
+def sync_current_artifact_version(
+    db: Session,
+    artifact: Artifact,
+    *,
+    change_summary: str | None = None,
+) -> None:
+    artifact_version_service.sync_current_artifact_version(
+        db,
+        artifact,
+        change_summary=change_summary,
+    )
+
+
+def update_artifact_files(db: Session, artifact_id: str, files: dict[str, str], summary: str) -> Artifact:
+    return artifact_version_service.update_artifact_files(db, artifact_id, files, summary)
+
+
 def compute_artifact_diff(old: str, new: str) -> list[dict[str, Any]]:
     diff = difflib.ndiff(old.splitlines(), new.splitlines())
     entries: list[dict[str, Any]] = []
@@ -204,33 +223,6 @@ def compute_artifact_diff(old: str, new: str) -> list[dict[str, Any]]:
             new_line += 1
             entries.append({"type": "add", "line": new_line, "content": text})
     return entries
-
-
-def update_artifact_files(db: Session, artifact_id: str, files: dict[str, str], summary: str) -> Artifact:
-    artifact = db.get(Artifact, artifact_id)
-    if not artifact:
-        raise NotFoundError("产物不存在")
-    current_files = artifact.content.get("files") or {}
-    next_version = artifact.current_version + 1
-    artifact.content = {
-        **artifact.content,
-        "previous_files": current_files,
-        "files": files,
-        "summary": summary,
-    }
-    artifact.current_version = next_version
-    artifact.updated_at = utcnow()
-    db.add(
-        ArtifactVersion(
-            artifact_id=artifact.id,
-            version=next_version,
-            content=artifact.content,
-            change_summary=summary,
-        )
-    )
-    db.commit()
-    db.refresh(artifact)
-    return artifact
 
 
 def create_deployment(db: Session, artifact_id: str, mode: str = "preview_link") -> Deployment:

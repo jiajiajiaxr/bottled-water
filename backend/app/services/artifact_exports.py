@@ -7,9 +7,11 @@ import zipfile
 from dataclasses import dataclass
 from html import escape
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any
 
 from app.models import Artifact
+from app.services.artifact_storage import BINARY_ARTIFACT_FORMATS
 from app.services.file_tools import generate_pdf
 from app.services.serialization import artifact_to_dict
 
@@ -60,7 +62,7 @@ def _files(artifact: Artifact) -> dict[str, str]:
     files = content.get("files") if isinstance(content.get("files"), dict) else {}
     normalized = {str(path): str(value) for path, value in files.items()}
     if not normalized:
-        html = content.get("html") or ""
+        html = content.get("preview_html") or content.get("html") or ""
         normalized["index.html"] = str(html)
     return normalized
 
@@ -150,6 +152,9 @@ def _pptx_bytes(title: str, body: str) -> bytes:
 
 
 def default_export_format(artifact: Artifact) -> str:
+    content_format = (artifact.content or {}).get("format")
+    if content_format in {"pdf", "docx", "xlsx", "pptx", "html"}:
+        return str(content_format)
     tool_format = ((artifact.content or {}).get("tool_output") or {}).get("format")
     if tool_format in {"pdf", "docx", "xlsx", "pptx", "html"}:
         return str(tool_format)
@@ -164,6 +169,9 @@ def default_export_format(artifact: Artifact) -> str:
 
 def export_artifact(artifact: Artifact, export_format: str | None = None) -> ArtifactExport:
     fmt = (export_format or default_export_format(artifact)).lower().strip(".")
+    stored = _stored_artifact_export(artifact, fmt)
+    if stored:
+        return stored
     files = _files(artifact)
     base = _safe_name(artifact.name, f"artifact-{artifact.id[:8]}")
     metadata = artifact_to_dict(artifact)
@@ -190,3 +198,21 @@ def export_artifact(artifact: Artifact, export_format: str | None = None) -> Art
         raise ValueError(f"unsupported export format: {fmt}")
     content = _zip_bytes(files, metadata)
     return ArtifactExport(content, "application/zip", f"{base}.zip")
+
+
+def _stored_artifact_export(artifact: Artifact, fmt: str) -> ArtifactExport | None:
+    content = artifact.content or {}
+    if fmt not in BINARY_ARTIFACT_FORMATS and fmt != content.get("format"):
+        return None
+    descriptor = content.get("export_file") or content.get("source_file")
+    if not isinstance(descriptor, dict) or descriptor.get("format") != fmt:
+        return None
+    path_value = descriptor.get("storage_path")
+    if not path_value:
+        return None
+    path = Path(str(path_value))
+    if not path.exists() or not path.is_file():
+        return None
+    media_type = str(descriptor.get("media_type") or OFFICE_MIME_TYPES.get(fmt) or artifact.mime_type)
+    filename = str(descriptor.get("filename") or f"{_safe_name(artifact.name, artifact.id[:8])}.{fmt}")
+    return ArtifactExport(path.read_bytes(), media_type, filename)

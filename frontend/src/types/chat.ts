@@ -77,6 +77,9 @@ export interface WorkspaceArtifact {
   id: string;
   conversationId: string;
   type?: string;
+  format?: string;
+  media_type?: string;
+  filename?: string;
   title: string;
   language: string;
   code: string;
@@ -84,6 +87,10 @@ export interface WorkspaceArtifact {
   previewUrl?: string;
   preview_url?: string;
   content?: {
+    preview_html?: string;
+    format?: string;
+    media_type?: string;
+    filename?: string;
     tool_output?: {
       format?: string;
       media_type?: string;

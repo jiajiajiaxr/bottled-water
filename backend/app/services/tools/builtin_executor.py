@@ -10,21 +10,16 @@ from sqlalchemy.orm import Session
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.models import Artifact, Conversation, Deployment, FileAsset, User, utcnow
 from app.services.artifact_exports import default_export_format
-from app.services.artifacts import (
-    build_demo_html,
-    create_artifact,
-    create_preview_message,
-    update_artifact_files,
-)
+from app.services.artifacts import update_artifact_files
 from app.services.file_tools import (
     convert_file,
     embed_text,
     extract_text_from_path,
-    generate_file,
     preview_payload,
     summarize_text,
 )
 from app.services.serialization import artifact_to_dict
+from app.services.tools.artifact_executor import make_artifact_from_content
 from app.services.tools.api_probe import run_api_test
 from app.services.tools.browser_probe import run_browser_preview
 from app.services.tools.sandbox_runner import run_sandbox_command, run_test_command
@@ -61,22 +56,6 @@ def _get_file(db: Session, user: User, file_id: str) -> FileAsset:
     return asset
 
 
-def _get_conversation(db: Session, user: User, conversation_id: str | None) -> Conversation:
-    if not conversation_id:
-        raise ValidationAppError("conversation_id 不能为空")
-    conversation = db.scalar(
-        select(Conversation).where(
-            Conversation.id == conversation_id,
-            Conversation.deleted_at.is_(None),
-        )
-    )
-    if not conversation:
-        raise NotFoundError("会话不存在")
-    if conversation.creator_id != user.id and user.role != "admin":
-        raise ForbiddenError("无权访问该会话")
-    return conversation
-
-
 def _artifact(db: Session, user: User, artifact_id: str) -> Artifact:
     artifact = db.get(Artifact, artifact_id)
     if not artifact or artifact.deleted_at is not None:
@@ -85,72 +64,6 @@ def _artifact(db: Session, user: User, artifact_id: str) -> Artifact:
     if not conversation or (conversation.creator_id != user.id and user.role != "admin"):
         raise ForbiddenError("无权访问该产物")
     return artifact
-
-
-def _make_artifact_from_content(
-    db: Session,
-    user: User,
-    *,
-    conversation_id: str | None,
-    title: str,
-    body: str,
-    format_name: str,
-    html_content: str | None = None,
-) -> dict[str, Any]:
-    conversation = _get_conversation(db, user, conversation_id)
-    artifact_type = {
-        "pdf": "document",
-        "docx": "document",
-        "xlsx": "spreadsheet",
-        "pptx": "slides",
-        "html": "web_app",
-        "web_app": "web_app",
-    }.get(format_name, "document")
-    generated = None
-    if format_name in {"pdf", "docx", "xlsx", "pptx", "html"}:
-        generated = generate_file("html" if format_name == "web_app" else format_name, title=title, body=body)
-    html_preview = html_content or build_demo_html(title, body[:500], artifact_type=artifact_type)
-    artifact = create_artifact(
-        db,
-        conversation,
-        task=None,
-        name=title,
-        html=html_preview,
-        artifact_type=artifact_type,
-        description=f"由工具 artifact.create_{format_name} 生成。",
-    )
-    content = dict(artifact.content or {})
-    content["tool_output"] = {
-        "tool": f"artifact.create_{format_name}",
-        "format": format_name,
-        "capability_level": "real",
-        "filename": generated.filename if generated else None,
-        "media_type": generated.media_type if generated else None,
-        "size": len(generated.content) if generated else len(html_preview),
-    }
-    artifact.content = content
-    preview = create_preview_message(db, conversation, artifact)
-    conversation.last_message_preview = "工具已生成产物卡片，可点击预览。"
-    conversation.last_message_sender = "Artifact Tool"
-    conversation.last_message_at = utcnow()
-    conversation.message_count += 1
-    db.commit()
-    db.refresh(artifact)
-    db.refresh(preview)
-    export_format = "html" if format_name in {"html", "web_app"} else format_name
-    return {
-        "status": "succeeded",
-        "capability_level": "real",
-        "artifact_id": artifact.id,
-        "artifact": artifact_to_dict(artifact),
-        "preview_message_id": preview.id,
-        "preview_url": f"/api/v1/artifacts/{artifact.id}/preview",
-        "export_url": f"/api/v1/artifacts/{artifact.id}/export?format={export_format}",
-        "format": export_format,
-        "filename": generated.filename if generated else None,
-        "media_type": generated.media_type if generated else "text/html; charset=utf-8",
-    }
-
 
 def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "file.upload":
@@ -202,7 +115,7 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
         title = str(arguments.get("title") or "AgentHub 产物")
         body = str(arguments.get("body") or arguments.get("content") or title)
         html_content = arguments.get("html") if isinstance(arguments.get("html"), str) else None
-        return _make_artifact_from_content(
+        return make_artifact_from_content(
             db,
             user,
             conversation_id=str(arguments.get("conversation_id") or ""),

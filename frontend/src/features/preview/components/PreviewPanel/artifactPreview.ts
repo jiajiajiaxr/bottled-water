@@ -8,7 +8,10 @@ export interface ArtifactExportResult {
 }
 
 export function preferredArtifactFormat(artifact?: WorkspaceArtifact): string {
-  const toolFormat = artifact?.content?.tool_output?.format;
+  const toolFormat =
+    artifact?.format ??
+    artifact?.content?.format ??
+    artifact?.content?.tool_output?.format;
   if (toolFormat) return toolFormat.toLowerCase();
   if (artifact?.type === "document") return "pdf";
   if (artifact?.type === "spreadsheet") return "xlsx";
@@ -19,6 +22,8 @@ export function preferredArtifactFormat(artifact?: WorkspaceArtifact): string {
 export function isPdfArtifact(artifact: WorkspaceArtifact | undefined, format: string) {
   return (
     format === "pdf" ||
+    artifact?.media_type === "application/pdf" ||
+    artifact?.content?.media_type === "application/pdf" ||
     artifact?.content?.tool_output?.media_type === "application/pdf"
   );
 }

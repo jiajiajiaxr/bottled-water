@@ -11,9 +11,21 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.errors import ValidationAppError
 from app.core.database import Base
-from app.models import Agent, Artifact, Conversation, McpServer, Skill, ToolDefinition, ToolInvocation, User
+from app.models import (
+    Agent,
+    Artifact,
+    ArtifactVersion,
+    Conversation,
+    FileAsset,
+    McpServer,
+    Skill,
+    ToolDefinition,
+    ToolInvocation,
+    User,
+)
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
 from app.services.artifact_exports import export_artifact
+from app.services.artifacts import update_artifact_files
 from app.services.demo_cleanup import cleanup_acceptance_residue
 from app.services.mcp.discovery import discover_server_tools, import_server_manifest, probe_server
 from app.services.mcp.schema import validate_mcp_arguments
@@ -65,6 +77,81 @@ def test_artifact_create_pdf_exports_real_chinese_pdf() -> None:
     assert len(reader.pages) >= 2
     assert b"/FontName" in exported.content
     assert any(token in exported.content for token in (b"NotoSans", b"SimHei", b"STSong"))
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "fmt"),
+    [
+        ("artifact.create_pdf", "pdf"),
+        ("artifact.create_docx", "docx"),
+        ("artifact.create_xlsx", "xlsx"),
+        ("artifact.create_pptx", "pptx"),
+    ],
+)
+def test_office_artifacts_persist_real_files_and_versions(tool_name: str, fmt: str) -> None:
+    db = _memory_session()
+    user = _user()
+    conversation = Conversation(creator_id=user.id, chat_type="single", title="Office Files")
+    db.add_all([user, conversation])
+    db.commit()
+
+    result = invoke_tool(
+        db,
+        user,
+        tool_name,
+        {"conversation_id": conversation.id, "title": f"真实{fmt}文件", "body": "第一段\n第二段"},
+    )
+    artifact = db.get(Artifact, result["result"]["artifact_id"])
+    source_file = artifact.content["source_file"]
+    exported = export_artifact(artifact, fmt)
+    asset = db.get(FileAsset, source_file["file_asset_id"])
+
+    assert artifact.content["format"] == fmt
+    assert artifact.content["preview_html"]
+    assert source_file == artifact.content["export_file"]
+    assert Path(source_file["storage_path"]).read_bytes() == exported.content
+    assert asset is not None
+    assert asset.artifact_id == artifact.id
+    assert asset.purpose == "artifact_source"
+    assert asset.size == len(exported.content)
+
+    update_artifact_files(db, artifact.id, {"index.html": "<main><h1>第二版</h1></main>"}, "保存第二版")
+    db.refresh(artifact)
+    version = db.scalar(
+        select(ArtifactVersion).where(
+            ArtifactVersion.artifact_id == artifact.id,
+            ArtifactVersion.version == artifact.current_version,
+        )
+    )
+
+    assert artifact.current_version == 2
+    assert artifact.content["source_file"]["version"] == 2
+    assert Path(artifact.content["source_file"]["storage_path"]).exists()
+    assert version is not None
+    assert version.checksum == artifact.content["source_file"]["checksum"]
+
+
+def test_html_artifact_preview_and_export_use_real_html_file() -> None:
+    db = _memory_session()
+    user = _user()
+    conversation = Conversation(creator_id=user.id, chat_type="single", title="HTML Files")
+    db.add_all([user, conversation])
+    db.commit()
+    html = "<!doctype html><html><body><main><h1>HTML 预览</h1></main></body></html>"
+
+    result = invoke_tool(
+        db,
+        user,
+        "artifact.create_html",
+        {"conversation_id": conversation.id, "title": "HTML 预览", "html": html},
+    )
+    artifact = db.get(Artifact, result["result"]["artifact_id"])
+    exported = export_artifact(artifact, "html")
+
+    assert artifact.content["preview_html"] == html
+    assert artifact.content["source_file"]["format"] == "html"
+    assert exported.content.decode("utf-8") == html
+    assert Path(artifact.content["source_file"]["storage_path"]).read_text(encoding="utf-8") == html
 
 
 def test_sandbox_run_timeout_and_denied_command_are_recorded() -> None:
