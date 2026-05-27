@@ -112,6 +112,7 @@ export function PreviewPanel({
   }
 
   const exportFormats = artifactExportFormats(preferredFormat);
+  const primaryFormat = preferredFormat === "web_app" ? "html" : preferredFormat;
 
   return (
     <Sider
@@ -143,6 +144,7 @@ export function PreviewPanel({
             <Button
               key={format}
               size="small"
+              type={format === primaryFormat ? "primary" : "default"}
               onClick={async () => {
                 const exported = await api.exportArtifact(artifact.id, format);
                 setExportResult(exported);
@@ -150,6 +152,7 @@ export function PreviewPanel({
               }}
             >
               {format.toUpperCase()}
+              {format === primaryFormat ? " 主下载" : ""}
             </Button>
           ),
         )}

@@ -25,7 +25,7 @@ from app.models import (
     User,
 )
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
-from app.services.artifact_exports import export_artifact
+from app.services.artifact_exports import default_export_format, export_artifact
 from app.services.artifacts import update_artifact_files
 from app.services.demo_cleanup import cleanup_acceptance_residue
 from app.services.mcp.discovery import discover_server_tools, import_server_manifest, probe_server
@@ -105,15 +105,19 @@ def test_office_artifacts_persist_real_files_and_versions(tool_name: str, fmt: s
     artifact = db.get(Artifact, result["result"]["artifact_id"])
     source_file = artifact.content["source_file"]
     exported = export_artifact(artifact, fmt)
+    default_exported = export_artifact(artifact)
     asset = db.get(FileAsset, source_file["file_asset_id"])
 
     assert artifact.content["format"] == fmt
+    assert default_export_format(artifact) == fmt
     assert artifact.content["preview_html"]
     assert "AgentHub Artifact" not in artifact.content["preview_html"]
     assert artifact.content["source_text"]
     assert artifact.content["content_model"]["kind"] in {"document", "spreadsheet", "slides"}
     assert source_file == artifact.content["export_file"]
     assert Path(source_file["storage_path"]).read_bytes() == exported.content
+    assert default_exported.content == exported.content
+    assert default_exported.filename.endswith(f".{fmt}")
     assert asset is not None
     assert asset.artifact_id == artifact.id
     assert asset.purpose == "artifact_source"

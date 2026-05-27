@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openOrDownloadExport } from "./artifactPreview";
+import { artifactExportFormats, preferredArtifactFormat, openOrDownloadExport } from "./artifactPreview";
 
 describe("openOrDownloadExport", () => {
   afterEach(() => {
@@ -67,5 +67,35 @@ describe("openOrDownloadExport", () => {
     );
 
     expect(open).toHaveBeenCalledWith("blob:pdf", "_blank", "noopener,noreferrer");
+  });
+});
+
+describe("artifact export semantics", () => {
+  it.each(["docx", "pptx", "xlsx", "pdf", "html"])(
+    "puts current %s format first and keeps zip secondary",
+    (format) => {
+      const formats = artifactExportFormats(format);
+
+      expect(formats[0]).toBe(format);
+      expect(formats).toContain("zip");
+      expect(formats.indexOf("zip")).toBeGreaterThan(0);
+    },
+  );
+
+  it("prefers artifact.content.format over generic artifact type", () => {
+    const format = preferredArtifactFormat({
+      id: "artifact-1",
+      conversationId: "conversation-1",
+      type: "document",
+      format: "docx",
+      title: "Word",
+      language: "html",
+      code: "",
+      previousCode: "",
+      updatedAt: new Date().toISOString(),
+      content: { format: "docx" },
+    });
+
+    expect(format).toBe("docx");
   });
 });
