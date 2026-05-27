@@ -141,11 +141,14 @@ def _make_artifact_from_content(
     return {
         "status": "succeeded",
         "capability_level": "real",
+        "artifact_id": artifact.id,
         "artifact": artifact_to_dict(artifact),
         "preview_message_id": preview.id,
         "preview_url": f"/api/v1/artifacts/{artifact.id}/preview",
         "export_url": f"/api/v1/artifacts/{artifact.id}/export?format={export_format}",
         "format": export_format,
+        "filename": generated.filename if generated else None,
+        "media_type": generated.media_type if generated else "text/html; charset=utf-8",
     }
 
 

@@ -225,8 +225,9 @@ async def test_agent_custom_python_tool_is_exposed_and_executed() -> None:
     )
     invocations = db.scalars(select(ToolInvocation).where(ToolInvocation.tool_name == custom_tool.name)).all()
 
-    assert blocked["type"] == "unknown"
+    assert blocked["type"] == "tool"
     assert blocked["status"] == "failed"
+    assert "授权" in blocked["output"]
     assert len(invocations) == 1
 
 

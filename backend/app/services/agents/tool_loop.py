@@ -224,6 +224,7 @@ async def execute_mcp_action(
     user: User | None,
     conversation: Conversation,
     prompt: str,
+    arguments: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     channel = f"conversation:{conversation.id}"
     await event_bus.publish(channel, "tool:started", {"type": "mcp", "server_id": server.id, "tool_name": name})
@@ -231,7 +232,7 @@ async def execute_mcp_action(
         db,
         server=server,
         tool_name_value=name,
-        arguments=_mcp_tool_args(prompt, name),
+        arguments=arguments or _mcp_tool_args(prompt, name),
         user=user,
         conversation_id=conversation.id,
         timeout_ms=min(server.timeout_ms or 30000, 5000),
@@ -462,6 +463,8 @@ async def execute_tool_by_name(
 
     # 内置工具
     if tool_name in registry.BUILTIN_TOOLS:
+        if not _is_configured_tool(db, agent, tool_name):
+            return _unauthorized_tool_result(tool_name)
         if not user:
             user = db.get(User, conversation.creator_id)
         payload = registry.invoke_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
@@ -476,6 +479,12 @@ async def execute_tool_by_name(
     # Skill
     if tool_name.startswith("skill."):
         skill_id = tool_name.removeprefix("skill.")
+        if not _is_configured_skill(agent, skill_id):
+            return _unauthorized_tool_result(
+                tool_name,
+                result_type="skill",
+                extra={"skill_id": skill_id},
+            )
         skill = db.get(Skill, skill_id)
         if not skill or skill.deleted_at is not None or skill.status != "active":
             return {"type": "skill", "skill_id": skill_id, "status": "failed", "output": "Skill 不存在或未启用"}
@@ -495,10 +504,24 @@ async def execute_tool_by_name(
         if len(parts) >= 3:
             server_id = parts[1]
             actual_tool_name = ".".join(parts[2:])
+            if not _is_configured_mcp(agent, server_id):
+                return _unauthorized_tool_result(
+                    tool_name,
+                    result_type="mcp",
+                    extra={"server_id": server_id, "tool_name": actual_tool_name},
+                )
             server = db.get(McpServer, server_id)
             if not server or server.deleted_at is not None or not server.enabled:
                 return {"type": "mcp", "server_id": server_id, "tool_name": actual_tool_name, "status": "failed", "output": "MCP server 不存在或未启用"}
-            return await execute_mcp_action(db, server=server, name=actual_tool_name, user=user, conversation=conversation, prompt=arguments.get("prompt", ""))
+            return await execute_mcp_action(
+                db,
+                server=server,
+                name=actual_tool_name,
+                user=user,
+                conversation=conversation,
+                prompt=arguments.get("prompt", ""),
+                arguments=arguments,
+            )
 
     authorized_tool = _resolve_authorized_db_tool(db, agent, tool_name)
     if authorized_tool:
@@ -514,7 +537,49 @@ async def execute_tool_by_name(
             "invocation_id": payload.get("invocation_id"),
         }
 
+    if _db_tool_exists(db, tool_name):
+        return _unauthorized_tool_result(tool_name)
+
     return {"type": "unknown", "tool_name": tool_name, "status": "failed", "output": f"未知工具: {tool_name}"}
+
+
+def _unauthorized_tool_result(
+    tool_name: str,
+    *,
+    result_type: str = "tool",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": result_type,
+        "tool_name": tool_name,
+        "status": "failed",
+        "output": f"Agent 未授权调用工具: {tool_name}",
+        **(extra or {}),
+    }
+
+
+def _is_configured_tool(db: Session, agent: Agent, tool_name: str) -> bool:
+    allowed = normalize_tool_names((agent.config or {}).get("tools") or [])
+    if tool_name in allowed:
+        return True
+    if not allowed:
+        return False
+    return db.scalar(
+        select(ToolDefinition.id).where(
+            ToolDefinition.deleted_at.is_(None),
+            ToolDefinition.status == "active",
+            ToolDefinition.name == tool_name,
+            ToolDefinition.id.in_(allowed),
+        )
+    ) is not None
+
+
+def _is_configured_skill(agent: Agent, skill_id: str) -> bool:
+    return skill_id in {str(item) for item in (agent.config or {}).get("skill_ids") or [] if item}
+
+
+def _is_configured_mcp(agent: Agent, server_id: str) -> bool:
+    return server_id in {str(item) for item in (agent.config or {}).get("mcp_server_ids") or [] if item}
 
 
 def _resolve_authorized_db_tool(db: Session, agent: Agent, tool_name: str) -> ToolDefinition | None:
@@ -532,3 +597,14 @@ def _resolve_authorized_db_tool(db: Session, agent: Agent, tool_name: str) -> To
     if not tool or tool.is_builtin or tool.type == "builtin":
         return None
     return tool
+
+
+def _db_tool_exists(db: Session, tool_name: str) -> bool:
+    value = db.scalar(
+        select(ToolDefinition.id).where(
+            ToolDefinition.deleted_at.is_(None),
+            ToolDefinition.status == "active",
+            (ToolDefinition.name == tool_name) | (ToolDefinition.id == tool_name),
+        )
+    )
+    return isinstance(value, str) and bool(value)

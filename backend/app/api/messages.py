@@ -12,11 +12,10 @@ from app.core.database import get_db
 from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import Artifact, Conversation, FileAsset, Message, User, utcnow
-from app.services.realtime.event_bus import event_bus
-from app.services.artifacts import build_demo_html, classify_artifact_request, create_artifact, create_preview_message
+from app.models import Conversation, FileAsset, Message, User, utcnow
 from app.services.chat.orchestrator import run_orchestration
-from app.services.serialization import artifact_to_dict, message_to_dict
+from app.services.realtime.event_bus import event_bus
+from app.services.serialization import message_to_dict
 
 
 router = APIRouter(tags=["messages"])
@@ -63,14 +62,10 @@ def _list_messages(db: Session, user: User, conversation_id: str) -> list[dict]:
     return [message_to_dict(message) for message in messages]
 
 
-def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True) -> Message:
-    conversation = _get_conversation(db, user, conversation_id)
-    text = _message_text(payload).strip()
-    if not text:
-        raise ValidationAppError("消息内容不能为空")
+def _normalize_attachments(db: Session, user: User, payload: dict) -> list[dict]:
     raw_content = payload.get("content") if isinstance(payload.get("content"), dict) else {}
     attachments = raw_content.get("attachments") or payload.get("attachments") or []
-    normalized_attachments: list[dict] = []
+    normalized: list[dict] = []
     for item in attachments:
         file_id = item.get("file_id") or item.get("id") if isinstance(item, dict) else str(item)
         if not file_id:
@@ -82,17 +77,39 @@ def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigg
                 FileAsset.deleted_at.is_(None),
             )
         )
-        if file_asset:
-            normalized_attachments.append(
-                {
-                    "file_id": file_asset.id,
-                    "filename": file_asset.original_filename,
-                    "content_type": file_asset.content_type,
-                    "size": file_asset.size,
-                    "parse_status": file_asset.parse_status,
-                    "extracted_text": file_asset.extracted_text[:12000],
-                }
-            )
+        if not file_asset:
+            continue
+        normalized.append(
+            {
+                "file_id": file_asset.id,
+                "filename": file_asset.original_filename,
+                "content_type": file_asset.content_type,
+                "size": file_asset.size,
+                "parse_status": file_asset.parse_status,
+                "extracted_text": file_asset.extracted_text[:12000],
+            }
+        )
+    return normalized
+
+
+def _schedule_orchestration(conversation_id: str, message_id: str) -> None:
+    previous = ORCHESTRATION_TASKS.get(conversation_id)
+    if previous and not previous.done():
+        previous.cancel()
+    task = asyncio.create_task(run_orchestration(message_id))
+    ORCHESTRATION_TASKS[conversation_id] = task
+    task.add_done_callback(
+        lambda done, cid=conversation_id: ORCHESTRATION_TASKS.pop(cid, None)
+        if ORCHESTRATION_TASKS.get(cid) is done
+        else None
+    )
+
+
+def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True) -> Message:
+    conversation = _get_conversation(db, user, conversation_id)
+    text = _message_text(payload).strip()
+    if not text:
+        raise ValidationAppError("消息内容不能为空")
     message = Message(
         client_message_id=payload.get("client_message_id") or str(uuid.uuid4()),
         conversation_id=conversation.id,
@@ -100,7 +117,7 @@ def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigg
         sender_id=user.id,
         sender_name=user.display_name,
         content_type=payload.get("content_type") or "text",
-        content={"text": text, "attachments": normalized_attachments},
+        content={"text": text, "attachments": _normalize_attachments(db, user, payload)},
         status="sent",
         reply_to_message_id=payload.get("reply_to_message_id") or payload.get("quotedMessageId"),
         extra={"thinking_enabled": bool(payload.get("thinking_enabled"))},
@@ -114,12 +131,7 @@ def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigg
     db.commit()
     db.refresh(message)
     if trigger_agent:
-        previous = ORCHESTRATION_TASKS.get(conversation.id)
-        if previous and not previous.done():
-            previous.cancel()
-        task = asyncio.create_task(run_orchestration(message.id))
-        ORCHESTRATION_TASKS[conversation.id] = task
-        task.add_done_callback(lambda done, cid=conversation.id: ORCHESTRATION_TASKS.pop(cid, None) if ORCHESTRATION_TASKS.get(cid) is done else None)
+        _schedule_orchestration(conversation.id, message.id)
     return message
 
 
@@ -140,58 +152,7 @@ async def send_message(
     user: User = Depends(get_current_user),
 ):
     message = _send(db, user, conversation_id, await _payload(request), trigger_agent=True)
-    preview_message = None
-    artifact = None
-    artifact_type = classify_artifact_request(message.content.get("text", ""))
-    if artifact_type:
-        conversation = db.get(Conversation, conversation_id)
-        existing_preview = db.scalar(
-            select(Message)
-            .where(
-                Message.conversation_id == conversation_id,
-                Message.content_type == "preview_card",
-                Message.created_at >= message.created_at,
-                Message.deleted_at.is_(None),
-            )
-            .order_by(Message.created_at.desc())
-        )
-        if not existing_preview and conversation:
-            artifact_name = {
-                "document": "AgentHub 文档产物预览",
-                "spreadsheet": "AgentHub 表格产物预览",
-                "slides": "AgentHub 演示文稿预览",
-                "code": "AgentHub 代码产物预览",
-                "web_app": "AgentHub Web 产物预览",
-            }.get(artifact_type, "AgentHub 协作产物预览")
-            artifact = create_artifact(
-                db,
-                conversation,
-                task=None,
-                name=artifact_name,
-                html=build_demo_html(
-                    message.content.get("text", ""),
-                    "主控 Agent 正在生成最终说明，产物草稿已可先行预览。",
-                    artifact_type=artifact_type,
-                ),
-                artifact_type=artifact_type,
-            )
-            preview_message = create_preview_message(db, conversation, artifact)
-            conversation.last_message_preview = "已生成产物卡片，可点击后在右侧预览、编辑和部署。"
-            conversation.last_message_sender = "Artifact Agent"
-            conversation.last_message_at = utcnow()
-            conversation.message_count += 1
-            db.commit()
-            db.refresh(artifact)
-            db.refresh(preview_message)
-        elif existing_preview:
-            preview_message = existing_preview
-            artifact_id = existing_preview.content.get("artifact_id") if isinstance(existing_preview.content, dict) else None
-            artifact = db.get(Artifact, artifact_id) if artifact_id else None
     await event_bus.publish(f"conversation:{conversation_id}", "message:new", message_to_dict(message))
-    if artifact:
-        await event_bus.publish(f"conversation:{conversation_id}", "artifact:created", artifact_to_dict(artifact))
-    if preview_message:
-        await event_bus.publish(f"conversation:{conversation_id}", "message:new", message_to_dict(preview_message))
     return ok(message_to_dict(message), "消息发送成功")
 
 

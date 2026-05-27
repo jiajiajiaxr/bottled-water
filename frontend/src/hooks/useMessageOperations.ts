@@ -11,7 +11,6 @@ import type { ChatMessage, UploadedFile, MessageAttachment } from "../types";
 import {
   makeMessage,
   stripInternalAgentOutput,
-  isLikelyArtifactRequest,
   isTaskRunning,
   participantName,
 } from "../lib/message";
@@ -400,24 +399,7 @@ export function useMessageOperations(currentUserName: string) {
               }
             : item,
         );
-        const hasPreviewCard = cleanMessages.some(
-          (item) => item.kind === "preview_card",
-        );
-        setMessages(
-          hasPreviewCard || !freshArtifact
-            ? cleanMessages
-            : [
-                ...cleanMessages,
-                makeMessage({
-                  conversationId,
-                  role: "assistant",
-                  kind: "preview_card",
-                  author: "Artifact Agent",
-                  content: `预览产物：${freshArtifact.title}`,
-                  streamState: "done",
-                }),
-              ],
-        );
+        setMessages(cleanMessages);
         const lastAssistant = [...cleanMessages]
           .reverse()
           .find((item) => item.role === "assistant" && item.kind === "text");
@@ -573,46 +555,6 @@ export function useMessageOperations(currentUserName: string) {
           item.id === localMessage.id ? userMessage : item,
         ),
       );
-      if (isLikelyArtifactRequest(content)) {
-        const freshArtifact = await api
-          .artifact(conversationId)
-          .catch(() => undefined);
-        if (freshArtifact) {
-          setArtifact(freshArtifact);
-          updateMessages((current) => {
-            const exists = current.some(
-              (item) =>
-                item.kind === "preview_card" &&
-                item.rawContent?.artifact_id === freshArtifact.id,
-            );
-            if (exists) return current;
-            return [
-              ...current,
-              makeMessage({
-                conversationId,
-                role: "assistant",
-                kind: "preview_card",
-                author: "Artifact Agent",
-                content: `预览产物：${freshArtifact.title}`,
-                rawContent: { artifact_id: freshArtifact.id },
-                streamState: "done",
-              }),
-            ];
-          });
-          updateConversations((current) =>
-            current.map((item) =>
-              item.id === conversationId
-                ? {
-                    ...item,
-                    lastMessage:
-                      "已生成产物卡片，可点击后在右侧预览、编辑和部署。",
-                    updatedAt: new Date().toISOString(),
-                  }
-                : item,
-            ),
-          );
-        }
-      }
     } catch (error) {
       stopStreamRef.current?.();
       void streamPromise;
