@@ -1,0 +1,213 @@
+"""
+测试 AgentLoop
+
+覆盖：
+- 基本执行流程
+- 工具调用循环
+- 状态报告解析
+"""
+
+import pytest
+
+from agent_runtime.runtime.agent_loop import AgentLoop
+from agent_runtime.core.types import (
+    AgentConfig, AgentState, AgentWill, ChatMessage, ChatResponse, ToolCall,
+)
+
+
+class TestAgentLoopBasic:
+    """测试 AgentLoop 基本功能"""
+
+    @pytest.fixture
+    def agent_config(self):
+        return AgentConfig(
+            id="coder",
+            name="程序员",
+            system_prompt="你是一个程序员。",
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_without_tools(self, agent_config, mock_provider):
+        """测试无工具时的基本执行"""
+        mock_provider.responses = [
+            ChatResponse(content="任务已完成。\n```status_report\n{\"state\": \"completed\", \"will\": \"complete\", \"rationale\": \"完成\"}\n```"),
+        ]
+
+        loop = AgentLoop(agent_config, mock_provider)
+        result = await loop.run(
+            task="写一个函数",
+            blackboard_view={},
+            tool_executor=None,
+        )
+
+        assert result["work_product"] == "任务已完成。"
+        report = result["status_report"]
+        assert report.agent_id == "coder"
+        assert report.state == AgentState.COMPLETED
+        assert report.will == AgentWill.COMPLETE
+        assert report.rationale == "完成"
+        assert result["tool_events"] == []
+
+    @pytest.mark.asyncio
+    async def test_run_parses_status_report(self, agent_config, mock_provider):
+        """测试状态报告解析"""
+        mock_provider.responses = [
+            ChatResponse(content="```status_report\n{\"state\": \"running\", \"will\": \"execute\", \"rationale\": \"继续工作\", \"confidence\": 0.9}\n```"),
+        ]
+
+        loop = AgentLoop(agent_config, mock_provider)
+        result = await loop.run("任务", {}, None)
+
+        report = result["status_report"]
+        assert report.state == AgentState.RUNNING
+        assert report.will == AgentWill.EXECUTE
+        assert report.confidence == 0.9
+        assert report.rationale == "继续工作"
+
+    @pytest.mark.asyncio
+    async def test_run_with_tool_calls(self, agent_config, mock_provider, mock_tool_executor):
+        """测试工具调用循环"""
+        mock_provider.responses = [
+            # 第一轮：LLM 返回 tool_calls
+            ChatResponse(
+                content="",
+                tool_calls=[{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "file_read", "arguments": '{"path": "/tmp/test.txt"}'},
+                }],
+            ),
+            # 第二轮：LLM 总结工具结果
+            ChatResponse(content="文件内容已读取。\n```status_report\n{\"state\": \"completed\", \"will\": \"complete\"}\n```"),
+        ]
+
+        mock_tool_executor._tools = [{
+            "type": "function",
+            "function": {"name": "file_read", "description": "读文件"},
+        }]
+
+        loop = AgentLoop(agent_config, mock_provider)
+        result = await loop.run("读文件", {}, mock_tool_executor)
+
+        assert len(result["tool_events"]) == 1
+        assert result["tool_events"][0]["agent_id"] == "coder"
+        assert result["status_report"].state == AgentState.COMPLETED
+        assert mock_provider.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_run_tool_not_found(self, agent_config, mock_provider):
+        """测试工具未找到的情况"""
+        mock_provider.responses = [
+            ChatResponse(
+                content="",
+                tool_calls=[{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "unknown_tool", "arguments": "{}"},
+                }],
+            ),
+            ChatResponse(content="工具未找到。\n```status_report\n{\"state\": \"completed\", \"will\": \"complete\"}\n```"),
+        ]
+
+        loop = AgentLoop(agent_config, mock_provider)
+        result = await loop.run("调用未知工具", {}, None)
+
+        # 没有 tool_executor，工具调用会被跳过
+        assert result["status_report"].state == AgentState.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_run_max_tool_rounds(self, agent_config, mock_provider):
+        """测试工具调用轮数上限"""
+        # 模拟 LLM 总是返回 tool_calls
+        responses = []
+        for _ in range(AgentLoop.MAX_TOOL_ROUNDS + 1):
+            responses.append(ChatResponse(
+                content="",
+                tool_calls=[{
+                    "id": f"call_{_}",
+                    "type": "function",
+                    "function": {"name": "noop", "arguments": "{}"},
+                }],
+            ))
+        mock_provider.responses = responses
+
+        loop = AgentLoop(agent_config, mock_provider)
+        result = await loop.run("无限工具调用", {}, None)
+
+        assert len(result["tool_events"]) == AgentLoop.MAX_TOOL_ROUNDS
+
+
+class TestAgentLoopPromptBuilding:
+    """测试提示词构建"""
+
+    @pytest.fixture
+    def loop(self, mock_provider):
+        config = AgentConfig(id="test", name="测试", system_prompt="你是一个测试助手。")
+        return AgentLoop(config, mock_provider)
+
+    def test_build_prompt(self, loop):
+        bb_view = {
+            "recent_history": [
+                {"type": "user_message", "content": "你好"},
+            ],
+            "kv_state": {"status": "ok"},
+            "version": 1,
+        }
+        prompt = loop._build_prompt("写一个函数", bb_view)
+        assert "写一个函数" in prompt
+        assert "近期历史" in prompt
+        assert "状态变量" in prompt
+        assert "```status_report" in prompt
+
+    def test_format_blackboard_empty(self, loop):
+        text = loop._format_blackboard({})
+        assert text == "（无）"
+
+    def test_format_blackboard_full(self, loop):
+        bb = {
+            "recent_history": [
+                {"type": "agent_work", "content": "完成代码"},
+                {"type": "user_input", "content": "很好"},
+            ],
+            "kv_state": {"progress": 50},
+            "summary_count": 3,
+            "version": 5,
+        }
+        text = loop._format_blackboard(bb)
+        assert "完成代码" in text
+        assert "progress" in text
+        assert "3" in text  # summary_count
+        assert "5" in text  # version
+
+
+class TestAgentLoopStatusParsing:
+    """测试状态报告解析"""
+
+    @pytest.fixture
+    def loop(self, mock_provider):
+        config = AgentConfig(id="test", name="测试", system_prompt="prompt")
+        return AgentLoop(config, mock_provider)
+
+    def test_extract_from_code_block(self, loop):
+        content = '工作完成。\n```status_report\n{"state": "completed", "will": "complete", "rationale": "搞定了", "confidence": 0.95}\n```'
+        report = loop._extract_status_report(content)
+        assert report.state == AgentState.COMPLETED
+        assert report.will == AgentWill.COMPLETE
+        assert report.confidence == 0.95
+
+    def test_extract_invalid_json(self, loop):
+        content = '```status_report\nnot json\n```'
+        report = loop._extract_status_report(content)
+        assert report.state == AgentState.UNKNOWN
+        assert report.will == AgentWill.WAIT
+
+    def test_extract_missing_block(self, loop):
+        content = '没有任何状态报告'
+        report = loop._extract_status_report(content)
+        assert report.state == AgentState.UNKNOWN
+
+    def test_remove_status_report(self, loop):
+        content = '工作成果。\n```status_report\n{"state": "completed"}\n```\n一些其他内容'
+        cleaned = loop._remove_status_report(content)
+        assert "工作成果" in cleaned
+        assert "status_report" not in cleaned

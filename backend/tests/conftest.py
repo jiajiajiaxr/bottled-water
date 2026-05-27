@@ -1,3 +1,12 @@
+"""pytest 全局配置"""
+
+import sys
+from pathlib import Path
+
+# 将 src/ 加入 Python 路径，确保可以导入 agent_runtime 等模块
+_SRC_DIR = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(_SRC_DIR))
+
 import importlib
 import os
 from collections.abc import Iterator
