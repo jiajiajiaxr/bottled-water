@@ -31,18 +31,32 @@ def make_artifact_from_content(
     body: str,
     format_name: str,
     html_content: str | None = None,
+    content_model: dict[str, Any] | None = None,
+    template: str | None = None,
 ) -> dict[str, Any]:
     conversation = _get_conversation(db, user, conversation_id)
     artifact_type = artifact_type_for_format(format_name)
     export_format = "html" if format_name in {"html", "web_app"} else format_name
-    source_text = body or title
-    content_model = build_content_model(export_format, title=title, source_text=source_text)
+    model_text = content_model.get("source_text") if isinstance(content_model, dict) else None
+    source_text = body or str(model_text or title)
+    normalized_model = build_content_model(
+        export_format,
+        title=title,
+        source_text=source_text,
+        content_model=content_model,
+        template=template,
+    )
     generated = (
         html_artifact_file(title=title, html_content=html_content)
         if export_format == "html" and html_content
-        else build_artifact_file(format_name, title=title, body=source_text)
+        else build_artifact_file(
+            format_name,
+            title=title,
+            body=source_text,
+            content_model=normalized_model,
+        )
     )
-    html_preview = _preview_html(export_format, generated.content, content_model, html_content)
+    html_preview = _preview_html(export_format, generated.content, normalized_model, html_content)
     artifact = create_artifact(
         db,
         conversation,
@@ -69,7 +83,7 @@ def make_artifact_from_content(
         html_preview,
         source_file,
         source_text,
-        content_model,
+        normalized_model,
     )
     sync_current_artifact_version(db, artifact, change_summary="初始真实文件产物")
     preview = create_preview_message(db, conversation, artifact)

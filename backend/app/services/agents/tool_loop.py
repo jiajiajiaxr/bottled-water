@@ -140,6 +140,12 @@ def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> di
     args: dict[str, Any] = {"input": prompt, "prompt": prompt, "conversation_id": conversation.id}
     if name.startswith("artifact.create_"):
         args.update({"title": "AgentHub 工具产物", "body": prompt})
+        if name in {"artifact.create_pdf", "artifact.create_docx"}:
+            args["content_model"] = {
+                "title": "AgentHub 工具产物",
+                "template": "report",
+                "sections": [{"title": "正文", "blocks": [{"type": "paragraph", "text": prompt}]}],
+            }
         if name in {"artifact.create_html", "artifact.create_web_app"}:
             args["html"] = ""
     if name == "db.inspect":

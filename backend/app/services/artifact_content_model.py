@@ -3,8 +3,18 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
+from app.services.document_model import normalize_document_model
+from app.services.document_model import render_preview_html as render_document_preview_html
 
-def build_content_model(format_name: str, *, title: str, source_text: str) -> dict[str, Any]:
+
+def build_content_model(
+    format_name: str,
+    *,
+    title: str,
+    source_text: str,
+    content_model: dict[str, Any] | None = None,
+    template: str | None = None,
+) -> dict[str, Any]:
     normalized = format_name.lower().strip(".")
     lines = _clean_lines(source_text)
     if normalized == "xlsx":
@@ -12,7 +22,12 @@ def build_content_model(format_name: str, *, title: str, source_text: str) -> di
     if normalized == "pptx":
         return {"kind": "slides", "title": title, "slides": _slides(title, lines), "source_text": source_text}
     if normalized in {"pdf", "docx"}:
-        return {"kind": "document", "title": title, "blocks": _document_blocks(lines), "source_text": source_text}
+        return normalize_document_model(
+            content_model,
+            title=title,
+            source_text=source_text,
+            template=template,
+        )
     return {"kind": "html", "title": title, "source_text": source_text}
 
 
@@ -25,7 +40,7 @@ def render_preview_html(format_name: str, model: dict[str, Any], html_content: s
     if normalized == "pptx":
         return _slides_preview(model)
     if normalized in {"pdf", "docx"}:
-        return _document_preview(model, "PDF" if normalized == "pdf" else "Word")
+        return render_document_preview_html(model, "PDF" if normalized == "pdf" else "Word")
     if html_content:
         return html_content
     return _document_preview(model, "Document")

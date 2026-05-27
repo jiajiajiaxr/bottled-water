@@ -65,9 +65,15 @@ def preview_html_to_text(preview_html: str) -> str:
     return parser.text()
 
 
-def build_artifact_file(format_name: str, *, title: str, body: str) -> GeneratedFile:
+def build_artifact_file(
+    format_name: str,
+    *,
+    title: str,
+    body: str,
+    content_model: dict[str, Any] | None = None,
+) -> GeneratedFile:
     fmt = "html" if format_name == "web_app" else format_name
-    return generate_file(fmt, title=title, body=body)
+    return generate_file(fmt, title=title, body=body, content_model=content_model)
 
 
 def html_artifact_file(*, title: str, html_content: str) -> GeneratedFile:

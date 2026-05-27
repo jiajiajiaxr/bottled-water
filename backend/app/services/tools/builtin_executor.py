@@ -115,6 +115,8 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
         title = str(arguments.get("title") or "AgentHub 产物")
         body = str(arguments.get("body") or arguments.get("content") or title)
         html_content = arguments.get("html") if isinstance(arguments.get("html"), str) else None
+        content_model = arguments.get("content_model") if isinstance(arguments.get("content_model"), dict) else None
+        template = arguments.get("template") if isinstance(arguments.get("template"), str) else None
         return make_artifact_from_content(
             db,
             user,
@@ -123,6 +125,8 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
             body=body,
             format_name=fmt,
             html_content=html_content,
+            content_model=content_model,
+            template=template,
         )
     if name == "artifact.export":
         artifact = _artifact(db, user, str(arguments.get("artifact_id") or ""))

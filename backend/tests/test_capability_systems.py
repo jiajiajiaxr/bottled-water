@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from docx import Document
 from pypdf import PdfReader
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -137,6 +138,54 @@ def test_office_artifacts_persist_real_files_and_versions(tool_name: str, fmt: s
     assert Path(artifact.content["source_file"]["storage_path"]).exists()
     assert version is not None
     assert version.checksum == artifact.content["source_file"]["checksum"]
+
+
+def test_document_model_drives_docx_and_pdf_renderers() -> None:
+    db = _memory_session()
+    user = _user()
+    conversation = Conversation(creator_id=user.id, chat_type="single", title="Document Model")
+    db.add_all([user, conversation])
+    db.commit()
+    content_model = _document_model()
+
+    docx_result = invoke_tool(
+        db,
+        user,
+        "artifact.create_docx",
+        {
+            "conversation_id": conversation.id,
+            "title": "结构化项目方案",
+            "template": "proposal",
+            "content_model": content_model,
+        },
+    )
+    pdf_result = invoke_tool(
+        db,
+        user,
+        "artifact.create_pdf",
+        {
+            "conversation_id": conversation.id,
+            "title": "结构化项目方案",
+            "template": "proposal",
+            "content_model": content_model,
+        },
+    )
+
+    docx_artifact = db.get(Artifact, docx_result["result"]["artifact_id"])
+    pdf_artifact = db.get(Artifact, pdf_result["result"]["artifact_id"])
+    docx_export = export_artifact(docx_artifact)
+    pdf_export = export_artifact(pdf_artifact)
+    document = Document(io.BytesIO(docx_export.content))
+    pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf_export.content)).pages)
+
+    assert docx_artifact.content["content_model"]["template"] == "proposal"
+    assert "agenthub-word-preview" in docx_artifact.content["preview_html"]
+    assert "callout" in docx_artifact.content["preview_html"]
+    assert any(paragraph.text == "实施范围" for paragraph in document.paragraphs)
+    assert document.tables and document.tables[0].cell(0, 0).text == "阶段"
+    assert "结构化项目方案" in pdf_text
+    assert "实施范围" in pdf_text
+    assert "阶段" in pdf_text
 
 
 @pytest.mark.parametrize(
@@ -475,6 +524,33 @@ def test_skill_package_parse_and_activation_context(tmp_path: Path) -> None:
     assert manifest["metadata"]["scripts"] == ["scripts/format.py"]
     assert "Release Notes" in context
     assert f"skill.{skill.id}" in context
+
+
+def _document_model() -> dict[str, Any]:
+    return {
+        "kind": "document",
+        "title": "结构化项目方案",
+        "subtitle": "用于答辩演示的正式方案",
+        "template": "proposal",
+        "sections": [
+            {
+                "title": "实施范围",
+                "blocks": [
+                    {"type": "paragraph", "text": "本方案覆盖需求梳理、开发实施和验收交付。"},
+                    {"type": "list", "ordered": True, "items": ["需求确认", "迭代开发", "上线验收"]},
+                    {
+                        "type": "table",
+                        "headers": ["阶段", "交付物"],
+                        "rows": [["设计", "方案文档"], ["实现", "可运行平台"]],
+                    },
+                    {"type": "callout", "title": "注意", "text": "所有产物必须来自真实工具执行。"},
+                    {"type": "page_break"},
+                    {"type": "heading", "level": 2, "text": "验收标准"},
+                    {"type": "paragraph", "text": "支持中文、表格、分页、页眉页脚和页码。"},
+                ],
+            }
+        ],
+    }
 
 
 def _memory_session() -> Any:

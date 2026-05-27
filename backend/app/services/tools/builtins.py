@@ -41,6 +41,29 @@ def _schema(properties: dict[str, Any], required: list[str] | None = None) -> di
     return {"type": "object", "properties": properties, "required": required or []}
 
 
+def _document_artifact_schema() -> dict[str, Any]:
+    return _schema(
+        {
+            "conversation_id": {"type": "string"},
+            "title": {"type": "string"},
+            "subtitle": {"type": "string"},
+            "body": {"type": "string"},
+            "template": {
+                "type": "string",
+                "description": "基础模板：proposal/report/prd/meeting",
+            },
+            "content_model": {
+                "type": "object",
+                "description": (
+                    "结构化 DocumentModel，含 title/subtitle/sections/blocks；"
+                    "blocks 支持 paragraph/heading/list/table/callout/page_break。"
+                ),
+            },
+        },
+        ["conversation_id"],
+    )
+
+
 BUILTIN_TOOLS: dict[str, BuiltinTool] = {
     "file.upload": BuiltinTool(
         "file.upload",
@@ -122,7 +145,7 @@ BUILTIN_TOOLS: dict[str, BuiltinTool] = {
         "artifact",
         "生成真实 PDF 文件并创建聊天产物卡片。",
         ("artifact:create", "artifact:export"),
-        _schema({"conversation_id": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string"}}, ["conversation_id"]),
+        _document_artifact_schema(),
         _schema({"artifact": {"type": "object"}, "export_url": {"type": "string"}}),
     ),
     "artifact.create_docx": BuiltinTool(
@@ -131,7 +154,7 @@ BUILTIN_TOOLS: dict[str, BuiltinTool] = {
         "artifact",
         "生成 DOCX 产物并提供预览与导出。",
         ("artifact:create",),
-        _schema({"conversation_id": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string"}}, ["conversation_id"]),
+        _document_artifact_schema(),
         _schema({"artifact": {"type": "object"}}),
     ),
     "artifact.create_xlsx": BuiltinTool(

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.errors import ValidationAppError
+from app.services.document_model import normalize_document_model, render_docx, render_pdf
 
 
 TEXT_EXTENSIONS = {
@@ -242,19 +243,9 @@ def _html_document(title: str, body: str) -> str:
     )
 
 
-def generate_docx(title: str, body: str) -> bytes:
-    try:
-        from docx import Document
-    except Exception as exc:  # pragma: no cover
-        raise ValidationAppError("Word 生成依赖 python-docx 不可用") from exc
-    buffer = io.BytesIO()
-    document = Document()
-    document.add_heading(title, level=1)
-    for line in body.splitlines():
-        if line.strip():
-            document.add_paragraph(line.strip())
-    document.save(buffer)
-    return buffer.getvalue()
+def generate_docx(title: str, body: str, content_model: dict[str, Any] | None = None) -> bytes:
+    model = normalize_document_model(content_model, title=title, source_text=body)
+    return render_docx(model)
 
 
 def generate_xlsx(title: str, body: str) -> bytes:
@@ -297,10 +288,9 @@ def generate_pptx(title: str, body: str) -> bytes:
     return buffer.getvalue()
 
 
-def generate_pdf(title: str, body: str) -> bytes:
-    from app.services.tools.pdf_generator import generate_pdf_document
-
-    return generate_pdf_document(title, body)
+def generate_pdf(title: str, body: str, content_model: dict[str, Any] | None = None) -> bytes:
+    model = normalize_document_model(content_model, title=title, source_text=body)
+    return render_pdf(model)
 
 
 def generate_markdown(title: str, body: str) -> bytes:
@@ -331,13 +321,19 @@ GENERATORS = {
 }
 
 
-def generate_file(format_name: str, *, title: str, body: str) -> GeneratedFile:
+def generate_file(
+    format_name: str,
+    *,
+    title: str,
+    body: str,
+    content_model: dict[str, Any] | None = None,
+) -> GeneratedFile:
     fmt = format_name.lower().strip(".")
     if fmt not in GENERATORS:
         raise ValidationAppError(f"不支持的生成格式：{format_name}")
     generator, media_type = GENERATORS[fmt]
     normalized = "md" if fmt == "markdown" else fmt
-    content = generator(title, body)
+    content = generator(title, body, content_model) if normalized in {"pdf", "docx"} else generator(title, body)
     safe = re.sub(r"[^A-Za-z0-9_.\-\u4e00-\u9fff]+", "-", title).strip("-") or "agenthub-artifact"
     return GeneratedFile(content=content, media_type=media_type, filename=f"{safe[:70]}.{normalized}")
 

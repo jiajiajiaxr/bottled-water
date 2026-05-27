@@ -12,7 +12,7 @@ from typing import Any
 
 from app.models import Artifact
 from app.services.artifact_storage import BINARY_ARTIFACT_FORMATS
-from app.services.file_tools import generate_pdf
+from app.services.file_tools import generate_docx, generate_pdf
 from app.services.serialization import artifact_to_dict
 
 
@@ -198,7 +198,7 @@ def export_artifact(artifact: Artifact, export_format: str | None = None) -> Art
         content = json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8")
         return ArtifactExport(content, "application/json; charset=utf-8", f"{base}.json")
     if fmt == "docx":
-        return ArtifactExport(_docx_bytes(artifact.name, body), OFFICE_MIME_TYPES["docx"], f"{base}.docx")
+        return ArtifactExport(generate_docx(artifact.name, body), OFFICE_MIME_TYPES["docx"], f"{base}.docx")
     if fmt == "xlsx":
         return ArtifactExport(_xlsx_bytes(artifact.name, body), OFFICE_MIME_TYPES["xlsx"], f"{base}.xlsx")
     if fmt == "pptx":

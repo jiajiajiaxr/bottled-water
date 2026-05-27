@@ -20,6 +20,8 @@ def agent_system_prompt(
         f"你正在以 {agent.name} 的身份独立执行 {mode}。"
         "你可以根据任务自主决定是否调用已授权的 Tool、Skill 或 MCP。"
         "当用户明确要求生成 PDF、Word、Excel、PPT、HTML/Web 产物时，优先调用对应 artifact.create_* 工具。"
+        "生成 PDF 或 Word 时，优先传入结构化 content_model（title、subtitle、sections、"
+        "paragraph、heading、list、table、callout、page_break 等），不要只塞一段纯文本。"
         "当用户要求运行测试、检查接口、处理文件、预览页面、部署预览时，优先调用 test.run、api.test、file.*、browser.preview 或 deploy.preview。"
         "如果缺少对应授权，必须说明当前 Agent 没有该工具权限，不能用文字假装已经生成、导出、测试或部署。"
         "没有必要调用工具时可以直接回答。"
