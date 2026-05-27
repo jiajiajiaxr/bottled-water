@@ -4,60 +4,64 @@ agent_runtime 测试 fixtures
 
 import pytest
 from typing import AsyncIterator, List, Optional, Dict, Any
-
-from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
-from agent_runtime.core.types import (
-    AgentConfig, AgentReport, AgentState, AgentWill, Event, Message, SchedulingDecision,
+from agent_runtime import (
+    AgentConfig,
+    AgentReport,
+    AgentState,
+    AgentWill,
+    Event,
+    Message,
+    SchedulingDecision,
 )
-from agent_runtime.core.interfaces import PersistenceBackend, EventSink, ToolExecutor
+from agent_runtime import PersistenceBackend, EventSink, ToolExecutor
 
+# 从项目根目录加载 .env
+from dotenv import load_dotenv
+from model_provider import create_provider, ModelConfig, ChatMessage
+
+# 加载环境变量（从项目根目录）
+import os
+
+env_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")
+load_dotenv(env_path)
 
 # ---------------------------------------------------------------------------
 # Mock Model Provider
 # ---------------------------------------------------------------------------
 
-class MockModelProvider(BaseModelProvider):
-    """用于测试的模型提供者 mock"""
 
-    def __init__(self, responses: List[ChatResponse] = None):
-        super().__init__({"model": "mock"})
-        self.responses = responses or []
-        self.call_count = 0
-        self.calls: List[dict] = []
+@pytest.fixture
+def api_key():
+    key = os.environ.get("ARK_API_KEY")
+    if not key:
+        pytest.skip("ARK_API_KEY not found in environment")
+    return key
 
-    async def chat(
-        self,
-        messages: List[ChatMessage],
-        system_prompt: Optional[str] = None,
-        tools: Optional[List[Dict]] = None,
-        temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
-    ) -> ChatResponse:
-        self.call_count += 1
-        self.calls.append({
-            "messages": messages,
-            "system_prompt": system_prompt,
-            "tools": tools,
-        })
-        if self.responses:
-            idx = min(self.call_count - 1, len(self.responses) - 1)
-            return self.responses[idx]
-        return ChatResponse(content="mock response")
 
-    async def chat_stream(
-        self,
-        messages: List[ChatMessage],
-        system_prompt: Optional[str] = None,
-        tools: Optional[List[Dict]] = None,
-        temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
-    ) -> AsyncIterator[StreamChunk]:
-        yield StreamChunk(content="mock stream response")
+@pytest.fixture
+def endpoint_id():
+    eid = os.environ.get("ARK_ENDPOINT_ID")
+    if not eid:
+        pytest.skip("ARK_ENDPOINT_ID not found in environment")
+    return eid
+
+
+@pytest.fixture
+def provider(api_key, endpoint_id):
+    """创建 ArkProvider 实例"""
+    return create_provider(
+        ModelConfig(
+            provider="ark",
+            model=endpoint_id,
+            api_key=api_key,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
 # Mock Persistence Backend
 # ---------------------------------------------------------------------------
+
 
 class MockPersistenceBackend(PersistenceBackend):
     """用于测试的持久化后端 mock"""
@@ -86,7 +90,9 @@ class MockPersistenceBackend(PersistenceBackend):
         key = f"{agent_id}:{conversation_id}"
         return self.agent_contexts.get(key, [])
 
-    async def save_agent_context(self, agent_id: str, conversation_id: str, frames: List[dict]) -> None:
+    async def save_agent_context(
+        self, agent_id: str, conversation_id: str, frames: List[dict]
+    ) -> None:
         key = f"{agent_id}:{conversation_id}"
         self.agent_contexts[key] = frames
 
@@ -94,6 +100,7 @@ class MockPersistenceBackend(PersistenceBackend):
 # ---------------------------------------------------------------------------
 # Mock Event Sink
 # ---------------------------------------------------------------------------
+
 
 class MockEventSink(EventSink):
     """用于测试的事件接收器 mock"""
@@ -111,6 +118,7 @@ class MockEventSink(EventSink):
 # ---------------------------------------------------------------------------
 # Mock Tool Executor
 # ---------------------------------------------------------------------------
+
 
 class MockToolExecutor(ToolExecutor):
     """用于测试的工具执行器 mock"""
@@ -130,10 +138,6 @@ class MockToolExecutor(ToolExecutor):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-@pytest.fixture
-def mock_provider():
-    return MockModelProvider()
 
 
 @pytest.fixture

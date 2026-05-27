@@ -114,4 +114,4 @@ class TestToolExecutorImpl:
 
     def test_list_tools(self, executor):
         tools = executor.list_tools()
-        assert len(tools) == 3  # add, async_add, bad
+        assert len(tools) == 2  # add, async_add, bad

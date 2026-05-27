@@ -4,22 +4,19 @@
 需要 .env 文件中的 ARK_API_KEY 和 ARK_ENDPOINT_ID。
 """
 
-import asyncio
 import os
 import pytest
 
 # 从项目根目录加载 .env
 from dotenv import load_dotenv
+from model_provider import create_provider, ModelConfig, ChatMessage
 
 # 加载环境变量（从项目根目录）
 env_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")
 load_dotenv(env_path)
 
-from model_provider import create_provider, ModelConfig, ChatMessage
-
 
 # --- 辅助函数 ---
-
 def safe_print(text: str, max_len: int = 80) -> str:
     """安全打印：过滤掉终端不支持的非 ASCII 字符（如 emoji）"""
     safe = text[:max_len].encode("ascii", "ignore").decode("ascii")
@@ -27,6 +24,7 @@ def safe_print(text: str, max_len: int = 80) -> str:
 
 
 # --- fixtures ---
+
 
 @pytest.fixture
 def api_key():
@@ -47,23 +45,28 @@ def endpoint_id():
 @pytest.fixture
 def provider(api_key, endpoint_id):
     """创建 ArkProvider 实例"""
-    return create_provider(ModelConfig(
-        provider="ark",
-        model=endpoint_id,
-        api_key=api_key,
-    ))
+    return create_provider(
+        ModelConfig(
+            provider="ark",
+            model=endpoint_id,
+            api_key=api_key,
+        )
+    )
 
 
 # --- 基础测试 ---
 
+
 @pytest.mark.asyncio
 async def test_create_provider(api_key, endpoint_id):
     """测试工厂函数创建 Provider"""
-    provider = create_provider(ModelConfig(
-        provider="ark",
-        model=endpoint_id,
-        api_key=api_key,
-    ))
+    provider = create_provider(
+        ModelConfig(
+            provider="ark",
+            model=endpoint_id,
+            api_key=api_key,
+        )
+    )
     assert provider is not None
     assert provider.model == endpoint_id
     print(f"\n[OK] Provider created: model={provider.model}")
@@ -142,6 +145,7 @@ async def test_chat_temperature(provider):
 
 
 # --- 性能/辅助测试 ---
+
 
 @pytest.mark.asyncio
 async def test_count_tokens(provider):
