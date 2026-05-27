@@ -5,9 +5,9 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any
+from typing import List, Dict
 
-from .types import Event, Message
+from .types import Event, Message, ToolCall, ToolResult
 
 
 class PersistenceBackend(ABC):
@@ -44,7 +44,9 @@ class PersistenceBackend(ABC):
         pass
 
     @abstractmethod
-    async def save_agent_context(self, agent_id: str, conversation_id: str, frames: List[dict]) -> None:
+    async def save_agent_context(
+        self, agent_id: str, conversation_id: str, frames: List[dict]
+    ) -> None:
         """保存 Agent 上下文"""
         pass
 
@@ -67,7 +69,7 @@ class ToolExecutor(ABC):
     """工具执行器接口"""
 
     @abstractmethod
-    async def execute(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
+    async def execute(self, tool_call: ToolCall) -> ToolResult:
         """执行工具调用"""
         pass
 

@@ -50,15 +50,19 @@ class BlackboardManager:
 
     async def append_history(self, conversation_id: str, entry: Dict[str, Any]) -> Dict[str, Any]:
         """追加原始历史条目"""
-        logger.debug("Blackboard 追加历史", conversation_id=conversation_id, entry_type=entry.get("type"))
+        logger.debug(
+            "Blackboard 追加历史", conversation_id=conversation_id, entry_type=entry.get("type")
+        )
         blackboard = await self.get(conversation_id)
         if not blackboard:
             blackboard = await self.create(conversation_id)
 
-        blackboard["raw_history"].append({
-            **entry,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        blackboard["raw_history"].append(
+            {
+                **entry,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
         blackboard["version"] += 1
         blackboard["updated_at"] = datetime.utcnow().isoformat()
 
@@ -66,27 +70,35 @@ class BlackboardManager:
         return blackboard
 
     async def add_summary(self, conversation_id: str, summary: Dict[str, Any]) -> Dict[str, Any]:
-        """添加结构化摘要"""
-        logger.info("Blackboard 添加摘要", conversation_id=conversation_id)
         """添加结构化摘要（由 Lead 生成内容，此处只存储）"""
+
+        logger.info("Blackboard 添加摘要", conversation_id=conversation_id)
+
         blackboard = await self.get(conversation_id)
+
         if not blackboard:
             raise ValueError(f"Blackboard not found for {conversation_id}")
 
-        blackboard["structured_summaries"].append({
-            **summary,
-            "created_at": datetime.utcnow().isoformat(),
-        })
+        blackboard["structured_summaries"].append(
+            {
+                **summary,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+        )
         blackboard["version"] += 1
         blackboard["updated_at"] = datetime.utcnow().isoformat()
 
         await self._persist(blackboard)
+
         return blackboard
 
     async def update_kv(self, conversation_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         """更新键值状态"""
-        logger.debug("Blackboard 更新 KV", conversation_id=conversation_id, keys=list(updates.keys()))
+        logger.debug(
+            "Blackboard 更新 KV", conversation_id=conversation_id, keys=list(updates.keys())
+        )
         blackboard = await self.get(conversation_id)
+
         if not blackboard:
             raise ValueError(f"Blackboard not found for {conversation_id}")
 
@@ -99,7 +111,9 @@ class BlackboardManager:
 
     # --- 读操作 ---
 
-    async def get_raw_history(self, conversation_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    async def get_raw_history(
+        self, conversation_id: str, limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """获取原始历史"""
         blackboard = await self.get(conversation_id)
         if not blackboard:
@@ -138,8 +152,10 @@ class BlackboardManager:
         self._cache[blackboard["conversation_id"]] = blackboard
         if self._persistence:
             try:
-                await self._persistence.save_blackboard(
-                    blackboard["conversation_id"], blackboard
-                )
+                await self._persistence.save_blackboard(blackboard["conversation_id"], blackboard)
             except Exception as e:
-                logger.error("Blackboard 持久化失败", conversation_id=blackboard["conversation_id"], error=str(e))
+                logger.error(
+                    "Blackboard 持久化失败",
+                    conversation_id=blackboard["conversation_id"],
+                    error=str(e),
+                )

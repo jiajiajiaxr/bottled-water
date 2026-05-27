@@ -10,9 +10,9 @@
 看门狗是"最后一道防线"，不干预正常调度，只在异常时触发。
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from common.logger import get_logger
 from ..core.types import AgentReport, SchedulingDecision, Event
@@ -23,16 +23,18 @@ logger = get_logger(__name__)
 @dataclass
 class WatchdogConfig:
     """看门狗配置"""
-    max_rounds: int = 50           # 最大调度轮数
-    max_idle_seconds: int = 300    # 最大空闲时间（秒）
+
+    max_rounds: int = 50  # 最大调度轮数
+    max_idle_seconds: int = 300  # 最大空闲时间（秒）
     max_total_tokens: int = 500000  # Token 预算上限
-    deadlock_threshold: int = 3    # 死锁检测：连续 N 轮无进展
+    deadlock_threshold: int = 3  # 死锁检测：连续 N 轮无进展
     min_progress_interval: int = 10  # 最小进展间隔（秒）
 
 
 @dataclass
 class WatchdogState:
     """看门狗内部状态"""
+
     round_count: int = 0
     total_tokens_used: int = 0
     last_progress_round: int = 0
@@ -52,7 +54,9 @@ class Watchdog:
 
     # --- 决策前校验 ---
 
-    def check_before_decision(self, blackboard: dict, reports: List[AgentReport]) -> Optional[Event]:
+    def check_before_decision(
+        self, blackboard: dict, reports: List[AgentReport]
+    ) -> Optional[Event]:
         """
         调度器决策前校验。
 
@@ -63,7 +67,11 @@ class Watchdog:
 
         # 1. 轮数上限
         if self.state.round_count > self.config.max_rounds:
-            logger.warning("看门狗触发：轮数上限", rounds=self.state.round_count, max_rounds=self.config.max_rounds)
+            logger.warning(
+                "看门狗触发：轮数上限",
+                rounds=self.state.round_count,
+                max_rounds=self.config.max_rounds,
+            )
             return Event(
                 type="watchdog_triggered",
                 payload={
@@ -93,8 +101,9 @@ class Watchdog:
         active_count = sum(1 for r in reports if r.state not in ("completed", "failed"))
         all_blocked = all(r.will.value == "blocked" for r in reports)
         all_waiting = all(r.will.value == "wait" for r in reports)
+        all_completed = all(r.state == "completed" for r in reports)
 
-        if active_count == 0 or all_blocked or all_waiting:
+        if active_count == 0 or all_blocked or all_waiting or not all_completed:
             self.state.consecutive_idle_rounds += 1
             if self.state.consecutive_idle_rounds >= self.config.deadlock_threshold:
                 logger.warning(
@@ -115,7 +124,9 @@ class Watchdog:
         # 4. 运行超时
         elapsed = (datetime.utcnow() - self.started_at).total_seconds()
         if elapsed > self.config.max_idle_seconds:
-            logger.warning("看门狗触发：运行超时", elapsed=elapsed, max_seconds=self.config.max_idle_seconds)
+            logger.warning(
+                "看门狗触发：运行超时", elapsed=elapsed, max_seconds=self.config.max_idle_seconds
+            )
             return Event(
                 type="watchdog_triggered",
                 payload={
@@ -136,17 +147,23 @@ class Watchdog:
         Returns:
             如果校验通过返回 None，否则返回终止事件。
         """
-        self.state.decision_history.append({
-            "round": self.state.round_count,
-            "decision_type": decision.decision_type,
-            "target": decision.target_agent_id,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        self.state.decision_history.append(
+            {
+                "round": self.state.round_count,
+                "decision_type": decision.decision_type,
+                "target": decision.target_agent_id,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
         # 检测连续重复的决策（可能陷入循环）
         if len(self.state.decision_history) >= 4:
             recent = self.state.decision_history[-4:]
-            if all(d["decision_type"] == recent[0]["decision_type"] and d["target"] == recent[0]["target"] for d in recent):
+            if all(
+                d["decision_type"] == recent[0]["decision_type"]
+                and d["target"] == recent[0]["target"]
+                for d in recent
+            ):
                 logger.warning(
                     "看门狗触发：决策循环",
                     target=decision.target_agent_id,

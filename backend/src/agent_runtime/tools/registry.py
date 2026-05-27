@@ -46,7 +46,7 @@ class ToolRegistry:
                     "name": name,
                     "description": info["description"],
                     "parameters": info["parameters"],
-                }
+                },
             }
             for name, info in self._tools.items()
         ]

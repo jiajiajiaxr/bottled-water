@@ -16,6 +16,7 @@ from datetime import datetime
 @dataclass
 class ContextFrame:
     """上下文帧"""
+
     frame_type: str  # "task" | "thought" | "tool_call" | "tool_result"
     content: Any
     timestamp: datetime = field(default_factory=datetime.utcnow)
@@ -106,7 +107,9 @@ class AgentContextManager:
     def _key(self, agent_id: str, conversation_id: str) -> str:
         return f"{agent_id}:{conversation_id}"
 
-    def initialize(self, agent_id: str, conversation_id: str, system_prompt: str = "", role_config: Dict = None):
+    def initialize(
+        self, agent_id: str, conversation_id: str, system_prompt: str = "", role_config: Dict = None
+    ):
         """初始化 Agent 上下文"""
         key = self._key(agent_id, conversation_id)
         ctx = AgentContext(agent_id=agent_id, conversation_id=conversation_id)
@@ -121,7 +124,9 @@ class AgentContextManager:
             self.initialize(agent_id, conversation_id)
         return self._contexts[key]
 
-    def after_round(self, agent_id: str, conversation_id: str, archive: bool = False) -> Optional[Dict]:
+    def after_round(
+        self, agent_id: str, conversation_id: str, archive: bool = False
+    ) -> Optional[Dict]:
         """轮次结束后处理"""
         ctx = self.get(agent_id, conversation_id)
         result = None

@@ -110,6 +110,7 @@ class Session:
 
 # 空实现，用于可选依赖的默认值
 
+
 class _NullEventSink(EventSink):
     async def emit(self, event: Event) -> None:
         pass

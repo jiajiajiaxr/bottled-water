@@ -5,6 +5,7 @@
 """
 
 from dataclasses import dataclass, field
+import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from enum import Enum
@@ -12,16 +13,19 @@ from enum import Enum
 
 class AgentState(str, Enum):
     """Agent 运行状态"""
+
     IDLE = "idle"
     READY = "ready"
     RUNNING = "running"
     WAITING = "waiting"
     COMPLETED = "completed"
     FAILED = "failed"
+    UNKNOWN = "unknown"
 
 
 class AgentWill(str, Enum):
     """Agent 意图"""
+
     EXECUTE = "execute"
     WAIT = "wait"
     DELEGATE = "delegate"
@@ -32,6 +36,7 @@ class AgentWill(str, Enum):
 @dataclass
 class AgentConfig:
     """Agent 配置"""
+
     id: str
     name: str
     system_prompt: str
@@ -43,6 +48,7 @@ class AgentConfig:
 @dataclass
 class AgentReport:
     """Agent 状态报告"""
+
     agent_id: str
     state: AgentState
     will: AgentWill
@@ -57,6 +63,7 @@ class AgentReport:
 @dataclass
 class SchedulingDecision:
     """调度决策"""
+
     decision_type: str  # "assign" | "parallel" | "wait" | "escalate" | "user_input"
     target_agent_id: Optional[str] = None
     task_description: str = ""
@@ -68,6 +75,7 @@ class SchedulingDecision:
 @dataclass
 class Message:
     """运行时消息"""
+
     id: str
     conversation_id: str
     agent_id: Optional[str]
@@ -80,6 +88,7 @@ class Message:
 @dataclass
 class Event:
     """运行时事件"""
+
     type: str
     payload: Dict[str, Any]
     timestamp: datetime = field(default_factory=datetime.utcnow)
@@ -88,14 +97,41 @@ class Event:
 @dataclass
 class ToolCall:
     """工具调用"""
+
     tool_name: str
     parameters: Dict[str, Any]
     call_id: str
+
+    @classmethod
+    def new(cls, tc: Dict[str, Any]):
+        function_info = tc.get("function", {})
+        tool_name = function_info.get("name", "")
+        arguments_str = function_info.get("arguments", "{}")
+        call_id = tc.get("id", "")
+
+        err = None
+
+        # 解析参数
+        try:
+            if isinstance(arguments_str, str):
+                parameters = json.loads(arguments_str)
+            else:
+                parameters = arguments_str
+        except json.JSONDecodeError as e:
+            parameters = {}
+            err = e
+
+        return cls(
+            tool_name=tool_name,
+            parameters=parameters,
+            call_id=call_id,
+        ), err
 
 
 @dataclass
 class ToolResult:
     """工具执行结果"""
+
     call_id: str
     success: bool
     result: Any

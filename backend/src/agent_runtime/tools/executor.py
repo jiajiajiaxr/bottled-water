@@ -4,8 +4,6 @@
 负责执行工具调用，处理异常，返回结果。
 """
 
-from typing import Any, Dict
-
 from common.logger import get_logger
 from .registry import ToolRegistry
 from ..core.types import ToolCall, ToolResult
@@ -35,6 +33,7 @@ class ToolExecutorImpl:
         try:
             # 支持同步和异步 handler
             import asyncio
+
             if asyncio.iscoroutinefunction(handler):
                 result = await handler(**tool_call.parameters)
             else:
@@ -47,7 +46,9 @@ class ToolExecutorImpl:
                 result=result,
             )
         except Exception as e:
-            logger.error("工具执行失败", tool=tool_call.tool_name, call_id=tool_call.call_id, error=str(e))
+            logger.error(
+                "工具执行失败", tool=tool_call.tool_name, call_id=tool_call.call_id, error=str(e)
+            )
             return ToolResult(
                 call_id=tool_call.call_id,
                 success=False,

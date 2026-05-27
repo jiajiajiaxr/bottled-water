@@ -8,6 +8,7 @@ Agent 执行循环
 - 状态自报告
 """
 
+import re
 import json
 from typing import Dict, Any, Optional, List
 
@@ -93,6 +94,9 @@ class AgentLoop:
 
             # 如果没有工具调用，说明 Agent 已完成本轮工作
             if not tool_calls:
+                logger.info("Agent 无工具调用", agent_id=self.agent.id)
+                messages.append(ChatMessage(role="assistant", content=content))
+
                 break
 
             # 处理工具调用
@@ -116,12 +120,55 @@ class AgentLoop:
                 if not tool_executor:
                     break
 
-                result = await self._execute_tool_call(tc, tool_executor)
-                tool_results.append({
-                    "tool": tc.get("function", {}).get("name", "unknown"),
-                    "success": result.success if isinstance(result, ToolResult) else True,
-                    "result": result.result if isinstance(result, ToolResult) else result,
-                })
+                tool_call, err = ToolCall.new(tc)
+
+                if err:
+                    logger.error("工具参数解析失败", tool=tool_call.tool_name, error=str(err))
+
+                    result = ToolResult(
+                        call_id=tool_call.call_id,
+                        success=False,
+                        result=None,
+                        error=f"参数解析失败: {err}",
+                    )
+
+                else:
+                    try:
+                        logger.info(
+                            "执行工具",
+                            agent_id=self.agent.id,
+                            tool=tool_call.tool_name,
+                            call_id=tool_call.call_id,
+                        )
+
+                        # 执行工具
+                        result = await tool_executor.execute(tool_call)
+
+                        # 如果 result 已经是 ToolResult，直接返回
+                        if not isinstance(result, ToolResult):
+                            # 否则包装为 ToolResult
+                            result = ToolResult(
+                                call_id=tool_call.call_id,
+                                success=True,
+                                result=result,
+                            )
+                    except Exception as e:
+                        logger.error("工具执行失败", tool=tool_call.tool_name, error=str(e))
+
+                        result = ToolResult(
+                            call_id=tool_call.call_id,
+                            success=False,
+                            result=None,
+                            error=str(e),
+                        )
+
+                tool_results.append(
+                    {
+                        "tool": tc.get("function", {}).get("name", "unknown"),
+                        "success": result.success if isinstance(result, ToolResult) else True,
+                        "result": result.result if isinstance(result, ToolResult) else result,
+                    }
+                )
 
                 # 将工具结果加入消息列表
                 tool_msg = ChatMessage(
@@ -131,11 +178,13 @@ class AgentLoop:
                 )
                 messages.append(tool_msg)
 
-            tool_events.append({
-                "agent_id": self.agent.id,
-                "round": tool_round,
-                "results": tool_results[-len(tool_calls):],
-            })
+            tool_events.append(
+                {
+                    "agent_id": self.agent.id,
+                    "round": tool_round,
+                    "results": tool_results[-len(tool_calls) :],
+                }
+            )
 
         # 如果达到工具调用上限
         if tool_round >= self.MAX_TOOL_ROUNDS:
@@ -177,56 +226,6 @@ class AgentLoop:
             "tool_events": tool_events,
         }
 
-    async def _execute_tool_call(
-        self,
-        tool_call: Dict[str, Any],
-        tool_executor: ToolExecutor,
-    ) -> ToolResult:
-        """执行单个工具调用"""
-        function_info = tool_call.get("function", {})
-        tool_name = function_info.get("name", "")
-        arguments_str = function_info.get("arguments", "{}")
-        call_id = tool_call.get("id", "")
-
-        logger.info("执行工具", agent_id=self.agent.id, tool=tool_name, call_id=call_id)
-
-        try:
-            # 解析参数
-            if isinstance(arguments_str, str):
-                parameters = json.loads(arguments_str)
-            else:
-                parameters = arguments_str
-
-            # 执行工具
-            result = await tool_executor.execute(tool_name, parameters)
-
-            # 如果 result 已经是 ToolResult，直接返回
-            if isinstance(result, ToolResult):
-                return result
-
-            # 否则包装为 ToolResult
-            return ToolResult(
-                call_id=call_id,
-                success=True,
-                result=result,
-            )
-        except json.JSONDecodeError as e:
-            logger.error("工具参数解析失败", tool=tool_name, error=str(e))
-            return ToolResult(
-                call_id=call_id,
-                success=False,
-                result=None,
-                error=f"参数解析失败: {e}",
-            )
-        except Exception as e:
-            logger.error("工具执行失败", tool=tool_name, error=str(e))
-            return ToolResult(
-                call_id=call_id,
-                success=False,
-                result=None,
-                error=str(e),
-            )
-
     def _build_prompt(self, task: str, blackboard_view: dict) -> str:
         """构建用户提示词"""
         # 构建 Blackboard 视图文本
@@ -262,7 +261,9 @@ class AgentLoop:
         if recent_history:
             parts.append("近期历史：")
             for entry in recent_history[-5:]:
-                parts.append(f"  - [{entry.get('type', '?')}] {str(entry.get('content', ''))[:100]}")
+                parts.append(
+                    f"  - [{entry.get('type', '?')}] {str(entry.get('content', ''))[:100]}"
+                )
 
         kv_state = blackboard_view.get("kv_state", {})
         if kv_state:
@@ -281,7 +282,7 @@ class AgentLoop:
         """从回复中提取状态报告"""
         import re
 
-        pattern = r'```status_report\s*([\s\S]*?)\s*```'
+        pattern = r"```status_report\s*([\s\S]*?)\s*```"
         match = re.search(pattern, content)
         if match:
             try:
@@ -308,8 +309,8 @@ class AgentLoop:
 
     def _remove_status_report(self, content: str) -> str:
         """从回复中移除状态报告部分"""
-        import re
-        pattern = r'```status_report\s*[\s\S]*?\s*```'
+
+        pattern = r"```status_report\s*[\s\S]*?\s*```"
         return re.sub(pattern, "", content).strip()
 
     def _parse_state(self, state_str: str) -> AgentState:
@@ -333,4 +334,5 @@ class AgentLoop:
             "complete": AgentWill.COMPLETE,
             "blocked": AgentWill.BLOCKED,
         }
+
         return will_map.get(will_str.lower(), AgentWill.WAIT)
