@@ -25,6 +25,9 @@ from app.services.file_tools import (
     summarize_text,
 )
 from app.services.serialization import artifact_to_dict
+from app.services.tools.api_probe import run_api_test
+from app.services.tools.browser_probe import run_browser_preview
+from app.services.tools.sandbox_runner import run_sandbox_command, run_test_command
 
 
 def _workspace_file_root() -> Path:
@@ -120,6 +123,7 @@ def _make_artifact_from_content(
     content["tool_output"] = {
         "tool": f"artifact.create_{format_name}",
         "format": format_name,
+        "capability_level": "real",
         "filename": generated.filename if generated else None,
         "media_type": generated.media_type if generated else None,
         "size": len(generated.content) if generated else len(html_preview),
@@ -135,6 +139,8 @@ def _make_artifact_from_content(
     db.refresh(preview)
     export_format = "html" if format_name in {"html", "web_app"} else format_name
     return {
+        "status": "succeeded",
+        "capability_level": "real",
         "artifact": artifact_to_dict(artifact),
         "preview_message_id": preview.id,
         "preview_url": f"/api/v1/artifacts/{artifact.id}/preview",
@@ -230,14 +236,13 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
         inspector = inspect(db.get_bind())
         return {"status": "succeeded", "tables": [{"name": table, "columns": [column["name"] for column in inspector.get_columns(table)]} for table in inspector.get_table_names()]}
     if name == "api.test":
-        return {"status": "succeeded", "path": arguments.get("path") or "/api/v1/health", "result": "health route reachable in current app"}
-    if name in {"sandbox.run", "test.run"}:
-        command = str(arguments.get("command") or "echo AgentHub")
-        return {"status": "succeeded", "command": command, "exit_code": 0, "stdout": f"[mock-sandbox] {command}", "stderr": ""}
+        return run_api_test(arguments)
+    if name == "sandbox.run":
+        return run_sandbox_command(arguments)
+    if name == "test.run":
+        return run_test_command(arguments)
     if name == "browser.preview":
-        artifact_id = str(arguments.get("artifact_id") or "")
-        url = str(arguments.get("url") or (f"/api/v1/artifacts/{artifact_id}/preview" if artifact_id else "about:blank"))
-        return {"status": "succeeded", "preview_url": url}
+        return run_browser_preview(arguments)
     if name == "security.audit":
         target = str(arguments.get("target") or arguments)
         findings = []

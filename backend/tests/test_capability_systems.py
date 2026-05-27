@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Any
 
 import pytest
+from pypdf import PdfReader
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from app.core.errors import ValidationAppError
 from app.core.database import Base
-from app.models import Agent, Conversation, McpServer, Skill, ToolDefinition, ToolInvocation, User
+from app.models import Agent, Artifact, Conversation, McpServer, Skill, ToolDefinition, ToolInvocation, User
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
+from app.services.artifact_exports import export_artifact
 from app.services.demo_cleanup import cleanup_acceptance_residue
 from app.services.mcp.discovery import discover_server_tools, import_server_manifest, probe_server
 from app.services.mcp.schema import validate_mcp_arguments
@@ -33,6 +37,102 @@ def test_tool_invocation_records_builtin_run() -> None:
     assert invocation is not None
     assert invocation.tool_name == "api.test"
     assert invocation.status == "succeeded"
+
+
+def test_artifact_create_pdf_exports_real_chinese_pdf() -> None:
+    db = _memory_session()
+    user = _user()
+    conversation = Conversation(creator_id=user.id, chat_type="single", title="PDF Conversation")
+    db.add_all([user, conversation])
+    db.commit()
+
+    result = invoke_tool(
+        db,
+        user,
+        "artifact.create_pdf",
+        {
+            "conversation_id": conversation.id,
+            "title": "中文项目方案",
+            "body": "# 目标\n这是中文段落。\n- 第一项\n- 第二项\n---\n第二页内容",
+        },
+    )
+    artifact = db.get(Artifact, result["result"]["artifact"]["id"])
+    exported = export_artifact(artifact, "pdf")
+    reader = PdfReader(io.BytesIO(exported.content))
+
+    assert result["result"]["capability_level"] == "real"
+    assert exported.media_type == "application/pdf"
+    assert len(reader.pages) >= 2
+    assert b"/FontName" in exported.content
+    assert any(token in exported.content for token in (b"NotoSans", b"SimHei", b"STSong"))
+
+
+def test_sandbox_run_timeout_and_denied_command_are_recorded() -> None:
+    db = _memory_session()
+    user = _user()
+    db.add(user)
+    db.commit()
+
+    timeout_result = invoke_tool(
+        db,
+        user,
+        "sandbox.run",
+        {"command": 'python -c "while True: pass"', "timeout": 1},
+    )
+
+    assert timeout_result["result"]["status"] == "timeout"
+    assert timeout_result["result"]["exit_code"] == -1
+    assert timeout_result["result"]["capability_level"] == "real"
+
+    with pytest.raises(ValidationAppError):
+        invoke_tool(db, user, "sandbox.run", {"command": "rm -rf ."})
+    failed = db.scalars(select(ToolInvocation).where(ToolInvocation.tool_name == "sandbox.run")).all()
+    assert failed[-1].status == "failed"
+
+
+def test_test_run_executes_allowed_command() -> None:
+    db = _memory_session()
+    user = _user()
+    db.add(user)
+    db.commit()
+
+    result = invoke_tool(db, user, "test.run", {"command": "pytest --version", "timeout": 10})
+
+    assert result["result"]["status"] == "succeeded"
+    assert result["result"]["exit_code"] == 0
+    assert "pytest" in result["result"]["stdout"].lower()
+
+
+def test_api_test_asserts_status_code() -> None:
+    db = _memory_session()
+    user = _user()
+    db.add(user)
+    db.commit()
+
+    result = invoke_tool(
+        db,
+        user,
+        "api.test",
+        {"method": "GET", "path": "/api/v1/health", "expected_status": 200},
+    )
+
+    assert result["result"]["status"] == "succeeded"
+    assert result["result"]["status_code"] == 200
+    assert result["result"]["assertion_passed"] is True
+
+
+def test_browser_preview_checks_access_with_fallback_details() -> None:
+    db = _memory_session()
+    user = _user()
+    db.add(user)
+    db.commit()
+
+    result = invoke_tool(db, user, "browser.preview", {"url": "/api/v1/health"})
+
+    assert result["result"]["status"] == "succeeded"
+    assert result["result"]["accessible"] is True
+    assert result["result"]["capability_level"] in {"real", "fallback"}
+    assert "playwright" in result["result"]
 
 
 def test_builtin_tools_sync_to_database_catalog() -> None:

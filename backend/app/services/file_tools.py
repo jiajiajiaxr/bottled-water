@@ -298,39 +298,9 @@ def generate_pptx(title: str, body: str) -> bytes:
 
 
 def generate_pdf(title: str, body: str) -> bytes:
-    lines = [title, "", *[line.strip() for line in body.splitlines() if line.strip()]]
-    escaped_lines = []
-    for line in lines[:120]:
-        safe = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-        escaped_lines.append(safe[:110])
-    stream = ["BT", "/F1 12 Tf", "50 790 Td"]
-    for index, line in enumerate(escaped_lines):
-        if index:
-            stream.append("0 -18 Td")
-        stream.append(f"({line}) Tj")
-    stream.append("ET")
-    stream_bytes = "\n".join(stream).encode("latin-1", errors="replace")
-    objects = [
-        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
-        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
-        b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n",
-        b"4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n",
-        f"5 0 obj << /Length {len(stream_bytes)} >> stream\n".encode("ascii") + stream_bytes + b"\nendstream endobj\n",
-    ]
-    output = io.BytesIO()
-    output.write(b"%PDF-1.4\n")
-    offsets = [0]
-    for obj in objects:
-        offsets.append(output.tell())
-        output.write(obj)
-    xref = output.tell()
-    output.write(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
-    for offset in offsets[1:]:
-        output.write(f"{offset:010d} 00000 n \n".encode("ascii"))
-    output.write(
-        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode("ascii")
-    )
-    return output.getvalue()
+    from app.services.tools.pdf_generator import generate_pdf_document
+
+    return generate_pdf_document(title, body)
 
 
 def generate_markdown(title: str, body: str) -> bytes:

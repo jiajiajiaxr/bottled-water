@@ -210,10 +210,25 @@ BUILTIN_TOOLS: dict[str, BuiltinTool] = {
         "sandbox.run",
         "沙箱运行",
         "runtime",
-        "在受控沙箱中执行命令，默认返回安全模拟结果。",
+        "在受控沙箱中执行命令，返回真实 stdout/stderr/exit_code。",
         ("sandbox:run",),
-        _schema({"command": {"type": "string"}, "sandbox_id": {"type": "string"}}),
-        _schema({"stdout": {"type": "string"}, "exit_code": {"type": "integer"}}),
+        _schema(
+            {
+                "command": {"type": "string"},
+                "sandbox_id": {"type": "string"},
+                "workdir": {"type": "string"},
+                "timeout": {"type": "integer"},
+            },
+            ["command"],
+        ),
+        _schema(
+            {
+                "stdout": {"type": "string"},
+                "stderr": {"type": "string"},
+                "exit_code": {"type": "integer"},
+                "capability_level": {"type": "string"},
+            }
+        ),
     ),
     "browser.preview": BuiltinTool(
         "browser.preview",
@@ -237,19 +252,42 @@ BUILTIN_TOOLS: dict[str, BuiltinTool] = {
         "api.test",
         "API 测试",
         "backend",
-        "执行 API 冒烟测试摘要。",
+        "执行真实 HTTP/ASGI API 调用并返回状态断言。",
         ("api:test",),
-        _schema({"path": {"type": "string"}}),
-        _schema({"status": {"type": "string"}}),
+        _schema(
+            {
+                "method": {"type": "string"},
+                "path": {"type": "string"},
+                "headers": {"type": "object"},
+                "body": {},
+                "expected_status": {"type": "integer"},
+            }
+        ),
+        _schema({"status": {"type": "string"}, "status_code": {"type": "integer"}}),
     ),
     "test.run": BuiltinTool(
         "test.run",
         "运行测试",
         "qa",
-        "记录测试运行请求并返回可审查日志。",
+        "在受控沙箱中执行 pytest/ruff/npm test/pnpm test 等真实测试命令。",
         ("test:run",),
-        _schema({"command": {"type": "string"}}),
-        _schema({"status": {"type": "string"}, "log": {"type": "string"}}),
+        _schema(
+            {
+                "command": {"type": "string"},
+                "sandbox_id": {"type": "string"},
+                "workdir": {"type": "string"},
+                "timeout": {"type": "integer"},
+            },
+            ["command"],
+        ),
+        _schema(
+            {
+                "status": {"type": "string"},
+                "stdout": {"type": "string"},
+                "stderr": {"type": "string"},
+                "exit_code": {"type": "integer"},
+            }
+        ),
     ),
     "security.audit": BuiltinTool(
         "security.audit",
