@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CloudUploadOutlined,
   BulbOutlined,
@@ -29,11 +23,7 @@ import {
 type UploadRequestOption = any;
 import { MessageBubble } from "@/features/chat/components/MessageBubble";
 import { useMessageStore } from "@/store";
-import type {
-  ChatMessage,
-  Conversation,
-  UploadedFile,
-} from "@/types";
+import type { ChatMessage, Conversation, UploadedFile } from "@/types";
 
 const { Content } = Layout;
 const { TextArea } = Input;
@@ -167,6 +157,7 @@ export function ChatPanel({
             <MessageBubble
               key={item.id}
               message={item}
+              state={item.state}
               quoted={
                 item.quotedMessageId
                   ? messageById.get(item.quotedMessageId)

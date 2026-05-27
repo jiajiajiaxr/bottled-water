@@ -1,7 +1,15 @@
 import type { ConversationWorkflow, WorkflowRun } from "./workflow";
 
 export type MessageRole = "user" | "assistant" | "system" | "tool";
-export type MessageKind = "text" | "code" | "file" | "event" | "error" | "preview_card" | "diff_panel" | "deploy_status_card";
+export type MessageKind =
+  | "text"
+  | "code"
+  | "file"
+  | "event"
+  | "error"
+  | "preview_card"
+  | "diff_panel"
+  | "deploy_status_card";
 export type StreamState = "idle" | "streaming" | "done" | "error";
 
 export interface Participant {
@@ -71,6 +79,7 @@ export interface ChatMessage {
   streamState?: StreamState;
   quotedMessageId?: string;
   status?: string;
+  state: "active" | "inactive";
 }
 
 export interface WorkspaceArtifact {
@@ -86,7 +95,14 @@ export interface WorkspaceArtifact {
 
 export interface Deployment {
   id: string;
-  status: "idle" | "building" | "ready" | "failed" | "deployed" | "deploying" | "pending";
+  status:
+    | "idle"
+    | "building"
+    | "ready"
+    | "failed"
+    | "deployed"
+    | "deploying"
+    | "pending";
   url?: string;
   commit: string;
   updatedAt: string;

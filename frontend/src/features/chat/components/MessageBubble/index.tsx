@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
   BranchesOutlined,
-  BulbOutlined,
   CloudUploadOutlined,
   CopyOutlined,
   EyeOutlined,
@@ -31,46 +30,18 @@ import {
 import { formatTime } from "@/lib/format";
 import { useMessageStore } from "@/store";
 import type { ChatMessage, MessageAttachment } from "@/types";
+import ThinkingBlock from "./ThinkingBlock";
 
 const { Text, Paragraph } = Typography;
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  state: "active" | "inactive";
   quoted?: ChatMessage;
   onQuote: (message: ChatMessage) => void;
   onRegenerate: (message: ChatMessage) => void;
   onCopy: (text: string) => void;
   onPreview: (message: ChatMessage) => void;
-}
-
-function ThinkingBlock({
-  thinking,
-  streaming,
-}: {
-  thinking?: string;
-  streaming?: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className="thinking-block">
-      <button
-        type="button"
-        className="thinking-toggle"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <BulbOutlined />
-        <span>思考过程</span>
-        <span className="thinking-chevron">{expanded ? "▼" : "▶"}</span>
-      </button>
-      {expanded && (
-        <div className="thinking-content">
-          {(thinking ?? "").trim()
-            ? (streaming ? thinking : <MarkdownContent text={thinking!} />)
-            : <Text type="secondary">思考中...</Text>}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function MessageBubbleComponent({
@@ -100,6 +71,8 @@ function MessageBubbleComponent({
     | undefined
   >();
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const onExpandedChange = (expanded: boolean) => setExpanded(expanded);
 
   useEffect(() => {
     return () => {
@@ -219,10 +192,11 @@ function MessageBubbleComponent({
             </Text>
           </Flex>
           {quoted && <div className="quote-block">{quoted.content}</div>}
-          {thinkingEnabled && !isUser && (message.thinking || message.streamState === "streaming") && (
+          {thinkingEnabled && !isUser && (
             <ThinkingBlock
-              thinking={message.thinking}
-              streaming={message.streamState === "streaming"}
+              thinking={message.thinking ?? ""}
+              expanded={expanded}
+              onExpandedChange={onExpandedChange}
             />
           )}
           <div className="message-content">
@@ -367,18 +341,6 @@ function MessageBubbleComponent({
   );
 }
 
-export const MessageBubble = React.memo(
-  MessageBubbleComponent,
-  (prev, next) => {
-    const skip =
-      prev.message.id === next.message.id &&
-      prev.message.content === next.message.content &&
-      prev.message.thinking === next.message.thinking &&
-      prev.message.streamState === next.message.streamState &&
-      prev.message.kind === next.message.kind &&
-      prev.quoted?.id === next.quoted?.id &&
-      ((prev.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0) ===
-      ((next.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0);
-    return skip;
-  },
-);
+export const MessageBubble = React.memo(MessageBubbleComponent, (_, next) => {
+  return next.state === "active";
+});

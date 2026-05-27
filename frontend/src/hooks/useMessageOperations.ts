@@ -15,7 +15,7 @@ import {
   participantName,
 } from "@/lib/message";
 
-export function useMessageOperations(currentUserName: string) {
+export function useMessageOperations() {
   const { message } = AntApp.useApp();
   const { setBackgroundTasks } = useTaskStore();
 
@@ -24,7 +24,7 @@ export function useMessageOperations(currentUserName: string) {
     setBackgroundTasks(tasks);
   };
 
-  const { conversations, activeId, updateConversations } =
+  const { activeConversation, updateActiveConversation } =
     useConversationStore();
   const {
     appendHistoryMessage,
@@ -43,16 +43,12 @@ export function useMessageOperations(currentUserName: string) {
 
   const stopStreamRef = useRef<(() => void) | undefined>();
 
-  const active = conversations.find((item) => item.id === activeId);
-
   const appendConversationStream = async (
     conversationId: string,
     _prompt: string,
   ) => {
-    const targetConversation =
-      conversations.find((item) => item.id === conversationId) ?? active;
     const agentParticipants =
-      targetConversation?.participants.filter(
+      activeConversation?.participants.filter(
         (item) => item.participant_type === "agent" && item.agent_id,
       ) ?? [];
     const tempIdsByAgentId = new Map<string, string>();
@@ -129,6 +125,7 @@ export function useMessageOperations(currentUserName: string) {
         rawContent: agentId ? { agent_id: agentId } : {},
         streamState: "streaming",
         createdAt: new Date().toISOString(),
+        state: "active",
       });
     };
 
@@ -216,13 +213,11 @@ export function useMessageOperations(currentUserName: string) {
       next.add(conversationId);
       return next;
     });
-    updateConversations((current) =>
-      current.map((item) =>
-        item.id === conversationId
-          ? { ...item, updatedAt: new Date().toISOString(), unread: 0 }
-          : item,
-      ),
-    );
+    updateActiveConversation({
+      ...activeConversation,
+      updatedAt: new Date().toISOString(),
+      unread: 0,
+    });
     stopStreamRef.current = undefined;
 
     // delta 累积器（仅用于本地缓冲，不控制渲染频率）
@@ -390,29 +385,27 @@ export function useMessageOperations(currentUserName: string) {
                   author: "Artifact Agent",
                   content: `预览产物：${freshArtifact.title}`,
                   streamState: "done",
+                  state: "inactive",
                 }),
               ],
         );
         const lastAssistant = [...cleanMessages]
           .reverse()
           .find((item) => item.role === "assistant" && item.kind === "text");
+
         completedPreview = (
           lastAssistant?.content ||
           stripInternalAgentOutput(rawBuffer) ||
           "done"
         ).slice(0, 120);
-        updateConversations((current) =>
-          current.map((item) =>
-            item.id === conversationId
-              ? {
-                  ...item,
-                  lastMessage: completedPreview,
-                  updatedAt: new Date().toISOString(),
-                }
-              : item,
-          ),
-        );
+
+        updateActiveConversation({
+          ...activeConversation,
+          lastMessage: completedPreview,
+          updatedAt: new Date().toISOString(),
+        });
       }
+
       if (freshArtifact) setArtifact(freshArtifact);
     } catch (error) {
       activeToolCalls.clear();
@@ -441,17 +434,11 @@ export function useMessageOperations(currentUserName: string) {
         return next;
       });
       if (completedPreview) {
-        updateConversations((current) =>
-          current.map((item) =>
-            item.id === conversationId && item.lastMessage === "正在回答..."
-              ? {
-                  ...item,
-                  lastMessage: completedPreview,
-                  updatedAt: new Date().toISOString(),
-                }
-              : item,
-          ),
-        );
+        updateActiveConversation({
+          ...activeConversation,
+          lastMessage: completedPreview,
+          updatedAt: new Date().toISOString(),
+        });
       }
       refreshTasks().catch(() => undefined);
     }

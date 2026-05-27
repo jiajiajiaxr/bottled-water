@@ -3,14 +3,14 @@ import type { Conversation } from "@/types";
 
 interface ConversationState {
   conversations: Conversation[];
-  currentConversationId: string | null;
-  activeId: string | undefined;
+  activeConversation: Conversation | undefined;
   conversationCategories: string[];
   isLoading: boolean;
   loadingMessages: boolean;
+
   setConversations: (conversations: Conversation[]) => void;
-  setCurrentConversationId: (id: string | null) => void;
-  setActiveId: (id: string | undefined) => void;
+  setActiveConversation: (id: string) => void;
+  updateActiveConversation: (patch: Partial<Conversation>) => void;
   setConversationCategories: (categories: string[]) => void;
   updateConversation: (id: string, patch: Partial<Conversation>) => void;
   addConversation: (conversation: Conversation) => void;
@@ -22,16 +22,25 @@ interface ConversationState {
   ) => void;
 }
 
-export const useConversationStore = create<ConversationState>((set) => ({
+export const useConversationStore = create<ConversationState>((set, get) => ({
   conversations: [],
-  currentConversationId: null,
-  activeId: undefined,
+  activeConversation: undefined,
   conversationCategories: [],
   isLoading: false,
   loadingMessages: false,
+
   setConversations: (conversations) => set({ conversations }),
-  setCurrentConversationId: (id) => set({ currentConversationId: id }),
-  setActiveId: (activeId) => set({ activeId }),
+  setActiveConversation: (id) => {
+    const conversation = get().conversations.find((item) => item.id === id);
+
+    set({ activeConversation: conversation });
+  },
+  updateActiveConversation: (patch) => {
+    const conversation = get().activeConversation;
+    if (conversation) {
+      set({ activeConversation: { ...conversation, ...patch } });
+    }
+  },
   setConversationCategories: (conversationCategories) =>
     set({ conversationCategories }),
   updateConversation: (id, patch) =>
