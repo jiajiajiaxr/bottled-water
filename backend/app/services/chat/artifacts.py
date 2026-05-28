@@ -13,12 +13,17 @@ from app.services.serialization import artifact_to_dict, message_to_dict
 async def _publish_tool_artifacts(db: Session, channel: str, tool_context: dict[str, Any]) -> None:
     created_messages: list[Message] = []
     fallback_conversation_id = _conversation_id_from_channel(channel)
+    failed_tool_message_created = False
     for item in _collect_tool_results(tool_context):
         output = item.get("output") if isinstance(item.get("output"), dict) else {}
         tool_name = str(item.get("tool_name") or output.get("tool") or "")
         if not output:
             continue
         await _publish_artifact_outputs(db, channel, output)
+        if _should_show_tool_message(tool_name, output):
+            if failed_tool_message_created:
+                continue
+            failed_tool_message_created = True
         message = _message_for_tool_result(db, tool_name, output, fallback_conversation_id)
         if message:
             created_messages.append(message)

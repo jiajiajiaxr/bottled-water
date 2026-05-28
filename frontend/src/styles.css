@@ -292,6 +292,29 @@ button {
   margin: 12px 0 !important;
 }
 
+.tool-call-summary {
+  color: #8c8c8c;
+  font-size: 12px;
+  cursor: help;
+  user-select: none;
+}
+
+.tool-call-summary.warning {
+  color: #d48806;
+}
+
+.tool-call-summary-popover {
+  max-width: 420px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tool-call-summary-detail + .tool-call-summary-detail {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
 .markdown-content {
   color: #111827;
   line-height: 1.7;

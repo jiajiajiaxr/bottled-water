@@ -112,6 +112,14 @@ async def test_successful_tool_call_is_not_inserted_as_tool_runner_message(db: S
                     "conversation_id": conversation.id,
                     "error": "parse failed",
                 },
+            },
+            {
+                "tool_name": "sandbox.run",
+                "output": {
+                    "status": "failed",
+                    "conversation_id": conversation.id,
+                    "error": "command failed",
+                },
             }
         ]
     }
@@ -125,6 +133,74 @@ async def test_successful_tool_call_is_not_inserted_as_tool_runner_message(db: S
     tool_messages = db.scalars(select(Message).where(Message.sender_name == "Tool Runner")).all()
     assert len(tool_messages) == 1
     assert "file.summarize" in tool_messages[0].content["text"]
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_events_are_persisted_without_tool_runner_messages(db: Session) -> None:
+    user, conversation, user_message = _user_conversation_message(db, "杩愯涓夋 sandbox")
+    agent = _agent(user, "Frontend Worker", "frontend", tools=["sandbox.run"])
+    db.add(agent)
+    db.commit()
+    calls: list[list[dict[str, Any]]] = []
+
+    async def fake_stream_chat(messages: list[dict[str, Any]], **_: Any) -> Any:
+        calls.append(messages)
+        if len(calls) == 1:
+            yield LLMStreamEvent(
+                type="tool_calls",
+                tool_calls=[
+                    {
+                        "id": f"call-sandbox-{index}",
+                        "type": "function",
+                        "function": {"name": "sandbox.run", "arguments": '{"command": "echo ok"}'},
+                    }
+                    for index in range(3)
+                ],
+            )
+            yield LLMStreamEvent(type="done", usage={})
+            return
+        yield LLMStreamEvent(type="delta", text="sandbox 已完成。")
+        yield LLMStreamEvent(type="done", usage={})
+
+    async def fake_execute(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "type": "tool",
+            "tool_name": "sandbox.run",
+            "status": "succeeded",
+            "output": {
+                "status": "succeeded",
+                "stdout": "ok",
+                "stderr": "",
+                "exit_code": 0,
+                "duration_ms": 12,
+                "conversation_id": conversation.id,
+            },
+        }
+
+    with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream_chat):
+        with patch("app.services.agents.function_loop.execute_tool_by_name", fake_execute):
+            with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock) as publish:
+                result = await run_agent_function_call_loop(
+                    db,
+                    conversation=conversation,
+                    user_message=user_message,
+                    agent=agent,
+                    prompt="杩愯涓夋 sandbox",
+                    channel=f"conversation:{conversation.id}",
+                    mode="unit-test",
+                )
+
+    assistant = result.assistant
+    assert assistant is not None
+    assert assistant.status == "completed"
+    tool_events = assistant.content["tool_events"]
+    assert len(tool_events) == 3
+    assert {event["tool_name"] for event in tool_events} == {"sandbox.run"}
+    assert db.scalars(select(Message).where(Message.sender_name == "Tool Runner")).all() == []
+    done_events = [call for call in publish.await_args_list if call.args[1] == "tool_call_done"]
+    assert len(done_events) == 3
+    assert all(call.args[2]["agent_message_id"] == assistant.id for call in done_events)
+    assert done_events[0].args[2]["detail"]["tool_name"] == "sandbox.run"
 
 
 @pytest.mark.asyncio

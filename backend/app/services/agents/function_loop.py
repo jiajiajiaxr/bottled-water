@@ -11,6 +11,7 @@ from app.models import Agent, Conversation, Message, Task, User, WorkflowRun, ut
 from app.services.agents.function_messages import agent_system_prompt, tool_arguments, tool_names
 from app.services.agents.function_types import AgentFunctionLoopResult
 from app.services.agents.permission_guard import complete_missing_artifact_tool
+from app.services.agents.tool_events import tool_event_from_record
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
 from app.services.ark import ark_client
 from app.services.context.attachments import attachment_preflight_reply
@@ -98,6 +99,7 @@ async def _publish_message_tool_event(
     tool_call_id: str,
     emit_message: bool,
     status: str | None = None,
+    detail: dict[str, Any] | None = None,
 ) -> None:
     if not emit_message or not assistant:
         return
@@ -111,6 +113,7 @@ async def _publish_message_tool_event(
             "tool_name": tool_name,
             "tool_call_id": tool_call_id,
             **({"status": status} if status else {}),
+            **({"detail": detail} if detail else {}),
         },
     )
 
@@ -129,7 +132,10 @@ async def _fail_agent_loop(
 ) -> AgentFunctionLoopResult:
     final_text = strip_internal_agent_output(error_text) or "本轮响应异常结束，已停止生成。"
     if assistant:
-        assistant.content = {"text": final_text}
+        assistant.content = {
+            "text": final_text,
+            "tool_events": [tool_event_from_record(db, item) for item in (tool_results or [])],
+        }
         assistant.status = "failed"
     db.commit()
     if assistant:
@@ -185,7 +191,7 @@ async def _complete_agent_loop_without_model(
 ) -> AgentFunctionLoopResult:
     text = strip_internal_agent_output(final_text)
     if assistant:
-        assistant.content = {"text": text}
+        assistant.content = {"text": text, "tool_events": []}
         assistant.status = "completed"
     update_conversation_state_after_turn(
         db,
@@ -511,6 +517,7 @@ async def run_agent_function_call_loop(
                 tool_name=tool_name,
                 tool_call_id=tool_call_id,
                 emit_message=emit_message,
+                status="running",
             )
             await _publish_workflow_update(
                 db,
@@ -586,6 +593,7 @@ async def run_agent_function_call_loop(
             tool_results.append(record)
             round_tool_results.append(record)
             db.commit()
+            tool_event = tool_event_from_record(db, record)
             await _publish_message_tool_event(
                 channel=channel,
                 assistant=assistant,
@@ -595,6 +603,7 @@ async def run_agent_function_call_loop(
                 tool_call_id=tool_call_id,
                 emit_message=emit_message,
                 status=status,
+                detail=tool_event,
             )
             await _publish_workflow_update(
                 db,
@@ -635,8 +644,9 @@ async def run_agent_function_call_loop(
     final_text = strip_internal_agent_output(stream_text) or f"{agent.name} 已完成本次处理。"
     thinking_text = strip_internal_agent_output(reasoning_text) if reasoning_text else ""
     assistant_message_id = assistant.id if assistant else None
+    tool_events = [tool_event_from_record(db, item) for item in tool_results]
     if assistant:
-        assistant.content = {"text": final_text, "thinking": thinking_text}
+        assistant.content = {"text": final_text, "thinking": thinking_text, "tool_events": tool_events}
         assistant.status = "completed"
     update_conversation_state_after_turn(
         db,
