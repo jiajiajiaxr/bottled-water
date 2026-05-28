@@ -6,19 +6,23 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Artifact, Conversation, FileAsset, McpServer, Skill, ToolDefinition
+from app.models import Agent, Artifact, Conversation, FileAsset, McpServer, Skill, ToolDefinition, Workspace
 from app.services.context.compression import trim_text
+from app.services.context.memory import workspace_memory_text
 from app.services.context.variables import artifact_reference_scope
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.permissions import normalize_tool_names
 
 
 @dataclass
 class WorkspaceContext:
     workspace_id: str | None = None
+    long_term_memory: str = ""
     files: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
-    tools: list[dict[str, Any]] = field(default_factory=list)
-    skills: list[dict[str, Any]] = field(default_factory=list)
-    mcp_servers: list[dict[str, Any]] = field(default_factory=list)
+    authorized_tools: list[dict[str, Any]] = field(default_factory=list)
+    authorized_skills: list[dict[str, Any]] = field(default_factory=list)
+    authorized_mcp_servers: list[dict[str, Any]] = field(default_factory=list)
 
     def as_scope(self) -> dict[str, Any]:
         return {
@@ -31,42 +35,61 @@ class WorkspaceContext:
     def to_dict(self) -> dict[str, Any]:
         return {
             "workspace_id": self.workspace_id,
+            "long_term_memory": self.long_term_memory,
             "files": self.files,
             "artifacts": self.artifacts,
-            "tools": self.tools,
-            "skills": self.skills,
-            "mcp_servers": self.mcp_servers,
+            "authorized_tools": self.authorized_tools,
+            "authorized_skills": self.authorized_skills,
+            "authorized_mcp_servers": self.authorized_mcp_servers,
         }
 
     def to_text(self) -> str:
         parts: list[str] = []
+        if self.long_term_memory:
+            parts.append("工作区长期记忆：\n" + self.long_term_memory)
         if self.files:
-            parts.append("Files:\n" + "\n".join(f"- {item['filename']}: {item['summary']}" for item in self.files))
+            parts.append("当前会话文件：\n" + "\n".join(f"- {item['filename']}: {item['summary']}" for item in self.files))
         if self.artifacts:
             parts.append(
-                "Artifacts:\n"
+                "当前会话产物：\n"
                 + "\n".join(
                     f"- {item['title']} ({item['format']}): {item['preview_url']}" for item in self.artifacts
                 )
             )
-        if self.tools:
-            parts.append("Tools:\n" + "\n".join(f"- {item['name']}: {item['description']}" for item in self.tools))
-        if self.skills:
-            parts.append("Skills:\n" + "\n".join(f"- {item['name']}: {item['description']}" for item in self.skills))
-        if self.mcp_servers:
-            parts.append("MCP:\n" + "\n".join(f"- {item['name']}: {item['tools']}" for item in self.mcp_servers))
+        if self.authorized_tools:
+            parts.append(
+                "当前 Agent 已授权 Tool 摘要：\n"
+                + "\n".join(f"- {item['name']}: {item['description']}" for item in self.authorized_tools)
+            )
+        if self.authorized_skills:
+            parts.append(
+                "当前 Agent 已授权 Skill 摘要：\n"
+                + "\n".join(f"- {item['name']}: {item['description']}" for item in self.authorized_skills)
+            )
+        if self.authorized_mcp_servers:
+            parts.append(
+                "当前 Agent 已授权 MCP 摘要：\n"
+                + "\n".join(f"- {item['name']}: {item['tools']}" for item in self.authorized_mcp_servers)
+            )
         return trim_text("\n\n".join(parts), max_chars=8000)
 
 
-def build_workspace_context(db: Session, conversation: Conversation) -> WorkspaceContext:
+def build_workspace_context(
+    db: Session,
+    conversation: Conversation,
+    *,
+    agent: Agent | None = None,
+) -> WorkspaceContext:
     workspace_id = _workspace_id(conversation)
+    workspace = db.get(Workspace, workspace_id) if workspace_id else None
     return WorkspaceContext(
         workspace_id=workspace_id,
+        long_term_memory=workspace_memory_text(workspace),
         files=_files(db, conversation),
         artifacts=_artifacts(db, conversation),
-        tools=_tools(db, conversation, workspace_id),
-        skills=_skills(db, conversation, workspace_id),
-        mcp_servers=_mcp_servers(db, conversation, workspace_id),
+        authorized_tools=_authorized_tools(db, agent),
+        authorized_skills=_authorized_skills(db, agent),
+        authorized_mcp_servers=_authorized_mcp_servers(db, agent),
     )
 
 
@@ -118,47 +141,71 @@ def _artifacts(db: Session, conversation: Conversation) -> list[dict[str, Any]]:
     ]
 
 
-def _tools(db: Session, conversation: Conversation, workspace_id: str | None) -> list[dict[str, Any]]:
-    query = select(ToolDefinition).where(ToolDefinition.deleted_at.is_(None), ToolDefinition.status == "active")
-    if workspace_id:
-        query = query.where(or_(ToolDefinition.workspace_id == workspace_id, ToolDefinition.workspace_id.is_(None)))
-    else:
-        query = query.where(ToolDefinition.workspace_id.is_(None))
-    return [
-        {"id": item.id, "name": item.name, "description": item.description or item.display_name or ""}
-        for item in db.scalars(query.order_by(ToolDefinition.is_builtin.desc(), ToolDefinition.name.asc()).limit(20)).all()
+def _authorized_tools(db: Session, agent: Agent | None) -> list[dict[str, Any]]:
+    allowed = normalize_tool_names((agent.config or {}).get("tools") or []) if agent else []
+    if not allowed:
+        return []
+    rows = db.scalars(
+        select(ToolDefinition)
+        .where(
+            ToolDefinition.deleted_at.is_(None),
+            ToolDefinition.status == "active",
+            (ToolDefinition.name.in_(allowed)) | (ToolDefinition.id.in_(allowed)),
+        )
+        .order_by(ToolDefinition.name.asc())
+        .limit(20)
+    ).all()
+    items = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "description": item.description or item.display_name or "",
+            "type": item.type,
+        }
+        for item in rows
     ]
+    seen = {item["name"] for item in items}
+    for name in allowed:
+        builtin = BUILTIN_TOOLS.get(name)
+        if builtin and name not in seen:
+            items.append({"id": name, "name": name, "description": builtin.description, "type": "builtin"})
+    return items[:20]
 
 
-def _skills(db: Session, conversation: Conversation, workspace_id: str | None) -> list[dict[str, Any]]:
-    query = select(Skill).where(
-        Skill.deleted_at.is_(None),
-        Skill.status == "active",
-        or_(Skill.owner_id == conversation.creator_id, Skill.owner_id.is_(None)),
-    )
-    if workspace_id:
-        query = query.where(or_(Skill.workspace_id == workspace_id, Skill.workspace_id.is_(None)))
-    else:
-        query = query.where(Skill.workspace_id.is_(None))
-    return [
-        {"id": item.id, "name": item.name, "description": item.description}
-        for item in db.scalars(query.order_by(Skill.updated_at.desc()).limit(10)).all()
-    ]
+def _authorized_skills(db: Session, agent: Agent | None) -> list[dict[str, Any]]:
+    allowed = [str(item) for item in (agent.config or {}).get("skill_ids") or [] if item] if agent else []
+    if not allowed:
+        return []
+    rows = db.scalars(
+        select(Skill)
+        .where(Skill.id.in_(allowed), Skill.deleted_at.is_(None), Skill.status == "active")
+        .order_by(Skill.updated_at.desc())
+        .limit(10)
+    ).all()
+    return [{"id": item.id, "name": item.name, "description": item.description} for item in rows]
 
 
-def _mcp_servers(db: Session, conversation: Conversation, workspace_id: str | None) -> list[dict[str, Any]]:
+def _authorized_mcp_servers(db: Session, agent: Agent | None) -> list[dict[str, Any]]:
+    allowed = [str(item) for item in (agent.config or {}).get("mcp_server_ids") or [] if item] if agent else []
+    if not allowed:
+        return []
     query = select(McpServer).where(
+        McpServer.id.in_(allowed),
         McpServer.deleted_at.is_(None),
         McpServer.enabled.is_(True),
-        or_(McpServer.owner_id == conversation.creator_id, McpServer.owner_id.is_(None)),
     )
-    if workspace_id:
-        query = query.where(or_(McpServer.workspace_id == workspace_id, McpServer.workspace_id.is_(None)))
-    else:
-        query = query.where(McpServer.workspace_id.is_(None))
+    if agent:
+        query = query.where(or_(McpServer.owner_id == agent.owner_id, McpServer.owner_id.is_(None)))
+    rows = db.scalars(
+        query.order_by(McpServer.updated_at.desc()).limit(10)
+    ).all()
     return [
-        {"id": item.id, "name": item.name, "tools": [tool.get("name") for tool in item.tools or [] if isinstance(tool, dict)]}
-        for item in db.scalars(query.order_by(McpServer.updated_at.desc()).limit(10)).all()
+        {
+            "id": item.id,
+            "name": item.name,
+            "tools": [tool.get("name") for tool in item.tools or [] if isinstance(tool, dict)],
+        }
+        for item in rows
     ]
 
 

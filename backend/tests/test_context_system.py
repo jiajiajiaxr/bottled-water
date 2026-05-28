@@ -7,12 +7,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import Base
-from app.models import Agent, Artifact, Conversation, FileAsset, Message, ToolInvocation, User
+from app.models import Agent, Artifact, Conversation, FileAsset, Message, ToolInvocation, User, Workspace
 from app.services.agents.function_loop import run_agent_function_call_loop
-from app.services.context.builder import ContextBuilder
-from app.services.context.memory import attachment_context, load_conversation_memory
-from app.services.context.variables import artifact_reference_scope, resolve_value
 from app.services.ark import LLMStreamEvent
+from app.services.context.builder import ContextBuilder
+from app.services.context.memory import (
+    attachment_context,
+    load_conversation_memory,
+    write_workspace_memory,
+)
+from app.services.context.variables import artifact_reference_scope, resolve_value
 
 
 def test_history_is_trimmed_and_summary_persisted() -> None:
@@ -29,14 +33,7 @@ def test_history_is_trimmed_and_summary_persisted() -> None:
                 status="sent",
             )
         )
-    current = Message(
-        conversation_id=conversation.id,
-        sender_type="user",
-        sender_id=user.id,
-        sender_name="User",
-        content={"text": "当前问题"},
-        status="sent",
-    )
+    current = _message(conversation, user, "当前问题")
     db.add(current)
     db.commit()
 
@@ -73,20 +70,12 @@ def test_attachment_context_marks_text_and_images_honestly() -> None:
     assert "未启用视觉解析" in text
 
 
-def test_context_builder_includes_workspace_resources_and_runtime() -> None:
+def test_context_builder_orders_context_before_latest_input() -> None:
     db = _memory_session()
     user, conversation = _user_conversation(db)
-    agent = Agent(id="agent-1", name="Writer", type="assistant", config={"max_context_tokens": 4000})
-    message = Message(
-        conversation_id=conversation.id,
-        sender_type="user",
-        sender_id=user.id,
-        sender_name="User",
-        content={"text": "使用资源"},
-        status="sent",
-    )
+    agent = _agent(db, user, tools=["sandbox.run"])
+    message = _message(conversation, user, "使用资源")
     db.add_all([
-        agent,
         message,
         FileAsset(
             owner_id=user.id,
@@ -129,11 +118,13 @@ def test_context_builder_includes_workspace_resources_and_runtime() -> None:
         prompt="使用资源",
         mode="direct",
     )
-    user_context = bundle.messages[-1]["content"]
+    context_message = bundle.messages[-2]["content"]
+    latest_message = bundle.messages[-1]["content"]
 
-    assert "项目方案正文" in user_context
-    assert "方案 PDF" in user_context
-    assert "sandbox.run" in user_context
+    assert "项目方案正文" in context_message
+    assert "方案 PDF" in context_message
+    assert "sandbox.run" in context_message
+    assert latest_message == "## 最新用户输入\n使用资源"
 
 
 def test_tool_result_message_uses_persisted_invocation() -> None:
@@ -197,39 +188,27 @@ async def test_agent_loop_answers_from_current_conversation_history() -> None:
     db = _memory_session()
     user, conversation = _user_conversation(db)
     agent = _agent(db, user)
-    previous = Message(
-        conversation_id=conversation.id,
-        sender_type="user",
-        sender_id=user.id,
-        sender_name="演示用户",
-        content={"text": "你好"},
-        status="sent",
-    )
-    completed = Message(
-        conversation_id=conversation.id,
-        sender_type="agent",
-        sender_id=agent.id,
-        sender_name=agent.name,
-        content={"text": "你好，我在。"},
-        status="completed",
-    )
-    streaming = Message(
-        conversation_id=conversation.id,
-        sender_type="agent",
-        sender_id=agent.id,
-        sender_name=agent.name,
-        content={"text": "这条仍在生成中，不应作为完成回复使用。"},
-        status="streaming",
-    )
-    current = Message(
-        conversation_id=conversation.id,
-        sender_type="user",
-        sender_id=user.id,
-        sender_name="演示用户",
-        content={"text": "你能看到我刚才说了什么吗？"},
-        status="sent",
-    )
-    db.add_all([previous, completed, streaming, current])
+    db.add_all([
+        _message(conversation, user, "你好"),
+        Message(
+            conversation_id=conversation.id,
+            sender_type="agent",
+            sender_id=agent.id,
+            sender_name=agent.name,
+            content={"text": "你好，我在。"},
+            status="completed",
+        ),
+        Message(
+            conversation_id=conversation.id,
+            sender_type="agent",
+            sender_id=agent.id,
+            sender_name=agent.name,
+            content={"text": "这条仍在生成中，不应作为完成回复使用。"},
+            status="streaming",
+        ),
+    ])
+    current = _message(conversation, user, "你能看到我刚才说了什么吗？")
+    db.add(current)
     db.commit()
 
     async def fake_stream(messages: list[dict[str, str]], **_kwargs: object):
@@ -243,20 +222,128 @@ async def test_agent_loop_answers_from_current_conversation_history() -> None:
         yield LLMStreamEvent(type="delta", text="能看到，你刚才说的是“你好”。")
         yield LLMStreamEvent(type="done", usage={})
 
-    with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream):
-        with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock):
-            result = await run_agent_function_call_loop(
-                db,
-                conversation=conversation,
-                user_message=current,
-                agent=agent,
-                prompt="你能看到我刚才说了什么吗？",
-                channel=f"conversation:{conversation.id}",
-                mode="context-memory-test",
-            )
+    result = await _run_loop(db, conversation, current, agent, fake_stream)
 
     assert result.assistant is not None
     assert "你好" in result.assistant.content["text"]
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_resolves_followup_from_recent_digest() -> None:
+    db = _memory_session()
+    user, conversation = _user_conversation(db)
+    agent = _agent(db, user)
+    db.add_all([
+        _message(conversation, user, "1+1=2"),
+        Message(
+            conversation_id=conversation.id,
+            sender_type="agent",
+            sender_id=agent.id,
+            sender_name=agent.name,
+            content={"text": "对，1+1 等于 2。"},
+            status="completed",
+        ),
+    ])
+    current = _message(conversation, user, "再加上1呢")
+    db.add(current)
+    db.commit()
+
+    async def fake_stream(messages: list[dict[str, str]], **_kwargs: object):
+        serialized = "\n".join(str(item.get("content")) for item in messages)
+        assert "recent_turns_digest" in serialized
+        assert "1+1=2" in serialized
+        assert "数值与实体引用" in serialized
+        assert messages[-1]["content"].endswith("再加上1呢")
+        yield LLMStreamEvent(type="delta", text="等于 3。")
+        yield LLMStreamEvent(type="done", usage={})
+
+    result = await _run_loop(db, conversation, current, agent, fake_stream)
+
+    assert result.assistant is not None
+    assert "3" in result.assistant.content["text"]
+
+
+def test_old_project_background_summary_is_recovered() -> None:
+    db = _memory_session()
+    user, conversation = _user_conversation(db)
+    agent = _agent(db, user)
+    for index in range(18):
+        text = "项目背景：北极星项目要做多 Agent 编排平台。" if index == 0 else f"大量历史细节 {index} " + ("内容" * 100)
+        db.add(_message(conversation, user, text))
+    current = _message(conversation, user, "继续推进项目")
+    db.add(current)
+    db.commit()
+
+    bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=current,
+        agent=agent,
+        system_prompt="系统提示",
+        prompt="继续推进项目",
+        mode="direct",
+        token_budget=1200,
+    )
+    db.commit()
+    reloaded = db.get(Conversation, conversation.id)
+    serialized = "\n".join(str(item["content"]) for item in bundle.messages)
+
+    assert "北极星项目" in reloaded.extra["context"]["summary"]
+    assert "北极星项目" in serialized
+
+
+@pytest.mark.asyncio
+async def test_new_conversation_uses_only_workspace_memory_across_conversations() -> None:
+    db = _memory_session()
+    user = _user(db)
+    workspace = Workspace(id="workspace-context", owner_id=user.id, name="Context Workspace", extra={})
+    old_conversation = Conversation(
+        id="conv-old",
+        creator_id=user.id,
+        chat_type="single",
+        title="Old",
+        extra={"workspace_id": workspace.id},
+    )
+    new_conversation = Conversation(
+        id="conv-new",
+        creator_id=user.id,
+        chat_type="single",
+        title="New",
+        extra={"workspace_id": workspace.id},
+    )
+    agent = _agent(db, user)
+    db.add_all([
+        workspace,
+        old_conversation,
+        new_conversation,
+        _message(old_conversation, user, "旧会话秘密：一次性口令 12345"),
+    ])
+    current = _message(new_conversation, user, "你知道项目背景吗？")
+    db.add(current)
+    db.commit()
+
+    first = ContextBuilder(db).build_agent_messages(
+        conversation=new_conversation,
+        user_message=current,
+        agent=agent,
+        system_prompt="系统提示",
+        prompt="你知道项目背景吗？",
+        mode="direct",
+    )
+    assert "一次性口令" not in "\n".join(str(item["content"]) for item in first.messages)
+
+    write_workspace_memory(db, workspace, "项目背景：bottled-water 是长期多智能体平台项目。")
+    second = ContextBuilder(db).build_agent_messages(
+        conversation=new_conversation,
+        user_message=current,
+        agent=agent,
+        system_prompt="系统提示",
+        prompt="你知道项目背景吗？",
+        mode="direct",
+    )
+    serialized = "\n".join(str(item["content"]) for item in second.messages)
+
+    assert "bottled-water" in serialized
+    assert "一次性口令" not in serialized
 
 
 @pytest.mark.asyncio
@@ -273,23 +360,9 @@ async def test_agent_loop_does_not_read_other_conversation_history() -> None:
     agent = _agent(db, user)
     db.add_all([
         other,
-        Message(
-            conversation_id=other.id,
-            sender_type="user",
-            sender_id=user.id,
-            sender_name="演示用户",
-            content={"text": "旧会话秘密"},
-            status="sent",
-        ),
+        _message(other, user, "旧会话秘密"),
     ])
-    current = Message(
-        conversation_id=conversation.id,
-        sender_type="user",
-        sender_id=user.id,
-        sender_name="演示用户",
-        content={"text": "你知道旧会话秘密吗？"},
-        status="sent",
-    )
+    current = _message(conversation, user, "你知道旧会话秘密吗？")
     db.add(current)
     db.commit()
 
@@ -300,20 +373,30 @@ async def test_agent_loop_does_not_read_other_conversation_history() -> None:
         yield LLMStreamEvent(type="delta", text="我不能读取其他未授权会话的内容。")
         yield LLMStreamEvent(type="done", usage={})
 
-    with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream):
-        with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock):
-            result = await run_agent_function_call_loop(
-                db,
-                conversation=conversation,
-                user_message=current,
-                agent=agent,
-                prompt="你知道旧会话秘密吗？",
-                channel=f"conversation:{conversation.id}",
-                mode="context-isolation-test",
-            )
+    result = await _run_loop(db, conversation, current, agent, fake_stream)
 
     assert result.assistant is not None
     assert "不能读取" in result.assistant.content["text"]
+
+
+async def _run_loop(
+    db: Session,
+    conversation: Conversation,
+    user_message: Message,
+    agent: Agent,
+    fake_stream: object,
+):
+    with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream):
+        with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock):
+            return await run_agent_function_call_loop(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                agent=agent,
+                prompt=str(user_message.content["text"]),
+                channel=f"conversation:{conversation.id}",
+                mode="context-test",
+            )
 
 
 def _memory_session() -> Session:
@@ -324,13 +407,7 @@ def _memory_session() -> Session:
 
 
 def _user_conversation(db: Session) -> tuple[User, Conversation]:
-    user = User(
-        id="user-context",
-        email="context@example.com",
-        username="context",
-        password_hash="x",
-        display_name="Context User",
-    )
+    user = _user(db)
     conversation = Conversation(
         id="conv-context",
         creator_id=user.id,
@@ -338,19 +415,44 @@ def _user_conversation(db: Session) -> tuple[User, Conversation]:
         title="Context",
         extra={"workspace_id": None},
     )
-    db.add_all([user, conversation])
+    db.add(conversation)
     db.commit()
     return user, conversation
 
 
-def _agent(db: Session, user: User) -> Agent:
+def _user(db: Session) -> User:
+    user = User(
+        id="user-context",
+        email="context@example.com",
+        username="context",
+        password_hash="x",
+        display_name="Context User",
+    )
+    db.add(user)
+    db.flush()
+    return user
+
+
+def _agent(db: Session, user: User, *, tools: list[str] | None = None) -> Agent:
     agent = Agent(
         owner_id=user.id,
         name="Context Agent",
         type="assistant",
         description="用于上下文验收的智能体",
-        config={},
+        config={"tools": tools or []},
     )
     db.add(agent)
     db.commit()
     return agent
+
+
+def _message(conversation: Conversation, user: User, text: str) -> Message:
+    return Message(
+        conversation_id=conversation.id,
+        sender_type="user",
+        sender_id=user.id,
+        sender_name=user.display_name,
+        content_type="text",
+        content={"text": text},
+        status="sent",
+    )
