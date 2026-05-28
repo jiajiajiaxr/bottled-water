@@ -25,18 +25,20 @@ class AgentNodeExecutor(WorkflowNodeExecutor):
                 output={"error": "agent not found", "agent_id": agent_id},
                 message="Agent not found",
             )
+        node_input = getattr(context, "node_input", {}) or {}
         result = await run_agent_function_call_loop(
             context.db,
             conversation=context.conversation,
             user_message=context.user_message,
             agent=agent,
-            prompt=format_node_input_for_agent(node, getattr(context, "node_input", {}) or {}),
+            prompt=format_node_input_for_agent(node, node_input),
             channel=context.channel,
             mode="workflow-agent-node",
             task=context.task,
             workflow_run=context.workflow_run,
             workflow_node_id=node.id,
             node_title=node.title,
+            node_input=node_input,
             max_tool_rounds=int(node.config.get("max_tool_rounds") or 3),
             emit_message=context.output_mode == "independent_messages",
         )

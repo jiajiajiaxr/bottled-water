@@ -359,14 +359,21 @@ export const demoSandboxes: SandboxSession[] = [
     resource_limits: { cpu: "2", memory: "2Gi", timeout_seconds: 300 },
     command_history: [
       {
+        status: "succeeded",
+        capability_level: "fallback",
+        sandbox_id: "sandbox-demo",
         command: "pytest -q",
         argv: ["pytest", "-q"],
+        cwd: "backend/var/workspaces/workspace-demo/sandbox",
         exit_code: 0,
         stdout: "[mock-sandbox] 11 passed",
         stderr: "",
         duration_ms: 840,
         created_at: new Date().toISOString()
       }
+    ],
+    mounted_files: [
+      { path: "README.md", size: 128, updated_at: Date.now() }
     ],
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()

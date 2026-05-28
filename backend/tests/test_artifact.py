@@ -38,9 +38,20 @@ def test_artifact_preview_contract(
     assert body.get("kind") in {None, "preview", "app", "html"}
 
     artifact_id = body.get("id") or body.get("artifact_id")
+    exports = client.get(f"/api/v1/artifacts/{artifact_id}/exports", headers=auth_headers)
+    assert exports.status_code == 200, exports.text
+    export_body = exports.json()["data"]
+    assert export_body["formats"] == [
+        {
+            "format": export_body["default_format"],
+            "url": f"/api/v1/artifacts/{artifact_id}/export?format={export_body['default_format']}",
+        }
+    ]
+
     exported = client.get(f"/api/v1/artifacts/{artifact_id}/export?format=zip", headers=auth_headers)
     assert exported.status_code == 200, exported.text
     assert exported.headers["content-type"].startswith("application/zip")
+    assert "filename*=" in exported.headers["content-disposition"]
 
     exported_json = client.get(f"/api/v1/artifacts/{artifact_id}/export?format=json", headers=auth_headers)
     assert exported_json.status_code == 200, exported_json.text

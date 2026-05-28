@@ -2,31 +2,29 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models import Agent, Conversation, Message, Task, User, WorkflowRun, utcnow
+from app.services.agents.function_messages import agent_system_prompt, tool_arguments, tool_names
+from app.services.agents.function_types import AgentFunctionLoopResult
+from app.services.agents.permission_guard import complete_missing_artifact_tool
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
 from app.services.ark import ark_client
+from app.services.context.attachments import attachment_preflight_reply
+from app.services.context.builder import ContextBuilder
+from app.services.context.state import update_conversation_state_after_turn
+from app.services.llm.tool_calls import detect_artifact_tool
 from app.services.llm_gateway import stream_model_config_chat
 from app.services.output_filter import strip_internal_agent_output
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import message_to_dict, task_to_dict
+from app.services.skills.context import activated_skill_context
 from app.services.workflows.runtime import _set_workflow_node_state, mutate_workflow_run_locked
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class AgentFunctionLoopResult:
-    assistant: Message | None
-    text: str
-    thinking: str
-    tool_results: list[dict[str, Any]]
-    tool_context: dict[str, Any]
 
 
 async def _publish_workflow_update(
@@ -65,38 +63,6 @@ async def _publish_workflow_update(
             "node_id": workflow_node_id,
         },
     )
-
-
-def _agent_system_prompt(agent: Agent, *, mode: str, node_title: str | None = None) -> str:
-    base = (agent.config or {}).get("system_prompt") or agent.description or f"你是 {agent.name}。"
-    node_hint = f"\n当前工作流节点：{node_title}" if node_title else ""
-    return (
-        f"{base}{node_hint}\n"
-        f"你正在以 {agent.name} 的身份独立执行 {mode}。"
-        "你可以根据任务自主决定是否调用已授权的 Tool、Skill 或 MCP。"
-        "没有必要调用工具时可以直接回答。"
-        "如果调用了工具，必须结合工具结果继续推理，然后给用户自然语言最终回复。"
-        "不要伪装成 Master Agent，也不要暴露内部 JSON。"
-    )
-
-
-def _tool_names(tools: list[dict[str, Any]]) -> set[str]:
-    names: set[str] = set()
-    for item in tools:
-        function = item.get("function") if isinstance(item, dict) else None
-        if isinstance(function, dict) and function.get("name"):
-            names.add(str(function["name"]))
-    return names
-
-
-def _tool_arguments(raw: str) -> dict[str, Any]:
-    if not raw:
-        return {}
-    try:
-        value = json.loads(raw)
-        return value if isinstance(value, dict) else {"value": value}
-    except json.JSONDecodeError:
-        return {"raw": raw}
 
 
 async def _publish_text_delta(
@@ -149,6 +115,133 @@ async def _publish_message_tool_event(
     )
 
 
+async def _fail_agent_loop(
+    db: Session,
+    *,
+    conversation: Conversation,
+    assistant: Message | None,
+    agent: Agent,
+    channel: str,
+    workflow_run: WorkflowRun | None,
+    workflow_node_id: str | None,
+    error_text: str,
+    tool_results: list[dict[str, Any]] | None = None,
+) -> AgentFunctionLoopResult:
+    final_text = strip_internal_agent_output(error_text) or "本轮响应异常结束，已停止生成。"
+    if assistant:
+        assistant.content = {"text": final_text}
+        assistant.status = "failed"
+    db.commit()
+    if assistant:
+        await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+        await event_bus.publish(
+            channel,
+            "message_stop",
+            {
+                "agent_message_id": assistant.id,
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "stop_reason": "generation_failed",
+            },
+        )
+    await _publish_workflow_update(
+        db,
+        conversation=conversation,
+        workflow_run=workflow_run,
+        workflow_node_id=workflow_node_id,
+        channel=channel,
+        status="failed",
+        progress=100,
+        output={"error": final_text, "assistant_message_id": assistant.id if assistant else None},
+        message=f"{agent.name} 响应失败",
+    )
+    return AgentFunctionLoopResult(
+        assistant=assistant,
+        text=final_text,
+        thinking="",
+        tool_results=tool_results or [],
+        tool_context={
+            "mode": "function_call_loop",
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "assistant_message_id": assistant.id if assistant else None,
+            "status": "failed",
+            "error": final_text,
+        },
+    )
+
+
+async def _complete_agent_loop_without_model(
+    db: Session,
+    *,
+    conversation: Conversation,
+    user_message: Message,
+    assistant: Message | None,
+    agent: Agent,
+    channel: str,
+    workflow_run: WorkflowRun | None,
+    workflow_node_id: str | None,
+    final_text: str,
+) -> AgentFunctionLoopResult:
+    text = strip_internal_agent_output(final_text)
+    if assistant:
+        assistant.content = {"text": text}
+        assistant.status = "completed"
+    update_conversation_state_after_turn(
+        db,
+        conversation,
+        user_message=user_message,
+        assistant_message=assistant,
+        final_text=text,
+        tool_results=[],
+    )
+    db.commit()
+    if assistant:
+        await _publish_text_delta(
+            channel=channel,
+            assistant=assistant,
+            agent=agent,
+            text=text,
+            emit_message=True,
+        )
+        await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+        await event_bus.publish(
+            channel,
+            "message_stop",
+            {
+                "agent_message_id": assistant.id,
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "stop_reason": "end_turn",
+            },
+        )
+    await _publish_workflow_update(
+        db,
+        conversation=conversation,
+        workflow_run=workflow_run,
+        workflow_node_id=workflow_node_id,
+        channel=channel,
+        status="completed",
+        progress=100,
+        output={"summary": text[:1000], "assistant_message_id": assistant.id if assistant else None},
+        message=f"{agent.name} 已完成回复",
+    )
+    return AgentFunctionLoopResult(
+        assistant=assistant,
+        text=text,
+        thinking="",
+        tool_results=[],
+        tool_context={
+            "mode": "function_call_loop",
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "assistant_message_id": assistant.id if assistant else None,
+            "status": "completed",
+            "attachment_preflight": True,
+        },
+    )
+
+
 async def run_agent_function_call_loop(
     db: Session,
     *,
@@ -162,6 +255,7 @@ async def run_agent_function_call_loop(
     workflow_run: WorkflowRun | None = None,
     workflow_node_id: str | None = None,
     node_title: str | None = None,
+    node_input: dict[str, Any] | None = None,
     max_tool_rounds: int = 3,
     emit_message: bool = True,
 ) -> AgentFunctionLoopResult:
@@ -169,8 +263,16 @@ async def run_agent_function_call_loop(
     settings = get_settings()
     user = db.get(User, conversation.creator_id)
     tools = build_tools_for_agent(db, agent) if settings.enable_function_calling else []
-    allowed_tool_names = _tool_names(tools)
+    allowed_tool_names = tool_names(tools)
     model_config_id = (agent.config or {}).get("model_config_id")
+    logger.info(
+        "[agent_function_loop] start agent=%s/%s mode=%s model_config_id=%s exposed_tools=%s",
+        agent.name,
+        agent.id,
+        mode,
+        model_config_id,
+        sorted(allowed_tool_names),
+    )
 
     assistant: Message | None = None
     if emit_message:
@@ -215,10 +317,76 @@ async def run_agent_function_call_loop(
         message=f"{agent.name} 正在组织回复",
     )
 
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": _agent_system_prompt(agent, mode=mode, node_title=node_title)},
-        {"role": "user", "content": prompt},
-    ]
+    requested_artifact_tool = detect_artifact_tool(prompt)
+    if requested_artifact_tool and requested_artifact_tool not in allowed_tool_names:
+        logger.info(
+            "[agent_function_loop] missing_artifact_tool agent=%s requested=%s exposed_tools=%s",
+            agent.id,
+            requested_artifact_tool,
+            sorted(allowed_tool_names),
+        )
+        return await complete_missing_artifact_tool(
+            db,
+            conversation=conversation,
+            assistant=assistant,
+            agent=agent,
+            workflow_run=workflow_run,
+            workflow_node_id=workflow_node_id,
+            channel=channel,
+            requested_tool=requested_artifact_tool,
+            publish_workflow_update=_publish_workflow_update,
+        )
+
+    preflight_reply = attachment_preflight_reply(
+        prompt,
+        (user_message.content or {}).get("attachments") or [],
+    )
+    if preflight_reply:
+        return await _complete_agent_loop_without_model(
+            db,
+            conversation=conversation,
+            user_message=user_message,
+            assistant=assistant,
+            agent=agent,
+            channel=channel,
+            workflow_run=workflow_run,
+            workflow_node_id=workflow_node_id,
+            final_text=preflight_reply,
+        )
+
+    try:
+        skill_context = activated_skill_context(db, agent)
+        context_builder = ContextBuilder(db)
+        context_bundle = context_builder.build_agent_messages(
+            conversation=conversation,
+            user_message=user_message,
+            agent=agent,
+            system_prompt=agent_system_prompt(
+                agent,
+                mode=mode,
+                node_title=node_title,
+                skill_context=skill_context,
+            ),
+            prompt=prompt,
+            mode=mode,
+            task=task,
+            workflow_run=workflow_run,
+            workflow_node_id=workflow_node_id,
+            node_input=node_input,
+        )
+    except Exception as exc:
+        logger.exception("agent function loop context build failed: agent=%s", agent.id)
+        return await _fail_agent_loop(
+            db,
+            conversation=conversation,
+            assistant=assistant,
+            agent=agent,
+            channel=channel,
+            workflow_run=workflow_run,
+            workflow_node_id=workflow_node_id,
+            error_text=f"{agent.name} 构建上下文失败：{exc}",
+        )
+    messages: list[dict[str, Any]] = context_bundle.messages
     stream_text = ""
     reasoning_text = ""
     tool_results: list[dict[str, Any]] = []
@@ -267,6 +435,16 @@ async def run_agent_function_call_loop(
                         )
                 elif event.type == "tool_calls":
                     current_tool_calls = event.tool_calls or []
+                    logger.info(
+                        "[agent_function_loop] tool_calls_received agent=%s round=%s calls=%s",
+                        agent.id,
+                        round_num,
+                        [
+                            (item.get("function") or {}).get("name")
+                            for item in current_tool_calls
+                            if isinstance(item, dict)
+                        ],
+                    )
                 elif event.type == "usage" and emit_message and assistant:
                     await event_bus.publish(
                         channel,
@@ -297,6 +475,14 @@ async def run_agent_function_call_loop(
             break
 
         if not current_tool_calls or round_num >= max_tool_rounds:
+            if round_num == 0 and not current_tool_calls:
+                logger.info(
+                    "[agent_function_loop] no_tool_calls agent=%s model_config_id=%s requested_artifact_tool=%s exposed_tools=%s",
+                    agent.id,
+                    model_config_id,
+                    requested_artifact_tool,
+                    sorted(allowed_tool_names),
+                )
             break
 
         round_tool_results: list[dict[str, Any]] = []
@@ -305,7 +491,18 @@ async def run_agent_function_call_loop(
             function = function if isinstance(function, dict) else {}
             tool_name = str(function.get("name") or "")
             tool_call_id = str(tool_call.get("id") or f"call_{round_num}_{len(tool_results) + 1}")
-            arguments = _tool_arguments(str(function.get("arguments") or ""))
+            arguments = _tool_arguments_with_context(
+                tool_arguments(str(function.get("arguments") or "")),
+                conversation=conversation,
+                agent=agent,
+                task=task,
+            )
+            logger.info(
+                "[agent_function_loop] tool_call agent=%s name=%s arguments=%s",
+                agent.id,
+                tool_name,
+                json.dumps(arguments, ensure_ascii=False, default=str)[:1200],
+            )
             await _publish_message_tool_event(
                 channel=channel,
                 assistant=assistant,
@@ -348,15 +545,36 @@ async def run_agent_function_call_loop(
                     "output": "Agent 未被授权调用该工具",
                 }
             else:
-                result = await execute_tool_by_name(
-                    db,
-                    agent=agent,
-                    user=user,
-                    conversation=conversation,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                )
+                try:
+                    result = await execute_tool_by_name(
+                        db,
+                        agent=agent,
+                        user=user,
+                        conversation=conversation,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "[agent_function_loop] tool execution failed agent=%s name=%s",
+                        agent.id,
+                        tool_name,
+                    )
+                    result = {
+                        "type": "tool",
+                        "tool_name": tool_name,
+                        "status": "failed",
+                        "output": {"error": str(exc)},
+                        "error": str(exc),
+                    }
             status = str(result.get("status") or "unknown")
+            logger.info(
+                "[agent_function_loop] tool_result agent=%s name=%s status=%s invocation_id=%s",
+                agent.id,
+                tool_name,
+                status,
+                result.get("invocation_id"),
+            )
             record = {
                 "tool_name": tool_name,
                 "tool_call_id": tool_call_id,
@@ -403,11 +621,11 @@ async def run_agent_function_call_loop(
         messages.append({"role": "assistant", "content": current_text or "", "tool_calls": current_tool_calls})
         for item in round_tool_results:
             messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": item["tool_call_id"],
-                    "content": json.dumps(item["result"], ensure_ascii=False)[:4000],
-                }
+                context_builder.tool_result_message(
+                    conversation=conversation,
+                    tool_call_id=item["tool_call_id"],
+                    result=item["result"],
+                )
             )
         if task:
             task.progress = max(task.progress or 0, min(90, 25 + (round_num + 1) * 15))
@@ -420,7 +638,16 @@ async def run_agent_function_call_loop(
     if assistant:
         assistant.content = {"text": final_text, "thinking": thinking_text}
         assistant.status = "completed"
-        db.commit()
+    update_conversation_state_after_turn(
+        db,
+        conversation,
+        user_message=user_message,
+        assistant_message=assistant,
+        final_text=final_text,
+        tool_results=tool_results,
+    )
+    db.commit()
+    if assistant:
         await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
         await event_bus.publish(
             channel,
@@ -462,8 +689,28 @@ async def run_agent_function_call_loop(
             "model_config_id": model_config_id,
             "executions": [item["result"] for item in tool_results],
             "tool_results": tool_results,
+            "context": context_bundle.diagnostics,
             "summary": "\n".join(
                 f"- {item.get('tool_name')}: {item.get('status')}" for item in tool_results
             ),
         },
     )
+
+
+def _tool_arguments_with_context(
+    arguments: dict[str, Any],
+    *,
+    conversation: Conversation,
+    agent: Agent,
+    task: Task | None,
+) -> dict[str, Any]:
+    extra = conversation.extra if isinstance(conversation.extra, dict) else {}
+    enriched = dict(arguments)
+    enriched.setdefault("conversation_id", conversation.id)
+    enriched.setdefault("agent_id", agent.id)
+    if task:
+        enriched.setdefault("task_id", task.id)
+    workspace_id = extra.get("workspace_id") or extra.get("workspaceId")
+    if workspace_id:
+        enriched.setdefault("workspace_id", str(workspace_id))
+    return enriched

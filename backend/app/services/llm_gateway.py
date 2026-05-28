@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.errors import NotFoundError, ValidationAppError
 from app.models import ModelConfig
 from app.services.ark import LLMResult, LLMStreamEvent, extract_output_text
+from app.services.llm.tool_calls import select_mock_tool_call
 
 
 def _mock_result(model: ModelConfig, prompt: str, reason: str = "mock") -> LLMResult:
@@ -182,20 +183,12 @@ async def stream_model_config_chat(
             (str(message.get("content") or "") for message in reversed(messages) if message.get("role") == "user"),
             "",
         )
-        if tools and "file" in user_text.lower():
-            yield LLMStreamEvent(type="delta", text="我先读取文件内容。", model=model.model_id)
+        mock_tool_call = select_mock_tool_call(messages, tools)
+        if mock_tool_call:
+            yield LLMStreamEvent(type="delta", text="我将调用授权工具处理请求。", model=model.model_id)
             yield LLMStreamEvent(
                 type="tool_calls",
-                tool_calls=[
-                    {
-                        "id": "call_mock_model_config",
-                        "type": "function",
-                        "function": {
-                            "name": tools[0]["function"]["name"],
-                            "arguments": json.dumps({"prompt": user_text}, ensure_ascii=False),
-                        },
-                    }
-                ],
+                tool_calls=[mock_tool_call],
                 model=model.model_id,
             )
             yield LLMStreamEvent(type="done", usage={}, model=model.model_id)
@@ -220,6 +213,7 @@ async def stream_model_config_chat(
     }
     if tools:
         body["tools"] = tools
+        body["tool_choice"] = "auto"
 
     timeout = httpx.Timeout(provider.config.get("timeout_seconds", 60))
     accumulated_tool_calls: dict[int, dict[str, Any]] = {}

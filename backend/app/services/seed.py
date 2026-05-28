@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.database import Base
 from app.core.security import hash_password
 from app.models import (
     Agent,
@@ -25,7 +26,11 @@ from app.models import (
     WorkspaceMember,
     utcnow,
 )
-from app.services.tools.registry import get_official_toolbox, ensure_tool_tables
+from app.services.demo_cleanup import cleanup_acceptance_residue
+from app.services.mcp.catalog import ensure_mcp_tables
+from app.services.skills.catalog import ensure_skill_tables
+from app.services.tools.builtins.registry import get_official_toolbox
+from app.services.tools.catalog import ensure_tool_tables, sync_builtin_tool_definitions
 
 
 DEFAULT_AGENTS = [
@@ -207,6 +212,8 @@ DEFAULT_ROLE_MAP = {
 
 def ensure_seed_data(db: Session) -> User:
     settings = get_settings()
+    if settings.environment == "test":
+        Base.metadata.create_all(bind=db.get_bind())
     user = db.scalar(select(User).where(User.email == settings.demo_email))
     if not user:
         user = User(
@@ -222,6 +229,10 @@ def ensure_seed_data(db: Session) -> User:
         db.add(UserSettings(user_id=user.id, theme="light"))
 
     ensure_tool_tables(db)
+    sync_builtin_tool_definitions(db)
+    ensure_skill_tables(db)
+    ensure_mcp_tables(db)
+    cleanup_acceptance_residue(db)
 
     agents = db.scalars(select(Agent)).all()
     if not agents:
@@ -313,7 +324,6 @@ def ensure_seed_data(db: Session) -> User:
                 "avatar_color": spec["avatar_color"],
             }
 
-    Skill.__table__.create(bind=db.get_bind(), checkfirst=True)
     existing_skill_names = {item.name for item in db.scalars(select(Skill).where(Skill.source == "system")).all()}
     for spec in DEFAULT_SKILLS:
         if spec["name"] in existing_skill_names:

@@ -22,7 +22,9 @@ from app.models import (
     PromptTemplate,
     ShortcutCommand,
     Skill,
+    SkillRun,
     ToolDefinition,
+    ToolInvocation,
     SandboxSession,
     RemoteConnection,
     Subtask,
@@ -296,11 +298,13 @@ def subtask_to_dict(subtask: Subtask) -> dict[str, Any]:
 
 
 def artifact_to_dict(artifact: Artifact) -> dict[str, Any]:
-    files = artifact.content.get("files") or {}
-    html = files.get("index.html") or artifact.content.get("html") or ""
+    content = artifact.content or {}
+    files = content.get("files") or {}
+    html = content.get("preview_html") or files.get("index.html") or content.get("html") or ""
     first_code = next(iter(files.values()), html)
-    previous_files = artifact.content.get("previous_files") or {}
-    previous_code = previous_files.get("index.html") or artifact.content.get("previous_html") or first_code
+    previous_files = content.get("previous_files") or {}
+    previous_code = previous_files.get("index.html") or content.get("previous_html") or first_code
+    export_format = content.get("format") or ((content.get("tool_output") or {}).get("format"))
     return {
         "id": artifact.id,
         "artifact_id": artifact.id,
@@ -316,7 +320,11 @@ def artifact_to_dict(artifact: Artifact) -> dict[str, Any]:
         "status": artifact.status,
         "storage_url": artifact.storage_url,
         "preview_url": f"/api/v1/artifacts/{artifact.id}/preview",
-        "content": artifact.content,
+        "export_url": f"/api/v1/artifacts/{artifact.id}/export?format={export_format}" if export_format else None,
+        "format": export_format,
+        "media_type": content.get("media_type") or artifact.mime_type,
+        "filename": content.get("filename") or ((content.get("source_file") or {}).get("filename")),
+        "content": content,
         "files": files,
         "code": html or first_code,
         "previousCode": previous_code,
@@ -512,6 +520,9 @@ def shortcut_command_to_dict(command: ShortcutCommand) -> dict[str, Any]:
 
 
 def skill_to_dict(skill: Skill) -> dict[str, Any]:
+    from app.services.skills.adapters.legacy import legacy_skill_manifest
+
+    manifest = legacy_skill_manifest(skill)
     return {
         "id": skill.id,
         "skill_id": skill.id,
@@ -530,9 +541,30 @@ def skill_to_dict(skill: Skill) -> dict[str, Any]:
         "tags": skill.tags or [],
         "config": redact_sensitive(skill.config or {}),
         "metadata": redact_sensitive(skill.extra or {}),
+        "manifest": redact_sensitive(manifest),
         "created_by": skill.owner_id,
         "created_at": iso(skill.created_at),
         "updated_at": iso(skill.updated_at),
+    }
+
+
+def skill_run_to_dict(run: SkillRun) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "skill_id": run.skill_id,
+        "owner_id": run.owner_id,
+        "conversation_id": run.conversation_id,
+        "runtime_type": run.runtime_type,
+        "status": run.status,
+        "input": redact_sensitive(run.input or {}),
+        "output": redact_sensitive(run.output or {}),
+        "error_message": run.error_message,
+        "duration_ms": run.duration_ms,
+        "started_at": iso(run.started_at),
+        "completed_at": iso(run.completed_at),
+        "metadata": redact_sensitive(run.extra or {}),
+        "created_at": iso(run.created_at),
+        "updated_at": iso(run.updated_at),
     }
 
 
@@ -556,10 +588,33 @@ def tool_definition_to_dict(tool: ToolDefinition) -> dict[str, Any]:
         "tags": tool.tags or [],
         "config": redact_sensitive(tool.config or {}),
         "metadata": redact_sensitive(tool.extra or {}),
-        "is_builtin": tool.owner_id is None,
+        "is_builtin": bool(tool.is_builtin),
+        "builtin_handler": tool.builtin_handler,
         "created_by": tool.owner_id,
         "created_at": iso(tool.created_at),
         "updated_at": iso(tool.updated_at),
+    }
+
+
+def tool_invocation_to_dict(invocation: ToolInvocation) -> dict[str, Any]:
+    return {
+        "id": invocation.id,
+        "tool_id": invocation.tool_id,
+        "owner_id": invocation.owner_id,
+        "workspace_id": invocation.workspace_id,
+        "conversation_id": invocation.conversation_id,
+        "tool_name": invocation.tool_name,
+        "tool_type": invocation.tool_type,
+        "arguments": redact_sensitive(invocation.arguments or {}),
+        "result": redact_sensitive(invocation.result or {}),
+        "status": invocation.status,
+        "error_message": invocation.error_message,
+        "duration_ms": invocation.duration_ms,
+        "started_at": iso(invocation.started_at),
+        "completed_at": iso(invocation.completed_at),
+        "metadata": redact_sensitive(invocation.extra or {}),
+        "created_at": iso(invocation.created_at),
+        "updated_at": iso(invocation.updated_at),
     }
 
 

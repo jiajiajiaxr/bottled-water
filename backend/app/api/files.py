@@ -13,7 +13,13 @@ from app.core.response import ok
 from app.deps import get_current_user
 from app.models import FileAsset, User, utcnow
 from app.services.files import save_upload
-from app.services.file_tools import convert_file, embed_text, extract_text_from_path, preview_payload, summarize_text
+from app.services.tools.builtins.file import (
+    convert_file,
+    embed_text,
+    extract_text_from_path,
+    preview_payload,
+    summarize_text,
+)
 from app.services.serialization import file_asset_to_dict
 
 

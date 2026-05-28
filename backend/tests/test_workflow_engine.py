@@ -359,12 +359,16 @@ class FailingExecutor(WorkflowNodeExecutor):
 
 
 class SlowParallelExecutor(WorkflowNodeExecutor):
-    started: list[str] = []
+    def __init__(self) -> None:
+        self.started: list[str] = []
+        self.events: list[tuple[str, str]] = []
 
     async def execute(self, node: Any, context: Any) -> NodeExecutionResult:
         if node.id in {"a", "b"}:
             self.started.append(node.id)
+            self.events.append(("start", node.id))
             await asyncio.sleep(0.05)
+            self.events.append(("finish", node.id))
         return NodeExecutionResult(output={"node": node.id})
 
 
@@ -500,8 +504,15 @@ async def test_engine_runs_parallel_nodes_with_isolated_sessions() -> None:
                 ).run()
                 elapsed = asyncio.get_running_loop().time() - started_at
 
+    first_finish_index = next(
+        index for index, event in enumerate(executor.events) if event[0] == "finish"
+    )
+    started_before_first_finish = {
+        node_id for event, node_id in executor.events[:first_finish_index] if event == "start"
+    }
     assert set(executor.started) == {"a", "b"}
-    assert elapsed < 0.09
+    assert started_before_first_finish == {"a", "b"}
+    assert elapsed < 0.3
     assert result.outputs["a"]["node"] == "a"
     assert result.outputs["b"]["node"] == "b"
 

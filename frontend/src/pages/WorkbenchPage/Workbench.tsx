@@ -18,7 +18,7 @@ import {
   useMessageOperations,
   useWorkbenchActions,
 } from "../../hooks";
-import { isTaskRunning } from "../../lib/message";
+import { deriveRunningConversationIds } from "../../lib/runningConversations";
 
 export function Workbench({
   user,
@@ -129,14 +129,17 @@ export function Workbench({
       ),
     [backgroundTasks, currentConversationIds],
   );
-  const runningConversationIds = useMemo(() => {
-    const next = new Set(localRunningConversationIds);
-    backgroundTasks.forEach((task) => {
-      if (task.conversation_id && isTaskRunning(task.status))
-        next.add(task.conversation_id);
-    });
-    return next;
-  }, [backgroundTasks, localRunningConversationIds]);
+  const runningConversationIds = useMemo(
+    () =>
+      deriveRunningConversationIds({
+        conversations,
+        backgroundTasks,
+        localRunningConversationIds,
+        activeConversationId: activeId,
+        activeMessages: messages,
+      }),
+    [activeId, backgroundTasks, conversations, localRunningConversationIds, messages],
+  );
   const navigateToConversation = (
     workspaceId?: string,
     conversationId?: string,

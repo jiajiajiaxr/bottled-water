@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { PointerEvent } from "react";
 import {
   CheckCircleOutlined,
   CodeOutlined,
@@ -23,8 +24,16 @@ import {
 } from "antd";
 import { api } from "../../../../api";
 import { diffLines } from "../../../../lib/diff";
-import { buildPreviewDocument } from "../../../../lib/preview";
 import { FilesKnowledgePanel } from "../../../chat/components/drawers/FilesKnowledgePanel";
+import { ArtifactPreviewFrame } from "./ArtifactPreviewFrame";
+import { ResizeHandle } from "./ResizeHandle";
+import {
+  artifactExportFormats,
+  downloadLabel,
+  isPdfArtifact as checkPdfArtifact,
+  openOrDownloadExport,
+  preferredArtifactFormat,
+} from "./artifactPreview";
 import type {
   Deployment,
   KnowledgeBase,
@@ -38,6 +47,8 @@ const { Title, Text } = Typography;
 
 export function PreviewPanel({
   artifact,
+  width,
+  onResizeStart,
   deployment,
   files,
   knowledgeBases,
@@ -49,6 +60,8 @@ export function PreviewPanel({
   onRetrieve,
 }: {
   artifact?: WorkspaceArtifact;
+  width: number;
+  onResizeStart: (event: PointerEvent<HTMLDivElement>) => void;
   deployment?: Deployment;
   files: UploadedFile[];
   knowledgeBases: KnowledgeBase[];
@@ -66,7 +79,7 @@ export function PreviewPanel({
     payload: { title: string; content: string },
   ) => Promise<void>;
   onRetrieve: (kbId: string, query: string) => Promise<string>;
-}) {
+  }) {
   const [tab, setTab] = useState("preview");
   const [draft, setDraft] = useState("");
   const [exportResult, setExportResult] = useState<{
@@ -80,26 +93,33 @@ export function PreviewPanel({
     setDraft(artifact?.code ?? "");
   }, [artifact?.id, artifact?.code]);
 
+  const preferredFormat = useMemo(
+    () => preferredArtifactFormat(artifact),
+    [artifact],
+  );
+  const isPdfArtifact = checkPdfArtifact(artifact, preferredFormat);
+
   if (!artifact) {
     return (
       <Sider
-        width={460}
+        width={width}
         className="preview-panel"
         data-testid="artifact-preview-panel"
       >
+        <ResizeHandle onResizeStart={onResizeStart} />
         <Empty description="点击聊天流中的预览产物卡片后展开预览、编辑、Diff、部署和资产面板" />
       </Sider>
     );
   }
 
-  const previewDocument = buildPreviewDocument(draft);
-
+  const exportFormats = artifactExportFormats(preferredFormat);
   return (
     <Sider
-      width={470}
+      width={width}
       className="preview-panel"
       data-testid="artifact-preview-panel"
     >
+      <ResizeHandle onResizeStart={onResizeStart} />
       <Flex justify="space-between" align="center" className="preview-head">
         <div>
           <Text type="secondary">Artifact</Text>
@@ -118,23 +138,19 @@ export function PreviewPanel({
         </Space>
       </Flex>
       <Space wrap className="artifact-export-bar">
-        {["zip", "html", "markdown", "json", "docx", "xlsx", "pptx"].map(
+        {exportFormats.map(
           (format) => (
             <Button
               key={format}
               size="small"
+              type="primary"
               onClick={async () => {
                 const exported = await api.exportArtifact(artifact.id, format);
                 setExportResult(exported);
-                if (exported.previewUrl)
-                  window.open(
-                    exported.previewUrl,
-                    "_blank",
-                    "noopener,noreferrer",
-                  );
+                openOrDownloadExport(exported, format);
               }}
             >
-              {format.toUpperCase()}
+              {downloadLabel(format)}
             </Button>
           ),
         )}
@@ -152,10 +168,10 @@ export function PreviewPanel({
             label: <EyeOutlined />,
             children: (
               <div className="preview-frame-wrap">
-                <iframe
-                  title="artifact preview"
-                  sandbox="allow-scripts"
-                  srcDoc={previewDocument}
+                <ArtifactPreviewFrame
+                  artifact={artifact}
+                  draft={draft}
+                  isPdfArtifact={isPdfArtifact}
                 />
               </div>
             ),

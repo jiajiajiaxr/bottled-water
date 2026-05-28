@@ -16,7 +16,7 @@ from app.schemas.requests import CreateAgentRequest, GenerateAgentRequest, Parse
 from app.services.ark import ArkClient
 from app.services.llm_gateway import test_model_config
 from app.services.serialization import agent_to_dict
-from app.services.tools.registry import normalize_tool_names
+from app.services.tools.permissions import normalize_tool_names
 
 
 router = APIRouter(tags=["agents"])

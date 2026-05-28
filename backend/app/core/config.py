@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -27,6 +28,8 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        if os.getenv("AGENTHUB_TESTING") == "1":
+            return (init_settings, env_settings, dotenv_settings, file_secret_settings)
         # Project .env is authoritative for this local app so stale PowerShell
         # session variables cannot silently override model keys.
         return (init_settings, dotenv_settings, env_settings, file_secret_settings)

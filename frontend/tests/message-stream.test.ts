@@ -73,4 +73,37 @@ describe("conversation SSE stream", () => {
     expect(source.closed).toBe(true);
     expect(onDone).toHaveBeenCalledOnce();
   });
+
+  it("emits message_stop and task status events for local pending cleanup", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const onMessageStop = vi.fn();
+    const onTaskStatusChanged = vi.fn();
+    const promise = streamAssistantReply("conversation-3", {
+      onMessageStop,
+      onTaskStatusChanged,
+    });
+    const source = FakeEventSource.latest!;
+
+    source.emit("message_stop", {
+      agent_message_id: "agent-message-3",
+      stop_reason: "end_turn",
+    });
+    source.emit("task:status_changed", {
+      id: "task-1",
+      conversation_id: "conversation-3",
+      status: "COMPLETED",
+      title: "task",
+    });
+
+    expect(onMessageStop).toHaveBeenCalledWith({
+      agent_message_id: "agent-message-3",
+      stop_reason: "end_turn",
+    });
+    expect(onTaskStatusChanged).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "task-1", status: "COMPLETED" }),
+    );
+
+    source.emit("generation_finished", { reason: "direct_agent_completed" });
+    await expect(promise).resolves.toBeTruthy();
+  });
 });

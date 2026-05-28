@@ -34,10 +34,9 @@ export function useWorkbenchActions(
     files,
     setArtifact,
     setFiles,
-    setArtifactPanelOpen,
     setDeployment,
   } = useArtifactStore();
-  const { setCreateOpen } = useUIStore();
+  const { setCreateOpen, setArtifactPanelOpen } = useUIStore();
 
   const patchConversation = async (
     item: Conversation,

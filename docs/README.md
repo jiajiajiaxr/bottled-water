@@ -5,6 +5,8 @@
 - 演示者：快速知道系统有哪些功能、怎么走完整链路。
 - 开发者：快速找到每个功能对应的前端、后端、数据模型和测试文件。
 - 维护者：知道模型、Agent、工具、Skill、MCP、文件、产物和工作流之间怎么连接。
+- 能力体系数据边界：见 `capability-data-boundaries.md`，说明 Tool/MCP/Skill 的数据库目录、代码执行器、运行记录和测试隔离规则。
+- 能力模块迁移：见 `capability-module-migration.md`，说明 Tool/MCP/Skill 新目录、旧入口 shim 和删除条件。
 
 ## 文档索引
 
@@ -12,6 +14,7 @@
 - [文件职责地图](./file-map.md)：说明主要目录和关键文件分别负责什么。
 - [开发维护手册](./development-guide.md)：本地环境、迁移、启动、测试和常见改动入口。
 - [Agent 与工作流运行机制](./agent-workflow-runtime.md)：说明单聊、群聊、画布优先编排、Agentic Loop、工具调用和运行态持久化。
+- [Tool / MCP / Skill 模块迁移说明](./capability-module-migration.md)：说明能力域重构后的模块边界和旧入口兼容策略。
 
 ## 阅读建议
 
@@ -24,6 +27,6 @@
 - 消息不流式：`frontend/src/api.ts`、`backend/app/api/messages.py`、`backend/app/services/realtime/event_bus.py`、`backend/app/services/chat/orchestrator.py`
 - Agent 不按权限调用工具：`backend/app/services/agents/tool_loop.py`、`backend/app/services/tools/registry.py`、`backend/app/models.py`
 - 工作流画布保存或运行异常：`backend/app/api/conversations.py`、`backend/app/services/chat/orchestrator.py`、`frontend/src/App.tsx`
-- 文件/产物异常：`backend/app/api/files.py`、`backend/app/services/file_tools.py`、`backend/app/api/artifacts.py`、`backend/app/services/artifact_exports.py`
+- 文件/产物异常：`backend/app/api/files.py`、`backend/app/services/tools/builtins/file/`、`backend/app/api/artifacts.py`、`backend/app/services/tools/builtins/artifact/`
 - 模型调用失败：`backend/app/core/config.py`、`backend/app/services/ark.py`、`backend/app/services/llm_gateway.py`
 

@@ -1,4 +1,4 @@
-import type { ChatMessage } from "../types";
+import type { AgentTask, ChatMessage, WorkflowRun } from "../types";
 
 export const API_BASE = "/api/v1";
 
@@ -78,13 +78,9 @@ export async function requestFile(
   const contentType =
     response.headers.get("content-type") ?? "application/octet-stream";
   const disposition = response.headers.get("content-disposition") ?? "";
-  const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+  const filename = responseFilename(disposition);
 
-  if (
-    contentType.startsWith("text/") ||
-    contentType.includes("json") ||
-    contentType.includes("xml")
-  ) {
+  if (isTextResponse(contentType)) {
     return { previewText: await response.text(), contentType, filename };
   }
 
@@ -93,6 +89,31 @@ export async function requestFile(
     contentType,
     filename,
   };
+}
+
+function isTextResponse(contentType: string) {
+  const normalized = contentType.toLowerCase();
+  if (
+    normalized.includes("officedocument") ||
+    normalized.includes("application/pdf") ||
+    normalized.includes("application/zip") ||
+    normalized.includes("application/octet-stream")
+  ) {
+    return false;
+  }
+  return (
+    normalized.startsWith("text/") ||
+    normalized.includes("application/json") ||
+    normalized.includes("+json") ||
+    normalized.includes("application/xml") ||
+    normalized.includes("+xml")
+  );
+}
+
+function responseFilename(disposition: string) {
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  if (encoded) return decodeURIComponent(encoded);
+  return /filename="?([^";]+)"?/i.exec(disposition)?.[1];
 }
 
 export const wait = (ms: number) =>
@@ -104,6 +125,9 @@ export type StreamAssistantHandlers = {
   onMessageStart?: (payload: Record<string, unknown>) => void;
   onMessageUpdated?: (message: ChatMessage) => void;
   onMessageNew?: (message: ChatMessage) => void;
+  onMessageStop?: (payload: Record<string, unknown>) => void;
+  onTaskStatusChanged?: (task: AgentTask) => void;
+  onWorkflowRunUpdated?: (payload: Partial<WorkflowRun> & Record<string, unknown>) => void;
   onToolCallStart?: (payload: Record<string, unknown>) => void;
   onToolCallDone?: (payload: Record<string, unknown>) => void;
   onDone?: (payload?: Record<string, unknown>) => void;

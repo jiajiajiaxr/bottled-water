@@ -1,4 +1,9 @@
 import {
+  useCallback,
+  useState,
+} from "react";
+import type { PointerEvent } from "react";
+import {
   App as AntApp,
   Avatar,
   Button,
@@ -33,6 +38,8 @@ import type {
 import type { StreamState } from "../../store/useMessageStore";
 
 const { Text } = Typography;
+const PREVIEW_MIN_WIDTH = 360;
+const PREVIEW_DEFAULT_WIDTH = 680;
 
 export interface WorkbenchLayoutProps {
   // User
@@ -106,6 +113,12 @@ export interface WorkbenchLayoutProps {
 
 export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const { message } = AntApp.useApp();
+  const [previewWidth, setPreviewWidth] = useState(() => {
+    const value = Number(window.localStorage.getItem("agenthub_preview_width"));
+    return Number.isFinite(value) && value >= PREVIEW_MIN_WIDTH
+      ? value
+      : PREVIEW_DEFAULT_WIDTH;
+  });
 
   const {
     currentUser,
@@ -154,6 +167,35 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     runningConversationIds,
   } = props;
   const workflowWorkspaceId = active?.workspace_id || activeWorkspaceId;
+  const startPreviewResize = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      const clampWidth = (width: number) => {
+        const maxWidth = Math.max(
+          PREVIEW_MIN_WIDTH,
+          Math.floor(window.innerWidth * 0.78),
+        );
+        return Math.min(maxWidth, Math.max(PREVIEW_MIN_WIDTH, width));
+      };
+      let latestWidth = clampWidth(window.innerWidth - event.clientX);
+      const handleMove = (moveEvent: globalThis.PointerEvent) => {
+        const nextWidth = clampWidth(window.innerWidth - moveEvent.clientX);
+        latestWidth = nextWidth;
+        setPreviewWidth(nextWidth);
+      };
+      const handleUp = () => {
+        window.localStorage.setItem("agenthub_preview_width", String(latestWidth));
+        window.removeEventListener("pointermove", handleMove);
+        window.removeEventListener("pointerup", handleUp);
+        document.body.classList.remove("is-resizing-preview");
+      };
+      document.body.classList.add("is-resizing-preview");
+      window.addEventListener("pointermove", handleMove);
+      window.addEventListener("pointerup", handleUp, { once: true });
+    },
+    [],
+  );
 
   return (
     <Layout className="workbench">
@@ -306,6 +348,8 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
       {artifactPanelOpen && artifact && (
         <PreviewPanel
           artifact={artifact}
+          width={previewWidth}
+          onResizeStart={startPreviewResize}
           deployment={deployment}
           files={files}
           knowledgeBases={knowledgeBases}

@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Agent, Conversation, McpServer, Skill, User
-from app.services.ark import ark_client
+from app.models import Agent, Conversation, McpServer, Skill, ToolDefinition, User
 from app.services.realtime.event_bus import event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
-from app.services.tools.registry import BUILTIN_TOOLS, invoke_tool, normalize_tool_names
+from app.services.skills.runtime import SkillRuntime
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.executor import invoke_tool, invoke_tool_async
+from app.services.tools.permissions import normalize_tool_names
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -34,10 +35,6 @@ def _score_text(prompt: str, *values: Any) -> int:
         if token in haystack:
             score += 2 if len(token) > 3 else 1
     return score
-
-
-def _skill_tool_refs(skill: Skill) -> list[dict[str, Any]]:
-    return [item for item in (skill.tools or []) if isinstance(item, dict)]
 
 
 def _mcp_tool_args(prompt: str, name: str) -> dict[str, Any]:
@@ -143,8 +140,35 @@ def select_agent_mcp_action(db: Session, conversation: Conversation, prompt: str
 
 def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> dict[str, Any]:
     args: dict[str, Any] = {"input": prompt, "prompt": prompt, "conversation_id": conversation.id}
+    workspace_id = _workspace_id(conversation)
+    if workspace_id:
+        args["workspace_id"] = workspace_id
     if name.startswith("artifact.create_"):
-        args.update({"title": "AgentHub 工具产物", "body": prompt})
+        template = _document_template_for_prompt(prompt)
+        args.update({"title": _document_title_for_prompt(prompt), "body": prompt, "template": template})
+        if name in {"artifact.create_pdf", "artifact.create_docx"}:
+            args["content_model"] = {
+                "title": args["title"],
+                "template": template,
+                "cover": {"issuer": "AgentHub", "confidentiality": "演示文档"},
+                "toc": {"enabled": True, "title": "目录"},
+                "sections": [
+                    {
+                        "title": "需求概述",
+                        "blocks": [
+                            {"type": "callout", "title": "用户需求", "text": prompt},
+                            {"type": "paragraph", "text": "以下内容基于当前对话需求生成，下载文件为真实二进制文档。"},
+                        ],
+                    },
+                    {
+                        "title": "正文内容",
+                        "blocks": [
+                            {"type": "paragraph", "text": prompt},
+                            {"type": "list", "ordered": True, "items": ["背景说明", "方案要点", "交付建议"]},
+                        ],
+                    },
+                ],
+            }
         if name in {"artifact.create_html", "artifact.create_web_app"}:
             args["html"] = ""
     if name == "db.inspect":
@@ -153,12 +177,31 @@ def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> di
         args.setdefault("path", "/api/v1/health")
         args.setdefault("command", "pytest -q")
     if name == "sandbox.run":
-        args.setdefault("command", "echo AgentHub worker sandbox")
+        args.setdefault("command", "python --version")
     if name == "security.audit":
         args.setdefault("target", prompt)
     if name == "document.review":
         args.setdefault("text", prompt)
     return args
+
+
+def _document_template_for_prompt(prompt: str) -> str:
+    if re.search(r"(实验|lab|lab report)", prompt, re.I):
+        return "lab_report"
+    if re.search(r"(prd|需求文档|产品需求)", prompt, re.I):
+        return "prd"
+    if re.search(r"(会议|纪要|meeting)", prompt, re.I):
+        return "meeting"
+    if re.search(r"(方案|proposal|计划书|项目)", prompt, re.I):
+        return "proposal"
+    return "report"
+
+
+def _document_title_for_prompt(prompt: str) -> str:
+    if re.search(r"(pdf|word|docx|文档|报告|方案|prd|纪要|实验)", prompt, re.I):
+        cleaned = re.sub(r"(生成|创建|写一份|一个|一份|pdf|word|docx|文档)", "", prompt, flags=re.I).strip(" ：:，,。")
+        return (cleaned[:40] or "AgentHub 正式文档").strip()
+    return "AgentHub 正式文档"
 
 
 def _select_agent_builtin_tools(agent: Agent, prompt: str, limit: int) -> list[str]:
@@ -206,56 +249,17 @@ async def execute_skill(
     user: User | None,
     conversation: Conversation,
     prompt: str,
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     channel = f"conversation:{conversation.id}"
     await event_bus.publish(channel, "tool:started", {"type": "skill", "skill_id": skill.id, "name": skill.name})
-    mcp_refs = [item for item in _skill_tool_refs(skill) if item.get("type") == "mcp" and item.get("server_id") and item.get("name")]
-    if mcp_refs:
-        ref = mcp_refs[0]
-        server = db.get(McpServer, str(ref["server_id"]))
-        if server:
-            invocation = await invoke_mcp_tool_recorded(
-                db,
-                server=server,
-                tool_name_value=str(ref["name"]),
-                arguments=_mcp_tool_args(prompt, str(ref["name"])),
-                user=user,
-                conversation_id=conversation.id,
-                timeout_ms=min(server.timeout_ms or 30000, 5000),
-            )
-            result = {
-                "type": "skill_mcp",
-                "skill_id": skill.id,
-                "skill_name": skill.name,
-                "status": invocation["status"],
-                "output": invocation.get("result") or invocation.get("error_message"),
-                "invocation_id": invocation["id"],
-            }
-            await event_bus.publish(channel, "tool:finished", result)
-            return result
-
-    system_prompt = skill.prompt or skill.content or f"You are the AgentHub skill {skill.name}."
-    try:
-        response = await ark_client.chat(
-            [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": json.dumps({"input": prompt, "skill": skill.name}, ensure_ascii=False),
-                },
-            ],
-            temperature=0.2,
-            max_tokens=600,
-            purpose="skill_execution",
-        )
-        output = response.text
-        model = response.model
-        status = "succeeded"
-    except Exception as exc:
-        output = f"[skill-fallback] {skill.name}: {prompt[:180]}"
-        model = "mock-skill-execution"
-        status = f"fallback:{exc.__class__.__name__}"
-    result = {"type": "skill", "skill_id": skill.id, "skill_name": skill.name, "status": status, "output": output, "model": model}
+    result = await SkillRuntime().run(
+        db,
+        skill=skill,
+        user=user,
+        conversation=conversation,
+        payload=payload or {"prompt": prompt, "input": prompt, "skill": skill.name},
+    )
     await event_bus.publish(channel, "tool:finished", result)
     return result
 
@@ -268,6 +272,7 @@ async def execute_mcp_action(
     user: User | None,
     conversation: Conversation,
     prompt: str,
+    arguments: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     channel = f"conversation:{conversation.id}"
     await event_bus.publish(channel, "tool:started", {"type": "mcp", "server_id": server.id, "tool_name": name})
@@ -275,7 +280,7 @@ async def execute_mcp_action(
         db,
         server=server,
         tool_name_value=name,
-        arguments=_mcp_tool_args(prompt, name),
+        arguments=arguments or _mcp_tool_args(prompt, name),
         user=user,
         conversation_id=conversation.id,
         timeout_ms=min(server.timeout_ms or 30000, 5000),
@@ -397,25 +402,48 @@ async def run_agentic_tool_loop(
 
 def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
     """将 Agent 配置的 tools/skills/mcp 转为 OpenAI Function Calling 格式。"""
-    from app.services.tools.registry import BUILTIN_TOOLS
+    from app.services.skills.adapters.legacy import legacy_skill_manifest
+    from app.services.tools.catalog import sync_builtin_tool_definitions
 
     tools: list[dict[str, Any]] = []
     config = agent.config or {}
 
-    # 内置工具
+    # Tool 目录（内置工具和自定义工具都从数据库目录读取元数据）
     allowed_tool_names = normalize_tool_names(config.get("tools") or [])
-    for name in allowed_tool_names:
-        if name not in BUILTIN_TOOLS:
-            continue
-        builtin = BUILTIN_TOOLS[name]
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": builtin.description,
-                "parameters": builtin.input_schema,
-            },
-        })
+    if allowed_tool_names:
+        tool_rows: list[ToolDefinition] = []
+        try:
+            sync_builtin_tool_definitions(db)
+            tool_query = select(ToolDefinition).where(
+                ToolDefinition.deleted_at.is_(None),
+                ToolDefinition.status == "active",
+                (ToolDefinition.name.in_(allowed_tool_names)) | (ToolDefinition.id.in_(allowed_tool_names)),
+            )
+            tool_rows = [item for item in db.scalars(tool_query).all() if isinstance(item, ToolDefinition)]
+        except Exception:
+            tool_rows = []
+        for tool in tool_rows:
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description or tool.display_name or tool.name,
+                    "parameters": tool.input_schema or {"type": "object", "properties": {}},
+                },
+            })
+        if not tool_rows:
+            for name in allowed_tool_names:
+                builtin = BUILTIN_TOOLS.get(name)
+                if not builtin:
+                    continue
+                tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": builtin.description,
+                        "parameters": builtin.input_schema,
+                    },
+                })
 
     # Skill（作为 function 暴露）
     allowed_skill_ids = [str(item) for item in config.get("skill_ids") or [] if item]
@@ -426,12 +454,13 @@ def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
             Skill.status == "active",
         )
         for skill in db.scalars(skill_query).all():
+            manifest = legacy_skill_manifest(skill)
             tools.append({
                 "type": "function",
                 "function": {
                     "name": f"skill.{skill.id}",
-                    "description": skill.description or skill.prompt or f"Skill: {skill.name}",
-                    "parameters": {
+                    "description": manifest.get("description") or skill.description or f"Skill: {skill.name}",
+                    "parameters": manifest.get("input_schema") or {
                         "type": "object",
                         "properties": {"prompt": {"type": "string", "description": "用户请求内容"}},
                         "required": ["prompt"],
@@ -477,19 +506,43 @@ async def execute_tool_by_name(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     """根据 tool_name 路由到内置工具/Skill/MCP 执行器。"""
-    from app.services.tools import registry
 
     # 内置工具
-    if tool_name in registry.BUILTIN_TOOLS:
-        return registry.invoke_builtin_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
+    if tool_name in BUILTIN_TOOLS:
+        if not _is_configured_tool(db, agent, tool_name):
+            return _unauthorized_tool_result(tool_name)
+        if not user:
+            user = db.get(User, conversation.creator_id)
+        payload = invoke_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
+        return {
+            "type": "tool",
+            "tool_name": tool_name,
+            "status": payload.get("result", {}).get("status", "succeeded"),
+            "output": payload.get("result"),
+            "invocation_id": payload.get("invocation_id"),
+        }
 
     # Skill
     if tool_name.startswith("skill."):
         skill_id = tool_name.removeprefix("skill.")
+        if not _is_configured_skill(agent, skill_id):
+            return _unauthorized_tool_result(
+                tool_name,
+                result_type="skill",
+                extra={"skill_id": skill_id},
+            )
         skill = db.get(Skill, skill_id)
         if not skill or skill.deleted_at is not None or skill.status != "active":
             return {"type": "skill", "skill_id": skill_id, "status": "failed", "output": "Skill 不存在或未启用"}
-        return await execute_skill(db, skill=skill, user=user, conversation=conversation, prompt=arguments.get("prompt", ""))
+        prompt = arguments.get("prompt") or arguments.get("input") or ""
+        return await execute_skill(
+            db,
+            skill=skill,
+            user=user,
+            conversation=conversation,
+            prompt=str(prompt),
+            payload=arguments,
+        )
 
     # MCP
     if tool_name.startswith("mcp."):
@@ -497,9 +550,107 @@ async def execute_tool_by_name(
         if len(parts) >= 3:
             server_id = parts[1]
             actual_tool_name = ".".join(parts[2:])
+            if not _is_configured_mcp(agent, server_id):
+                return _unauthorized_tool_result(
+                    tool_name,
+                    result_type="mcp",
+                    extra={"server_id": server_id, "tool_name": actual_tool_name},
+                )
             server = db.get(McpServer, server_id)
             if not server or server.deleted_at is not None or not server.enabled:
                 return {"type": "mcp", "server_id": server_id, "tool_name": actual_tool_name, "status": "failed", "output": "MCP server 不存在或未启用"}
-            return await execute_mcp_action(db, server=server, name=actual_tool_name, user=user, conversation=conversation, prompt=arguments.get("prompt", ""))
+            return await execute_mcp_action(
+                db,
+                server=server,
+                name=actual_tool_name,
+                user=user,
+                conversation=conversation,
+                prompt=arguments.get("prompt", ""),
+                arguments=arguments,
+            )
+
+    authorized_tool = _resolve_authorized_db_tool(db, agent, tool_name)
+    if authorized_tool:
+        if not user:
+            user = db.get(User, conversation.creator_id)
+        payload = await invoke_tool_async(db, user, authorized_tool.name, {**arguments, "conversation_id": conversation.id})
+        result = payload.get("result") or {}
+        return {
+            "type": "tool",
+            "tool_name": authorized_tool.name,
+            "status": result.get("status", "succeeded"),
+            "output": result,
+            "invocation_id": payload.get("invocation_id"),
+        }
+
+    if _db_tool_exists(db, tool_name):
+        return _unauthorized_tool_result(tool_name)
 
     return {"type": "unknown", "tool_name": tool_name, "status": "failed", "output": f"未知工具: {tool_name}"}
+
+
+def _unauthorized_tool_result(
+    tool_name: str,
+    *,
+    result_type: str = "tool",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": result_type,
+        "tool_name": tool_name,
+        "status": "failed",
+        "output": f"Agent 未授权调用工具: {tool_name}",
+        **(extra or {}),
+    }
+
+
+def _is_configured_tool(db: Session, agent: Agent, tool_name: str) -> bool:
+    allowed = normalize_tool_names((agent.config or {}).get("tools") or [])
+    if tool_name in allowed:
+        return True
+    if not allowed:
+        return False
+    return db.scalar(
+        select(ToolDefinition.id).where(
+            ToolDefinition.deleted_at.is_(None),
+            ToolDefinition.status == "active",
+            ToolDefinition.name == tool_name,
+            ToolDefinition.id.in_(allowed),
+        )
+    ) is not None
+
+
+def _is_configured_skill(agent: Agent, skill_id: str) -> bool:
+    return skill_id in {str(item) for item in (agent.config or {}).get("skill_ids") or [] if item}
+
+
+def _is_configured_mcp(agent: Agent, server_id: str) -> bool:
+    return server_id in {str(item) for item in (agent.config or {}).get("mcp_server_ids") or [] if item}
+
+
+def _resolve_authorized_db_tool(db: Session, agent: Agent, tool_name: str) -> ToolDefinition | None:
+    allowed_tool_names = normalize_tool_names((agent.config or {}).get("tools") or [])
+    if not allowed_tool_names:
+        return None
+    tool = db.scalar(
+        select(ToolDefinition).where(
+            ToolDefinition.deleted_at.is_(None),
+            ToolDefinition.status == "active",
+            (ToolDefinition.name == tool_name) | (ToolDefinition.id == tool_name),
+            (ToolDefinition.name.in_(allowed_tool_names)) | (ToolDefinition.id.in_(allowed_tool_names)),
+        )
+    )
+    if not tool or tool.is_builtin or tool.type == "builtin":
+        return None
+    return tool
+
+
+def _db_tool_exists(db: Session, tool_name: str) -> bool:
+    value = db.scalar(
+        select(ToolDefinition.id).where(
+            ToolDefinition.deleted_at.is_(None),
+            ToolDefinition.status == "active",
+            (ToolDefinition.name == tool_name) | (ToolDefinition.id == tool_name),
+        )
+    )
+    return isinstance(value, str) and bool(value)

@@ -1,4 +1,9 @@
 export function buildPreviewDocument(code: string) {
+  const trimmed = code.trim();
+  if (/^<!doctype\s+html/i.test(trimmed) || /<html[\s>]/i.test(trimmed)) {
+    return trimmed;
+  }
+
   const escaped = code.replace(/[&<>"']/g, (char) => {
     const map: Record<string, string> = {
       "&": "&amp;",
@@ -25,7 +30,7 @@ export function buildPreviewDocument(code: string) {
 </head>
 <body>
   <div class="stage">
-    ${code.includes("<section") || code.includes("<main") ? code : `<pre>${escaped}</pre>`}
+    ${/<(section|main|article|div|table|form|canvas|svg)[\s>]/i.test(code) ? code : `<pre>${escaped}</pre>`}
   </div>
 </body>
 </html>`;
