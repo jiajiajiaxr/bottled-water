@@ -14,8 +14,10 @@ from app.services.context.builder import ContextBuilder
 from app.services.context.memory import (
     attachment_context,
     load_conversation_memory,
+    should_remember_workspace_fact,
     write_workspace_memory,
 )
+from app.services.context.state import conversation_state, update_conversation_state_after_turn
 from app.services.context.variables import artifact_reference_scope, resolve_value
 
 
@@ -118,13 +120,15 @@ def test_context_builder_orders_context_before_latest_input() -> None:
         prompt="使用资源",
         mode="direct",
     )
-    context_message = bundle.messages[-2]["content"]
+    system_message = bundle.messages[0]["content"]
     latest_message = bundle.messages[-1]["content"]
 
-    assert "项目方案正文" in context_message
-    assert "方案 PDF" in context_message
-    assert "sandbox.run" in context_message
-    assert latest_message == "## 最新用户输入\n使用资源"
+    assert [item["role"] for item in bundle.messages] == ["system", "user"]
+    assert "项目方案正文" in system_message
+    assert "方案 PDF" in system_message
+    assert "sandbox.run" in system_message
+    assert "短期记忆：最近原文对话" not in system_message
+    assert latest_message == "使用资源"
 
 
 def test_tool_result_message_uses_persisted_invocation() -> None:
@@ -213,12 +217,13 @@ async def test_agent_loop_answers_from_current_conversation_history() -> None:
 
     async def fake_stream(messages: list[dict[str, str]], **_kwargs: object):
         serialized = "\n".join(str(item.get("content")) for item in messages)
-        assert "当前会话历史消息" in serialized
-        assert "角色：用户" in serialized
-        assert "时间：" in serialized
+        assert [item["role"] for item in messages] == ["system", "user", "assistant", "user"]
         assert "你好" in serialized
         assert "你好，我在。" in serialized
         assert "仍在生成中" not in serialized
+        assert messages[1]["content"] == "你好"
+        assert messages[2]["content"] == "你好，我在。"
+        assert messages[-1]["content"] == "你能看到我刚才说了什么吗？"
         yield LLMStreamEvent(type="delta", text="能看到，你刚才说的是“你好”。")
         yield LLMStreamEvent(type="done", usage={})
 
@@ -229,38 +234,88 @@ async def test_agent_loop_answers_from_current_conversation_history() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_resolves_followup_from_recent_digest() -> None:
+async def test_agent_loop_uses_role_history_and_state_for_math_followup() -> None:
     db = _memory_session()
     user, conversation = _user_conversation(db)
     agent = _agent(db, user)
-    db.add_all([
-        _message(conversation, user, "1+1=2"),
-        Message(
-            conversation_id=conversation.id,
-            sender_type="agent",
-            sender_id=agent.id,
-            sender_name=agent.name,
-            content={"text": "对，1+1 等于 2。"},
-            status="completed",
-        ),
-    ])
-    current = _message(conversation, user, "再加上1呢")
-    db.add(current)
+    first = _message(conversation, user, "1+1等于几")
+    db.add(first)
     db.commit()
 
-    async def fake_stream(messages: list[dict[str, str]], **_kwargs: object):
-        serialized = "\n".join(str(item.get("content")) for item in messages)
-        assert "recent_turns_digest" in serialized
-        assert "1+1=2" in serialized
-        assert "数值与实体引用" in serialized
-        assert messages[-1]["content"].endswith("再加上1呢")
-        yield LLMStreamEvent(type="delta", text="等于 3。")
+    async def first_stream(messages: list[dict[str, str]], **_kwargs: object):
+        assert messages[-1]["content"] == "1+1等于几"
+        yield LLMStreamEvent(type="delta", text="2")
         yield LLMStreamEvent(type="done", usage={})
 
-    result = await _run_loop(db, conversation, current, agent, fake_stream)
+    first_result = await _run_loop(db, conversation, first, agent, first_stream)
+    assert first_result.assistant is not None
+    assert conversation_state(conversation)["last_math_result"] == 2
+
+    followup = _message(conversation, user, "再加2呢")
+    db.add(followup)
+    db.commit()
+
+    async def followup_stream(messages: list[dict[str, str]], **_kwargs: object):
+        serialized = "\n".join(str(item.get("content")) for item in messages)
+        assert [item["role"] for item in messages][-3:] == ["user", "assistant", "user"]
+        assert "conversation_state" in serialized
+        assert "last_math_result" in serialized
+        assert "recent_turns_digest" in serialized
+        assert "1+1等于几" in serialized
+        assert "2" in serialized
+        assert messages[-1]["content"] == "再加2呢"
+        yield LLMStreamEvent(type="delta", text="4")
+        yield LLMStreamEvent(type="done", usage={})
+
+    result = await _run_loop(db, conversation, followup, agent, followup_stream)
 
     assert result.assistant is not None
-    assert "3" in result.assistant.content["text"]
+    assert "4" in result.assistant.content["text"]
+    assert conversation_state(conversation)["last_math_result"] == 4
+
+
+def test_conversation_state_tracks_previous_topic_and_artifact_reference() -> None:
+    db = _memory_session()
+    user, conversation = _user_conversation(db)
+    agent = _agent(db, user)
+    user_message = _message(conversation, user, "生成一份红色主题的产品说明 PDF")
+    assistant_message = Message(
+        conversation_id=conversation.id,
+        sender_type="agent",
+        sender_id=agent.id,
+        sender_name=agent.name,
+        content={"text": "已生成产物。"},
+        status="completed",
+    )
+    db.add_all([user_message, assistant_message])
+    db.commit()
+
+    update_conversation_state_after_turn(
+        db,
+        conversation,
+        user_message=user_message,
+        assistant_message=assistant_message,
+        final_text="已生成产物。",
+        tool_results=[{"result": {"artifact_id": "artifact-red-pdf"}}],
+    )
+    followup = _message(conversation, user, "把刚才那个改成蓝色")
+    db.add(followup)
+    db.commit()
+
+    bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=followup,
+        agent=agent,
+        system_prompt="系统提示",
+        prompt="把刚才那个改成蓝色",
+        mode="direct",
+    )
+    serialized = "\n".join(str(item["content"]) for item in bundle.messages)
+
+    assert "last_topic" in serialized
+    assert "last_artifact_id" in serialized
+    assert "artifact-red-pdf" in serialized
+    assert bundle.messages[-1]["content"] == "把刚才那个改成蓝色"
 
 
 def test_old_project_background_summary_is_recovered() -> None:
@@ -320,6 +375,8 @@ async def test_new_conversation_uses_only_workspace_memory_across_conversations(
     current = _message(new_conversation, user, "你知道项目背景吗？")
     db.add(current)
     db.commit()
+    assert not should_remember_workspace_fact("项目背景：这只是普通聊天里提到的一句话。")
+    assert should_remember_workspace_fact("请记住：项目背景是 bottled-water 长期多智能体平台。")
 
     first = ContextBuilder(db).build_agent_messages(
         conversation=new_conversation,

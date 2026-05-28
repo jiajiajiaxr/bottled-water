@@ -14,7 +14,7 @@ from app.services.context.compression import estimate_tokens, trim_text
 
 RECENT_DIGEST_TURNS = 8
 SENSITIVE_PATTERN = re.compile(r"(api[_-]?key|secret|password|token|私钥|密码|密钥)", re.I)
-STABLE_MEMORY_PATTERN = re.compile(r"(记住|偏好|以后|长期|项目背景|项目叫|目标是|我们正在做|默认使用)")
+EXPLICIT_MEMORY_PATTERN = re.compile(r"(请记住|帮我记住|记住一下|长期记住|保存到长期记忆|以后都记住)")
 TRANSIENT_PATTERN = re.compile(r"^(你好|hello|hi|在吗|谢谢|1\s*[+＋]\s*1|再加上|算一下)")
 
 
@@ -140,7 +140,7 @@ def should_remember_workspace_fact(text: str) -> bool:
         return False
     if TRANSIENT_PATTERN.search(clean.lower()):
         return False
-    return bool(STABLE_MEMORY_PATTERN.search(clean))
+    return bool(EXPLICIT_MEMORY_PATTERN.search(clean))
 
 
 def recent_turns_digest(messages: list[Message], *, max_turns: int = RECENT_DIGEST_TURNS) -> str:
@@ -205,7 +205,7 @@ def _split_by_budget(messages: list[Message], *, token_budget: int) -> tuple[lis
 
 def _message_to_chat(message: Message) -> dict[str, str]:
     role = "assistant" if message.sender_type == "agent" else "user"
-    return {"role": role, "content": _message_block(message)}
+    return {"role": role, "content": _message_text(message)}
 
 
 def _recent_messages_text(messages: list[Message]) -> str:

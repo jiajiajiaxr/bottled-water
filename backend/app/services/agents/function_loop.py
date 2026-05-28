@@ -14,6 +14,7 @@ from app.services.agents.permission_guard import complete_missing_artifact_tool
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
 from app.services.ark import ark_client
 from app.services.context.builder import ContextBuilder
+from app.services.context.state import update_conversation_state_after_turn
 from app.services.llm.tool_calls import detect_artifact_tool
 from app.services.llm_gateway import stream_model_config_chat
 from app.services.output_filter import strip_internal_agent_output
@@ -465,7 +466,16 @@ async def run_agent_function_call_loop(
     if assistant:
         assistant.content = {"text": final_text, "thinking": thinking_text}
         assistant.status = "completed"
-        db.commit()
+    update_conversation_state_after_turn(
+        db,
+        conversation,
+        user_message=user_message,
+        assistant_message=assistant,
+        final_text=final_text,
+        tool_results=tool_results,
+    )
+    db.commit()
+    if assistant:
         await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
         await event_bus.publish(
             channel,
