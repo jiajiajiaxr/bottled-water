@@ -144,12 +144,30 @@ def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> di
     if workspace_id:
         args["workspace_id"] = workspace_id
     if name.startswith("artifact.create_"):
-        args.update({"title": "AgentHub 工具产物", "body": prompt})
+        template = _document_template_for_prompt(prompt)
+        args.update({"title": _document_title_for_prompt(prompt), "body": prompt, "template": template})
         if name in {"artifact.create_pdf", "artifact.create_docx"}:
             args["content_model"] = {
-                "title": "AgentHub 工具产物",
-                "template": "report",
-                "sections": [{"title": "正文", "blocks": [{"type": "paragraph", "text": prompt}]}],
+                "title": args["title"],
+                "template": template,
+                "cover": {"issuer": "AgentHub", "confidentiality": "演示文档"},
+                "toc": {"enabled": True, "title": "目录"},
+                "sections": [
+                    {
+                        "title": "需求概述",
+                        "blocks": [
+                            {"type": "callout", "title": "用户需求", "text": prompt},
+                            {"type": "paragraph", "text": "以下内容基于当前对话需求生成，下载文件为真实二进制文档。"},
+                        ],
+                    },
+                    {
+                        "title": "正文内容",
+                        "blocks": [
+                            {"type": "paragraph", "text": prompt},
+                            {"type": "list", "ordered": True, "items": ["背景说明", "方案要点", "交付建议"]},
+                        ],
+                    },
+                ],
             }
         if name in {"artifact.create_html", "artifact.create_web_app"}:
             args["html"] = ""
@@ -165,6 +183,25 @@ def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> di
     if name == "document.review":
         args.setdefault("text", prompt)
     return args
+
+
+def _document_template_for_prompt(prompt: str) -> str:
+    if re.search(r"(实验|lab|lab report)", prompt, re.I):
+        return "lab_report"
+    if re.search(r"(prd|需求文档|产品需求)", prompt, re.I):
+        return "prd"
+    if re.search(r"(会议|纪要|meeting)", prompt, re.I):
+        return "meeting"
+    if re.search(r"(方案|proposal|计划书|项目)", prompt, re.I):
+        return "proposal"
+    return "report"
+
+
+def _document_title_for_prompt(prompt: str) -> str:
+    if re.search(r"(pdf|word|docx|文档|报告|方案|prd|纪要|实验)", prompt, re.I):
+        cleaned = re.sub(r"(生成|创建|写一份|一个|一份|pdf|word|docx|文档)", "", prompt, flags=re.I).strip(" ：:，,。")
+        return (cleaned[:40] or "AgentHub 正式文档").strip()
+    return "AgentHub 正式文档"
 
 
 def _select_agent_builtin_tools(agent: Agent, prompt: str, limit: int) -> list[str]:

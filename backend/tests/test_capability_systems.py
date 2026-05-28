@@ -34,6 +34,7 @@ from app.services.mcp.schema import validate_mcp_arguments
 from app.services.mcp.transports.common import tool_allowed
 from app.services.skills.context import activated_skill_context
 from app.services.skills.package import parse_skill_package
+from app.services.document_model import normalize_document_model, parse_markdown_blocks
 from app.services.tools.executor import invoke_tool
 from app.services.tools.catalog import sync_builtin_tool_definitions
 
@@ -76,6 +77,7 @@ def test_artifact_create_pdf_exports_real_chinese_pdf() -> None:
 
     assert result["result"]["capability_level"] == "real"
     assert exported.media_type == "application/pdf"
+    assert exported.content.startswith(b"%PDF")
     assert len(reader.pages) >= 2
     assert b"/FontName" in exported.content
     assert any(token in exported.content for token in (b"NotoSans", b"SimHei", b"STSong"))
@@ -188,6 +190,60 @@ def test_document_model_drives_docx_and_pdf_renderers() -> None:
     assert "阶段" in pdf_text
 
 
+def test_document_templates_have_distinct_default_sections() -> None:
+    report = normalize_document_model(None, title="报告模板", source_text="", template="report")
+    proposal = normalize_document_model(None, title="方案模板", source_text="", template="proposal")
+    lab_report = normalize_document_model(None, title="实验模板", source_text="", template="lab_report")
+
+    report_titles = [section["title"] for section in report["sections"]]
+    proposal_titles = [section["title"] for section in proposal["sections"]]
+    lab_titles = [section["title"] for section in lab_report["sections"]]
+
+    assert "分析内容" in report_titles
+    assert "实施计划" in proposal_titles
+    assert "实验目的" in lab_titles
+    assert report_titles != proposal_titles
+    assert proposal_titles != lab_titles
+
+
+def test_markdown_input_becomes_structured_document_blocks() -> None:
+    markdown = """# 背景
+第一行说明
+第二行继续
+
+- 事项 A
+- 事项 B
+
+| 指标 | 结果 |
+| --- | --- |
+| 通过率 | 100% |
+
+> [!WARNING] 风险提示
+> 需要持续观察。
+
+> 这是一段引用
+
+![架构图](architecture.png)
+
+---
+
+[page_break]
+"""
+    blocks = parse_markdown_blocks(markdown)
+    model = normalize_document_model(None, title="Markdown 文档", source_text=markdown, template="report")
+    flattened = [block for section in model["sections"] for block in section["blocks"]]
+
+    assert any(block["type"] == "heading" and block["text"] == "背景" for block in blocks)
+    assert any(block["type"] == "paragraph" and "第一行说明 第二行继续" in block["text"] for block in flattened)
+    assert any(block["type"] == "list" and block["items"] == ["事项 A", "事项 B"] for block in flattened)
+    assert any(block["type"] == "table" and block["headers"] == ["指标", "结果"] for block in flattened)
+    assert any(block["type"] == "callout" and block["variant"] == "warning" for block in flattened)
+    assert any(block["type"] == "quote" for block in flattened)
+    assert any(block["type"] == "image" and block["src"] == "architecture.png" for block in flattened)
+    assert any(block["type"] == "divider" for block in flattened)
+    assert any(block["type"] == "page_break" for block in flattened)
+
+
 @pytest.mark.parametrize(
     ("tool_name", "fmt", "preview_marker"),
     [
@@ -217,6 +273,9 @@ def test_artifact_exports_cover_zip_and_text_formats(tool_name: str, fmt: str, p
     json_export = export_artifact(artifact, "json")
 
     assert preview_marker in artifact.content["preview_html"]
+    if fmt in {"docx", "pdf"}:
+        assert "HTML preview" in artifact.content["preview_html"]
+    assert "\ufffd" not in artifact.content["preview_html"]
     assert html_export.media_type.startswith("text/html")
     assert md_export.media_type.startswith("text/markdown")
     assert json_export.media_type.startswith("application/json")

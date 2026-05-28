@@ -1,11 +1,27 @@
 from __future__ import annotations
 
-import re
+from copy import deepcopy
+from datetime import UTC, datetime
 from typing import Any
 
+from app.services.document_model.markdown import markdown_to_sections, parse_markdown_blocks
+from app.services.document_model.templates import DOCUMENT_TEMPLATES as TEMPLATE_REGISTRY
+from app.services.document_model.templates import get_template, normalize_template_name
 
-DOCUMENT_TEMPLATES = {"proposal", "report", "prd", "meeting"}
-BLOCK_TYPES = {"paragraph", "heading", "list", "table", "callout", "page_break"}
+
+DOCUMENT_TEMPLATES = set(TEMPLATE_REGISTRY)
+BLOCK_TYPES = {
+    "paragraph",
+    "heading",
+    "list",
+    "table",
+    "callout",
+    "quote",
+    "image",
+    "divider",
+    "page_break",
+    "signatures",
+}
 
 
 def normalize_document_model(
@@ -29,21 +45,53 @@ def _from_mapping(
     source_text: str,
     template: str | None,
 ) -> dict[str, Any]:
-    model_title = str(value.get("title") or title or "AgentHub Document")
-    model_template = _template(str(value.get("template") or template or "report"))
+    model_title = _clean_text(value.get("title") or title or "AgentHub Document")
+    model_template = normalize_template_name(value.get("template") or template)
+    template_def = get_template(model_template)
+    model_source = _clean_text(value.get("source_text") or value.get("body") or source_text or "")
     sections = _normalize_sections(value)
+    if not sections and model_source:
+        sections = markdown_to_sections(model_source)
     if not sections:
-        sections = _from_source_text(
-            title=model_title,
-            source_text=str(value.get("source_text") or source_text or model_title),
-            template=model_template,
-        )["sections"]
+        sections = template_def.default_sections()
+    sections = _merge_source_into_template_sections(sections, model_source)
     return _document(
         title=model_title,
-        subtitle=str(value.get("subtitle") or ""),
+        subtitle=_clean_text(value.get("subtitle") or template_def.subtitle),
         sections=sections,
-        source_text=str(value.get("source_text") or source_text or ""),
+        source_text=model_source,
         template=model_template,
+        cover=_normalize_cover(value.get("cover"), template_def.cover, model_title, value.get("subtitle")),
+        toc=_normalize_toc(value.get("toc")),
+        metadata=_normalize_metadata(value.get("metadata"), model_template),
+        tables=_normalize_named_blocks(value.get("tables"), "table"),
+        callouts=_normalize_named_blocks(value.get("callouts"), "callout"),
+        signatures=_normalize_signatures(value.get("signatures")),
+        appendix=_normalize_appendix(value.get("appendix")),
+        template_spec=template_def.to_dict(),
+    )
+
+
+def _from_source_text(title: str, source_text: str, template: str | None) -> dict[str, Any]:
+    model_template = normalize_template_name(template)
+    template_def = get_template(model_template)
+    sections = markdown_to_sections(source_text) if source_text else template_def.default_sections()
+    if _looks_like_short_prompt(source_text):
+        sections = _merge_source_into_template_sections(template_def.default_sections(), source_text)
+    return _document(
+        title=title or "AgentHub Document",
+        subtitle=template_def.subtitle,
+        sections=sections,
+        source_text=source_text,
+        template=model_template,
+        cover=_normalize_cover(None, template_def.cover, title, None),
+        toc={"enabled": True, "title": "目录"},
+        metadata=_normalize_metadata(None, model_template),
+        tables=[],
+        callouts=[],
+        signatures=[],
+        appendix=[],
+        template_spec=template_def.to_dict(),
     )
 
 
@@ -55,14 +103,16 @@ def _normalize_sections(value: dict[str, Any]) -> list[dict[str, Any]]:
     blocks = value.get("blocks")
     if isinstance(blocks, list):
         normalized = [_block(item) for item in blocks if isinstance(item, dict)]
-        return [{"title": "", "blocks": [item for item in normalized if item]}]
+        return [{"title": "", "level": 1, "blocks": [item for item in normalized if item]}]
     return []
 
 
 def _section(value: dict[str, Any]) -> dict[str, Any]:
     blocks = value.get("blocks") if isinstance(value.get("blocks"), list) else []
+    if not blocks and value.get("content"):
+        blocks = parse_markdown_blocks(str(value["content"]))
     return {
-        "title": str(value.get("title") or ""),
+        "title": _clean_text(value.get("title")),
         "level": _level(value.get("level"), default=1),
         "blocks": [block for item in blocks if isinstance(item, dict) if (block := _block(item))],
     }
@@ -77,18 +127,27 @@ def _block(value: dict[str, Any]) -> dict[str, Any]:
         return {"type": "heading", "level": _level(value.get("level"), default=2), "text": _text(value)}
     if block_type == "list":
         items = value.get("items") if isinstance(value.get("items"), list) else []
-        return {"type": "list", "ordered": bool(value.get("ordered")), "items": [str(item) for item in items]}
+        return {"type": "list", "ordered": bool(value.get("ordered")), "items": [_clean_text(item) for item in items]}
     if block_type == "table":
         return _table(value)
     if block_type == "callout":
         return {
             "type": "callout",
-            "title": str(value.get("title") or "提示"),
+            "title": _clean_text(value.get("title") or "提示"),
             "text": _text(value),
-            "variant": str(value.get("variant") or "info"),
+            "variant": _clean_text(value.get("variant") or "info"),
         }
+    if block_type == "quote":
+        return {"type": "quote", "text": _text(value)}
+    if block_type == "image":
+        return {"type": "image", "src": _clean_text(value.get("src")), "alt": _clean_text(value.get("alt"))}
+    if block_type == "divider":
+        return {"type": "divider"}
     if block_type == "page_break":
         return {"type": "page_break"}
+    if block_type == "signatures":
+        items = value.get("items") if isinstance(value.get("items"), list) else []
+        return {"type": "signatures", "items": [_clean_text(item) for item in items]}
     return {"type": "paragraph", "text": _text(value)}
 
 
@@ -96,82 +155,74 @@ def _table(value: dict[str, Any]) -> dict[str, Any]:
     headers = value.get("headers") if isinstance(value.get("headers"), list) else []
     rows = value.get("rows") if isinstance(value.get("rows"), list) else []
     normalized_rows = []
-    for row in rows[:80]:
+    for row in rows[:120]:
         if isinstance(row, list):
-            normalized_rows.append([str(cell) for cell in row[:10]])
+            normalized_rows.append([_clean_text(cell) for cell in row[:12]])
         elif isinstance(row, dict):
-            normalized_rows.append([str(row.get(header, "")) for header in headers])
-    return {"type": "table", "headers": [str(item) for item in headers[:10]], "rows": normalized_rows}
+            normalized_rows.append([_clean_text(row.get(header, "")) for header in headers[:12]])
+    return {"type": "table", "headers": [_clean_text(item) for item in headers[:12]], "rows": normalized_rows}
 
 
-def _from_source_text(title: str, source_text: str, template: str | None) -> dict[str, Any]:
-    blocks = _parse_markdown_blocks(source_text or title)
-    return _document(
-        title=title or "AgentHub Document",
-        subtitle="",
-        sections=[{"title": "", "level": 1, "blocks": blocks}],
-        source_text=source_text,
-        template=_template(template or "report"),
-    )
+def _normalize_cover(value: Any, defaults: dict[str, Any], title: str, subtitle: Any) -> dict[str, Any]:
+    cover = deepcopy(defaults)
+    if isinstance(value, dict):
+        cover.update({str(key): _clean_text(item) for key, item in value.items() if item is not None})
+    cover.setdefault("issuer", "AgentHub")
+    cover["title"] = _clean_text(cover.get("title") or title)
+    cover["subtitle"] = _clean_text(cover.get("subtitle") or subtitle or "")
+    cover.setdefault("date", datetime.now(UTC).date().isoformat())
+    return cover
 
 
-def _parse_markdown_blocks(text: str) -> list[dict[str, Any]]:
-    blocks: list[dict[str, Any]] = []
-    lines = text.splitlines()
-    index = 0
-    while index < len(lines):
-        line = lines[index].strip()
-        if not line:
-            index += 1
-            continue
-        if line in {"---", "[pagebreak]", "[page_break]"}:
-            blocks.append({"type": "page_break"})
-        elif match := re.match(r"^(#{1,4})\s+(.+)$", line):
-            blocks.append({"type": "heading", "level": len(match.group(1)), "text": match.group(2)})
-        elif line.startswith(">"):
-            blocks.append({"type": "callout", "title": "提示", "text": line.lstrip("> ").strip()})
-        elif _is_table_line(line):
-            table, index = _consume_table(lines, index)
-            blocks.append(table)
-            continue
-        elif re.match(r"^([-*+]|\d+[.)])\s+", line):
-            items, ordered, index = _consume_list(lines, index)
-            blocks.append({"type": "list", "ordered": ordered, "items": items})
-            continue
-        else:
-            blocks.append({"type": "paragraph", "text": line})
-        index += 1
-    return blocks or [{"type": "paragraph", "text": "暂无正文内容。"}]
+def _normalize_toc(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return {"enabled": bool(value.get("enabled", True)), "title": _clean_text(value.get("title") or "目录")}
+    return {"enabled": True, "title": "目录"}
 
 
-def _consume_list(lines: list[str], start: int) -> tuple[list[str], bool, int]:
-    items: list[str] = []
-    ordered = False
-    index = start
-    while index < len(lines):
-        match = re.match(r"^([-*+]|\d+[.)])\s+(.+)$", lines[index].strip())
-        if not match:
-            break
-        ordered = ordered or bool(re.match(r"^\d+", match.group(1)))
-        items.append(match.group(2).strip())
-        index += 1
-    return items, ordered, index
+def _normalize_metadata(value: Any, template: str) -> dict[str, Any]:
+    metadata = {"template": template, "source": "AgentHub", "generated_at": datetime.now(UTC).isoformat()}
+    if isinstance(value, dict):
+        metadata.update({str(key): _clean_text(item) for key, item in value.items() if item is not None})
+    return metadata
 
 
-def _consume_table(lines: list[str], start: int) -> tuple[dict[str, Any], int]:
-    rows: list[list[str]] = []
-    index = start
-    while index < len(lines) and _is_table_line(lines[index].strip()):
-        cells = [cell.strip() for cell in lines[index].strip().strip("|").split("|")]
-        if not all(re.fullmatch(r":?-{2,}:?", cell or "") for cell in cells):
-            rows.append(cells)
-        index += 1
-    headers = rows[0] if rows else []
-    return {"type": "table", "headers": headers, "rows": rows[1:]}, index
+def _normalize_named_blocks(value: Any, expected_type: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    blocks = [_block(item) for item in value if isinstance(item, dict)]
+    return [block for block in blocks if block.get("type") == expected_type]
 
 
-def _is_table_line(line: str) -> bool:
-    return line.startswith("|") and line.endswith("|") and line.count("|") >= 2
+def _normalize_signatures(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [_clean_text(item) for item in value if _clean_text(item)]
+
+
+def _normalize_appendix(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [_section(item) for item in value if isinstance(item, dict)]
+    if isinstance(value, str) and value.strip():
+        return [{"title": "附录", "level": 1, "blocks": parse_markdown_blocks(value)}]
+    return []
+
+
+def _merge_source_into_template_sections(sections: list[dict[str, Any]], source_text: str) -> list[dict[str, Any]]:
+    if not source_text.strip() or not _looks_like_short_prompt(source_text):
+        return sections
+    merged = deepcopy(sections)
+    if merged:
+        merged[0].setdefault("blocks", [])
+        merged[0]["blocks"].insert(0, {"type": "callout", "title": "用户需求", "text": source_text.strip(), "variant": "info"})
+    return merged
+
+
+def _looks_like_short_prompt(source_text: str) -> bool:
+    stripped = source_text.strip()
+    if not stripped:
+        return False
+    return len(stripped) <= 80 and "\n" not in stripped and not stripped.startswith("#")
 
 
 def _document(
@@ -181,21 +232,41 @@ def _document(
     sections: list[dict[str, Any]],
     source_text: str,
     template: str,
+    cover: dict[str, Any],
+    toc: dict[str, Any],
+    metadata: dict[str, Any],
+    tables: list[dict[str, Any]],
+    callouts: list[dict[str, Any]],
+    signatures: list[str],
+    appendix: list[dict[str, Any]],
+    template_spec: dict[str, Any],
 ) -> dict[str, Any]:
-    blocks = [block for section in sections for block in section.get("blocks", [])]
+    blocks = [block for section in [*sections, *appendix] for block in section.get("blocks", [])]
     return {
         "kind": "document",
         "title": title,
         "subtitle": subtitle,
         "template": template,
+        "cover": cover,
+        "toc": toc,
+        "metadata": metadata,
         "sections": sections,
         "blocks": blocks,
+        "tables": tables,
+        "callouts": callouts,
+        "signatures": signatures,
+        "appendix": appendix,
+        "template_spec": template_spec,
         "source_text": source_text,
     }
 
 
 def _text(value: dict[str, Any]) -> str:
-    return str(value.get("text") or value.get("content") or "")
+    return _clean_text(value.get("text") or value.get("content") or "")
+
+
+def _clean_text(value: Any) -> str:
+    return str(value or "").replace("\x00", "").strip()
 
 
 def _level(value: Any, *, default: int) -> int:
@@ -203,7 +274,3 @@ def _level(value: Any, *, default: int) -> int:
         return min(max(int(value), 1), 4)
     except (TypeError, ValueError):
         return default
-
-
-def _template(value: str) -> str:
-    return value if value in DOCUMENT_TEMPLATES else "report"
