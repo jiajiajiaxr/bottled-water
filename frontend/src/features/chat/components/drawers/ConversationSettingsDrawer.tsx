@@ -1,19 +1,9 @@
 import { useEffect, useMemo } from "react";
-import { BranchesOutlined, SaveOutlined } from "@ant-design/icons";
-import {
-  Alert,
-  Button,
-  Drawer,
-  Form,
-  Input,
-  Select,
-  Space,
-  Typography,
-} from "antd";
+import { SaveOutlined } from "@ant-design/icons";
+import { Button, Drawer, Form, Input, Select, Space } from "antd";
 import { mergeConversationCategories } from "../../../../lib/conversation";
 import type { Agent, Conversation } from "../../../../types";
 
-const { Text } = Typography;
 const { TextArea } = Input;
 
 export function ConversationSettingsDrawer({
@@ -22,7 +12,6 @@ export function ConversationSettingsDrawer({
   categoryOptions,
   onClose,
   onSaveConversation,
-  onOpenWorkflow,
 }: {
   open: boolean;
   active?: Conversation;
@@ -85,26 +74,6 @@ export function ConversationSettingsDrawer({
             保存基础信息
           </Button>
         </Form>
-
-        <Alert
-          type="info"
-          showIcon
-          message="工作流画布已迁移到独立编排页"
-          description="当前群聊的 workflow 仍绑定 conversation.extra.workflow；发送消息时仍按这个会话的画布执行。"
-        />
-        <Button
-          block
-          size="large"
-          icon={<BranchesOutlined />}
-          onClick={onOpenWorkflow}
-          disabled={!active || active.chat_type !== "group"}
-          data-testid="open-full-workflow"
-        >
-          打开完整画布
-        </Button>
-        <Text type="secondary">
-          抽屉仅保留命名、分类和备注等基础设置，复杂编排请进入完整工作流页面。
-        </Text>
       </Space>
     </Drawer>
   );
