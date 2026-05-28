@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 from sqlalchemy import select
 
@@ -10,6 +11,7 @@ from app.models import Conversation, Message, Subtask, Task, WorkflowRun, utcnow
 from app.services.agents.direct import _run_direct_agent
 from app.services.ark import ArkProviderError, ark_client
 from app.services.chat.artifacts import _publish_tool_artifacts
+from app.services.chat.finalizer import fail_generation, finalize_streaming_agent_messages
 from app.services.output_filter import strip_internal_agent_output
 from app.services.queue import queue_service
 from app.services.realtime.event_bus import event_bus
@@ -28,6 +30,8 @@ from app.services.workflows.validator import (
     format_workflow_validation_message,
     validate_workflow_graph,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def run_orchestration(message_id: str) -> None:
@@ -159,6 +163,17 @@ async def run_orchestration(message_id: str) -> None:
             stream_text=stream_text,
         )
         raise
+    except Exception as exc:
+        logger.exception("orchestration failed: message_id=%s", message_id)
+        await fail_generation(
+            db,
+            conversation=conversation,
+            channel=channel,
+            task=task,
+            workflow_run=workflow_run,
+            reason="orchestration_failed",
+            error=exc,
+        )
     finally:
         db.close()
 
@@ -302,6 +317,14 @@ async def _mark_workflow_failed(
     if assistant:
         await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
         await event_bus.publish(channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "workflow_failed"})
+    await finalize_streaming_agent_messages(
+        db,
+        conversation=conversation,
+        channel=channel,
+        status="failed",
+        stop_reason="workflow_failed",
+        fallback_text="工作流执行失败，已停止后续节点。",
+    )
     await event_bus.publish(channel, "generation_finished", {"conversation_id": conversation.id, "reason": "workflow_failed"})
 
 
@@ -328,6 +351,14 @@ async def _complete_independent_group(
     task.completed_at = utcnow()
     _mark_workflow_completed(conversation, workflow_run)
     db.commit()
+    await finalize_streaming_agent_messages(
+        db,
+        conversation=conversation,
+        channel=channel,
+        status="completed",
+        stop_reason="workflow_completed",
+        fallback_text="本轮响应已结束。",
+    )
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
     await event_bus.publish(
         channel,
@@ -481,6 +512,14 @@ async def _handle_cancelled(
     if assistant:
         await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
         await event_bus.publish(channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "cancelled"})
+    await finalize_streaming_agent_messages(
+        db,
+        conversation=conversation,
+        channel=channel,
+        status="cancelled",
+        stop_reason="cancelled",
+        fallback_text="已停止本次响应。",
+    )
     if workflow_run:
         await event_bus.publish(
             channel,

@@ -1,0 +1,352 @@
+from __future__ import annotations
+
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.core.database import Base
+from app.models import Agent, Conversation, Message, Task, User, WorkflowRun
+from app.services.agents.function_loop import run_agent_function_call_loop
+from app.services.agents.function_types import AgentFunctionLoopResult
+from app.services.ark import LLMStreamEvent
+from app.services.chat.artifacts import _publish_tool_artifacts
+from app.services.chat.finalizer import fail_generation
+from app.services.workflows.engine import WorkflowEngine
+from app.services.workflows.runtime import build_edge_states, build_node_states
+
+
+@pytest.fixture
+def db(tmp_path: Path) -> Iterator[Session]:
+    db_path = tmp_path / "chat_stability.db"
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    session = factory()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_direct_agent_tool_failure_still_finishes_assistant_message(db: Session) -> None:
+    user, conversation, user_message = _user_conversation_message(db, "请测试接口")
+    agent = _agent(user, "Frontend Worker", "frontend", tools=["api.test"])
+    db.add(agent)
+    db.commit()
+    calls: list[list[dict[str, Any]]] = []
+
+    async def fake_stream_chat(messages: list[dict[str, Any]], **_: Any) -> Any:
+        calls.append(messages)
+        if len(calls) == 1:
+            yield LLMStreamEvent(
+                type="tool_calls",
+                tool_calls=[
+                    {
+                        "id": "call-api",
+                        "type": "function",
+                        "function": {"name": "api.test", "arguments": '{"path": "/health"}'},
+                    }
+                ],
+            )
+            yield LLMStreamEvent(type="done", usage={})
+            return
+        yield LLMStreamEvent(type="delta", text="接口测试失败，我已停止继续调用。")
+        yield LLMStreamEvent(type="done", usage={})
+
+    with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream_chat):
+        with patch("app.services.agents.function_loop.execute_tool_by_name", new_callable=AsyncMock) as execute:
+            execute.side_effect = RuntimeError("network down")
+            with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock) as publish:
+                result = await run_agent_function_call_loop(
+                    db,
+                    conversation=conversation,
+                    user_message=user_message,
+                    agent=agent,
+                    prompt="请测试接口",
+                    channel=f"conversation:{conversation.id}",
+                    mode="unit-test",
+                )
+
+    assistant = db.scalar(select(Message).where(Message.sender_type == "agent"))
+    assert assistant is not None
+    assert assistant.status == "completed"
+    assert result.tool_results[0]["status"] == "failed"
+    assert not db.scalars(select(Message).where(Message.status == "streaming")).all()
+    assert any(call.args[1] == "message_stop" for call in publish.await_args_list)
+    assert len(calls) == 2
+    assert any(item.get("role") == "tool" for item in calls[1])
+
+
+@pytest.mark.asyncio
+async def test_successful_tool_call_is_not_inserted_as_tool_runner_message(db: Session) -> None:
+    user, conversation, _ = _user_conversation_message(db, "总结文件")
+    db.commit()
+    channel = f"conversation:{conversation.id}"
+    success_context = {
+        "executions": [
+            {
+                "tool_name": "file.summarize",
+                "output": {
+                    "status": "succeeded",
+                    "conversation_id": conversation.id,
+                    "summary": "done",
+                },
+            }
+        ]
+    }
+    failure_context = {
+        "executions": [
+            {
+                "tool_name": "file.summarize",
+                "output": {
+                    "status": "failed",
+                    "conversation_id": conversation.id,
+                    "error": "parse failed",
+                },
+            }
+        ]
+    }
+
+    with patch("app.services.chat.artifacts.event_bus.publish", new_callable=AsyncMock):
+        await _publish_tool_artifacts(db, channel, success_context)
+        assert db.scalars(select(Message).where(Message.sender_name == "Tool Runner")).all() == []
+
+        await _publish_tool_artifacts(db, channel, failure_context)
+
+    tool_messages = db.scalars(select(Message).where(Message.sender_name == "Tool Runner")).all()
+    assert len(tool_messages) == 1
+    assert "file.summarize" in tool_messages[0].content["text"]
+
+
+@pytest.mark.asyncio
+async def test_group_independent_workflow_runs_all_agents_on_repeated_rounds(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "group_rounds.db"
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    db = factory()
+    try:
+        user = _user()
+        conversation = Conversation(creator_id=user.id, chat_type="group", title="稳定性群聊", extra={})
+        agents = [
+            _agent(user, "Frontend Worker", "frontend"),
+            _agent(user, "Backend Worker", "backend"),
+            _agent(user, "Daily Chat Agent", "chat"),
+        ]
+        db.add_all([user, conversation, *agents])
+        db.commit()
+        workflow = _parallel_agent_workflow(conversation.id, agents)
+
+        async def fake_agent_loop(session: Session, **kwargs: Any) -> AgentFunctionLoopResult:
+            agent: Agent = kwargs["agent"]
+            conv: Conversation = kwargs["conversation"]
+            user_msg: Message = kwargs["user_message"]
+            assert kwargs["emit_message"] is True
+            assistant = Message(
+                conversation_id=conv.id,
+                sender_type="agent",
+                sender_id=agent.id,
+                sender_name=agent.name,
+                content_type="text",
+                content={"text": f"{agent.name}: {user_msg.content['text']}"},
+                status="completed",
+            )
+            session.add(assistant)
+            session.commit()
+            return AgentFunctionLoopResult(
+                assistant=assistant,
+                text=assistant.content["text"],
+                thinking="",
+                tool_results=[],
+                tool_context={"agent_name": agent.name},
+            )
+
+        with patch("app.services.workflows.engine.SessionLocal", side_effect=factory):
+            with patch(
+                "app.services.workflows.nodes.agent.run_agent_function_call_loop",
+                side_effect=fake_agent_loop,
+            ):
+                for index, prompt in enumerate(["你们好", "分别说一下你们能做什么"], start=1):
+                    user_message = Message(
+                        conversation_id=conversation.id,
+                        sender_type="user",
+                        sender_id=user.id,
+                        sender_name=user.display_name,
+                        content_type="text",
+                        content={"text": prompt},
+                        status="sent",
+                        extra={},
+                    )
+                    db.add(user_message)
+                    db.flush()
+                    task = Task(
+                        conversation_id=conversation.id,
+                        creator_id=user.id,
+                        title=f"round-{index}",
+                        description=prompt,
+                        status="EXECUTING",
+                        progress=10,
+                    )
+                    workflow_run = WorkflowRun(
+                        conversation_id=conversation.id,
+                        trigger_message_id=user_message.id,
+                        started_by=user.id,
+                        status="running",
+                        mode="canvas",
+                        workflow_snapshot=workflow,
+                        node_states=build_node_states(workflow),
+                        edge_states=build_edge_states(workflow),
+                        progress=5,
+                    )
+                    db.add_all([task, workflow_run])
+                    db.commit()
+
+                    with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+                        result = await WorkflowEngine(
+                            db,
+                            conversation=conversation,
+                            user_message=user_message,
+                            task=task,
+                            workflow_run=workflow_run,
+                            workflow=workflow,
+                            prompt=prompt,
+                            channel=f"conversation:{conversation.id}",
+                            agents=agents,
+                        ).run()
+
+                    assert len(result.agent_replies) == 3
+
+        db.expire_all()
+        replies = db.scalars(select(Message).where(Message.sender_type == "agent")).all()
+        assert len(replies) == 6
+        assert {message.sender_name for message in replies} == {
+            "Frontend Worker",
+            "Backend Worker",
+            "Daily Chat Agent",
+        }
+        assert not db.scalars(select(Message).where(Message.status == "streaming")).all()
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_generation_failure_closes_lingering_streaming_messages(db: Session) -> None:
+    user, conversation, _ = _user_conversation_message(db, "会挂起吗")
+    agent = _agent(user, "Daily Chat Agent", "chat")
+    task = Task(
+        conversation_id=conversation.id,
+        creator_id=user.id,
+        title="failure",
+        description="failure",
+        status="EXECUTING",
+        progress=60,
+    )
+    assistant = Message(
+        conversation_id=conversation.id,
+        sender_type="agent",
+        sender_id=agent.id,
+        sender_name=agent.name,
+        content_type="text",
+        content={"text": ""},
+        status="streaming",
+    )
+    db.add_all([agent, task, assistant])
+    db.commit()
+
+    with patch("app.services.chat.finalizer.event_bus.publish", new_callable=AsyncMock) as publish:
+        await fail_generation(
+            db,
+            conversation=conversation,
+            channel=f"conversation:{conversation.id}",
+            task=task,
+            workflow_run=None,
+            reason="unit_test_failed",
+            error=RuntimeError("boom"),
+        )
+
+    db.refresh(task)
+    db.refresh(assistant)
+    assert task.status == "FAILED"
+    assert assistant.status == "failed"
+    assert "异常结束" in assistant.content["text"]
+    assert any(call.args[1] == "message_stop" for call in publish.await_args_list)
+    assert any(call.args[1] == "generation_finished" for call in publish.await_args_list)
+
+
+def _user() -> User:
+    suffix = uuid4().hex
+    return User(
+        id=f"user-{suffix[:24]}",
+        email=f"chat-stability-{suffix}@example.com",
+        username=f"chat-stability-{suffix}",
+        password_hash="x",
+        display_name="演示用户",
+    )
+
+
+def _agent(user: User, name: str, agent_type: str, tools: list[str] | None = None) -> Agent:
+    return Agent(
+        owner_id=user.id,
+        name=name,
+        type=agent_type,
+        description=f"{name} description",
+        config={"tools": tools or []},
+        capabilities=[],
+    )
+
+
+def _user_conversation_message(db: Session, text: str) -> tuple[User, Conversation, Message]:
+    user = _user()
+    conversation = Conversation(creator_id=user.id, chat_type="single", title="稳定性单聊", extra={})
+    db.add_all([user, conversation])
+    db.flush()
+    message = Message(
+        conversation_id=conversation.id,
+        sender_type="user",
+        sender_id=user.id,
+        sender_name=user.display_name,
+        content_type="text",
+        content={"text": text},
+        status="sent",
+        extra={},
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(conversation)
+    db.refresh(message)
+    return user, conversation, message
+
+
+def _parallel_agent_workflow(conversation_id: str, agents: list[Agent]) -> dict[str, Any]:
+    nodes = [{"id": "start", "type": "start", "title": "Start"}]
+    for agent in agents:
+        nodes.append(
+            {
+                "id": f"agent-{agent.id[:8]}",
+                "type": "agent",
+                "title": agent.name,
+                "agent_id": agent.id,
+                "config": {"agent_id": agent.id},
+            }
+        )
+    nodes.append({"id": "end", "type": "end", "title": "End"})
+    agent_node_ids = [node["id"] for node in nodes if node["id"].startswith("agent-")]
+    return {
+        "conversation_id": conversation_id,
+        "mode": "all_agents_independent",
+        "output_mode": "independent_messages",
+        "nodes": nodes,
+        "edges": [["start", node_id] for node_id in agent_node_ids]
+        + [[node_id, "end"] for node_id in agent_node_ids],
+    }

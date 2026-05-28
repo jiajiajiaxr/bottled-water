@@ -164,11 +164,20 @@ def _conversation_id_from_channel(channel: str) -> str | None:
 
 
 def _should_show_tool_message(tool_name: str, output: dict[str, Any]) -> bool:
-    return (
+    return _is_failed_tool_output(output) and (
         tool_name.startswith(("file.", "sandbox.", "test.", "api.", "skill.", "mcp."))
         or tool_name in {"sandbox.run", "test.run", "api.test", "browser.preview"}
         or output.get("type") in {"skill", "mcp"}
     )
+
+
+def _is_failed_tool_output(output: dict[str, Any]) -> bool:
+    status = str(output.get("status") or output.get("state") or "").lower()
+    if status in {"failed", "error", "cancelled", "timeout"}:
+        return True
+    if output.get("ok") is False or output.get("success") is False:
+        return True
+    return bool(output.get("error") or output.get("error_message"))
 
 
 def _tool_summary(tool_name: str, output: dict[str, Any]) -> str:

@@ -10,6 +10,7 @@ from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.agents.tool_loop import run_agentic_tool_loop
 from app.services.ark import ark_client
 from app.services.chat.artifacts import _publish_tool_artifacts
+from app.services.chat.finalizer import finalize_streaming_agent_messages
 from app.services.context.builder import ContextBuilder
 from app.services.context.state import update_conversation_state_after_turn
 from app.services.llm_gateway import stream_model_config_chat
@@ -90,18 +91,48 @@ async def _run_direct_agent(
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
     await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
 
-    result = await run_agent_function_call_loop(
-        db,
-        conversation=conversation,
-        user_message=user_message,
-        agent=agent,
-        prompt=prompt,
-        channel=channel,
-        mode="????",
-        task=task,
-        max_tool_rounds=3,
-    )
-    await _publish_tool_artifacts(db, channel, result.tool_context)
+    try:
+        result = await run_agent_function_call_loop(
+            db,
+            conversation=conversation,
+            user_message=user_message,
+            agent=agent,
+            prompt=prompt,
+            channel=channel,
+            mode="direct",
+            task=task,
+            max_tool_rounds=3,
+        )
+        await _publish_tool_artifacts(db, channel, result.tool_context)
+    except Exception as exc:
+        logger.exception("direct agent failed: agent=%s", agent.id)
+        subtask.status = "FAILED"
+        subtask.completed_at = utcnow()
+        subtask.output = {"error": str(exc)}
+        task.status = "FAILED"
+        task.progress = min(max(task.progress or 0, 95), 100)
+        task.error_info = {"error": str(exc), "agent_id": agent.id}
+        task.completed_at = utcnow()
+        conversation.last_message_preview = "本轮响应异常结束，已停止生成。"
+        conversation.last_message_sender = agent.name
+        conversation.last_message_at = utcnow()
+        db.commit()
+        await finalize_streaming_agent_messages(
+            db,
+            conversation=conversation,
+            channel=channel,
+            status="failed",
+            stop_reason="direct_agent_failed",
+            fallback_text="本轮响应异常结束，已停止生成。",
+        )
+        await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
+        await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+        await event_bus.publish(
+            channel,
+            "generation_finished",
+            {"conversation_id": conversation.id, "reason": "direct_agent_failed", "status": "failed"},
+        )
+        return
 
     subtask.status = "COMPLETED"
     subtask.completed_at = utcnow()

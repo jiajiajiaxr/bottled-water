@@ -13,6 +13,7 @@ import {
   stripInternalAgentOutput,
   isTaskRunning,
   participantName,
+  isVisibleChatMessage,
 } from "../lib/message";
 
 /** 批量触发更新：16ms 窗口内收到 delta 的消息 id 合并为一次 state 更新（约 60fps） */
@@ -339,7 +340,10 @@ export function useMessageOperations(currentUserName: string) {
         },
         onMessageUpdated: upsertFinalMessage,
         onMessageNew: (incoming) => {
-          if (incoming.kind === "preview_card") upsertFinalMessage(incoming);
+          if (!isVisibleChatMessage(incoming)) return;
+          if (incoming.kind === "preview_card" || incoming.kind === "event") {
+            upsertFinalMessage(incoming);
+          }
         },
         onToolCallStart: (payload) => {
           const toolName = String(payload.tool_name || "");
@@ -390,15 +394,17 @@ export function useMessageOperations(currentUserName: string) {
         api.artifact(conversationId),
       ]).catch(() => [undefined, undefined]);
       if (freshMessages) {
-        const cleanMessages = freshMessages.map((item) =>
-          item.role === "assistant" && item.kind === "text"
-            ? {
-                ...item,
-                content: stripInternalAgentOutput(item.content),
-                streamState: "done" as const,
-              }
-            : item,
-        );
+        const cleanMessages = freshMessages
+          .filter(isVisibleChatMessage)
+          .map((item) =>
+            item.role === "assistant" && item.kind === "text"
+              ? {
+                  ...item,
+                  content: stripInternalAgentOutput(item.content),
+                  streamState: "done" as const,
+                }
+              : item,
+          );
         setMessages(cleanMessages);
         const lastAssistant = [...cleanMessages]
           .reverse()

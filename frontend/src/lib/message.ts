@@ -123,6 +123,25 @@ export function isTaskRunning(status?: string) {
   return RUNNING_TASK_STATUSES.has(String(status || "").toUpperCase());
 }
 
+export function isSuccessfulToolRunnerMessage(message: ChatMessage) {
+  if (message.author !== "Tool Runner" || message.kind !== "event") return false;
+  const raw = message.rawContent ?? {};
+  const output = raw.output;
+  const outputStatus =
+    output && typeof output === "object" && "status" in output
+      ? String((output as { status?: unknown }).status ?? "")
+      : "";
+  const status = String(raw.status ?? outputStatus ?? message.status ?? "").toLowerCase();
+  const hasError =
+    Boolean(raw.error || raw.error_message) ||
+    (output && typeof output === "object" && Boolean((output as { error?: unknown }).error));
+  return !hasError && !["failed", "error", "cancelled", "timeout"].includes(status);
+}
+
+export function isVisibleChatMessage(message: ChatMessage) {
+  return !isSuccessfulToolRunnerMessage(message);
+}
+
 export function isLikelyArtifactRequest(text: string) {
   const value = text.toLowerCase();
   return [

@@ -5,6 +5,7 @@ import {
   wait,
 } from "./client";
 import { demoMessages, demoUser } from "../mock";
+import { isVisibleChatMessage } from "../lib/message";
 import type { ChatMessage, UploadedFile } from "../types";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
@@ -12,7 +13,8 @@ export async function messages(conversationId: string): Promise<ChatMessage[]> {
     const result = await request<{ items: ChatMessage[] } | ChatMessage[]>(
       `/conversations/${conversationId}/messages`,
     );
-    return Array.isArray(result) ? result : result.items;
+    const items = Array.isArray(result) ? result : result.items;
+    return items.filter(isVisibleChatMessage);
   } catch {
     return demoMessages[conversationId] ?? [];
   }

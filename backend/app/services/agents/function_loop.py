@@ -114,6 +114,62 @@ async def _publish_message_tool_event(
     )
 
 
+async def _fail_agent_loop(
+    db: Session,
+    *,
+    conversation: Conversation,
+    assistant: Message | None,
+    agent: Agent,
+    channel: str,
+    workflow_run: WorkflowRun | None,
+    workflow_node_id: str | None,
+    error_text: str,
+    tool_results: list[dict[str, Any]] | None = None,
+) -> AgentFunctionLoopResult:
+    final_text = strip_internal_agent_output(error_text) or "本轮响应异常结束，已停止生成。"
+    if assistant:
+        assistant.content = {"text": final_text}
+        assistant.status = "failed"
+    db.commit()
+    if assistant:
+        await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+        await event_bus.publish(
+            channel,
+            "message_stop",
+            {
+                "agent_message_id": assistant.id,
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "stop_reason": "generation_failed",
+            },
+        )
+    await _publish_workflow_update(
+        db,
+        conversation=conversation,
+        workflow_run=workflow_run,
+        workflow_node_id=workflow_node_id,
+        channel=channel,
+        status="failed",
+        progress=100,
+        output={"error": final_text, "assistant_message_id": assistant.id if assistant else None},
+        message=f"{agent.name} 响应失败",
+    )
+    return AgentFunctionLoopResult(
+        assistant=assistant,
+        text=final_text,
+        thinking="",
+        tool_results=tool_results or [],
+        tool_context={
+            "mode": "function_call_loop",
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "assistant_message_id": assistant.id if assistant else None,
+            "status": "failed",
+            "error": final_text,
+        },
+    )
+
+
 async def run_agent_function_call_loop(
     db: Session,
     *,
@@ -209,25 +265,38 @@ async def run_agent_function_call_loop(
             publish_workflow_update=_publish_workflow_update,
         )
 
-    skill_context = activated_skill_context(db, agent)
-    context_builder = ContextBuilder(db)
-    context_bundle = context_builder.build_agent_messages(
-        conversation=conversation,
-        user_message=user_message,
-        agent=agent,
-        system_prompt=agent_system_prompt(
-            agent,
+    try:
+        skill_context = activated_skill_context(db, agent)
+        context_builder = ContextBuilder(db)
+        context_bundle = context_builder.build_agent_messages(
+            conversation=conversation,
+            user_message=user_message,
+            agent=agent,
+            system_prompt=agent_system_prompt(
+                agent,
+                mode=mode,
+                node_title=node_title,
+                skill_context=skill_context,
+            ),
+            prompt=prompt,
             mode=mode,
-            node_title=node_title,
-            skill_context=skill_context,
-        ),
-        prompt=prompt,
-        mode=mode,
-        task=task,
-        workflow_run=workflow_run,
-        workflow_node_id=workflow_node_id,
-        node_input=node_input,
-    )
+            task=task,
+            workflow_run=workflow_run,
+            workflow_node_id=workflow_node_id,
+            node_input=node_input,
+        )
+    except Exception as exc:
+        logger.exception("agent function loop context build failed: agent=%s", agent.id)
+        return await _fail_agent_loop(
+            db,
+            conversation=conversation,
+            assistant=assistant,
+            agent=agent,
+            channel=channel,
+            workflow_run=workflow_run,
+            workflow_node_id=workflow_node_id,
+            error_text=f"{agent.name} 构建上下文失败：{exc}",
+        )
     messages: list[dict[str, Any]] = context_bundle.messages
     stream_text = ""
     reasoning_text = ""
@@ -387,14 +456,28 @@ async def run_agent_function_call_loop(
                     "output": "Agent 未被授权调用该工具",
                 }
             else:
-                result = await execute_tool_by_name(
-                    db,
-                    agent=agent,
-                    user=user,
-                    conversation=conversation,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                )
+                try:
+                    result = await execute_tool_by_name(
+                        db,
+                        agent=agent,
+                        user=user,
+                        conversation=conversation,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "[agent_function_loop] tool execution failed agent=%s name=%s",
+                        agent.id,
+                        tool_name,
+                    )
+                    result = {
+                        "type": "tool",
+                        "tool_name": tool_name,
+                        "status": "failed",
+                        "output": {"error": str(exc)},
+                        "error": str(exc),
+                    }
             status = str(result.get("status") or "unknown")
             logger.info(
                 "[agent_function_loop] tool_result agent=%s name=%s status=%s invocation_id=%s",
