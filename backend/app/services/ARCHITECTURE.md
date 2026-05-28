@@ -7,6 +7,7 @@ This directory is organized by service domain. The previous root-level service e
 - `chat/` owns chat orchestration and may depend on `workflows/`, `agents/`, `tasks/`, and `realtime/`.
 - `workflows/` owns workflow graph validation, scheduling, node execution, planning, and `WorkflowRun` runtime state.
 - `agents/` owns Agent execution, Function Call loops, context construction, and tool result feedback.
+- `context/` owns unified recoverable model context: conversation memory, attachments, workspace resources, task/runtime state, variables, and compression.
 - `tools/` owns tool catalog, permission helpers, execution dispatch, built-in tools, and custom tool invocation.
 - `realtime/` owns EventBus/SSE/WebSocket boundaries and must not depend on business orchestration modules.
 - `tasks/` owns Task/Subtask creation and task plan serialization.
@@ -28,6 +29,12 @@ This directory is organized by service domain. The previous root-level service e
 - `agents/function_loop.py`: shared direct/group Agent Function Call loop. It creates assistant messages, streams model output, executes `tool_calls`, appends `role=tool` results, and asks the model for the final answer.
 - `agents/direct.py`: direct single-Agent Task/Subtask lifecycle. The actual reasoning loop is delegated to `agents/function_loop.py`.
 - `agents/tool_loop.py`: Function Call tool schema construction plus Skill/MCP routing. The older heuristic short loop remains only as an internal helper, not as a service entrypoint.
+- `context/builder.py`: single entrypoint used by direct chat and workflow Agent nodes to build model messages.
+- `context/memory.py`: recent-message retention, old-history summary persistence, and attachment text/image context.
+- `context/workspace.py`: conversation workspace resource index for files, artifacts, tools, Skills, and MCP.
+- `context/task.py`: Task, WorkflowRun, ToolInvocation, SkillRun, and McpToolInvocation runtime summaries.
+- `context/variables.py`: `{{input}}`, `{{nodes.id.text}}`, `{{upstream.text}}`, and artifact reference resolution.
+- `context/compression.py`: lightweight token budgeting, trimming, and JSON compaction.
 - `tools/builtins/registry.py`: built-in tool metadata, JSON schemas, and official Agent toolboxes.
 - `tools/builtins/executor.py`: built-in tool dispatch for file, artifact, runtime, QA, and deployment tools.
 - `tools/builtins/artifact/`: artifact generation, storage, renderers, and export behavior.

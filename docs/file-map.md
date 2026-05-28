@@ -87,6 +87,7 @@ agenthub/
 - `backend/app/services/llm_gateway.py`：模型配置测试和模型调用统一入口。
 - `backend/app/services/tools/`：Tool 数据库目录、自定义工具、权限、schema 校验和 `tool_invocations` 运行记录。
 - `backend/app/services/tools/builtins/`：内置 Tool 分层实现，包含 artifact、file、sandbox 等复杂能力包。
+- `backend/app/services/context/`：统一模型上下文系统，负责会话记忆、附件、工作区资源、任务运行态、变量解析和压缩预算。
 - `backend/app/services/workspaces/filesystem.py`：工作区级文件系统根目录、路径校验、子目录隔离和文件列表工具。
 - `backend/app/services/mcp/`：MCP server catalog、工具发现、schema 校验、调用记录和审计日志。
 - `backend/app/services/mcp/transports/`：MCP HTTP、stdio、SSE/WebSocket transport 分层实现。

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
+from app.services.context.variables import artifact_reference_scope
+from app.services.context.variables import lookup as _lookup_reference
+from app.services.context.variables import resolve_value
+from app.services.context.variables import stringify as _stringify_reference
 from app.services.workflows.graph import Node, WorkflowGraph
-
-REFERENCE_PATTERN = re.compile(r"\{\{\s*(?P<expr>[A-Za-z0-9_.:-]+)\s*\}\}")
 
 
 def collect_upstream_outputs(
@@ -101,6 +102,8 @@ def build_reference_scope(
         "prompt": prompt,
         "nodes": outputs,
         "upstream": {"nodes": upstream, "text": summarize_outputs(upstream)},
+        "artifact": artifact_reference_scope(_artifacts_from_outputs(outputs)),
+        "artifacts": artifact_reference_scope(_artifacts_from_outputs(outputs)),
         "node": {"id": node.id, "title": node.title, "type": node.type, "config": node.config},
     }
     if node_input is not None:
@@ -110,20 +113,6 @@ def build_reference_scope(
         scope["output"] = raw_output
         scope["result"] = raw_output
     return scope
-
-
-def resolve_value(value: Any, scope: dict[str, Any]) -> Any:
-    """递归解析 {{input}}、{{nodes.node_id.field}} 等模板变量。"""
-    if isinstance(value, dict):
-        return {key: resolve_value(item, scope) for key, item in value.items()}
-    if isinstance(value, list):
-        return [resolve_value(item, scope) for item in value]
-    if not isinstance(value, str):
-        return value
-    matched = REFERENCE_PATTERN.fullmatch(value.strip())
-    if matched:
-        return _lookup(scope, matched.group("expr"))
-    return REFERENCE_PATTERN.sub(lambda item: _stringify(_lookup(scope, item.group("expr"))), value)
 
 
 def format_node_input_for_agent(node: Node, node_input: dict[str, Any]) -> str:
@@ -155,25 +144,11 @@ def resolve_references(value: Any, outputs: dict[str, dict[str, Any]]) -> Any:
 
 
 def _lookup(scope: dict[str, Any], expr: str) -> Any:
-    current: Any = scope
-    for part in expr.split("."):
-        if isinstance(current, dict):
-            current = current.get(part)
-        else:
-            current = getattr(current, part, None)
-        if current is None:
-            return ""
-    return current
+    return _lookup_reference(scope, expr)
 
 
 def _stringify(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (dict, list)):
-        return _json_text(value)
-    return str(value)
+    return _stringify_reference(value)
 
 
 def _json_text(value: Any) -> str:
@@ -189,3 +164,12 @@ def _first_text(output: dict[str, Any]) -> str:
     if isinstance(result, dict):
         return _first_text(result)
     return _stringify(result)[:1000] if result else ""
+
+
+def _artifacts_from_outputs(outputs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
+    for node_id, output in outputs.items():
+        artifact_id = output.get("artifact_id") or output.get("id")
+        if artifact_id or output.get("preview_url") or output.get("export_url"):
+            artifacts.append({"node_id": node_id, **output})
+    return artifacts

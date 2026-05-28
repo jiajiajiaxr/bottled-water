@@ -13,6 +13,7 @@ from app.services.agents.function_types import AgentFunctionLoopResult
 from app.services.agents.permission_guard import complete_missing_artifact_tool
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
 from app.services.ark import ark_client
+from app.services.context.builder import ContextBuilder
 from app.services.llm.tool_calls import detect_artifact_tool
 from app.services.llm_gateway import stream_model_config_chat
 from app.services.output_filter import strip_internal_agent_output
@@ -125,6 +126,7 @@ async def run_agent_function_call_loop(
     workflow_run: WorkflowRun | None = None,
     workflow_node_id: str | None = None,
     node_title: str | None = None,
+    node_input: dict[str, Any] | None = None,
     max_tool_rounds: int = 3,
     emit_message: bool = True,
 ) -> AgentFunctionLoopResult:
@@ -207,18 +209,25 @@ async def run_agent_function_call_loop(
         )
 
     skill_context = activated_skill_context(db, agent)
-    messages: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": agent_system_prompt(
-                agent,
-                mode=mode,
-                node_title=node_title,
-                skill_context=skill_context,
-            ),
-        },
-        {"role": "user", "content": prompt},
-    ]
+    context_builder = ContextBuilder(db)
+    context_bundle = context_builder.build_agent_messages(
+        conversation=conversation,
+        user_message=user_message,
+        agent=agent,
+        system_prompt=agent_system_prompt(
+            agent,
+            mode=mode,
+            node_title=node_title,
+            skill_context=skill_context,
+        ),
+        prompt=prompt,
+        mode=mode,
+        task=task,
+        workflow_run=workflow_run,
+        workflow_node_id=workflow_node_id,
+        node_input=node_input,
+    )
+    messages: list[dict[str, Any]] = context_bundle.messages
     stream_text = ""
     reasoning_text = ""
     tool_results: list[dict[str, Any]] = []
@@ -439,11 +448,11 @@ async def run_agent_function_call_loop(
         messages.append({"role": "assistant", "content": current_text or "", "tool_calls": current_tool_calls})
         for item in round_tool_results:
             messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": item["tool_call_id"],
-                    "content": json.dumps(item["result"], ensure_ascii=False)[:4000],
-                }
+                context_builder.tool_result_message(
+                    conversation=conversation,
+                    tool_call_id=item["tool_call_id"],
+                    result=item["result"],
+                )
             )
         if task:
             task.progress = max(task.progress or 0, min(90, 25 + (round_num + 1) * 15))
@@ -498,6 +507,7 @@ async def run_agent_function_call_loop(
             "model_config_id": model_config_id,
             "executions": [item["result"] for item in tool_results],
             "tool_results": tool_results,
+            "context": context_bundle.diagnostics,
             "summary": "\n".join(
                 f"- {item.get('tool_name')}: {item.get('status')}" for item in tool_results
             ),

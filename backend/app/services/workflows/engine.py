@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.models import Agent, Conversation, Message, Task, WorkflowRun
+from app.services.context.task import build_task_context
+from app.services.context.workspace import build_workspace_context
 from app.services.workflows.events import publish_node_event, publish_run_updated
 from app.services.workflows.graph import Node, WorkflowGraph
 from app.services.workflows.io import resolve_node_input, resolve_node_output
@@ -328,12 +330,23 @@ class WorkflowEngine:
         )
 
     def _node_input(self, node: Node) -> dict[str, Any]:
-        return resolve_node_input(
+        node_input = resolve_node_input(
             node=node,
             graph=self.graph,
             prompt=self.prompt,
             outputs=self.result.outputs,
         )
+        workspace = build_workspace_context(self.db, self.conversation)
+        runtime = build_task_context(
+            self.db,
+            self.conversation,
+            task=self.task,
+            workflow_run=self.workflow_run,
+        )
+        node_input.setdefault("workspace", workspace.to_dict())
+        node_input.setdefault("workspace_text", workspace.to_text())
+        node_input.setdefault("runtime", runtime.to_dict())
+        return node_input
 
     async def _fail_run(self, node: Node | None, error: Exception | None = None) -> None:
         error_text = str(error) if error else None
