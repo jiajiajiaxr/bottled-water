@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 
 from sqlalchemy.orm import Session
@@ -11,7 +10,9 @@ from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.agents.tool_loop import run_agentic_tool_loop
 from app.services.ark import ark_client
 from app.services.chat.artifacts import _publish_tool_artifacts
-from app.services.llm_gateway import stream_model_config
+from app.services.context.builder import ContextBuilder
+from app.services.context.state import update_conversation_state_after_turn
+from app.services.llm_gateway import stream_model_config_chat
 from app.services.output_filter import strip_internal_agent_output
 from app.services.queue import queue_service
 from app.services.realtime.event_bus import event_bus
@@ -203,41 +204,27 @@ async def _run_direct_agent_without_function_calling(
         "\n你正在单聊模式直接响应用户。只使用你被授权的工具/Skill/MCP 结果，"
         "不要伪装成 Master；如果没有工具权限，就作为纯对话 Agent 回复。"
     )
-    tool_summary = json.dumps(tool_context, ensure_ascii=False)[:6000]
+    context_bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=user_message,
+        agent=agent,
+        system_prompt=system_prompt,
+        prompt=prompt,
+        mode="direct_without_function_calling",
+        task=task,
+        node_input={"agentic_tool_context": tool_context} if tool_context else None,
+    )
+    messages = context_bundle.messages
     thinking_enabled = (user_message.extra or {}).get("thinking_enabled") is True
     thinking = {"type": "enabled", "budget_tokens": 1024} if thinking_enabled else None
     model_config_id = (agent.config or {}).get("model_config_id")
-    if model_config_id:
-        try:
-            async for chunk in stream_model_config(
-                db,
-                str(model_config_id),
-                f"{system_prompt}\n\n工具执行摘要：{tool_summary}\n\n用户：{prompt}",
-            ):
-                text = chunk.get("text", "")
-                if text:
-                    stream_text += text
-                    await event_bus.publish(
-                        channel,
-                        "content_block_delta",
-                        {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "text_delta", "text": text}},
-                    )
-        except Exception as exc:
-            stream_text = f"{agent.name} 的专属模型调用失败，已降级：{exc}"
-            await event_bus.publish(
-                channel,
-                "content_block_delta",
-                {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "text_delta", "text": stream_text}},
-            )
-    else:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "system", "content": "工具执行摘要：" + tool_summary},
-            {"role": "user", "content": prompt},
-        ]
-        async for event in ark_client.stream_chat(
-            messages, purpose=f"agent:{agent.type}", thinking=thinking
-        ):
+
+    try:
+        if model_config_id:
+            event_stream = stream_model_config_chat(db, str(model_config_id), messages)
+        else:
+            event_stream = ark_client.stream_chat(messages, purpose=f"agent:{agent.type}", thinking=thinking)
+        async for event in event_stream:
             if event.type == "delta":
                 if event.text:
                     stream_text += event.text
@@ -255,6 +242,18 @@ async def _run_direct_agent_without_function_calling(
                     )
             elif event.type == "error":
                 stream_text += f"\n模型调用异常，已降级：{event.error}"
+    except Exception as exc:
+        stream_text = f"{agent.name} 的专属模型调用失败，已降级：{exc}"
+        await event_bus.publish(
+            channel,
+            "content_block_delta",
+            {
+                "agent_message_id": assistant.id,
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "delta": {"type": "text_delta", "text": stream_text},
+            },
+        )
 
     display_text = strip_internal_agent_output(stream_text)
     assistant.content = {
@@ -262,6 +261,14 @@ async def _run_direct_agent_without_function_calling(
         "thinking": strip_internal_agent_output(reasoning_text) if reasoning_text else "",
     }
     assistant.status = "completed"
+    update_conversation_state_after_turn(
+        db,
+        conversation,
+        user_message=user_message,
+        assistant_message=assistant,
+        final_text=assistant.content["text"],
+        tool_results=[],
+    )
     subtask.status = "COMPLETED"
     subtask.completed_at = utcnow()
     subtask.output = {"summary": assistant.content["text"][:500], "agentic_tools": tool_context}

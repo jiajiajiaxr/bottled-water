@@ -3,11 +3,12 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import Base
 from app.models import Agent, Artifact, Conversation, FileAsset, Message, ToolInvocation, User, Workspace
+from app.services.agents.direct import _run_direct_agent_without_function_calling
 from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.ark import LLMStreamEvent
 from app.services.context.builder import ContextBuilder
@@ -244,7 +245,10 @@ async def test_agent_loop_uses_role_history_and_state_for_math_followup() -> Non
 
     async def first_stream(messages: list[dict[str, str]], **_kwargs: object):
         assert messages[-1]["content"] == "1+1等于几"
-        yield LLMStreamEvent(type="delta", text="2")
+        yield LLMStreamEvent(
+            type="delta",
+            text="在常规十进制算术里，一加一的标准答案为2。当然二进制里 1+1=10。",
+        )
         yield LLMStreamEvent(type="done", usage={})
 
     first_result = await _run_loop(db, conversation, first, agent, first_stream)
@@ -271,6 +275,60 @@ async def test_agent_loop_uses_role_history_and_state_for_math_followup() -> Non
 
     assert result.assistant is not None
     assert "4" in result.assistant.content["text"]
+    assert conversation_state(conversation)["last_math_result"] == 4
+
+
+@pytest.mark.asyncio
+async def test_direct_agent_fallback_uses_role_history() -> None:
+    db = _memory_session()
+    user, conversation = _user_conversation(db)
+    agent = _agent(db, user)
+    db.add_all([
+        _message(conversation, user, "一加一等于多少"),
+        Message(
+            conversation_id=conversation.id,
+            sender_type="agent",
+            sender_id=agent.id,
+            sender_name=agent.name,
+            content={"text": "一加一等于2。"},
+            status="completed",
+        ),
+    ])
+    current = _message(conversation, user, "再加2呢")
+    db.add(current)
+    db.commit()
+
+    async def fake_stream(messages: list[dict[str, str]], **_kwargs: object):
+        serialized = "\n".join(str(item.get("content")) for item in messages)
+        assert [item["role"] for item in messages][-3:] == ["user", "assistant", "user"]
+        assert "一加一等于多少" in serialized
+        assert "一加一等于2" in serialized
+        assert messages[-1]["content"] == "再加2呢"
+        yield LLMStreamEvent(type="delta", text="4")
+        yield LLMStreamEvent(type="done", usage={})
+
+    with patch("app.services.agents.direct.run_agentic_tool_loop", new_callable=AsyncMock) as tool_loop:
+        tool_loop.return_value = {}
+        with patch("app.services.agents.direct._publish_tool_artifacts", new_callable=AsyncMock):
+            with patch("app.services.agents.direct.queue_service.enqueue", new_callable=AsyncMock):
+                with patch("app.services.agents.direct.event_bus.publish", new_callable=AsyncMock):
+                    with patch("app.services.agents.direct.ark_client.stream_chat", fake_stream):
+                        await _run_direct_agent_without_function_calling(
+                            db,
+                            conversation=conversation,
+                            user_message=current,
+                            agent=agent,
+                            prompt="再加2呢",
+                            channel=f"conversation:{conversation.id}",
+                        )
+
+    assistant = db.scalar(
+        select(Message)
+        .where(Message.conversation_id == conversation.id, Message.sender_type == "agent")
+        .order_by(Message.created_at.desc())
+    )
+    assert assistant is not None
+    assert assistant.content["text"] == "4"
     assert conversation_state(conversation)["last_math_result"] == 4
 
 
