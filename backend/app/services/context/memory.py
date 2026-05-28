@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -69,7 +70,7 @@ def attachment_context(message: Message, *, max_chars: int = 12_000) -> str:
 def _usable_message(message: Message, current_message_id: str | None) -> bool:
     if message.id == current_message_id:
         return False
-    if message.status == "streaming":
+    if message.sender_type == "agent" and message.status == "streaming":
         return False
     text = str((message.content or {}).get("text") or "").strip()
     return bool(text)
@@ -94,7 +95,18 @@ def _message_to_chat(message: Message) -> dict[str, str]:
     role = "assistant" if message.sender_type == "agent" else "user"
     name = message.sender_name or message.sender_type
     text = str((message.content or {}).get("text") or "")
-    return {"role": role, "content": f"{name}: {text}"}
+    label = "助手" if role == "assistant" else "用户"
+    return {
+        "role": role,
+        "content": (
+            "【当前会话历史消息】\n"
+            f"时间：{_message_time(message)}\n"
+            f"角色：{label}\n"
+            f"发送者：{name}\n"
+            f"状态：{message.status}\n"
+            f"内容：{text}"
+        ),
+    }
 
 
 def _existing_summary(conversation: Conversation) -> str:
@@ -108,7 +120,7 @@ def _persist_summary(conversation: Conversation, messages: list[Message], *, pre
     for message in messages[-40:]:
         speaker = message.sender_name or message.sender_type
         text = str((message.content or {}).get("text") or "")
-        lines.append(f"{speaker}: {trim_text(text, max_chars=500)}")
+        lines.append(f"{_message_time(message)} {speaker}: {trim_text(text, max_chars=500)}")
     summary = trim_text("\n".join(lines), max_chars=8000)
     extra = conversation.extra if isinstance(conversation.extra, dict) else {}
     conversation.extra = {
@@ -121,3 +133,10 @@ def _persist_summary(conversation: Conversation, messages: list[Message], *, pre
         },
     }
     return summary
+
+
+def _message_time(message: Message) -> str:
+    value = getattr(message, "created_at", None)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return "unknown"
