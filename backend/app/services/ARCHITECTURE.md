@@ -39,6 +39,7 @@ This directory is organized by service domain. The previous root-level service e
 - `tools/permissions.py`: tool name normalization and user permission helpers.
 - `tools/schema.py`: lightweight JSON Schema argument validation for model-generated tool calls.
 - `tools/registry.py`: compatibility re-export layer for older imports.
+- `workspaces/filesystem.py`: workspace-scoped runtime directories, safe path resolution, and file listing used by files, artifacts, sandbox, and custom tools.
 - `mcp/transports/`: HTTP, stdio, and reserved SSE/WebSocket MCP transport adapters.
 - `skills/runners/`: prompt, Agent, MCP compatibility, and script Skill runner boundaries.
 - `realtime/event_bus.py`: in-memory EventBus and event replay.

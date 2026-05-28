@@ -21,7 +21,7 @@ def start_tool_invocation(
     invocation = ToolInvocation(
         tool_id=tool.id if tool else None,
         owner_id=user.id if user else None,
-        workspace_id=tool.workspace_id if tool else None,
+        workspace_id=str(arguments.get("workspace_id") or "") or (tool.workspace_id if tool else None),
         conversation_id=conversation_id,
         tool_name=tool_name,
         tool_type=tool_type,

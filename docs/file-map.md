@@ -87,6 +87,7 @@ agenthub/
 - `backend/app/services/llm_gateway.py`：模型配置测试和模型调用统一入口。
 - `backend/app/services/tools/`：Tool 数据库目录、自定义工具、权限、schema 校验和 `tool_invocations` 运行记录。
 - `backend/app/services/tools/builtins/`：内置 Tool 分层实现，包含 artifact、file、sandbox 等复杂能力包。
+- `backend/app/services/workspaces/filesystem.py`：工作区级文件系统根目录、路径校验、子目录隔离和文件列表工具。
 - `backend/app/services/mcp/`：MCP server catalog、工具发现、schema 校验、调用记录和审计日志。
 - `backend/app/services/mcp/transports/`：MCP HTTP、stdio、SSE/WebSocket transport 分层实现。
 - `backend/app/services/skills/`：Skill manifest、包解析、运行、测试、版本、依赖和 Agent 激活上下文。
@@ -153,9 +154,12 @@ agenthub/
 
 ## 运行数据目录
 
-- `var/storage/uploads`：本地上传文件。
-- `var/ai-tools/generated`：AI 生成或用户创建的 Python 工具片段。
+- `backend/var/workspaces/{workspace_id}/files`：工作区上传文件。
+- `backend/var/workspaces/{workspace_id}/artifacts`：工作区产物真实文件与预览文件。
+- `backend/var/workspaces/{workspace_id}/sandbox`：工作区沙箱执行目录，按会话、Agent、任务继续隔离。
+- `backend/var/workspaces/{workspace_id}/tools`：AI 生成或用户创建的 Python 工具片段。
+- `backend/var/workspaces/{workspace_id}/logs`：工作区运行日志目录。
 - `var/backend.log`、`var/backend.err.log`：后端运行日志。
 - `var/frontend.log`、`var/frontend.err.log`：前端运行日志。
 
-`var` 是本地运行数据目录，里面的内容不属于核心源码。
+`backend/var` 和根目录 `var` 都是本地运行数据目录，里面的内容不属于核心源码。

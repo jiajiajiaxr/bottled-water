@@ -8,7 +8,6 @@ from typing import Any
 from app.core.errors import ValidationAppError
 
 
-SANDBOX_ROOT = Path(__file__).resolve().parents[5] / "var" / "sandboxes"
 MAX_TIMEOUT_SECONDS = 30
 OUTPUT_LIMIT = 60_000
 DENIED_EXECUTABLES = {
@@ -20,17 +19,6 @@ ALLOWED_EXECUTABLES = {
     "pnpm", "pnpm.cmd", "pytest", "pytest.exe", "ruff", "ruff.exe", "uv", "uv.exe",
 }
 TEST_EXECUTABLES = {"pytest", "ruff", "npm", "pnpm", "uv"}
-
-
-def resolve_workdir(sandbox_id: str, workdir: str) -> Path:
-    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", sandbox_id or "default").strip("-") or "default"
-    root = (SANDBOX_ROOT / safe_id).resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    target = (root / workdir.strip().lstrip("/\\")).resolve() if workdir else root
-    if target != root and root not in target.parents:
-        raise ValidationAppError("workdir escapes sandbox root")
-    target.mkdir(parents=True, exist_ok=True)
-    return target
 
 
 def validate_command_text(command: str) -> None:

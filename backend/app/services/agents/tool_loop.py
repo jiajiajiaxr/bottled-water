@@ -140,6 +140,9 @@ def select_agent_mcp_action(db: Session, conversation: Conversation, prompt: str
 
 def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> dict[str, Any]:
     args: dict[str, Any] = {"input": prompt, "prompt": prompt, "conversation_id": conversation.id}
+    workspace_id = _workspace_id(conversation)
+    if workspace_id:
+        args["workspace_id"] = workspace_id
     if name.startswith("artifact.create_"):
         args.update({"title": "AgentHub 工具产物", "body": prompt})
         if name in {"artifact.create_pdf", "artifact.create_docx"}:
@@ -156,7 +159,7 @@ def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> di
         args.setdefault("path", "/api/v1/health")
         args.setdefault("command", "pytest -q")
     if name == "sandbox.run":
-        args.setdefault("command", "echo AgentHub worker sandbox")
+        args.setdefault("command", "python --version")
     if name == "security.audit":
         args.setdefault("target", prompt)
     if name == "document.review":

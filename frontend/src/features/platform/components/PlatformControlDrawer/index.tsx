@@ -145,6 +145,10 @@ export function PlatformControlDrawer({
 
   const activeWorkspace =
     workspaces.find((item) => item.id === selectedWorkspace) ?? workspaces[0];
+  const selectedSandboxSession = useMemo(
+    () => sandboxes.find((item) => item.id === selectedSandbox),
+    [sandboxes, selectedSandbox],
+  );
   const filteredSkills = useMemo(() => {
     const keyword = skillSearch.trim().toLowerCase();
     if (!keyword) return skills;
@@ -1844,6 +1848,22 @@ export function PlatformControlDrawer({
                       value: sandbox.id,
                     }))}
                   />
+                  {selectedSandboxSession && (
+                    <div className="mt-8">
+                      <Space wrap size={[4, 4]}>
+                        <Tag>{selectedSandboxSession.status}</Tag>
+                        {selectedSandboxSession.workspace_id && (
+                          <Tag>workspace: {selectedSandboxSession.workspace_id}</Tag>
+                        )}
+                        {selectedSandboxSession.project_id && (
+                          <Tag>project: {selectedSandboxSession.project_id}</Tag>
+                        )}
+                        {selectedSandboxSession.last_command_at && (
+                          <Tag>last: {formatTime(selectedSandboxSession.last_command_at)}</Tag>
+                        )}
+                      </Space>
+                    </div>
+                  )}
                   <Form
                     className="mt-8"
                     form={commandForm}
@@ -1886,10 +1906,61 @@ export function PlatformControlDrawer({
                   </Form>
                   {sandboxResult && (
                     <div className="terminal-box">
-                      <span>{sandboxResult.command}</span>
-                      <pre>{sandboxResult.stdout || sandboxResult.stderr}</pre>
+                      <Space wrap size={[4, 4]}>
+                        <Tag>{sandboxResult.status || "completed"}</Tag>
+                        <Tag>exit {sandboxResult.exit_code}</Tag>
+                        <Tag>{sandboxResult.duration_ms}ms</Tag>
+                      </Space>
+                      <div>{sandboxResult.command}</div>
+                      {sandboxResult.cwd && <small>{sandboxResult.cwd}</small>}
+                      <pre>
+                        {[sandboxResult.stdout, sandboxResult.stderr]
+                          .filter(Boolean)
+                          .join("\n")}
+                      </pre>
                     </div>
                   )}
+                  {selectedSandboxSession?.mounted_files?.length ? (
+                    <>
+                      <Divider />
+                      <List
+                        size="small"
+                        header="工作目录文件"
+                        dataSource={selectedSandboxSession.mounted_files.slice(0, 8)}
+                        renderItem={(file) => (
+                          <List.Item>
+                            <List.Item.Meta
+                              title={file.path}
+                              description={`${file.size} bytes`}
+                            />
+                          </List.Item>
+                        )}
+                      />
+                    </>
+                  ) : null}
+                  {selectedSandboxSession?.command_history?.length ? (
+                    <>
+                      <Divider />
+                      <List
+                        size="small"
+                        header="最近运行记录"
+                        dataSource={selectedSandboxSession.command_history.slice(0, 6)}
+                        renderItem={(item) => (
+                          <List.Item>
+                            <List.Item.Meta
+                              title={
+                                <Space>
+                                  <span>{item.command}</span>
+                                  <Tag>{item.status || item.exit_code}</Tag>
+                                </Space>
+                              }
+                              description={item.cwd || item.created_at}
+                            />
+                          </List.Item>
+                        )}
+                      />
+                    </>
+                  ) : null}
                 </Card>
                 <Card title="远程连接">
                   <Form

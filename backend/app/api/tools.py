@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -20,6 +19,7 @@ from app.services.serialization import redact_sensitive, tool_definition_to_dict
 from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.catalog import ensure_tool_tables, get_tool_definition, list_tools
 from app.services.tools.executor import invoke_tool_async
+from app.services.workspaces.filesystem import safe_segment, workspace_area
 
 
 router = APIRouter(tags=["tools"])
@@ -67,10 +67,10 @@ def _safe_name(value: str) -> str:
     return name or "generated_tool"
 
 
-def _tool_workspace_file(name: str, code: str) -> str:
-    root = Path(__file__).resolve().parents[3] / "var" / "ai-tools" / "generated"
+def _tool_workspace_file(name: str, code: str, workspace_id: str | None = None) -> str:
+    root = workspace_area(workspace_id or "default", "tools") / "generated"
     root.mkdir(parents=True, exist_ok=True)
-    path = root / f"{_safe_name(name)}.py"
+    path = root / f"{safe_segment(_safe_name(name))}.py"
     path.write_text(code, encoding="utf-8")
     return str(path)
 
@@ -94,7 +94,7 @@ def _fallback_tool_spec(payload: GenerateToolRequest, reason: str) -> dict[str, 
         "output_schema": {"type": "object", "additionalProperties": True},
         "permissions": payload.allowed_permissions,
         "implementation": {"language": "python", "code": code},
-        "runtime": {"mode": "restricted_python", "workspace": "var/ai-tools"},
+        "runtime": {"mode": "restricted_python", "workspace": "workspace/tools"},
         "tags": list(dict.fromkeys([*payload.tags, "ai-generated"])),
         "config": {"generation": {"provider_status": "fallback", "reason": reason}},
     }
@@ -204,7 +204,7 @@ async def create_tool(
         raise ValidationAppError("工具名称已存在")
     implementation = redact_sensitive(payload.implementation)
     code = str(implementation.get("code") or "")
-    source_path = _tool_workspace_file(payload.name, code) if code else None
+    source_path = _tool_workspace_file(payload.name, code, payload.workspace_id) if code else None
     tool = ToolDefinition(
         owner_id=user.id,
         workspace_id=payload.workspace_id,
@@ -219,7 +219,7 @@ async def create_tool(
         output_schema=payload.output_schema,
         permissions=payload.permissions,
         implementation={**implementation, **({"source_path": source_path} if source_path else {})},
-        runtime=payload.runtime or {"mode": "restricted_python", "workspace": "var/ai-tools"},
+        runtime=payload.runtime or {"mode": "restricted_python", "workspace": "workspace/tools"},
         tags=payload.tags,
         config=redact_sensitive(payload.config),
     )
@@ -241,7 +241,7 @@ async def generate_tool(
     if spec["name"] in BUILTIN_TOOLS:
         spec["name"] = f"custom_{spec['name']}"
     code = str((spec.get("implementation") or {}).get("code") or "")
-    source_path = _tool_workspace_file(spec["name"], code) if code else None
+    source_path = _tool_workspace_file(spec["name"], code, payload.workspace_id) if code else None
     tool = ToolDefinition(
         owner_id=user.id,
         workspace_id=payload.workspace_id,
@@ -289,7 +289,7 @@ async def update_tool(
     if "implementation" in data and data["implementation"]:
         code = str(data["implementation"].get("code") or "")
         if code:
-            data["implementation"] = {**data["implementation"], "source_path": _tool_workspace_file(tool.name, code)}
+            data["implementation"] = {**data["implementation"], "source_path": _tool_workspace_file(tool.name, code, tool.workspace_id)}
     for key, value in data.items():
         if key in {"implementation", "runtime", "config"} and value is not None:
             value = redact_sensitive(value)

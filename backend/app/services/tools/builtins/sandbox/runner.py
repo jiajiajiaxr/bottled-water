@@ -22,13 +22,6 @@ def run_command(command: str, *, cwd: Path, timeout: int, test_mode: bool) -> di
     if not args:
         raise ValidationAppError("command cannot be empty")
     executable = Path(args[0]).name.lower()
-    if command.lower().startswith("echo "):
-        return {"stdout": command[5:].strip() + "\n", "stderr": "", "exit_code": 0}
-    if executable == "pwd":
-        return {"stdout": str(cwd) + "\n", "stderr": "", "exit_code": 0}
-    if executable == "ls":
-        names = sorted(item.name for item in cwd.iterdir())
-        return {"stdout": "\n".join(names) + ("\n" if names else ""), "stderr": "", "exit_code": 0}
     if executable in DENIED_EXECUTABLES or executable not in ALLOWED_EXECUTABLES:
         raise ValidationAppError(f"command executable is not allowed: {args[0]}")
     if test_mode and base_executable(executable) not in TEST_EXECUTABLES:

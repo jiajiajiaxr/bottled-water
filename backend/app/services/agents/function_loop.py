@@ -323,7 +323,12 @@ async def run_agent_function_call_loop(
             function = function if isinstance(function, dict) else {}
             tool_name = str(function.get("name") or "")
             tool_call_id = str(tool_call.get("id") or f"call_{round_num}_{len(tool_results) + 1}")
-            arguments = tool_arguments(str(function.get("arguments") or ""))
+            arguments = _tool_arguments_with_context(
+                tool_arguments(str(function.get("arguments") or "")),
+                conversation=conversation,
+                agent=agent,
+                task=task,
+            )
             logger.info(
                 "[agent_function_loop] tool_call agent=%s name=%s arguments=%s",
                 agent.id,
@@ -498,3 +503,22 @@ async def run_agent_function_call_loop(
             ),
         },
     )
+
+
+def _tool_arguments_with_context(
+    arguments: dict[str, Any],
+    *,
+    conversation: Conversation,
+    agent: Agent,
+    task: Task | None,
+) -> dict[str, Any]:
+    extra = conversation.extra if isinstance(conversation.extra, dict) else {}
+    enriched = dict(arguments)
+    enriched.setdefault("conversation_id", conversation.id)
+    enriched.setdefault("agent_id", agent.id)
+    if task:
+        enriched.setdefault("task_id", task.id)
+    workspace_id = extra.get("workspace_id") or extra.get("workspaceId")
+    if workspace_id:
+        enriched.setdefault("workspace_id", str(workspace_id))
+    return enriched

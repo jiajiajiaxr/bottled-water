@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import shlex
-
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
+from app.core.errors import ForbiddenError, NotFoundError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import RemoteConnection, SandboxSession, User, Workspace, utcnow
 from app.schemas.requests import CreateRemoteConnectionRequest, CreateSandboxRequest, RunSandboxCommandRequest
 from app.services.serialization import remote_connection_to_dict, sandbox_to_dict
+from app.services.tools.builtins.sandbox.executor import run_existing_sandbox_command
+from app.services.workspaces.filesystem import list_files, scoped_dir
 
 
 router = APIRouter(tags=["sandbox-remote"])
@@ -28,18 +28,20 @@ def _validate_workspace(db: Session, user: User, workspace_id: str | None) -> No
         return
     workspace = db.get(Workspace, workspace_id)
     if not workspace or workspace.deleted_at is not None:
-        raise NotFoundError("工作区不存在")
+        raise NotFoundError("workspace not found")
     if workspace.owner_id != user.id and user.role != "admin":
-        raise ForbiddenError("无权访问该工作区")
+        raise ForbiddenError("no permission to access this workspace")
 
 
 def _get_sandbox(db: Session, user: User, sandbox_id: str) -> SandboxSession:
     ensure_sandbox_tables(db)
-    sandbox = db.scalar(select(SandboxSession).where(SandboxSession.id == sandbox_id, SandboxSession.deleted_at.is_(None)))
+    sandbox = db.scalar(
+        select(SandboxSession).where(SandboxSession.id == sandbox_id, SandboxSession.deleted_at.is_(None))
+    )
     if not sandbox:
-        raise NotFoundError("沙箱不存在")
+        raise NotFoundError("sandbox not found")
     if sandbox.owner_id != user.id and user.role != "admin":
-        raise ForbiddenError("无权访问该沙箱")
+        raise ForbiddenError("no permission to access this sandbox")
     return sandbox
 
 
@@ -70,11 +72,12 @@ async def create_sandbox(
         image=payload.image,
         status="ready",
         resource_limits=payload.resource_limits or {"cpu": "1", "memory": "1Gi", "timeout_seconds": 300},
+        mounted_files=list_files(scoped_dir(payload.workspace_id or "default", "sandbox", task_id=payload.project_id)),
     )
     db.add(session)
     db.commit()
     db.refresh(session)
-    return ok(sandbox_to_dict(session), "沙箱已创建")
+    return ok(sandbox_to_dict(session), "sandbox created")
 
 
 @router.post("/sandboxes/{sandbox_id}/commands")
@@ -85,27 +88,17 @@ async def run_sandbox_command(
     user: User = Depends(get_current_user),
 ):
     session = _get_sandbox(db, user, sandbox_id)
-    command = payload.command.strip()
-    if not command:
-        raise ValidationAppError("命令不能为空")
-    blocked = {"rm -rf /", "format", "shutdown", "reboot"}
-    if any(item in command.lower() for item in blocked):
-        raise ValidationAppError("命令被沙箱安全策略拦截")
-    session.status = "running"
-    session.last_command_at = utcnow()
-    output = {
-        "command": command,
-        "argv": shlex.split(command, posix=False),
-        "exit_code": 0,
-        "stdout": f"[mock-sandbox] 已在 {session.image} 中执行：{command}",
-        "stderr": "",
-        "duration_ms": min(payload.timeout_seconds * 1000, 1200),
-        "created_at": utcnow().isoformat(),
-    }
-    session.command_history = [output, *(session.command_history or [])][:50]
-    session.status = "ready"
+    result = run_existing_sandbox_command(
+        db,
+        user,
+        session,
+        command=payload.command.strip(),
+        timeout=payload.timeout_seconds,
+        workdir=payload.workdir or payload.cwd or "",
+    )
     db.commit()
-    return ok({"sandbox": sandbox_to_dict(session), "result": output}, "命令执行完成")
+    db.refresh(session)
+    return ok({"sandbox": sandbox_to_dict(session), "result": result}, "command completed")
 
 
 @router.post("/sandboxes/{sandbox_id}/stop")
@@ -117,7 +110,7 @@ async def stop_sandbox(
     session = _get_sandbox(db, user, sandbox_id)
     session.status = "stopped"
     db.commit()
-    return ok(sandbox_to_dict(session), "沙箱已停止")
+    return ok(sandbox_to_dict(session), "sandbox stopped")
 
 
 @router.get("/remote-connections")
@@ -151,7 +144,7 @@ async def create_remote_connection(
     db.add(connection)
     db.commit()
     db.refresh(connection)
-    return ok(remote_connection_to_dict(connection), "远程连接已创建")
+    return ok(remote_connection_to_dict(connection), "remote connection created")
 
 
 @router.post("/remote-connections/{connection_id}/connect")
@@ -165,11 +158,11 @@ async def connect_remote(
         select(RemoteConnection).where(RemoteConnection.id == connection_id, RemoteConnection.deleted_at.is_(None))
     )
     if not connection:
-        raise NotFoundError("远程连接不存在")
+        raise NotFoundError("remote connection not found")
     if connection.owner_id != user.id and user.role != "admin":
-        raise ForbiddenError("无权访问远程连接")
+        raise ForbiddenError("no permission to access this remote connection")
     connection.status = "connected"
     connection.last_connected_at = utcnow()
     connection.session_state = {"active_tab": connection.endpoint or "about:blank", "mode": connection.connection_type}
     db.commit()
-    return ok(remote_connection_to_dict(connection), "远程连接已建立")
+    return ok(remote_connection_to_dict(connection), "remote connection established")

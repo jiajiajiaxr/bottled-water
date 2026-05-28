@@ -7,10 +7,10 @@ from pathlib import Path
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.core.errors import ValidationAppError
 from app.models import AuditLog, FileAsset, KnowledgeBase, KnowledgeDocument, User
 from app.services.tools.builtins.file import extract_text_from_path
+from app.services.workspaces.filesystem import scoped_dir, safe_segment, workspace_id_from_conversation
 
 
 SAFE_NAME = re.compile(r"[^a-zA-Z0-9._\-\u4e00-\u9fff]+")
@@ -45,6 +45,8 @@ async def save_upload(
     purpose: str = "attachment",
 ) -> FileAsset:
     ensure_extension_tables(db)
+    from app.core.config import get_settings
+
     settings = get_settings()
     max_bytes = settings.max_upload_mb * 1024 * 1024
     raw = await upload.read()
@@ -52,7 +54,11 @@ async def save_upload(
         raise ValidationAppError(f"文件超过 {settings.max_upload_mb}MB 限制")
     checksum = hashlib.sha256(raw).hexdigest()
     name = safe_filename(upload.filename or "upload.bin")
-    folder = Path(settings.storage_dir) / "uploads" / user.id[:8]
+    folder = scoped_dir(
+        workspace_id_from_conversation(db, conversation_id),
+        "files",
+        conversation_id=conversation_id,
+    ) / safe_segment(user.id[:8], default="user")
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{checksum[:12]}-{name}"
     path.write_bytes(raw)

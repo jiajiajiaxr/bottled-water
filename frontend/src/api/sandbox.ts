@@ -32,6 +32,7 @@ export async function createSandbox(payload: {
       image: payload.image,
       resource_limits: payload.resource_limits,
       status: "ready",
+      mounted_files: [],
       command_history: [],
     };
   }
@@ -42,6 +43,7 @@ export async function runSandboxCommand(
   payload: {
     command: string;
     timeout_seconds?: number;
+    workdir?: string;
     cwd?: string;
     env?: Record<string, string>;
   },
@@ -56,8 +58,12 @@ export async function runSandboxCommand(
     });
   } catch {
     const result: SandboxCommandResult = {
+      status: "fallback",
+      capability_level: "fallback",
+      sandbox_id: sandboxId,
       command: payload.command,
       argv: payload.command.split(" "),
+      cwd: payload.cwd || payload.workdir || "",
       exit_code: 0,
       stdout: `[mock-sandbox] ${payload.command}`,
       stderr: "",

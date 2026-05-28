@@ -35,9 +35,9 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
     if name == "api.test":
         return run_api_test(arguments)
     if name == "sandbox.run":
-        return run_sandbox_command(arguments)
+        return run_sandbox_command(db, user, arguments)
     if name == "test.run":
-        return run_test_command(arguments)
+        return run_test_command(db, user, arguments)
     if name == "browser.preview":
         return run_browser_preview(arguments)
     if name == "security.audit":

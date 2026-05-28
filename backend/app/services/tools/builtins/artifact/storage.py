@@ -3,15 +3,14 @@ from __future__ import annotations
 import hashlib
 import re
 from html.parser import HTMLParser
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.models import Artifact, FileAsset
 from app.services.tools.builtins.artifact.renderers import build_content_model
 from app.services.tools.builtins.file.converters import GeneratedFile, generate_file
+from app.services.workspaces.filesystem import scoped_dir, safe_segment, workspace_id_from_conversation
 
 
 BINARY_ARTIFACT_FORMATS = {"pdf", "docx", "xlsx", "pptx"}
@@ -98,7 +97,12 @@ def persist_artifact_file(
     raw = generated.content
     checksum = hashlib.sha256(raw).hexdigest()
     safe_name = _safe_filename(generated.filename)
-    folder = Path(get_settings().storage_dir) / "artifacts" / artifact.id / f"v{version}"
+    workspace_id = workspace_id_from_conversation(db, artifact.conversation_id)
+    folder = scoped_dir(
+        workspace_id,
+        "artifacts",
+        conversation_id=artifact.conversation_id,
+    ) / safe_segment(artifact.id) / f"v{version}"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{role}-{checksum[:12]}-{safe_name}"
     path.write_bytes(raw)

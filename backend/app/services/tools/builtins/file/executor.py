@@ -6,37 +6,58 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
+from app.core.errors import ForbiddenError, NotFoundError
 from app.models import FileAsset, User
 from app.services.tools.builtins.file.converters import convert_file
 from app.services.tools.builtins.file.extractors import embed_text, extract_text_from_path, summarize_text
 from app.services.tools.builtins.file.preview import preview_payload
+from app.services.workspaces.filesystem import resolve_workspace_path, scoped_dir, workspace_id_from_args
 
 
 def invoke_file_tool(db: Session, user: User, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "file.upload":
-        return {"status": "requires_upload", "message": "file.upload 通过 /files/upload multipart 接口执行。"}
+        return {"status": "requires_upload", "message": "file.upload runs through the multipart /files/upload API."}
     file_id = str(arguments.get("file_id") or "")
     if name in {"file.extract_text", "file.preview", "file.convert", "file.summarize", "file.embed"}:
         return _invoke_file_asset_tool(db, user, name, arguments, file_id)
     if name == "file.read":
-        if file_id:
-            asset = _get_file(db, user, file_id)
-            content = Path(asset.storage_path).read_text(encoding="utf-8", errors="ignore")[:200_000]
-            return {"status": "succeeded", "content": content}
-        path = _safe_tool_path(str(arguments.get("path") or ""))
-        return {
-            "status": "succeeded",
-            "path": str(path),
-            "content": path.read_text(encoding="utf-8", errors="ignore")[:200_000],
-        }
+        return _read_workspace_file(db, user, arguments, file_id)
     if name == "file.write":
-        path = _safe_tool_path(str(arguments.get("path") or ""))
-        content = str(arguments.get("content") or "")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        return {"status": "succeeded", "path": str(path), "size": len(content.encode("utf-8"))}
-    raise NotFoundError("文件工具不存在")
+        return _write_workspace_file(db, arguments)
+    raise NotFoundError("file tool not found")
+
+
+def _read_workspace_file(
+    db: Session,
+    user: User,
+    arguments: dict[str, Any],
+    file_id: str,
+) -> dict[str, Any]:
+    if file_id:
+        asset = _get_file(db, user, file_id)
+        content = Path(asset.storage_path).read_text(encoding="utf-8", errors="ignore")[:200_000]
+        return {"status": "succeeded", "file_id": asset.id, "content": content}
+    path = _safe_tool_path(db, arguments)
+    return {
+        "status": "succeeded",
+        "workspace_id": workspace_id_from_args(db, arguments),
+        "path": str(path),
+        "content": path.read_text(encoding="utf-8", errors="ignore")[:200_000],
+    }
+
+
+def _write_workspace_file(db: Session, arguments: dict[str, Any]) -> dict[str, Any]:
+    path = _safe_tool_path(db, arguments)
+    content = str(arguments.get("content") or "")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return {
+        "status": "succeeded",
+        "workspace_id": workspace_id_from_args(db, arguments),
+        "path": str(path),
+        "relative_path": str(arguments.get("path") or ""),
+        "size": len(content.encode("utf-8")),
+    }
 
 
 def _invoke_file_asset_tool(
@@ -77,27 +98,21 @@ def _invoke_file_asset_tool(
     return {"status": "succeeded", "embedding": embed_text(text), "provider": "local-hash"}
 
 
-def _workspace_file_root() -> Path:
-    root = Path(__file__).resolve().parents[5] / "var" / "ai-tools"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _safe_tool_path(relative_path: str) -> Path:
-    clean = relative_path.strip().replace("\\", "/").lstrip("/")
-    if not clean:
-        raise ValidationAppError("path 不能为空")
-    target = (_workspace_file_root() / clean).resolve()
-    root = _workspace_file_root().resolve()
-    if root not in target.parents and target != root:
-        raise ValidationAppError("路径超出 AI 工具工作区")
-    return target
+def _safe_tool_path(db: Session, arguments: dict[str, Any]) -> Path:
+    root = scoped_dir(
+        workspace_id_from_args(db, arguments),
+        "sandbox",
+        conversation_id=str(arguments.get("conversation_id") or "") or None,
+        agent_id=str(arguments.get("agent_id") or "") or None,
+        task_id=str(arguments.get("task_id") or "") or None,
+    )
+    return resolve_workspace_path(root, str(arguments.get("path") or ""))
 
 
 def _get_file(db: Session, user: User, file_id: str) -> FileAsset:
     asset = db.scalar(select(FileAsset).where(FileAsset.id == file_id, FileAsset.deleted_at.is_(None)))
     if not asset:
-        raise NotFoundError("文件不存在")
+        raise NotFoundError("file not found")
     if asset.owner_id != user.id and user.role != "admin":
-        raise ForbiddenError("无权访问该文件")
+        raise ForbiddenError("no permission to access this file")
     return asset

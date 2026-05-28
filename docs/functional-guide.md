@@ -300,7 +300,7 @@ MCP 服务用于接入外部工具和上下文服务。
 
 - 工具 API：`backend/app/api/tools.py`
 - 工具注册与调用：`backend/app/services/tools/registry.py`
-- 自定义工具存放：`var/ai-tools/generated`
+- 自定义工具存放：`backend/var/workspaces/{workspace_id}/tools/generated`
 - 前端管理：`frontend/src/App.tsx` 中全局设置的 `Tools` 页签
 - 测试：`tests/test_tools_files.py`
 
@@ -320,10 +320,14 @@ MCP 服务用于接入外部工具和上下文服务。
 相关代码：
 
 - 沙箱 API：`backend/app/api/sandbox.py`
+- 工作区文件系统：`backend/app/services/workspaces/filesystem.py`
+- 沙箱执行：`backend/app/services/tools/builtins/sandbox/`
 - 部署 API：`backend/app/api/deployments.py`
 - 数据模型：`SandboxSession`、`RemoteConnection`、`Deployment`
 - 前端入口：`frontend/src/App.tsx` 中的 `PlatformControlDrawer`
-- 测试：`tests/test_workspace_security_deploy_task.py`、`tests/test_deployment.py`
+- 测试：`tests/test_workspace_filesystem_sandbox.py`、`tests/test_workspace_security_deploy_task.py`、`tests/test_deployment.py`
+
+沙箱和文件工具默认使用 `backend/var/workspaces/{workspace_id}/`，其中 `files/` 保存上传文件，`artifacts/` 保存产物真实文件，`sandbox/` 承载受控命令执行，`tools/` 保存用户/AI 创建的自定义工具。沙箱运行会继续按 conversation、agent、task 创建子目录，避免不同任务互相污染。
 
 ## 15. 后台任务
 

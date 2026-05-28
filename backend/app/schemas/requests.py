@@ -363,6 +363,8 @@ class CreateSandboxRequest(BaseModel):
 class RunSandboxCommandRequest(BaseModel):
     command: str
     timeout_seconds: int = 30
+    workdir: str = ""
+    cwd: str | None = None
 
 
 class CreateRemoteConnectionRequest(BaseModel):
