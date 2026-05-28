@@ -286,6 +286,172 @@ async def test_generation_failure_closes_lingering_streaming_messages(db: Sessio
 
 
 @pytest.mark.asyncio
+async def test_image_attachment_without_vision_finishes_with_clear_reply(db: Session) -> None:
+    user, conversation, user_message = _user_conversation_message(db, "这个图片是什么")
+    user_message.content = {
+        "text": "这个图片是什么",
+        "attachments": [
+            {
+                "file_id": "image-1",
+                "filename": "demo.png",
+                "content_type": "image/png",
+                "size": 12,
+                "parse_status": "stored",
+                "extracted_text": "[图片文件：demo.png，可交给视觉模型或 OCR 工具继续识别]",
+                "metadata": {"extractor": "vision_entry", "vision_status": "ready_for_vision_model"},
+            }
+        ],
+    }
+    agent = _agent(user, "Writing Agent", "writer")
+    db.add(agent)
+    db.commit()
+
+    async def fail_if_called(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("image without vision should not call model")
+
+    with patch("app.services.agents.function_loop.ark_client.stream_chat", fail_if_called):
+        with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock) as publish:
+            result = await run_agent_function_call_loop(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                agent=agent,
+                prompt="这个图片是什么",
+                channel=f"conversation:{conversation.id}",
+                mode="unit-test",
+            )
+
+    assistant = result.assistant
+    assert assistant is not None
+    assert assistant.status == "completed"
+    assert "未启用视觉/OCR解析" in assistant.content["text"]
+    assert "无法判断图片内容" in assistant.content["text"]
+    assert not db.scalars(select(Message).where(Message.status == "streaming")).all()
+    assert any(call.args[1] == "message_stop" for call in publish.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_pdf_attachment_text_enters_context_once_and_finishes(db: Session) -> None:
+    user, conversation, user_message = _user_conversation_message(db, "总结一下这个文件")
+    user_message.content = {
+        "text": "总结一下这个文件",
+        "attachments": [
+            {
+                "file_id": "pdf-1",
+                "filename": "report.pdf",
+                "content_type": "application/pdf",
+                "size": 100,
+                "parse_status": "parsed",
+                "extracted_text": "PDF 项目方案正文，需要总结关键目标和风险。",
+                "metadata": {"extractor": "pypdf"},
+            }
+        ],
+    }
+    agent = _agent(user, "Writing Agent", "writer")
+    db.add(agent)
+    db.commit()
+
+    async def fake_stream(messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
+        serialized = "\n".join(str(item.get("content")) for item in messages)
+        assert "PDF 项目方案正文" in serialized
+        assert messages[-1]["content"] == "总结一下这个文件"
+        assert serialized.count("PDF 项目方案正文") == 1
+        yield LLMStreamEvent(type="delta", text="文件主要说明项目目标和风险。")
+        yield LLMStreamEvent(type="done", usage={})
+
+    with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream):
+        with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock) as publish:
+            result = await run_agent_function_call_loop(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                agent=agent,
+                prompt="总结一下这个文件",
+                channel=f"conversation:{conversation.id}",
+                mode="unit-test",
+            )
+
+    assert result.assistant is not None
+    assert result.assistant.status == "completed"
+    assert "项目目标和风险" in result.assistant.content["text"]
+    assert not db.scalars(select(Message).where(Message.status == "streaming")).all()
+    assert any(call.args[1] == "message_stop" for call in publish.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_empty_extracted_text_attachment_finishes_with_clear_reply(db: Session) -> None:
+    user, conversation, user_message = _user_conversation_message(db, "总结一下这个文件")
+    user_message.content = {
+        "text": "总结一下这个文件",
+        "attachments": [
+            {
+                "file_id": "empty-1",
+                "filename": "empty.docx",
+                "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "size": 10,
+                "parse_status": "stored",
+                "extracted_text": "",
+                "metadata": {"extractor": "python-docx"},
+            }
+        ],
+    }
+    agent = _agent(user, "Writing Agent", "writer")
+    db.add(agent)
+    db.commit()
+
+    async def fail_if_called(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("empty attachment should not call model")
+
+    with patch("app.services.agents.function_loop.ark_client.stream_chat", fail_if_called):
+        with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock) as publish:
+            result = await run_agent_function_call_loop(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                agent=agent,
+                prompt="总结一下这个文件",
+                channel=f"conversation:{conversation.id}",
+                mode="unit-test",
+            )
+
+    assert result.assistant is not None
+    assert result.assistant.status == "completed"
+    assert "未提取到可读文本" in result.assistant.content["text"]
+    assert not db.scalars(select(Message).where(Message.status == "streaming")).all()
+    assert any(call.args[1] == "message_stop" for call in publish.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_model_exception_path_does_not_leave_streaming_message(db: Session) -> None:
+    user, conversation, user_message = _user_conversation_message(db, "你好")
+    agent = _agent(user, "Daily Chat Agent", "chat")
+    db.add(agent)
+    db.commit()
+
+    async def broken_stream(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("model socket closed")
+        yield LLMStreamEvent(type="done", usage={})
+
+    with patch("app.services.agents.function_loop.ark_client.stream_chat", broken_stream):
+        with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock) as publish:
+            result = await run_agent_function_call_loop(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                agent=agent,
+                prompt="你好",
+                channel=f"conversation:{conversation.id}",
+                mode="unit-test",
+            )
+
+    assert result.assistant is not None
+    assert result.assistant.status == "completed"
+    assert "模型调用异常" in result.assistant.content["text"]
+    assert not db.scalars(select(Message).where(Message.status == "streaming")).all()
+    assert any(call.args[1] == "message_stop" for call in publish.await_args_list)
+
+
+@pytest.mark.asyncio
 async def test_independent_group_completion_updates_last_preview(db: Session) -> None:
     user, conversation, user_message = _user_conversation_message(db, "群聊问题")
     conversation.chat_type = "group"

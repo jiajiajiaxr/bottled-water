@@ -179,18 +179,7 @@ async def run_orchestration(message_id: str) -> None:
 
 
 def _prompt_with_attachments(user_message: Message) -> str:
-    prompt = user_message.content.get("text", "")
-    attachments = user_message.content.get("attachments") or []
-    if not attachments:
-        return prompt
-    attachment_context = "\n\n".join(
-        (
-            f"附件 {index}: {item.get('filename')} ({item.get('content_type')}, {item.get('size')} bytes)\n"
-            f"{item.get('extracted_text') or '[文件已上传，但当前解析器未提取文本]'}"
-        )
-        for index, item in enumerate(attachments, start=1)
-    )
-    return f"{prompt}\n\n## 用户上传附件\n{attachment_context}"
+    return str((user_message.content or {}).get("text") or "")
 
 
 async def _publish_workflow_validation_error(

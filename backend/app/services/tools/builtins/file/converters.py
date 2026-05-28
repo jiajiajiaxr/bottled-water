@@ -180,7 +180,7 @@ def extract_text_from_path(path: Path, *, content_type: str = "", filename: str 
     elif suffix in IMAGE_EXTENSIONS or content_type.startswith("image/"):
         metadata["extractor"] = "vision_entry"
         metadata["vision_status"] = "ready_for_vision_model"
-        text = f"[图片文件：{filename or path.name}，可交给视觉模型或 OCR 工具继续识别]"
+        text = ""
     else:
         metadata["extractor"] = "unsupported"
     text = text.strip()

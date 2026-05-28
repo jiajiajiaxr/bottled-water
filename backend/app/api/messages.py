@@ -13,6 +13,7 @@ from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Conversation, FileAsset, Message, User, utcnow
+from app.services.context.attachments import readable_attachment_text
 from app.services.chat.orchestrator import run_orchestration
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import message_to_dict
@@ -86,7 +87,14 @@ def _normalize_attachments(db: Session, user: User, payload: dict) -> list[dict]
                 "content_type": file_asset.content_type,
                 "size": file_asset.size,
                 "parse_status": file_asset.parse_status,
-                "extracted_text": file_asset.extracted_text[:12000],
+                "extracted_text": readable_attachment_text(
+                    {
+                        "content_type": file_asset.content_type,
+                        "extracted_text": file_asset.extracted_text,
+                        "metadata": file_asset.extra or {},
+                    }
+                )[:12000],
+                "metadata": file_asset.extra or {},
             }
         )
     return normalized

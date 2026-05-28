@@ -70,7 +70,7 @@ class ContextBuilder:
         context_text = join_sections(fit_sections(context_sections, token_budget=max(1000, int(budget * 0.3))))
         messages: list[dict[str, Any]] = [{"role": "system", "content": _system_with_context_policy(system_prompt, context_text)}]
         messages.extend(memory.messages)
-        latest_content = _latest_user_content(prompt, attachments, node_input)
+        latest_content = _latest_user_content(prompt, node_input)
         if group_context.speaker_identities:
             latest_content = format_group_message_content(
                 sender_type=user_message.sender_type,
@@ -135,10 +135,8 @@ def _system_with_context_policy(system_prompt: str, context_text: str) -> str:
     )
 
 
-def _latest_user_content(prompt: str, attachments: str, node_input: dict[str, Any] | None) -> str:
+def _latest_user_content(prompt: str, node_input: dict[str, Any] | None) -> str:
     sections = [prompt]
-    if attachments:
-        sections.append(f"## 当前消息附件\n{attachments}")
     if node_input:
         sections.append(f"## 工作流节点输入\n{compact_json(node_input, max_chars=6000)}")
     return "\n\n".join(sections)

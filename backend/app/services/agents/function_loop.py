@@ -13,6 +13,7 @@ from app.services.agents.function_types import AgentFunctionLoopResult
 from app.services.agents.permission_guard import complete_missing_artifact_tool
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
 from app.services.ark import ark_client
+from app.services.context.attachments import attachment_preflight_reply
 from app.services.context.builder import ContextBuilder
 from app.services.context.state import update_conversation_state_after_turn
 from app.services.llm.tool_calls import detect_artifact_tool
@@ -170,6 +171,77 @@ async def _fail_agent_loop(
     )
 
 
+async def _complete_agent_loop_without_model(
+    db: Session,
+    *,
+    conversation: Conversation,
+    user_message: Message,
+    assistant: Message | None,
+    agent: Agent,
+    channel: str,
+    workflow_run: WorkflowRun | None,
+    workflow_node_id: str | None,
+    final_text: str,
+) -> AgentFunctionLoopResult:
+    text = strip_internal_agent_output(final_text)
+    if assistant:
+        assistant.content = {"text": text}
+        assistant.status = "completed"
+    update_conversation_state_after_turn(
+        db,
+        conversation,
+        user_message=user_message,
+        assistant_message=assistant,
+        final_text=text,
+        tool_results=[],
+    )
+    db.commit()
+    if assistant:
+        await _publish_text_delta(
+            channel=channel,
+            assistant=assistant,
+            agent=agent,
+            text=text,
+            emit_message=True,
+        )
+        await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
+        await event_bus.publish(
+            channel,
+            "message_stop",
+            {
+                "agent_message_id": assistant.id,
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "stop_reason": "end_turn",
+            },
+        )
+    await _publish_workflow_update(
+        db,
+        conversation=conversation,
+        workflow_run=workflow_run,
+        workflow_node_id=workflow_node_id,
+        channel=channel,
+        status="completed",
+        progress=100,
+        output={"summary": text[:1000], "assistant_message_id": assistant.id if assistant else None},
+        message=f"{agent.name} 已完成回复",
+    )
+    return AgentFunctionLoopResult(
+        assistant=assistant,
+        text=text,
+        thinking="",
+        tool_results=[],
+        tool_context={
+            "mode": "function_call_loop",
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "assistant_message_id": assistant.id if assistant else None,
+            "status": "completed",
+            "attachment_preflight": True,
+        },
+    )
+
+
 async def run_agent_function_call_loop(
     db: Session,
     *,
@@ -263,6 +335,23 @@ async def run_agent_function_call_loop(
             channel=channel,
             requested_tool=requested_artifact_tool,
             publish_workflow_update=_publish_workflow_update,
+        )
+
+    preflight_reply = attachment_preflight_reply(
+        prompt,
+        (user_message.content or {}).get("attachments") or [],
+    )
+    if preflight_reply:
+        return await _complete_agent_loop_without_model(
+            db,
+            conversation=conversation,
+            user_message=user_message,
+            assistant=assistant,
+            agent=agent,
+            channel=channel,
+            workflow_run=workflow_run,
+            workflow_node_id=workflow_node_id,
+            final_text=preflight_reply,
         )
 
     try:

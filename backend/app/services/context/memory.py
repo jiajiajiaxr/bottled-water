@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message, Workspace, utcnow
+from app.services.context.attachments import attachment_context_from_items
 from app.services.context.compression import estimate_tokens, trim_text
 from app.services.context.group import SpeakerIdentity, format_group_message_content
 
@@ -63,22 +64,7 @@ def load_conversation_memory(
 
 def attachment_context(message: Message, *, max_chars: int = 12_000) -> str:
     attachments = (message.content or {}).get("attachments") or []
-    if not attachments:
-        return ""
-    parts: list[str] = []
-    for item in attachments:
-        if not isinstance(item, dict):
-            continue
-        filename = str(item.get("filename") or item.get("file_id") or "attachment")
-        content_type = str(item.get("content_type") or "")
-        extracted = str(item.get("extracted_text") or "").strip()
-        if extracted:
-            parts.append(f"- {filename} ({content_type})\n{trim_text(extracted, max_chars=3000)}")
-        elif content_type.startswith("image/"):
-            parts.append(f"- {filename} ({content_type})：图片附件；当前未启用视觉解析，不能假装理解图片内容。")
-        else:
-            parts.append(f"- {filename} ({content_type})：未提取到可读文本。")
-    return trim_text("\n\n".join(parts), max_chars=max_chars)
+    return attachment_context_from_items(attachments, max_chars=max_chars)
 
 
 def maybe_capture_workspace_memory(db: Session, conversation: Conversation, message: Message) -> str:
