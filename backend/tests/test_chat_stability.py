@@ -17,6 +17,7 @@ from app.services.agents.function_types import AgentFunctionLoopResult
 from app.services.ark import LLMStreamEvent
 from app.services.chat.artifacts import _publish_tool_artifacts
 from app.services.chat.finalizer import fail_generation
+from app.services.chat.orchestrator import _complete_independent_group
 from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.runtime import build_edge_states, build_node_states
 
@@ -282,6 +283,54 @@ async def test_generation_failure_closes_lingering_streaming_messages(db: Sessio
     assert "异常结束" in assistant.content["text"]
     assert any(call.args[1] == "message_stop" for call in publish.await_args_list)
     assert any(call.args[1] == "generation_finished" for call in publish.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_independent_group_completion_updates_last_preview(db: Session) -> None:
+    user, conversation, user_message = _user_conversation_message(db, "群聊问题")
+    conversation.chat_type = "group"
+    task = Task(
+        conversation_id=conversation.id,
+        creator_id=user.id,
+        title="group",
+        description="group",
+        status="EXECUTING",
+        progress=80,
+    )
+    workflow = _parallel_agent_workflow(conversation.id, [])
+    workflow_run = WorkflowRun(
+        conversation_id=conversation.id,
+        trigger_message_id=user_message.id,
+        started_by=user.id,
+        status="running",
+        mode="canvas",
+        workflow_snapshot=workflow,
+        node_states=build_node_states(workflow),
+        edge_states=build_edge_states(workflow),
+        progress=80,
+    )
+    db.add_all([task, workflow_run])
+    db.commit()
+
+    with patch("app.services.chat.orchestrator.event_bus.publish", new_callable=AsyncMock):
+        await _complete_independent_group(
+            db,
+            conversation,
+            task,
+            workflow_run,
+            [],
+            [
+                {"agent_name": "Frontend Worker", "text": "前端已回复"},
+                {"agent_name": "Backend Worker", "text": "后端已回复"},
+            ],
+            f"conversation:{conversation.id}",
+        )
+
+    db.refresh(conversation)
+    db.refresh(task)
+    assert task.status == "COMPLETED"
+    assert "Frontend Worker" in conversation.last_message_preview
+    assert "正在回答" not in conversation.last_message_preview
 
 
 def _user() -> User:

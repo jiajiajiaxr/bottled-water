@@ -1,4 +1,4 @@
-import type { ChatMessage } from "../types";
+import type { AgentTask, ChatMessage, WorkflowRun } from "../types";
 
 export const API_BASE = "/api/v1";
 
@@ -125,6 +125,9 @@ export type StreamAssistantHandlers = {
   onMessageStart?: (payload: Record<string, unknown>) => void;
   onMessageUpdated?: (message: ChatMessage) => void;
   onMessageNew?: (message: ChatMessage) => void;
+  onMessageStop?: (payload: Record<string, unknown>) => void;
+  onTaskStatusChanged?: (task: AgentTask) => void;
+  onWorkflowRunUpdated?: (payload: Partial<WorkflowRun> & Record<string, unknown>) => void;
   onToolCallStart?: (payload: Record<string, unknown>) => void;
   onToolCallDone?: (payload: Record<string, unknown>) => void;
   onDone?: (payload?: Record<string, unknown>) => void;

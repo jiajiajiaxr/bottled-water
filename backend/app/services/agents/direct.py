@@ -134,10 +134,14 @@ async def _run_direct_agent(
         )
         return
 
-    subtask.status = "COMPLETED"
+    failed_result = (
+        (result.tool_context or {}).get("status") == "failed"
+        or (result.assistant is not None and result.assistant.status in {"failed", "cancelled"})
+    )
+    subtask.status = "FAILED" if failed_result else "COMPLETED"
     subtask.completed_at = utcnow()
     subtask.output = {"summary": result.text[:500], "tool_results": result.tool_results}
-    task.status = "COMPLETED"
+    task.status = "FAILED" if failed_result else "COMPLETED"
     task.progress = 100
     task.output = {
         **(task.output or {}),
@@ -145,6 +149,8 @@ async def _run_direct_agent(
         "tool_results": result.tool_results,
         "agentic_tools": result.tool_context,
     }
+    if failed_result:
+        task.error_info = {"agent_id": agent.id, "message": result.text[:1000]}
     task.completed_at = utcnow()
     conversation.last_message_preview = result.text[:300]
     conversation.last_message_sender = agent.name

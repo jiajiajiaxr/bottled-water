@@ -6,7 +6,7 @@ import {
 } from "./client";
 import { demoMessages, demoUser } from "../mock";
 import { isVisibleChatMessage } from "../lib/message";
-import type { ChatMessage, UploadedFile } from "../types";
+import type { AgentTask, ChatMessage, UploadedFile, WorkflowRun } from "../types";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
   try {
@@ -146,8 +146,19 @@ export async function streamAssistantReply(
       source.addEventListener("tool_call_done", (event) => {
         handlers.onToolCallDone?.(eventPayload(event));
       });
+      source.addEventListener("task:status_changed", (event) => {
+        handlers.onTaskStatusChanged?.(
+          eventPayload(event) as unknown as AgentTask,
+        );
+      });
+      source.addEventListener("workflow:run_updated", (event) => {
+        handlers.onWorkflowRunUpdated?.(
+          eventPayload(event) as unknown as Partial<WorkflowRun> & Record<string, unknown>,
+        );
+      });
       source.addEventListener("message_stop", (event) => {
         const payload = eventPayload(event);
+        handlers.onMessageStop?.(payload);
         const stopReason = String(payload.stop_reason || "");
         if (
           ["workflow_completed", "generation_finished", "cancelled"].includes(

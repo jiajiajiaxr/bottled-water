@@ -349,6 +349,10 @@ async def _complete_independent_group(
         "agent_replies": agent_replies,
     }
     task.completed_at = utcnow()
+    conversation.last_message_preview = (summary or "多 Agent 已完成本轮回复。")[:300]
+    conversation.last_message_sender = "AgentHub"
+    conversation.last_message_at = utcnow()
+    conversation.activity_score = min(100, conversation.activity_score + 6)
     _mark_workflow_completed(conversation, workflow_run)
     db.commit()
     await finalize_streaming_agent_messages(

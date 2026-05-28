@@ -90,6 +90,59 @@ export function useMessageOperations(currentUserName: string) {
       ) ?? [];
     const tempIdsByAgentId = new Map<string, string>();
     const tempIdsByAuthor = new Map<string, string>();
+    const pendingMessageIds = new Set<string>();
+    const activeToolCalls = new Map<string, { toolName: string; toolCallId: string }>();
+    const isSingleAgentConversation = agentParticipants.length === 1;
+
+    const isTerminalMessageStatus = (status?: string) =>
+      ["completed", "failed", "cancelled", "error"].includes(
+        String(status || "").toLowerCase(),
+      );
+
+    const clearConversationRunning = (streamState: "done" | "error" = "done") => {
+      pendingMessageIds.clear();
+      activeToolCalls.clear();
+      updateLocalRunningConversationIds((current) => {
+        const next = new Set(current);
+        next.delete(conversationId);
+        return next;
+      });
+      updateMessages((current) =>
+        current.map((item) =>
+          item.conversationId === conversationId && item.streamState === "streaming"
+            ? {
+                ...item,
+                streamState,
+                rawContent: { ...item.rawContent, _activeToolCalls: [] },
+              }
+            : item,
+        ),
+      );
+    };
+
+    const clearMessagePending = (messageId?: string) => {
+      if (!messageId) return;
+      pendingMessageIds.delete(messageId);
+      activeToolCalls.clear();
+      updateMessages((current) =>
+        current.map((item) =>
+          item.id === messageId
+            ? {
+                ...item,
+                streamState: item.streamState === "streaming" ? "done" : item.streamState,
+                rawContent: { ...item.rawContent, _activeToolCalls: [] },
+              }
+            : item,
+        ),
+      );
+      if (pendingMessageIds.size === 0 && isSingleAgentConversation) {
+        updateLocalRunningConversationIds((current) => {
+          const next = new Set(current);
+          next.delete(conversationId);
+          return next;
+        });
+      }
+    };
 
     const normalizeIncomingMessage = (incoming: ChatMessage): ChatMessage => ({
       ...incoming,
@@ -167,6 +220,9 @@ export function useMessageOperations(currentUserName: string) {
 
     const upsertFinalMessage = (incoming: ChatMessage) => {
       const normalized = normalizeIncomingMessage(incoming);
+      if (isTerminalMessageStatus(normalized.status)) {
+        clearMessagePending(normalized.id);
+      }
       const agentId =
         normalized.sender_id ||
         (normalized.rawContent?.agent_id as string | undefined);
@@ -247,7 +303,6 @@ export function useMessageOperations(currentUserName: string) {
     let rawBuffer = "";
     let completedPreview = "";
     // 追踪当前消息上正在执行的工具调用
-    const activeToolCalls = new Map<string, { toolName: string; toolCallId: string }>();
     let currentMessageId = "";
 
     const updateActiveToolCalls = (messageId: string) => {
@@ -307,6 +362,7 @@ export function useMessageOperations(currentUserName: string) {
               payload.sender_name ||
               (agentId ? "Agent" : "Assistant"),
           );
+          pendingMessageIds.add(messageId);
           ensureStreamingMessage(messageId, author, agentId);
           activeToolCalls.clear();
         },
@@ -339,6 +395,11 @@ export function useMessageOperations(currentUserName: string) {
           thinkingBatcher.add(messageId);
         },
         onMessageUpdated: upsertFinalMessage,
+        onMessageStop: (payload) => {
+          clearMessagePending(
+            String(payload.agent_message_id || payload.message_id || ""),
+          );
+        },
         onMessageNew: (incoming) => {
           if (!isVisibleChatMessage(incoming)) return;
           if (incoming.kind === "preview_card" || incoming.kind === "event") {
@@ -360,10 +421,55 @@ export function useMessageOperations(currentUserName: string) {
             updateActiveToolCalls(currentMessageId);
           }
         },
+        onTaskStatusChanged: (task) => {
+          const { backgroundTasks, setBackgroundTasks: setTasks } =
+            useTaskStore.getState();
+          const exists = backgroundTasks.some((item) => item.id === task.id);
+          setTasks(
+            exists
+              ? backgroundTasks.map((item) => (item.id === task.id ? task : item))
+              : [task, ...backgroundTasks],
+          );
+          if (
+            task.conversation_id === conversationId &&
+            !isTaskRunning(task.status)
+          ) {
+            updateLocalRunningConversationIds((current) => {
+              const next = new Set(current);
+              next.delete(conversationId);
+              return next;
+            });
+          }
+        },
+        onWorkflowRunUpdated: (payload) => {
+          const status = String(payload.status || "");
+          updateConversations((current) =>
+            current.map((item) =>
+              item.id === conversationId
+                ? {
+                    ...item,
+                    workflow_runtime: {
+                      ...(item.workflow_runtime ?? {}),
+                      ...(payload as NonNullable<typeof item.workflow_runtime>),
+                    },
+                  }
+                : item,
+            ),
+          );
+          if (
+            ["completed", "failed", "cancelled"].includes(status.toLowerCase())
+          ) {
+            updateLocalRunningConversationIds((current) => {
+              const next = new Set(current);
+              next.delete(conversationId);
+              return next;
+            });
+          }
+        },
         onDone: () => {
           deltaBatcher.flushNow();
           thinkingBatcher.flushNow();
-          activeToolCalls.clear();
+          clearConversationRunning("done");
           // 流结束时统一过滤内部输出并清空工具调用状态
           updateMessages((current) =>
             current.map((item) => {
