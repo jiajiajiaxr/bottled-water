@@ -30,10 +30,10 @@ export function mergeToolEvents(...groups: ToolEventRecord[][]): ToolEventRecord
 export function summarizeToolEvents(events: ToolEventRecord[]): ToolSummary | undefined {
   const completed = events.filter((event) => String(event.status || "").toLowerCase() !== "running");
   if (!completed.length) return undefined;
-  const failed = completed.filter((event) => isFailedToolEvent(event));
-  if (failed.length) {
+  const finalFailed = finalFailedToolEvents(completed);
+  if (finalFailed.length) {
     return {
-      label: `工具失败：${formatToolNames(failed, 3).text}`,
+      label: `工具失败：${formatToolNames(finalFailed, 3).text}`,
       tone: "warning",
       details: completed,
     };
@@ -47,7 +47,11 @@ export function summarizeToolEvents(events: ToolEventRecord[]): ToolSummary | un
 
 export function isFailedToolEvent(event: ToolEventRecord) {
   const status = String(event.status || "").toLowerCase();
-  return FAILED_STATUSES.has(status) || Boolean(event.error || event.stderr);
+  if (FAILED_STATUSES.has(status)) return true;
+  if (status === "succeeded" || status === "completed") return false;
+  const exitCode = Number(event.exit_code);
+  if (Number.isFinite(exitCode) && exitCode !== 0) return true;
+  return Boolean(event.error);
 }
 
 export function toolEventDetailLines(event: ToolEventRecord): string[] {
@@ -75,13 +79,19 @@ function normalizeToolEvent(value: unknown): ToolEventRecord {
     toolName: stringValue(record.toolName ?? record.tool_name),
     toolCallId: stringValue(record.toolCallId ?? record.tool_call_id),
     status: stringValue(record.status),
-    exit_code: primitiveValue(record.exit_code),
-    duration_ms: primitiveValue(record.duration_ms),
+    exit_code: primitiveValue(record.exit_code ?? record.exitCode),
+    duration_ms: primitiveValue(record.duration_ms ?? record.durationMs),
     stdout: stringValue(record.stdout),
     stderr: stringValue(record.stderr),
     summary: stringValue(record.summary),
     error: stringValue(record.error ?? record.error_message),
   };
+}
+
+function finalFailedToolEvents(events: ToolEventRecord[]) {
+  const latestByTool = new Map<string, ToolEventRecord>();
+  events.forEach((event) => latestByTool.set(event.toolName, event));
+  return Array.from(latestByTool.values()).filter(isFailedToolEvent);
 }
 
 function formatToolNames(events: ToolEventRecord[], maxTools: number) {

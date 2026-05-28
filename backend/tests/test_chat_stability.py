@@ -136,6 +136,39 @@ async def test_successful_tool_call_is_not_inserted_as_tool_runner_message(db: S
 
 
 @pytest.mark.asyncio
+async def test_retry_success_does_not_insert_failed_tool_runner_message(db: Session) -> None:
+    _user, conversation, _message = _user_conversation_message(db, "运行脚本")
+    channel = f"conversation:{conversation.id}"
+    retry_context = {
+        "executions": [
+            {
+                "tool_name": "sandbox.run",
+                "output": {
+                    "status": "failed",
+                    "conversation_id": conversation.id,
+                    "exit_code": 1,
+                    "stderr": "missing file",
+                },
+            },
+            {
+                "tool_name": "sandbox.run",
+                "output": {
+                    "status": "succeeded",
+                    "conversation_id": conversation.id,
+                    "exit_code": 0,
+                    "stdout": "ok",
+                },
+            },
+        ]
+    }
+
+    with patch("app.services.chat.artifacts.event_bus.publish", new_callable=AsyncMock):
+        await _publish_tool_artifacts(db, channel, retry_context)
+
+    assert db.scalars(select(Message).where(Message.sender_name == "Tool Runner")).all() == []
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_events_are_persisted_without_tool_runner_messages(db: Session) -> None:
     user, conversation, user_message = _user_conversation_message(db, "杩愯涓夋 sandbox")
     agent = _agent(user, "Frontend Worker", "frontend", tools=["sandbox.run"])

@@ -65,15 +65,28 @@ def _merge_output_fields(event: dict[str, Any], output: Any) -> None:
         if output:
             event["stdout"] = _short(output)
         return
-    event["exit_code"] = _first(output, "exit_code", "return_code", "code")
+    nested = output.get("result") if isinstance(output.get("result"), dict) else {}
+    event["exit_code"] = _first(output, "exit_code", "return_code", "code") or _first(
+        nested,
+        "exit_code",
+        "return_code",
+        "code",
+    )
     event["duration_ms"] = event.get("duration_ms") or _first(
         output,
         "duration_ms",
         "elapsed_ms",
+    ) or _first(nested, "duration_ms", "elapsed_ms")
+    event["stdout"] = _short(
+        _first(output, "stdout", "stdout_tail", "output", "text")
+        or _first(nested, "stdout", "stdout_tail", "output", "text")
     )
-    event["stdout"] = _short(_first(output, "stdout", "stdout_tail", "output", "text"))
-    event["stderr"] = _short(_first(output, "stderr", "stderr_tail"))
-    event["error"] = _short(_first(output, "error", "error_message"))
+    event["stderr"] = _short(
+        _first(output, "stderr", "stderr_tail") or _first(nested, "stderr", "stderr_tail")
+    )
+    event["error"] = _short(
+        _first(output, "error", "error_message") or _first(nested, "error", "error_message")
+    )
 
 
 def _first(data: dict[str, Any], *keys: str) -> Any:

@@ -13,14 +13,18 @@ from app.services.serialization import artifact_to_dict, message_to_dict
 async def _publish_tool_artifacts(db: Session, channel: str, tool_context: dict[str, Any]) -> None:
     created_messages: list[Message] = []
     fallback_conversation_id = _conversation_id_from_channel(channel)
+    tool_results = _collect_tool_results(tool_context)
+    final_failed_tools = _final_failed_tool_names(tool_results)
     failed_tool_message_created = False
-    for item in _collect_tool_results(tool_context):
+    for item in tool_results:
         output = item.get("output") if isinstance(item.get("output"), dict) else {}
         tool_name = str(item.get("tool_name") or output.get("tool") or "")
         if not output:
             continue
         await _publish_artifact_outputs(db, channel, output)
         if _should_show_tool_message(tool_name, output):
+            if tool_name not in final_failed_tools:
+                continue
             if failed_tool_message_created:
                 continue
             failed_tool_message_created = True
@@ -144,6 +148,20 @@ def _collect_tool_results(value: Any) -> list[dict[str, Any]]:
     return results
 
 
+def _final_failed_tool_names(items: list[dict[str, Any]]) -> set[str]:
+    final_by_tool: dict[str, dict[str, Any]] = {}
+    for item in items:
+        output = item.get("output") if isinstance(item.get("output"), dict) else {}
+        tool_name = str(item.get("tool_name") or output.get("tool") or "")
+        if tool_name:
+            final_by_tool[tool_name] = output
+    return {
+        tool_name
+        for tool_name, output in final_by_tool.items()
+        if _should_show_tool_message(tool_name, output)
+    }
+
+
 def _artifact_id(output: dict[str, Any]) -> str | None:
     if output.get("artifact_id"):
         return str(output["artifact_id"])
@@ -190,10 +208,19 @@ def _tool_summary(tool_name: str, output: dict[str, Any]) -> str:
     if tool_name == "api.test":
         return f"API 测试 {status}：{output.get('status_code')}"
     if tool_name in {"sandbox.run", "test.run"}:
-        return f"{tool_name} {status}，exit_code={output.get('exit_code')}"
+        return f"{tool_name} {status}，exit_code={_exit_code(output)}"
     if tool_name.startswith("file."):
         return f"{tool_name} {status}"
     return f"{tool_name or 'tool'} {status}"
+
+
+def _exit_code(output: dict[str, Any]) -> Any:
+    if output.get("exit_code") is not None:
+        return output.get("exit_code")
+    result = output.get("result")
+    if isinstance(result, dict):
+        return result.get("exit_code")
+    return None
 
 
 def _compact(value: dict[str, Any]) -> dict[str, Any]:

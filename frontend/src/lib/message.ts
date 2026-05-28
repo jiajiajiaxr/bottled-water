@@ -124,17 +124,19 @@ export function isTaskRunning(status?: string) {
 }
 
 export function isSuccessfulToolRunnerMessage(message: ChatMessage) {
-  if (message.author !== "Tool Runner" || message.kind !== "event") return false;
+  if (message.author !== "Tool Runner") return false;
   const raw = message.rawContent ?? {};
   const output = raw.output;
-  const outputStatus =
-    output && typeof output === "object" && "status" in output
-      ? String((output as { status?: unknown }).status ?? "")
-      : "";
+  const outputRecord = output && typeof output === "object" ? (output as Record<string, unknown>) : {};
+  const nestedResult =
+    outputRecord.result && typeof outputRecord.result === "object"
+      ? (outputRecord.result as Record<string, unknown>)
+      : {};
+  const outputStatus = String(outputRecord.status ?? nestedResult.status ?? "");
   const status = String(raw.status ?? outputStatus ?? message.status ?? "").toLowerCase();
   const hasError =
     Boolean(raw.error || raw.error_message) ||
-    (output && typeof output === "object" && Boolean((output as { error?: unknown }).error));
+    Boolean(outputRecord.error || outputRecord.error_message || nestedResult.error || nestedResult.error_message);
   return !hasError && !["failed", "error", "cancelled", "timeout"].includes(status);
 }
 

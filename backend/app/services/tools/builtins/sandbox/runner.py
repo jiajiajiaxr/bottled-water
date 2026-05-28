@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -26,6 +27,11 @@ def run_command(command: str, *, cwd: Path, timeout: int, test_mode: bool) -> di
         raise ValidationAppError(f"command executable is not allowed: {args[0]}")
     if test_mode and base_executable(executable) not in TEST_EXECUTABLES:
         raise ValidationAppError("test.run only allows pytest, ruff, npm, pnpm or uv test commands")
+    env = {
+        **os.environ,
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+    }
     completed = subprocess.run(
         args,
         cwd=str(cwd),
@@ -35,6 +41,7 @@ def run_command(command: str, *, cwd: Path, timeout: int, test_mode: bool) -> di
         check=False,
         encoding="utf-8",
         errors="replace",
+        env=env,
     )
     return {
         "stdout": clean_output(completed.stdout),

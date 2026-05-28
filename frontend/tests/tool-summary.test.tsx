@@ -15,6 +15,18 @@ describe("tool call summary", () => {
     expect(summary?.label).toBe("调用：sandbox.run ×3");
   });
 
+  it("treats a failed tool as successful when the retry later succeeds", () => {
+    const summary = summarizeToolEvents([
+      { toolName: "file.write", toolCallId: "write-1", status: "succeeded" },
+      { toolName: "sandbox.run", toolCallId: "run-1", status: "failed", exit_code: 1 },
+      { toolName: "sandbox.run", toolCallId: "run-2", status: "succeeded", exit_code: 0 },
+    ]);
+
+    expect(summary?.tone).toBe("normal");
+    expect(summary?.label).toBe("调用：file.write · sandbox.run ×2");
+    expect(summary?.details).toHaveLength(3);
+  });
+
   it("renders the summary next to message actions", () => {
     render(
       <MessageBubble

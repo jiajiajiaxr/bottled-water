@@ -52,8 +52,8 @@ def test_file_write_then_sandbox_run_reads_same_workspace_scope(db: Session) -> 
         "workspace_id": workspace.id,
         "conversation_id": conversation.id,
         "agent_id": "agent-a",
-        "path": "note.txt",
-        "content": "hello-workspace",
+        "path": "hello.py",
+        "content": "print('中文输出')",
     }
 
     try:
@@ -66,18 +66,22 @@ def test_file_write_then_sandbox_run_reads_same_workspace_scope(db: Session) -> 
                 "workspace_id": workspace.id,
                 "conversation_id": conversation.id,
                 "agent_id": "agent-a",
-                "command": "python -c \"print(open('note.txt', encoding='utf-8').read())\"",
+                "command": written["result"]["sandbox_command"],
                 "timeout": 5,
             },
         )
         session = db.scalar(select(SandboxSession).where(SandboxSession.workspace_id == workspace.id))
 
         assert written["result"]["status"] == "succeeded"
+        assert written["result"]["path"] == "hello.py"
+        assert written["result"]["relative_path"] == "hello.py"
+        assert written["result"]["sandbox_path"] == "hello.py"
+        assert ":" not in written["result"]["path"]
         assert result["result"]["status"] == "succeeded"
-        assert "hello-workspace" in result["result"]["stdout"]
+        assert "中文输出" in result["result"]["stdout"]
         assert session is not None
         assert session.command_history[0]["cwd"] == result["result"]["cwd"]
-        assert any(item["path"] == "note.txt" for item in session.mounted_files)
+        assert any(item["path"] == "hello.py" for item in session.mounted_files)
     finally:
         _cleanup(workspace.id)
 
