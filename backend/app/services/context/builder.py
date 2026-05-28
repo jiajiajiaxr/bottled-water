@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, Message, Task, WorkflowRun
 from app.services.context.compression import DEFAULT_CONTEXT_TOKENS, compact_json, fit_sections, join_sections
+from app.services.context.group import build_group_member_context, format_group_message_content
 from app.services.context.memory import (
     attachment_context,
     load_conversation_memory,
@@ -45,16 +46,19 @@ class ContextBuilder:
     ) -> AgentContextBundle:
         budget = token_budget or _agent_budget(agent)
         maybe_capture_workspace_memory(self.db, conversation, user_message)
+        group_context = build_group_member_context(self.db, conversation, agent)
         memory = load_conversation_memory(
             self.db,
             conversation,
             current_message_id=user_message.id,
             token_budget=max(1200, int(budget * 0.6)),
+            speaker_identities=group_context.speaker_identities,
         )
         workspace = build_workspace_context(self.db, conversation, agent=agent)
         runtime = build_task_context(self.db, conversation, task=task, workflow_run=workflow_run)
         attachments = attachment_context(user_message)
         context_sections = [
+            ("群聊成员与身份规则", group_context.text),
             ("会话摘要", memory.summary),
             ("conversation_state / conversation_variables", conversation_state_text(conversation)),
             ("recent_turns_digest：辅助省略指代线索，不作为事实主来源", memory.recent_turns_digest),
@@ -66,7 +70,16 @@ class ContextBuilder:
         context_text = join_sections(fit_sections(context_sections, token_budget=max(1000, int(budget * 0.3))))
         messages: list[dict[str, Any]] = [{"role": "system", "content": _system_with_context_policy(system_prompt, context_text)}]
         messages.extend(memory.messages)
-        messages.append({"role": "user", "content": _latest_user_content(prompt, attachments, node_input)})
+        latest_content = _latest_user_content(prompt, attachments, node_input)
+        if group_context.speaker_identities:
+            latest_content = format_group_message_content(
+                sender_type=user_message.sender_type,
+                sender_id=user_message.sender_id,
+                sender_name=user_message.sender_name,
+                text=latest_content,
+                identities=group_context.speaker_identities,
+            )
+        messages.append({"role": "user", "content": latest_content})
         return AgentContextBundle(
             messages=messages,
             sections={
@@ -78,6 +91,10 @@ class ContextBuilder:
                     "recent_turns_digest": memory.recent_turns_digest,
                     "recent_messages_text": memory.recent_messages_text,
                     "conversation_state": conversation_state(conversation),
+                },
+                "group": {
+                    "enabled": bool(group_context.text),
+                    "member_context": group_context.text,
                 },
                 "node_input": node_input or {},
                 "workflow_node_id": workflow_node_id,

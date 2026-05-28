@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message, Workspace, utcnow
 from app.services.context.compression import estimate_tokens, trim_text
+from app.services.context.group import SpeakerIdentity, format_group_message_content
 
 
 RECENT_DIGEST_TURNS = 8
@@ -34,6 +35,7 @@ def load_conversation_memory(
     *,
     current_message_id: str | None = None,
     token_budget: int = 3000,
+    speaker_identities: dict[str, SpeakerIdentity] | None = None,
 ) -> MemoryContext:
     rows = db.scalars(
         select(Message)
@@ -47,7 +49,7 @@ def load_conversation_memory(
         summary = _persist_summary(conversation, old, previous=summary)
         db.flush()
     return MemoryContext(
-        messages=[_message_to_chat(item) for item in recent],
+        messages=[_message_to_chat(item, speaker_identities=speaker_identities) for item in recent],
         recent_messages_text=_recent_messages_text(recent),
         recent_turns_digest=recent_turns_digest(recent),
         summary=summary,
@@ -203,9 +205,22 @@ def _split_by_budget(messages: list[Message], *, token_budget: int) -> tuple[lis
     return recent, old
 
 
-def _message_to_chat(message: Message) -> dict[str, str]:
+def _message_to_chat(
+    message: Message,
+    *,
+    speaker_identities: dict[str, SpeakerIdentity] | None = None,
+) -> dict[str, str]:
     role = "assistant" if message.sender_type == "agent" else "user"
-    return {"role": role, "content": _message_text(message)}
+    content = _message_text(message)
+    if speaker_identities:
+        content = format_group_message_content(
+            sender_type=message.sender_type,
+            sender_id=message.sender_id,
+            sender_name=message.sender_name,
+            text=content,
+            identities=speaker_identities,
+        )
+    return {"role": role, "content": content}
 
 
 def _recent_messages_text(messages: list[Message]) -> str:

@@ -7,7 +7,17 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import Base
-from app.models import Agent, Artifact, Conversation, FileAsset, Message, ToolInvocation, User, Workspace
+from app.models import (
+    Agent,
+    Artifact,
+    Conversation,
+    ConversationParticipant,
+    FileAsset,
+    Message,
+    ToolInvocation,
+    User,
+    Workspace,
+)
 from app.services.agents.direct import _run_direct_agent_without_function_calling
 from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.ark import LLMStreamEvent
@@ -130,6 +140,134 @@ def test_context_builder_orders_context_before_latest_input() -> None:
     assert "sandbox.run" in system_message
     assert "短期记忆：最近原文对话" not in system_message
     assert latest_message == "使用资源"
+
+
+def test_group_history_preserves_agent_speaker_names() -> None:
+    db = _memory_session()
+    user = _user(db)
+    conversation = _group_conversation(db, user)
+    frontend = _agent(
+        db,
+        user,
+        name="Frontend Worker",
+        agent_type="frontend",
+        description="负责 React 页面和交互实现",
+        tools=["file.read"],
+    )
+    backend = _agent(
+        db,
+        user,
+        name="Backend Worker",
+        agent_type="backend",
+        description="负责 FastAPI 与数据库服务",
+        tools=["api.test"],
+    )
+    db.add_all([
+        _participant(conversation, frontend),
+        _participant(conversation, backend),
+        _message(conversation, user, "请两个 Worker 分别评估方案"),
+        Message(
+            conversation_id=conversation.id,
+            sender_type="agent",
+            sender_id=frontend.id,
+            sender_name=frontend.name,
+            content={"text": "我会实现前端工作台。"},
+            status="completed",
+        ),
+        Message(
+            conversation_id=conversation.id,
+            sender_type="agent",
+            sender_id=backend.id,
+            sender_name=backend.name,
+            content={"text": "我会补充后端 API。"},
+            status="completed",
+        ),
+    ])
+    current = _message(conversation, user, "Backend 继续")
+    db.add(current)
+    db.commit()
+
+    bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=current,
+        agent=backend,
+        system_prompt="系统提示",
+        prompt="Backend 继续",
+        mode="workflow-agent",
+    )
+    serialized = "\n".join(str(item["content"]) for item in bundle.messages)
+
+    assert "[Agent: Frontend Worker | role=frontend" in serialized
+    assert "[Agent: Backend Worker | role=backend" in serialized
+    assert "[User: Context User]" in serialized
+    assert "我会实现前端工作台。" in serialized
+    assert "我会补充后端 API。" in serialized
+
+
+def test_group_context_lists_members_and_warns_current_agent_not_to_impersonate() -> None:
+    db = _memory_session()
+    user = _user(db)
+    conversation = _group_conversation(db, user)
+    frontend = _agent(
+        db,
+        user,
+        name="Frontend Worker",
+        agent_type="frontend",
+        description="负责 React 页面和交互实现",
+        tools=["file.read"],
+    )
+    backend = _agent(
+        db,
+        user,
+        name="Backend Worker",
+        agent_type="backend",
+        description="负责 FastAPI 与数据库服务",
+        tools=["api.test"],
+    )
+    db.add_all([_participant(conversation, frontend), _participant(conversation, backend)])
+    current = _message(conversation, user, "你们分工是什么")
+    db.add(current)
+    db.commit()
+
+    bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=current,
+        agent=frontend,
+        system_prompt="系统提示",
+        prompt="你们分工是什么",
+        mode="workflow-agent",
+    )
+    system_message = str(bundle.messages[0]["content"])
+
+    assert "你是当前 Agent：Frontend Worker" in system_message
+    assert "其他群聊成员是协作者；你可以引用他们的发言和分工，但不要冒充他们发言。" in system_message
+    assert "Backend Worker" in system_message
+    assert "role=backend" in system_message
+    assert "api.test" in system_message
+    assert bundle.sections["group"]["enabled"] is True
+
+
+def test_single_chat_does_not_include_group_member_context() -> None:
+    db = _memory_session()
+    user, conversation = _user_conversation(db)
+    agent = _agent(db, user, name="Daily Chat Agent", agent_type="chat")
+    message = _message(conversation, user, "你好")
+    db.add(message)
+    db.commit()
+
+    bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=message,
+        agent=agent,
+        system_prompt="系统提示",
+        prompt="你好",
+        mode="direct",
+    )
+    serialized = "\n".join(str(item["content"]) for item in bundle.messages)
+
+    assert "群聊成员清单" not in serialized
+    assert "[User:" not in serialized
+    assert bundle.sections["group"]["enabled"] is False
 
 
 def test_tool_result_message_uses_persisted_invocation() -> None:
@@ -548,12 +686,20 @@ def _user(db: Session) -> User:
     return user
 
 
-def _agent(db: Session, user: User, *, tools: list[str] | None = None) -> Agent:
+def _agent(
+    db: Session,
+    user: User,
+    *,
+    tools: list[str] | None = None,
+    name: str = "Context Agent",
+    agent_type: str = "assistant",
+    description: str = "用于上下文验收的智能体",
+) -> Agent:
     agent = Agent(
         owner_id=user.id,
-        name="Context Agent",
-        type="assistant",
-        description="用于上下文验收的智能体",
+        name=name,
+        type=agent_type,
+        description=description,
         config={"tools": tools or []},
     )
     db.add(agent)
@@ -570,4 +716,26 @@ def _message(conversation: Conversation, user: User, text: str) -> Message:
         content_type="text",
         content={"text": text},
         status="sent",
+    )
+
+
+def _group_conversation(db: Session, user: User) -> Conversation:
+    conversation = Conversation(
+        id=f"group-{user.id}",
+        creator_id=user.id,
+        chat_type="group",
+        title="Group Context",
+        extra={"workspace_id": None},
+    )
+    db.add(conversation)
+    db.commit()
+    return conversation
+
+
+def _participant(conversation: Conversation, agent: Agent) -> ConversationParticipant:
+    return ConversationParticipant(
+        conversation_id=conversation.id,
+        participant_type="agent",
+        agent_id=agent.id,
+        role="member",
     )
