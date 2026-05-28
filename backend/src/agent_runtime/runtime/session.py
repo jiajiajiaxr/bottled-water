@@ -2,6 +2,7 @@
 会话入口
 
 用户使用 agent_runtime 的入口。
+EventDispatcher 职责上提：由 Session 统一管理，Orchestrator 只负责产生事件。
 """
 
 from typing import List, Optional, AsyncIterator, Dict, Any
@@ -13,6 +14,7 @@ from common.logger import get_logger
 from ..core.types import AgentConfig, Event
 from ..core.interfaces import PersistenceBackend, EventSink, ToolExecutor
 from .orchestrator import Orchestrator
+from .event_dispatcher import EventDispatcher
 from ..strategies.base import Scheduler
 
 logger = get_logger(__name__)
@@ -41,8 +43,12 @@ class Session:
         self.scheduler = scheduler
         self.model_provider = model_provider
         self.persistence = persistence
-        self.event_sink = event_sink or _NullEventSink()
         self.tool_executor = tool_executor or _NullToolExecutor()
+
+        # 事件分发器（职责上提：Session 层统一管理）
+        self.event_dispatcher = EventDispatcher()
+        if event_sink:
+            self.event_dispatcher.register_sink(event_sink)
 
         self.orchestrator = Orchestrator(
             session_id=session_id,
@@ -50,7 +56,6 @@ class Session:
             scheduler=scheduler,
             model_provider=model_provider,
             persistence=persistence,
-            event_sink=self.event_sink,
             tool_executor=self.tool_executor,
         )
 
@@ -87,11 +92,13 @@ class Session:
         """
         运行会话
 
-        返回事件流，调用方决定怎么处理（打印、存日志、转发 SSE 等）。
+        返回事件流，同时通过 EventDispatcher 分发给各 Sink。
         """
         logger.info("Session 运行开始", session_id=self.session_id, message_len=len(user_message))
         try:
             async for event in self.orchestrator.run(user_message):
+                # 分发到所有注册的 Sink（不阻塞 yield）
+                await self.event_dispatcher.dispatch(event)
                 yield event
         except Exception as e:
             logger.error("Session 运行失败", session_id=self.session_id, error=str(e))
@@ -101,6 +108,7 @@ class Session:
     async def send_message(self, content: str) -> AsyncIterator[Event]:
         """向运行中的会话发送新消息"""
         async for event in self.orchestrator.handle_user_input(content):
+            await self.event_dispatcher.dispatch(event)
             yield event
 
     def get_status(self) -> dict:
@@ -120,8 +128,15 @@ class _NullEventSink(EventSink):
 
 
 class _NullToolExecutor(ToolExecutor):
-    async def execute(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
-        raise NotImplementedError("No tool executor configured")
+    async def execute(self, tool_call) -> Any:
+        from agent_runtime import ToolResult
+
+        return ToolResult(
+            call_id=tool_call.call_id,
+            success=False,
+            result=None,
+            error="No tool executor configured",
+        )
 
     def list_tools(self) -> List[Dict]:
         return []

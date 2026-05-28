@@ -2,7 +2,6 @@
 测试核心类型定义
 """
 
-import pytest
 from datetime import datetime
 
 from agent_runtime.core.types import (
@@ -123,10 +122,10 @@ class TestEvent:
 
     def test_basic_creation(self):
         event = Event(
-            type="agent_started",
+            type="system.agent_started",
             payload={"agent_id": "coder"},
         )
-        assert event.type == "agent_started"
+        assert event.type == "system.agent_started"
         assert event.payload == {"agent_id": "coder"}
         assert isinstance(event.timestamp, datetime)
 

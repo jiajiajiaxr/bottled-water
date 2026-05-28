@@ -189,13 +189,17 @@ class TestAgentLoopPromptBuilding:
                 {"type": "user_input", "content": "很好"},
             ],
             "kv_state": {"progress": 50},
-            "summary_count": 3,
+            "structured_summaries": [
+                {"content": "第一轮摘要"},
+                {"content": "第二轮摘要"},
+                {"content": "第三轮摘要"},
+            ],
             "version": 5,
         }
         text = loop._format_blackboard(bb)
         assert "完成代码" in text
         assert "progress" in text
-        assert "3" in text  # summary_count
+        assert "历史摘要" in text
         assert "5" in text  # version
 
 

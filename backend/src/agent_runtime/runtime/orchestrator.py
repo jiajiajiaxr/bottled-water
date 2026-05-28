@@ -9,6 +9,7 @@
 - 用户中途输入处理
 """
 
+import asyncio
 from typing import Dict, List, Optional, AsyncIterator, Tuple
 from datetime import datetime
 
@@ -24,7 +25,7 @@ from ..core.types import (
     Message,
     SchedulingDecision,
 )
-from ..core.interfaces import PersistenceBackend, EventSink, ToolExecutor
+from ..core.interfaces import PersistenceBackend, ToolExecutor
 from ..strategies.base import Scheduler
 from ..context.blackboard import BlackboardManager
 from ..context.agent_ctx import AgentContextManager
@@ -44,7 +45,6 @@ class Orchestrator:
         scheduler: Scheduler,
         model_provider: BaseModelProvider,
         persistence: Optional[PersistenceBackend] = None,
-        event_sink: Optional[EventSink] = None,
         tool_executor: Optional[ToolExecutor] = None,
         watchdog_config: Optional[WatchdogConfig] = None,
     ):
@@ -53,7 +53,6 @@ class Orchestrator:
         self.scheduler = scheduler
         self.model_provider = model_provider
         self.persistence = persistence
-        self.event_sink = event_sink
         self.tool_executor = tool_executor
         self.watchdog = Watchdog(watchdog_config)
 
@@ -77,7 +76,7 @@ class Orchestrator:
         await self._initialize(user_message)
 
         yield Event(
-            type="session_started",
+            type="system.session_started",
             payload={
                 "session_id": self.session_id,
                 "agents": [
@@ -94,7 +93,7 @@ class Orchestrator:
             self.status = "failed"
             logger.error("调度循环异常", session_id=self.session_id, error=str(e), exc_info=True)
             yield Event(
-                type="session_error",
+                type="system.session_error",
                 payload={
                     "session_id": self.session_id,
                     "error": str(e),
@@ -107,7 +106,7 @@ class Orchestrator:
         self.status = "completed"
         logger.info("调度循环结束", session_id=self.session_id, rounds=self.round_num)
         yield Event(
-            type="session_completed",
+            type="system.session_completed",
             payload={
                 "session_id": self.session_id,
                 "rounds": self.round_num,
@@ -171,7 +170,7 @@ class Orchestrator:
                 user_input = self._user_input_queue.pop(0)
                 await self._handle_user_input_to_blackboard(user_input)
                 current_task = user_input  # 用户输入成为新任务
-                yield Event(type="user_input_received", payload={"content": user_input})
+                yield Event(type="user.input_received", payload={"content": user_input})
 
             # --- 1. 获取 Blackboard 视图 ---
             blackboard = await self.blackboard_mgr.get(self.session_id) or {}
@@ -179,10 +178,15 @@ class Orchestrator:
 
             # --- 2. 收集 Agent 报告 ---
             reports = self._collect_reports()
-            self._pending_agent_reports = {}  # 清空，等待新一轮执行
+            # 只清空已完成/失败的报告，保留未完成状态的报告
+            self._pending_agent_reports = {
+                aid: r
+                for aid, r in self._pending_agent_reports.items()
+                if r.state not in ("completed", "failed")
+            }
 
             yield Event(
-                type="round_started",
+                type="system.round_started",
                 payload={
                     "round": self.round_num,
                     "session_id": self.session_id,
@@ -197,7 +201,7 @@ class Orchestrator:
             watchdog_event = self.watchdog.check_before_decision(blackboard_view, reports)
 
             if watchdog_event:
-                yield Event(type="watchdog_triggered", payload=watchdog_event.payload)
+                yield Event(type="control.watchdog_triggered", payload=watchdog_event.payload)
                 self.status = "completed"
                 return
 
@@ -221,7 +225,7 @@ class Orchestrator:
             )
 
             yield Event(
-                type="scheduling_decision",
+                type="control.scheduling_decision",
                 payload={
                     "round": self.round_num,
                     "decision": decision.decision_type,
@@ -234,7 +238,7 @@ class Orchestrator:
             # --- 5. 看门狗后置校验 ---
             watchdog_event = self.watchdog.check_after_decision(decision)
             if watchdog_event:
-                yield Event(type="watchdog_triggered", payload=watchdog_event.payload)
+                yield Event(type="control.watchdog_triggered", payload=watchdog_event.payload)
                 self.status = "completed"
                 return
 
@@ -288,7 +292,7 @@ class Orchestrator:
             logger.info("调度器决策升级", session_id=self.session_id, rationale=decision.rationale)
             events.append(
                 Event(
-                    type="escalation",
+                    type="control.escalation",
                     payload={
                         "rationale": decision.rationale,
                         "target": decision.target_agent_id,
@@ -303,7 +307,7 @@ class Orchestrator:
             )
             events.append(
                 Event(
-                    type="waiting_for_user_input",
+                    type="user.waiting_for_input",
                     payload={
                         "rationale": decision.rationale,
                     },
@@ -345,7 +349,7 @@ class Orchestrator:
 
         events.append(
             Event(
-                type="agent_started",
+                type="system.agent_started",
                 payload={
                     "round": self.round_num,
                     "agent_id": agent_id,
@@ -356,12 +360,23 @@ class Orchestrator:
         )
 
         try:
-            # 执行 Agent 循环
+            # 收集 AgentLoop 内部事件
+            agent_internal_events: List[Event] = []
+
+            async def _emit_agent_event(event: Event):
+                agent_internal_events.append(event)
+
+            # 执行 Agent 循环（传入 AgentContext 保持记忆 + 事件回调）
             result = await agent_loop.run(
                 task=task,
                 blackboard_view=blackboard_view,
                 tool_executor=self.tool_executor,
+                agent_ctx=agent_ctx,
+                emit_event=_emit_agent_event,
             )
+
+            # 将内部事件混入事件流
+            events.extend(agent_internal_events)
 
             work_product = result["work_product"]
             status_report = result["status_report"]
@@ -369,7 +384,7 @@ class Orchestrator:
 
             # 发射工具调用事件
             for tool_event in result.get("tool_events", []):
-                events.append(Event(type="tool_calls_executed", payload=tool_event))
+                events.append(Event(type="agent.tool_calls_executed", payload=tool_event))
 
             # 记录 Token 使用（估算）
             tokens_used = self.model_provider.count_tokens(work_product)
@@ -392,21 +407,19 @@ class Orchestrator:
                 },
             )
 
-            # 归档到 Agent 上下文
-            agent_ctx.add("thought", status_report.rationale)
+            # 持久化 Agent 上下文（保留记忆，不清空）
             if self.persistence:
-                archive = self.agent_ctx_mgr.after_round(agent_id, self.session_id, archive=True)
-                if archive:
-                    await self.persistence.save_agent_context(
-                        agent_id, self.session_id, archive["stack"]
-                    )
+                archive = agent_ctx.archive()
+                await self.persistence.save_agent_context(
+                    agent_id, self.session_id, archive["frames"]
+                )
 
             # 看门狗记录进展
             self.watchdog.record_progress(tokens_used)
 
             events.append(
                 Event(
-                    type="agent_completed",
+                    type="system.agent_completed",
                     payload={
                         "round": self.round_num,
                         "agent_id": agent_id,
@@ -436,7 +449,7 @@ class Orchestrator:
             )
             events.append(
                 Event(
-                    type="agent_failed",
+                    type="system.agent_failed",
                     payload={
                         "round": self.round_num,
                         "agent_id": agent_id,
@@ -454,22 +467,32 @@ class Orchestrator:
         current_task: str,
         blackboard_view: dict,
     ) -> Tuple[bool, List[Event]]:
-        """执行并行决策：多个 Agent 同时执行任务"""
+        """执行并行决策：多个 Agent 并发执行任务"""
         events: List[Event] = []
-        logger.info("并行执行（简化版：串行）", session_id=self.session_id)
-        if decision.verification_agents:
-            for agent_id in decision.verification_agents:
-                sub_decision = SchedulingDecision(
-                    decision_type="assign",
-                    target_agent_id=agent_id,
-                    task_description=decision.task_description or current_task,
-                    rationale=decision.rationale,
-                )
-                cont, evs = await self._execute_assign(sub_decision, current_task, blackboard_view)
-                events.extend(evs)
-        elif decision.target_agent_id:
-            cont, evs = await self._execute_assign(decision, current_task, blackboard_view)
+        agent_ids = decision.verification_agents or []
+        if not agent_ids and decision.target_agent_id:
+            agent_ids = [decision.target_agent_id]
+
+        if not agent_ids:
+            return True, events
+
+        logger.info("并行执行", session_id=self.session_id, agent_ids=agent_ids)
+
+        # 构建并发的 assign 任务
+        async def run_agent(agent_id: str) -> Tuple[bool, List[Event]]:
+            sub_decision = SchedulingDecision(
+                decision_type="assign",
+                target_agent_id=agent_id,
+                task_description=decision.task_description or current_task,
+                rationale=decision.rationale,
+            )
+            return await self._execute_assign(sub_decision, current_task, blackboard_view)
+
+        # 使用 asyncio.gather 并发执行
+        results = await asyncio.gather(*[run_agent(aid) for aid in agent_ids])
+        for cont, evs in results:
             events.extend(evs)
+
         return True, events
 
     def _collect_reports(self) -> List[AgentReport]:
@@ -491,17 +514,30 @@ class Orchestrator:
         return reports
 
     def _build_blackboard_view(self, blackboard: dict) -> dict:
-        """构建给 Agent 看的 Blackboard 视图"""
-        if not blackboard:
-            return {"raw_history": [], "structured_summaries": [], "kv_state": {}, "version": 0}
+        """构建给 Agent 看的 Blackboard 分层视图。
 
-        # 只暴露必要信息，截断过长的历史
-        history = blackboard.get("raw_history", [])
-        recent_history = history[-20:] if len(history) > 20 else history
+        分层策略：
+        - 早期历史由 structured_summaries 替代（避免 Token 膨胀）
+        - 近期保留原始记录（保留细节）
+        - kv_state 直接注入（结构化状态）
+        """
+        if not blackboard:
+            return {
+                "raw_history": [],
+                "structured_summaries": [],
+                "kv_state": {},
+                "version": 0,
+            }
+
+        raw_history = blackboard.get("raw_history", [])
+        summaries = blackboard.get("structured_summaries", [])
+
+        # 保留最近 10 条原始记录，更早的由 summaries 替代
+        recent_history = raw_history[-10:] if len(raw_history) > 10 else raw_history
 
         return {
             "recent_history": recent_history,
-            "summary_count": len(blackboard.get("structured_summaries", [])),
+            "structured_summaries": summaries,
             "kv_state": blackboard.get("kv_state", {}),
             "version": blackboard.get("version", 0),
         }
@@ -530,7 +566,7 @@ class Orchestrator:
     async def handle_user_input(self, content: str) -> AsyncIterator[Event]:
         """处理用户中途输入"""
         self._user_input_queue.append(content)
-        yield Event(type="user_input_queued", payload={"content": content})
+        yield Event(type="user.input_queued", payload={"content": content})
 
         # 如果会话正在运行，输入已经放入队列会被下一轮处理
         # 如果会话已完成，需要重新启动调度循环

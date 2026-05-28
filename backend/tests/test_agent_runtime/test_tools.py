@@ -114,4 +114,102 @@ class TestToolExecutorImpl:
 
     def test_list_tools(self, executor):
         tools = executor.list_tools()
-        assert len(tools) == 2  # add, async_add, bad
+        assert len(tools) == 2  # add, async_add
+
+
+class TestMcpToolIntegration:
+    """测试 MCP 工具统一接入"""
+
+    @pytest.fixture
+    def registry_with_mcp(self):
+        """同时包含内置工具和 MCP 工具的注册表"""
+        reg = ToolRegistry()
+        # 内置工具
+        reg.register(
+            "file_read",
+            "读取文件",
+            {"type": "object", "properties": {"path": {"type": "string"}}},
+            lambda path: f"content of {path}",
+        )
+        # MCP 工具
+        reg.register_mcp(
+            "weather.query",
+            "查询天气",
+            {"type": "object", "properties": {"city": {"type": "string"}}},
+            server_id="weather-server",
+        )
+        return reg
+
+    @pytest.fixture
+    def mcp_executor_mock(self):
+        """MCP 执行器 mock"""
+        async def mock_executor(tool_name, parameters, server_id):
+            return {"temperature": 25, "city": parameters.get("city")}
+        return mock_executor
+
+    def test_mcp_tool_registration(self, registry_with_mcp):
+        """测试 MCP 工具注册"""
+        tool = registry_with_mcp.get_tool("weather.query")
+        assert tool is not None
+        assert tool["name"] == "weather.query"
+        assert tool["source"] == "mcp"
+        assert tool["server_id"] == "weather-server"
+
+        assert registry_with_mcp.is_mcp_tool("weather.query") is True
+        assert registry_with_mcp.is_mcp_tool("file_read") is False
+
+    def test_mcp_tool_listing(self, registry_with_mcp):
+        """测试 MCP 工具在 list_tools 中统一列出"""
+        tools = registry_with_mcp.list_tools()
+        names = [t["function"]["name"] for t in tools]
+        assert "file_read" in names
+        assert "weather.query" in names
+        assert len(tools) == 2
+
+    def test_tool_source_lists(self, registry_with_mcp):
+        """测试按来源列出工具"""
+        assert registry_with_mcp.list_builtin_tools() == ["file_read"]
+        assert registry_with_mcp.list_mcp_tools() == ["weather.query"]
+
+    @pytest.mark.asyncio
+    async def test_mcp_tool_execution(self, registry_with_mcp, mcp_executor_mock):
+        """测试 MCP 工具执行"""
+        registry_with_mcp.set_mcp_executor(mcp_executor_mock)
+        executor = ToolExecutorImpl(registry_with_mcp)
+
+        call = ToolCall(tool_name="weather.query", parameters={"city": "北京"}, call_id="call_1")
+        result = await executor.execute(call)
+
+        assert isinstance(result, ToolResult)
+        assert result.success is True
+        assert result.result["temperature"] == 25
+        assert result.result["city"] == "北京"
+
+    @pytest.mark.asyncio
+    async def test_mcp_executor_not_configured(self, registry_with_mcp):
+        """测试 MCP 执行器未配置时的错误"""
+        executor = ToolExecutorImpl(registry_with_mcp)
+
+        call = ToolCall(tool_name="weather.query", parameters={"city": "北京"}, call_id="call_1")
+        result = await executor.execute(call)
+
+        assert result.success is False
+        assert "MCP executor not configured" in result.error
+
+    @pytest.mark.asyncio
+    async def test_builtin_and_mcp_mixed(self, registry_with_mcp, mcp_executor_mock):
+        """测试内置和 MCP 工具混合使用"""
+        registry_with_mcp.set_mcp_executor(mcp_executor_mock)
+        executor = ToolExecutorImpl(registry_with_mcp)
+
+        # 执行内置工具
+        builtin_call = ToolCall(tool_name="file_read", parameters={"path": "/tmp/test.txt"}, call_id="call_1")
+        builtin_result = await executor.execute(builtin_call)
+        assert builtin_result.success is True
+        assert "content of /tmp/test.txt" in builtin_result.result
+
+        # 执行 MCP 工具
+        mcp_call = ToolCall(tool_name="weather.query", parameters={"city": "上海"}, call_id="call_2")
+        mcp_result = await executor.execute(mcp_call)
+        assert mcp_result.success is True
+        assert mcp_result.result["city"] == "上海"

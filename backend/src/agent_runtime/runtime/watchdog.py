@@ -73,7 +73,7 @@ class Watchdog:
                 max_rounds=self.config.max_rounds,
             )
             return Event(
-                type="watchdog_triggered",
+                type="control.watchdog_triggered",
                 payload={
                     "reason": "max_rounds_exceeded",
                     "rounds": self.state.round_count,
@@ -89,7 +89,7 @@ class Watchdog:
                 max_tokens=self.config.max_total_tokens,
             )
             return Event(
-                type="watchdog_triggered",
+                type="control.watchdog_triggered",
                 payload={
                     "reason": "token_budget_exhausted",
                     "tokens_used": self.state.total_tokens_used,
@@ -103,15 +103,22 @@ class Watchdog:
         all_waiting = all(r.will.value == "wait" for r in reports)
         all_completed = all(r.state == "completed" for r in reports)
 
-        if active_count == 0 or all_blocked or all_waiting or not all_completed:
+        # 死锁条件：没有活跃Agent但任务未完成 / 全部阻塞 / 全部等待
+        is_deadlock = (
+            (active_count == 0 and not all_completed)
+            or all_blocked
+            or all_waiting
+        )
+
+        if is_deadlock:
             self.state.consecutive_idle_rounds += 1
-            if self.state.consecutive_idle_rounds >= self.config.deadlock_threshold:
+            if self.state.consecutive_idle_rounds > self.config.deadlock_threshold:
                 logger.warning(
                     "看门狗触发：死锁/停滞",
                     consecutive_idle=self.state.consecutive_idle_rounds,
                 )
                 return Event(
-                    type="watchdog_triggered",
+                    type="control.watchdog_triggered",
                     payload={
                         "reason": "deadlock_detected",
                         "consecutive_idle_rounds": self.state.consecutive_idle_rounds,
@@ -128,7 +135,7 @@ class Watchdog:
                 "看门狗触发：运行超时", elapsed=elapsed, max_seconds=self.config.max_idle_seconds
             )
             return Event(
-                type="watchdog_triggered",
+                type="control.watchdog_triggered",
                 payload={
                     "reason": "timeout",
                     "elapsed_seconds": elapsed,
@@ -170,7 +177,7 @@ class Watchdog:
                     decision_type=decision.decision_type,
                 )
                 return Event(
-                    type="watchdog_triggered",
+                    type="control.watchdog_triggered",
                     payload={
                         "reason": "decision_loop",
                         "repeated_target": decision.target_agent_id,

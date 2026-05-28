@@ -3,21 +3,18 @@ agent_runtime 测试 fixtures
 """
 
 import pytest
-from typing import AsyncIterator, List, Optional, Dict, Any
+from typing import List, Dict, Any
 from agent_runtime import (
     AgentConfig,
-    AgentReport,
-    AgentState,
-    AgentWill,
     Event,
     Message,
-    SchedulingDecision,
 )
 from agent_runtime import PersistenceBackend, EventSink, ToolExecutor
 
 # 从项目根目录加载 .env
 from dotenv import load_dotenv
-from model_provider import create_provider, ModelConfig, ChatMessage
+from model_provider import create_provider, ModelConfig, ChatResponse, StreamChunk
+from model_provider.core.interfaces import BaseModelProvider
 
 # 加载环境变量（从项目根目录）
 import os
@@ -28,6 +25,39 @@ load_dotenv(env_path)
 # ---------------------------------------------------------------------------
 # Mock Model Provider
 # ---------------------------------------------------------------------------
+
+
+class MockModelProvider(BaseModelProvider):
+    """用于测试的模型提供者 mock"""
+
+    def __init__(self):
+        # 绕过 BaseModelProvider 的 config 要求
+        self.config = {}
+        self.model = "mock"
+        self.responses: List[ChatResponse] = []
+        self.call_count = 0
+
+    async def chat(
+        self,
+        messages=None,
+        system_prompt=None,
+        tools=None,
+        temperature=0.7,
+        max_tokens=None,
+    ) -> ChatResponse:
+        self.call_count += 1
+        if self.responses:
+            idx = min(self.call_count - 1, len(self.responses) - 1)
+            return self.responses[idx]
+        return ChatResponse(content="mock response")
+
+    async def chat_stream(self, messages=None, system_prompt=None, tools=None, temperature=0.7, max_tokens=None):
+        yield StreamChunk(content="mock", finish_reason="stop")
+
+
+@pytest.fixture
+def mock_provider():
+    return MockModelProvider()
 
 
 @pytest.fixture
@@ -127,9 +157,15 @@ class MockToolExecutor(ToolExecutor):
         self._tools = tools or []
         self.calls: List[dict] = []
 
-    async def execute(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
-        self.calls.append({"tool_name": tool_name, "parameters": parameters})
-        return {"tool": tool_name, "params": parameters, "result": "mock_result"}
+    async def execute(self, tool_call) -> Any:
+        from agent_runtime import ToolResult
+
+        self.calls.append({"tool_name": tool_call.tool_name, "parameters": tool_call.parameters})
+        return ToolResult(
+            call_id=tool_call.call_id,
+            success=True,
+            result={"tool": tool_call.tool_name, "params": tool_call.parameters, "result": "mock_result"},
+        )
 
     def list_tools(self) -> List[Dict]:
         return self._tools

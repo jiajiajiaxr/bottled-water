@@ -87,10 +87,21 @@ class Message:
 
 @dataclass
 class Event:
-    """运行时事件"""
+    """运行时事件
+
+    扩展字段支持全过程可观测：
+    - source: 事件来源（orchestrator/agent:coder/watchdog 等）
+    - target: 定向投递目标，None 表示广播
+    - channel: 可见性通道（all/internal/user）
+    - correlation_id: 请求-响应匹配 ID
+    """
 
     type: str
     payload: Dict[str, Any]
+    source: str = "system"
+    target: Optional[str] = None
+    channel: str = "all"
+    correlation_id: Optional[str] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
 

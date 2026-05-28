@@ -33,8 +33,15 @@ class TechLeadScheduler(Scheduler):
 
 你的职责：
 1. 分析全局上下文和团队成员状态
-2. 决定下一步如何调度（指派、并行、等待、升级、请求用户输入）
-3. 确保任务高效完成，避免死锁和无效循环
+2. 根据任务需求和 Agent 的工具能力做精准指派
+3. 决定下一步如何调度（指派、并行、等待、升级、请求用户输入）
+4. 确保任务高效完成，避免死锁和无效循环
+
+调度规则：
+- 任务需要特定工具时，只能指派拥有该工具的 Agent
+- 如果多个 Agent 都能处理，选择当前状态最空闲的
+- 独立子任务可以使用 parallel 并行执行
+- 所有 Agent 都 blocked 或 waiting 时，考虑 escalate 或 user_input
 
 可用的决策类型：
 - assign: 指派某个 Agent 执行具体任务
@@ -44,7 +51,7 @@ class TechLeadScheduler(Scheduler):
 - user_input: 请求用户输入（需要更多信息才能继续）
 - complete: 任务已完成，结束会话
 
-团队成员信息：
+团队成员信息（含各自可用工具）：
 {agent_profiles}
 
 当前全局上下文：
@@ -85,7 +92,7 @@ class TechLeadScheduler(Scheduler):
         self,
         blackboard: Dict[str, Any],
         agent_reports: List[AgentReport],
-        conversation_context: Dict[str, Any]
+        conversation_context: Dict[str, Any],
     ) -> SchedulingDecision:
         """基于 LLM 推理做调度决策"""
         if self.model_provider is None:
@@ -102,7 +109,7 @@ class TechLeadScheduler(Scheduler):
         self,
         blackboard: Dict[str, Any],
         agent_reports: List[AgentReport],
-        conversation_context: Dict[str, Any]
+        conversation_context: Dict[str, Any],
     ) -> SchedulingDecision:
         """调用 LLM 做调度决策"""
         # 构建 prompt
@@ -159,10 +166,11 @@ Agent 数量：{conversation_context.get("agent_count", 0)}
 
         # 尝试从 markdown 代码块中提取
         import re
+
         patterns = [
-            r'```json\s*(.*?)\s*```',
-            r'```\s*(.*?)\s*```',
-            r'\{[\s\S]*\}',
+            r"```json\s*(.*?)\s*```",
+            r"```\s*(.*?)\s*```",
+            r"\{[\s\S]*\}",
         ]
         for pattern in patterns:
             match = re.search(pattern, content, re.DOTALL)
@@ -174,8 +182,8 @@ Agent 数量：{conversation_context.get("agent_count", 0)}
 
         # 回退：尝试找到第一个 JSON 对象
         try:
-            start = content.index('{')
-            end = content.rindex('}') + 1
+            start = content.index("{")
+            end = content.rindex("}") + 1
             return json.loads(content[start:end])
         except (ValueError, json.JSONDecodeError):
             pass
@@ -208,13 +216,14 @@ Agent 数量：{conversation_context.get("agent_count", 0)}
         )
 
     def _build_agent_profiles(self) -> str:
-        """构建 Agent 配置描述"""
+        """构建 Agent 配置描述（含工具能力）"""
         lines = []
         for agent_id, agent in self.agents.items():
             lines.append(f"- {agent.name} (ID: {agent_id}, 角色: {agent.role})")
-            lines.append(f"  系统提示：{agent.system_prompt[:100]}...")
             if agent.tools:
                 lines.append(f"  可用工具：{', '.join(agent.tools)}")
+            else:
+                lines.append("  可用工具：无")
         return "\n".join(lines)
 
     def _build_blackboard_summary(self, blackboard: Dict[str, Any]) -> str:
@@ -225,7 +234,9 @@ Agent 数量：{conversation_context.get("agent_count", 0)}
             parts.append(f"历史记录数：{len(history)}")
             recent = history[-3:] if len(history) > 3 else history
             for entry in recent:
-                parts.append(f"  - [{entry.get('type', '?')}] {str(entry.get('content', ''))[:80]}...")
+                parts.append(
+                    f"  - [{entry.get('type', '?')}] {str(entry.get('content', ''))[:80]}..."
+                )
 
         kv = blackboard.get("kv_state", {})
         if kv:
@@ -254,10 +265,7 @@ Agent 数量：{conversation_context.get("agent_count", 0)}
         return "\n".join(lines)
 
     async def resolve_conflict(
-        self,
-        conflict_type: str,
-        conflicting_reports: List[AgentReport],
-        blackboard: Dict[str, Any]
+        self, conflict_type: str, conflicting_reports: List[AgentReport], blackboard: Dict[str, Any]
     ) -> SchedulingDecision:
         """解决 Agent 之间的冲突"""
         if self.model_provider is None:

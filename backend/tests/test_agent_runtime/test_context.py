@@ -7,7 +7,7 @@
 import pytest
 
 from agent_runtime.context.blackboard import BlackboardManager
-from agent_runtime.context.agent_ctx import AgentContextManager, AgentContext, ContextFrame
+from agent_runtime.context.agent_ctx import AgentContextManager, AgentContext
 
 
 # ---------------------------------------------------------------------------
@@ -193,16 +193,17 @@ class TestAgentContext:
         assert "写代码" in text
         assert "好的" in text
 
-    def test_trim(self):
+    def test_trim_by_tokens(self):
         ctx = AgentContext("coder", "conv_1")
-        for i in range(10):
-            ctx.add("thought", f"思考{i}")
+        # 添加大量内容使 Token 超出预算
+        for i in range(50):
+            ctx.add("thought", f"这是第{i}个非常长的思考内容，包含很多中文字符用来测试Token截断")
 
-        assert len(ctx.frames) == 10
-        ctx.trim(max_frames=3)
-        assert len(ctx.frames) == 3
-        assert ctx.frames[0].content == "思考7"
-        assert ctx.frames[2].content == "思考9"
+        assert len(ctx.frames) == 50
+        ctx.trim(max_tokens=100)  # 很小的预算，会触发截断
+        assert len(ctx.frames) < 50  # 应该被截断
+        # 最近的帧应该被保留
+        assert ctx.frames[-1].content.startswith("这是第49个")
 
     def test_archive(self):
         ctx = AgentContext("coder", "conv_1")

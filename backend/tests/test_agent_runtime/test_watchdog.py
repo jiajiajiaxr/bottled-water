@@ -3,7 +3,6 @@
 """
 
 import pytest
-from datetime import datetime, timedelta
 
 from agent_runtime.runtime.watchdog import Watchdog, WatchdogConfig
 from agent_runtime.core.types import AgentReport, AgentState, AgentWill, SchedulingDecision
@@ -52,7 +51,7 @@ class TestWatchdogCheckBeforeDecision:
         # 第 6 轮应该触发
         result = watchdog.check_before_decision({}, reports)
         assert result is not None
-        assert result.type == "watchdog_triggered"
+        assert result.type == "control.watchdog_triggered"
         assert result.payload["reason"] == "max_rounds_exceeded"
 
     def test_deadlock_all_blocked(self, watchdog):
@@ -78,7 +77,9 @@ class TestWatchdogCheckBeforeDecision:
         assert result is not None
         assert result.payload["reason"] == "deadlock_detected"
 
-    def test_no_deadlock_when_progress(self, watchdog):
+    def test_no_deadlock_when_progress(self):
+        # 使用更大的 max_rounds 避免轮数上限干扰
+        watchdog = Watchdog(WatchdogConfig(max_rounds=100, deadlock_threshold=2))
         blocked_reports = [AgentReport(agent_id="a1", state=AgentState.WAITING, will=AgentWill.BLOCKED)]
         active_reports = [AgentReport(agent_id="a1", state=AgentState.RUNNING, will=AgentWill.EXECUTE)]
 

@@ -12,6 +12,10 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from common.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class ContextFrame:
@@ -75,11 +79,53 @@ class AgentContext:
                 parts.append(f"工具返回：{frame.content}\n")
         return "\n".join(parts)
 
-    def trim(self, max_frames: int = 20):
-        """按帧数截断，保留最近的帧"""
-        if len(self.frames) > max_frames:
-            # 保留最近 max_frames 个，丢弃旧的
-            self.frames = self.frames[-max_frames:]
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """估算文本的 Token 数量（简化版，无 tiktoken 依赖）"""
+        import re
+
+        if not text:
+            return 0
+        cn_chars = len(re.findall(r"[一-鿿]", text))
+        en_words = len(re.findall(r"[a-zA-Z]+", text))
+        return cn_chars + int(en_words * 1.3) + 10
+
+    def trim(self, max_tokens: int = 4000):
+        """按 Token 预算滑动窗口截断，优先保留最近帧。
+
+        策略：
+        - 保留 system_prompt（由调用方控制）
+        - 保留所有 task 帧（任务定义不可丢）
+        - 从旧到新丢弃早期帧，直到 Token 预算内
+        """
+        if not self.frames:
+            return
+
+        current_tokens = self._estimate_tokens(self.system_prompt)
+        kept = []
+        removed = []
+
+        # 从最新到最旧遍历，优先保留最近帧
+        for frame in reversed(self.frames):
+            frame_tokens = self._estimate_tokens(str(frame.content))
+            if frame.frame_type == "task":
+                kept.append(frame)
+                current_tokens += frame_tokens
+            elif current_tokens + frame_tokens <= max_tokens:
+                kept.append(frame)
+                current_tokens += frame_tokens
+            else:
+                removed.append(frame)
+
+        if removed:
+            self.frames = list(reversed(kept))
+            logger.debug(
+                "AgentContext 截断",
+                agent_id=self.agent_id,
+                removed=len(removed),
+                kept=len(self.frames),
+                tokens=current_tokens,
+            )
 
     def archive(self) -> Dict[str, Any]:
         """归档当前上下文"""

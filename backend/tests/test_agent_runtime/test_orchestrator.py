@@ -110,9 +110,9 @@ class TestOrchestratorRun:
 
         # 应该产生 session_started, round_started, scheduling_decision, agent_started, agent_completed, session_completed
         event_types = [e.type for e in events]
-        assert "session_started" in event_types
-        assert "session_completed" in event_types
-        assert "scheduling_decision" in event_types
+        assert "system.session_started" in event_types
+        assert "system.session_completed" in event_types
+        assert "control.scheduling_decision" in event_types
         assert orch.status == "completed"
 
     @pytest.mark.asyncio
@@ -162,24 +162,27 @@ class TestOrchestratorRun:
         async for event in orch.run("任务"):
             events.append(event)
 
-        watchdog_events = [e for e in events if e.type == "watchdog_triggered"]
+        watchdog_events = [e for e in events if e.type == "control.watchdog_triggered"]
         assert len(watchdog_events) >= 1
         assert watchdog_events[0].payload["reason"] == "max_rounds_exceeded"
 
     @pytest.mark.asyncio
-    async def test_run_with_event_sink(self, orch, mock_provider, mock_event_sink):
-        """测试事件接收器"""
+    async def test_run_yields_events(self, orch, mock_provider):
+        """测试编排器产生事件流"""
         mock_provider.responses = [
             ChatResponse(
                 content='完成。\n```status_report\n{"state": "completed", "will": "complete"}\n```'
             ),
         ]
-        orch.event_sink = mock_event_sink
 
-        async for _ in orch.run("任务"):
-            pass
+        events = []
+        async for event in orch.run("任务"):
+            events.append(event)
 
-        assert len(mock_event_sink.events) > 0
+        assert len(events) > 0
+        event_types = [e.type for e in events]
+        assert "system.session_started" in event_types
+        assert "system.session_completed" in event_types
 
 
 class TestOrchestratorStatus:
@@ -222,5 +225,5 @@ class TestOrchestratorUserInput:
         async for event in orch.handle_user_input("新消息"):
             events.append(event)
 
-        assert events[0].type == "user_input_queued"
+        assert events[0].type == "user.input_queued"
         assert orch._user_input_queue == ["新消息"]
