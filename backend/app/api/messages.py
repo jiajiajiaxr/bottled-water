@@ -14,6 +14,7 @@ from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Conversation, FileAsset, Message, User, utcnow
 from app.services.context.attachments import readable_attachment_text
+from app.services.chat.cancellation import cancel_conversation_generation
 from app.services.chat.orchestrator import run_orchestration
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import message_to_dict
@@ -231,16 +232,17 @@ async def cancel_stream(
 ):
     conversation = _get_conversation(db, user, conversation_id)
     task = ORCHESTRATION_TASKS.get(conversation.id)
-    cancelled = False
+    task_cancelled = False
     if task and not task.done():
         task.cancel()
-        cancelled = True
-    await event_bus.publish(
-        f"conversation:{conversation.id}",
-        "generation:cancelled",
-        {"conversation_id": conversation.id, "cancelled": cancelled},
+        task_cancelled = True
+    result = await cancel_conversation_generation(
+        db,
+        conversation,
+        channel=f"conversation:{conversation.id}",
+        task_cancelled=task_cancelled,
     )
-    return ok({"conversation_id": conversation.id, "cancelled": cancelled}, "Generation cancelled")
+    return ok(result, "Generation cancelled")
 
 
 @compat_router.get("/conversations/{conversation_id}/messages")

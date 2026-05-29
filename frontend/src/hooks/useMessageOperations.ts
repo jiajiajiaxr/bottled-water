@@ -269,6 +269,10 @@ export function useMessageOperations(currentUserName: string) {
       });
     };
 
+    const closeStreamControl = () => {
+      stopStreamRef.current = undefined;
+    };
+
     if (agentParticipants.length === 1) {
       const participant = agentParticipants[0];
       const author = participantName(participant);
@@ -520,6 +524,7 @@ export function useMessageOperations(currentUserName: string) {
           }
         },
         onDone: () => {
+          closeStreamControl();
           deltaBatcher.flushNow();
           thinkingBatcher.flushNow();
           clearConversationRunning("done");
@@ -627,6 +632,11 @@ export function useMessageOperations(currentUserName: string) {
 
   const stopStreaming = async () => {
     if (!activeId) return;
+    const conversationId = activeId;
+    await api.cancelAssistantReply(conversationId).catch(() => undefined);
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 500);
+    });
     stopStreamRef.current?.();
     stopStreamRef.current = undefined;
     setStreamState("done");
@@ -646,18 +656,48 @@ export function useMessageOperations(currentUserName: string) {
           : item,
       ),
     );
-    updateMessages((current) =>
+    updateConversations((current) =>
       current.map((item) =>
-        item.streamState === "streaming"
+        item.id === conversationId
           ? {
               ...item,
+              lastMessage: "已停止本次响应",
+              updatedAt: new Date().toISOString(),
+              workflow_runtime: item.workflow_runtime
+                ? { ...item.workflow_runtime, status: "cancelled" }
+                : item.workflow_runtime,
+            }
+          : item,
+      ),
+    );
+    updateMessages((current) =>
+      current.map((item) =>
+        item.conversationId === conversationId && item.streamState === "streaming"
+          ? {
+              ...item,
+              status: "cancelled",
               streamState: "done",
+              rawContent: { ...item.rawContent, _activeToolCalls: [] },
               content: item.content || "已停止接收本次回复。",
             }
           : item,
       ),
     );
-    await api.cancelAssistantReply(activeId).catch(() => undefined);
+    const { backgroundTasks, setBackgroundTasks: setTasks } =
+      useTaskStore.getState();
+    setTasks(
+      backgroundTasks.map((task) =>
+        task.conversation_id === conversationId && isTaskRunning(task.status)
+          ? {
+              ...task,
+              status: "CANCELLED",
+              progress: Math.min(task.progress ?? 0, 95),
+              updated_at: new Date().toISOString(),
+              output: { ...(task.output ?? {}), cancelled: true },
+            }
+          : task,
+      ),
+    );
     await refreshTasks().catch(() => undefined);
     message.info("已停止本次响应");
   };

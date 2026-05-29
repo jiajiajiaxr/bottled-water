@@ -38,6 +38,41 @@ describe("running conversation derivation", () => {
 
     expect([...running]).toEqual([]);
   });
+
+  it("does not keep a cancelled conversation running from stale local or task state", () => {
+    const running = deriveRunningConversationIds({
+      conversations: [
+        {
+          ...conversation("conversation-1"),
+          lastMessage: "已停止本次响应",
+          workflow_runtime: workflowRuntime("cancelled"),
+        },
+      ],
+      backgroundTasks: [task("conversation-1", "EXECUTING")],
+      localRunningConversationIds: new Set(["conversation-1"]),
+      activeConversationId: "conversation-1",
+      activeMessages: [message("conversation-1", "cancelled")],
+    });
+
+    expect(running.has("conversation-1")).toBe(false);
+  });
+
+  it("ignores old running task when workflow runtime is terminal", () => {
+    const running = deriveRunningConversationIds({
+      conversations: [
+        {
+          ...conversation("group-1"),
+          workflow_runtime: workflowRuntime("completed"),
+        },
+      ],
+      backgroundTasks: [task("group-1", "RUNNING")],
+      localRunningConversationIds: new Set(),
+      activeConversationId: "group-1",
+      activeMessages: [],
+    });
+
+    expect(running.has("group-1")).toBe(false);
+  });
 });
 
 function conversation(id: string): Conversation {
@@ -74,5 +109,19 @@ function message(conversationId: string, status: string): ChatMessage {
     createdAt: new Date().toISOString(),
     status,
     streamState: status === "streaming" ? "streaming" : "done",
+  };
+}
+
+function workflowRuntime(status: string) {
+  return {
+    id: `run-${status}`,
+    conversation_id: "conversation-1",
+    status,
+    mode: "canvas",
+    workflow_snapshot: { mode: "canvas", nodes: [], edges: [] },
+    node_states: [],
+    edge_states: [],
+    events: [],
+    progress: status === "completed" ? 100 : 50,
   };
 }

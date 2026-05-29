@@ -16,6 +16,7 @@ from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.agents.function_types import AgentFunctionLoopResult
 from app.services.ark import LLMStreamEvent
 from app.services.chat.artifacts import _publish_tool_artifacts
+from app.services.chat.cancellation import cancel_conversation_generation
 from app.services.chat.finalizer import fail_generation
 from app.services.chat.orchestrator import _complete_independent_group
 from app.services.workflows.engine import WorkflowEngine
@@ -392,6 +393,67 @@ async def test_generation_failure_closes_lingering_streaming_messages(db: Sessio
     assert "异常结束" in assistant.content["text"]
     assert any(call.args[1] == "message_stop" for call in publish.await_args_list)
     assert any(call.args[1] == "generation_finished" for call in publish.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_cancel_generation_persists_terminal_state_and_events(db: Session) -> None:
+    user, conversation, _ = _user_conversation_message(db, "停止一下")
+    task = Task(
+        conversation_id=conversation.id,
+        creator_id=user.id,
+        title="running",
+        description="running",
+        status="EXECUTING",
+        progress=60,
+    )
+    assistant = Message(
+        conversation_id=conversation.id,
+        sender_type="agent",
+        sender_id="agent-1",
+        sender_name="Daily Chat Agent",
+        content_type="text",
+        content={"text": "", "_activeToolCalls": [{"toolName": "sandbox.run"}]},
+        status="streaming",
+    )
+    workflow = _parallel_agent_workflow(conversation.id, [])
+    workflow_run = WorkflowRun(
+        conversation_id=conversation.id,
+        trigger_message_id=None,
+        started_by=user.id,
+        status="running",
+        mode="canvas",
+        workflow_snapshot=workflow,
+        node_states=build_node_states(workflow),
+        edge_states=build_edge_states(workflow),
+        progress=40,
+    )
+    db.add_all([task, assistant, workflow_run])
+    db.commit()
+
+    with patch("app.services.chat.cancellation.event_bus.publish", new_callable=AsyncMock) as publish:
+        result = await cancel_conversation_generation(
+            db,
+            conversation,
+            channel=f"conversation:{conversation.id}",
+            task_cancelled=True,
+        )
+
+    db.refresh(assistant)
+    db.refresh(task)
+    db.refresh(workflow_run)
+    db.refresh(conversation)
+    assert result["messages"] == 1
+    assert assistant.status == "cancelled"
+    assert assistant.content["_activeToolCalls"] == []
+    assert task.status == "CANCELLED"
+    assert workflow_run.status == "cancelled"
+    assert conversation.last_message_preview == "已停止本次响应"
+    event_names = [call.args[1] for call in publish.await_args_list]
+    assert "message:updated" in event_names
+    assert "message_stop" in event_names
+    assert "task:status_changed" in event_names
+    assert "workflow:run_updated" in event_names
+    assert "generation_finished" in event_names
 
 
 @pytest.mark.asyncio
