@@ -12,6 +12,7 @@ import {
 } from "react-router-dom";
 import { api } from "./api";
 import { LoginScreen } from "./features/auth/components/LoginScreen";
+import { DocsPage } from "./pages/DocsPage";
 import { Workbench } from "./pages/WorkbenchPage/Workbench";
 import {
   conversationRoutePath,
@@ -143,6 +144,7 @@ function RoutedApp() {
   return (
     <AntApp>
       <Routes>
+        <Route path="/docs" element={<DocsPage />} />
         <Route
           path="/login"
           element={<LoginRoute user={user} onLogin={setUser} />}
