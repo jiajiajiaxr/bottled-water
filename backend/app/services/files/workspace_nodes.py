@@ -130,7 +130,7 @@ class _TreeBuilder:
             self._dedupe_names(child)
 
     def _directory_name(self, path: str, part: str) -> str:
-        return self.directory_labels.get(path) or ROOT_LABELS.get(path) or ROOT_LABELS.get(part) or readable_segment(part)
+        return self.directory_labels.get(path) or ROOT_LABELS.get(path) or ROOT_LABELS.get(part) or readable_segment(part, path=path)
 
 
 def _upload_nodes(
@@ -278,6 +278,8 @@ def _directory_labels(db: Session, conversations: list[Conversation]) -> dict[st
         label = f"{conversation.title or '会话'} · {conversation.id[:8]}"
         for area in ("uploads", "files", "sandbox", "exports", "artifacts"):
             labels[f"{area}/conversations/{conversation.id}"] = label
+            labels[f"{area}/conversations/{conversation.id}/agents"] = "Agent 输出"
+            labels[f"{area}/conversations/{conversation.id}/tasks"] = "任务输出"
     conversation_ids = {item.id for item in conversations}
     artifacts = db.scalars(
         select(Artifact).where(Artifact.conversation_id.in_(conversation_ids), Artifact.deleted_at.is_(None))

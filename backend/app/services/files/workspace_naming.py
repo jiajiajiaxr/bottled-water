@@ -39,8 +39,25 @@ def display_name(name: str, *, fallback_name: str | None = None, fallback_id: st
     return candidate[:180]
 
 
-def readable_segment(part: str) -> str:
-    return f"对象 {part[:8]}" if UUID_PATTERN.match(part) else part
+def readable_segment(part: str, *, path: str = "") -> str:
+    if not UUID_PATTERN.match(part):
+        return part
+    short_id = part[:8]
+    if path.startswith("artifacts/"):
+        return f"产物 {short_id}"
+    if path.startswith("uploads/") or path.startswith("files/"):
+        return f"上传记录 {short_id}"
+    if path.startswith("exports/"):
+        return f"导出记录 {short_id}"
+    if path.startswith("sandbox/"):
+        if "/tasks/" in path:
+            return f"任务运行 {short_id}"
+        if "/agents/" in path:
+            return f"Agent 工作区 {short_id}"
+        return f"沙箱记录 {short_id}"
+    if path.startswith("projects/"):
+        return f"项目文件夹 {short_id}"
+    return f"文件夹 {short_id}"
 
 
 def duplicate_suffix(updated_at: str | None, node_id: str) -> str:

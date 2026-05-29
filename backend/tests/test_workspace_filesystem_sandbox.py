@@ -239,6 +239,24 @@ def test_workspace_file_tree_normalizes_display_names_and_conversation_folders(d
         _cleanup(workspace.id)
 
 
+def test_workspace_file_tree_replaces_uuid_directories_with_readable_labels(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    uuid_dir = "3ef804b7-9a42-4f52-af0e-201238c23bc4"
+    path = scoped_dir(workspace.id, "uploads") / "legacy" / uuid_dir / "Figure_1.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"fake-image")
+
+    try:
+        tree = workspace_file_tree(db, user, workspace.id)
+        flat = _flatten(tree["root"])
+        display_names = {str(item.get("display_name") or "") for item in flat}
+
+        assert uuid_dir not in display_names
+        assert "上传记录 3ef804b7" in display_names
+    finally:
+        _cleanup(workspace.id)
+
+
 def test_at_file_reference_is_resolved_into_message_attachment(db: Session) -> None:
     user, workspace, conversation = _user_workspace_conversation(db)
     path = scoped_dir(workspace.id, "sandbox", conversation_id=conversation.id) / "summary.md"

@@ -31,6 +31,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<string>("all");
   const [preview, setPreview] = useState<PreviewState>();
+  const previewObjectUrl = preview?.objectUrl;
 
   const closePreview = useCallback(() => {
     if (preview?.objectUrl) URL.revokeObjectURL(preview.objectUrl);
@@ -52,7 +53,12 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
     void load();
   }, [load]);
 
-  useEffect(() => closePreview, [closePreview]);
+  useEffect(
+    () => () => {
+      if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+    },
+    [previewObjectUrl],
+  );
 
   const visibleNodes = useMemo(() => filterNodes(nodes, query, source), [nodes, query, source]);
   const sources = useMemo(() => {
