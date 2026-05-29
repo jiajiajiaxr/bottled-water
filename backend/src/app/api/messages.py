@@ -14,8 +14,7 @@ from app.models import Conversation, FileAsset, Message, User, utcnow
 from app.schemas.common import ApiResponse
 from app.schemas.requests import SendMessagePayload
 from app.services.events import event_bus
-from app.services.orchestrator import run_orchestration
-from app.services.runtime_adapter import OrchestratorV2
+from app.services.runtime_service import OrchestratorService
 from app.services.serialization import artifact_to_dict, message_to_dict
 
 
@@ -94,11 +93,11 @@ def _send(
                     "extracted_text": file_asset.extracted_text[:12000],
                 }
             )
-    # 调度策略：消息级 > 会话级 > 默认 workflow
+    # 调度策略：消息级 > 会话级 > 默认 tech_lead
     scheduling_strategy = payload.get("scheduling_strategy", "")
     if not scheduling_strategy and conversation.extra:
-        scheduling_strategy = (conversation.extra or {}).get("scheduling_strategy", "workflow")
-    scheduling_strategy = scheduling_strategy if scheduling_strategy in ("workflow", "tech_lead") else "workflow"
+        scheduling_strategy = (conversation.extra or {}).get("scheduling_strategy", "tech_lead")
+    scheduling_strategy = scheduling_strategy if scheduling_strategy in ("tech_lead",) else "tech_lead"
 
     # 如果消息指定了新策略，持久化到会话
     if payload.get("scheduling_strategy") and conversation.extra != {**(conversation.extra or {}), "scheduling_strategy": scheduling_strategy}:
@@ -135,12 +134,7 @@ def _send(
 
         if previous and not previous.done():
             previous.cancel()
-        if scheduling_strategy == "tech_lead":
-            # 使用新的 tech_lead 调度模式
-            task = asyncio.create_task(_run_tech_lead_orchestration(db, conversation, message))
-        else:
-            # 使用旧的 workflow 编排模式
-            task = asyncio.create_task(run_orchestration(message.id))
+        task = asyncio.create_task(OrchestratorService.run(db, conversation, message, scheduling_strategy))
         ORCHESTRATION_TASKS[conversation.id] = task
         
         task.add_done_callback(
@@ -150,12 +144,6 @@ def _send(
         )
 
     return message
-
-
-async def _run_tech_lead_orchestration(db: Session, conversation: Conversation, message: Message) -> None:
-    """运行 tech_lead 调度模式的多 Agent 编排"""
-    orchestrator = OrchestratorV2(db, conversation, message)
-    await orchestrator.run()
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=ApiResponse[dict])

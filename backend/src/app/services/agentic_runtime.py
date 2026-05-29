@@ -20,10 +20,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, McpServer, Skill, User
-from app.services.ark import ark_client
 from app.services.events import event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
 from app.services.tool_registry import BUILTIN_TOOLS, invoke_tool, normalize_tool_names
+from model_provider import create_provider
+from model_provider.core.config import ModelConfig
+from app.core.config import get_settings
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -248,26 +250,29 @@ async def execute_skill(
 
     system_prompt = skill.prompt or skill.content or f"You are the AgentHub skill {skill.name}."
     try:
-        response = await ark_client.chat(
-            [
+        settings = get_settings()
+        api_key = getattr(settings, "ARK_API_KEY", "")
+        model = getattr(settings, "ARK_DEFAULT_MODEL", "ep-xxx")
+        if not api_key:
+            raise RuntimeError("ARK_API_KEY not configured")
+
+        provider = create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
+        response = await provider.chat(
+            messages=[
                 {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": json.dumps({"input": prompt, "skill": skill.name}, ensure_ascii=False),
-                },
+                {"role": "user", "content": json.dumps({"input": prompt, "skill": skill.name}, ensure_ascii=False)},
             ],
             temperature=0.2,
             max_tokens=600,
-            purpose="skill_execution",
         )
-        output = response.text
-        model = response.model
+        output = response.content
+        model_name = response.model or model
         status = "succeeded"
     except Exception as exc:
         output = f"[skill-fallback] {skill.name}: {prompt[:180]}"
-        model = "mock-skill-execution"
+        model_name = "mock-skill-execution"
         status = f"fallback:{exc.__class__.__name__}"
-    result = {"type": "skill", "skill_id": skill.id, "skill_name": skill.name, "status": status, "output": output, "model": model}
+    result = {"type": "skill", "skill_id": skill.id, "skill_name": skill.name, "status": status, "output": output, "model": model_name}
     await event_bus.publish(channel, "tool:finished", result)
     return result
 

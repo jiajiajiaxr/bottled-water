@@ -1,3 +1,9 @@
+"""
+Tools API
+
+工具目录 CRUD 和 AI 生成，统一使用 model_provider 调用 LLM。
+"""
+
 from __future__ import annotations
 
 import json
@@ -16,12 +22,22 @@ from app.deps import get_current_user
 from app.models import ToolDefinition, User, Workspace, utcnow
 from app.schemas.common import ApiResponse, ToolDefinitionOut
 from app.schemas.requests import CreateToolRequest, GenerateToolRequest, InvokeToolRequest, UpdateToolRequest
-from app.services.ark import ark_client
 from app.services.serialization import redact_sensitive, tool_definition_to_dict
 from app.services.tool_registry import BUILTIN_TOOLS, ensure_tool_tables, invoke_tool, list_tools
-
+from model_provider import create_provider
+from model_provider.core.config import ModelConfig
+from app.core.config import get_settings
 
 router = APIRouter(tags=["tools"])
+
+
+def _model_provider():
+    settings = get_settings()
+    api_key = getattr(settings, "ARK_API_KEY", "")
+    model = getattr(settings, "ARK_DEFAULT_MODEL", "ep-xxx")
+    if not api_key:
+        return None
+    return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
 
 
 def _validate_workspace(db: Session, user: User, workspace_id: str | None) -> None:
@@ -44,23 +60,6 @@ def _owned_tool(db: Session, user: User, tool_id: str) -> ToolDefinition:
     return tool
 
 
-def _parse_json_object(text: str) -> dict[str, Any] | None:
-    try:
-        value = json.loads(text)
-        return value if isinstance(value, dict) else None
-    except json.JSONDecodeError:
-        pass
-    start = text.find("{")
-    end = text.rfind("}")
-    if start < 0 or end <= start:
-        return None
-    try:
-        value = json.loads(text[start : end + 1])
-        return value if isinstance(value, dict) else None
-    except json.JSONDecodeError:
-        return None
-
-
 def _safe_name(value: str) -> str:
     name = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip().lower()).strip("._")
     return name or "generated_tool"
@@ -74,20 +73,27 @@ def _tool_workspace_file(name: str, code: str) -> str:
     return str(path)
 
 
-def _fallback_tool_spec(payload: GenerateToolRequest, reason: str) -> dict[str, Any]:
-    name = payload.name or _safe_name(payload.intent[:60])
-    code = (
-        "text = str(arguments.get('input') or arguments.get('text') or arguments)\n"
-        "result = {\n"
-        "    'summary': text[:500],\n"
-        "    'note': 'AI 生成工具的安全占位实现，可继续编辑代码。'\n"
-        "}\n"
-    )
+def _parse_json_object(text: str) -> dict | None:
+    try:
+        value = json.loads(text)
+        return value if isinstance(value, dict) else None
+    except json.JSONDecodeError:
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
+def _fallback_tool_spec(payload: GenerateToolRequest, reason: str) -> dict:
+    name = _safe_name(payload.name or payload.intent[:60])
+    code = "text = str(arguments.get('input') or arguments.get('text') or arguments)\nresult = {'summary': text[:500], 'note': 'AI generated placeholder'}\n"
     return {
-        "name": _safe_name(name),
-        "display_name": payload.name or "AI 生成工具",
-        "description": payload.intent,
-        "category": payload.category,
+        "name": _safe_name(name), "display_name": payload.name or "AI 生成工具",
+        "description": payload.intent, "category": payload.category,
         "type": "custom_python",
         "input_schema": {"type": "object", "additionalProperties": True},
         "output_schema": {"type": "object", "additionalProperties": True},
@@ -95,132 +101,81 @@ def _fallback_tool_spec(payload: GenerateToolRequest, reason: str) -> dict[str, 
         "implementation": {"language": "python", "code": code},
         "runtime": {"mode": "restricted_python", "workspace": "var/ai-tools"},
         "tags": list(dict.fromkeys([*payload.tags, "ai-generated"])),
-        "config": {"generation": {"provider_status": "fallback", "reason": reason}},
+        "config": {"generation": {"status": "fallback", "reason": reason}},
     }
 
 
-async def _generate_tool_spec(payload: GenerateToolRequest) -> dict[str, Any]:
+async def _generate_tool_spec(payload: GenerateToolRequest) -> dict:
+    provider = _model_provider()
     fallback = _fallback_tool_spec(payload, "not_called")
+    if not provider:
+        return fallback
+
     try:
-        result = await ark_client.chat(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "你是 AgentHub 的工具构建助手。只返回 JSON。字段包含 name, display_name, "
-                        "description, category, type, input_schema, output_schema, permissions, "
-                        "implementation, runtime, tags, config。implementation.code 必须是受限 Python "
-                        "片段：读取 arguments 字典，最后把输出写入 result 变量；不要 import，不要读写系统文件，"
-                        "不要访问网络，不要包含密钥。"
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "name": payload.name,
-                            "intent": payload.intent,
-                            "requirements": payload.requirements,
-                            "category": payload.category,
-                            "allowed_permissions": payload.allowed_permissions,
-                            "tags": payload.tags,
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
+        result = await provider.chat(
+            messages=[
+                {"role": "system", "content": "你是 AgentHub 工具构建助手。只返回 JSON。字段：name, display_name, description, category, type, input_schema, output_schema, permissions, implementation, runtime, tags, config。implementation.code 必须是受限 Python 片段，不 import，不读写系统文件。"},
+                {"role": "user", "content": json.dumps({"name": payload.name, "intent": payload.intent, "requirements": payload.requirements, "category": payload.category, "allowed_permissions": payload.allowed_permissions, "tags": payload.tags}, ensure_ascii=False)},
             ],
             temperature=0.2,
             max_tokens=1400,
-            purpose="tool_generation",
         )
-        data = _parse_json_object(result.text)
+        data = _parse_json_object(result.content)
         if not data:
-            spec = _fallback_tool_spec(payload, "non_json_adapter_response")
-            spec["config"]["generation"].update({"model": result.model, "raw_text_preview": result.text[:300]})
+            spec = _fallback_tool_spec(payload, "non_json_response")
+            spec["config"]["generation"]["raw_preview"] = result.content[:300]
             return spec
-        implementation = data.get("implementation") if isinstance(data.get("implementation"), dict) else fallback["implementation"]
-        config = data.get("config") if isinstance(data.get("config"), dict) else {}
-        config = {
-            **config,
-            "generation": {
-                **(config.get("generation") if isinstance(config.get("generation"), dict) else {}),
-                "provider_status": getattr(result, "provider_status", "ok"),
-                "model": result.model,
-                "usage": result.usage,
-            },
-        }
-        return {
-            "name": _safe_name(str(data.get("name") or fallback["name"])),
-            "display_name": str(data.get("display_name") or payload.name or fallback["display_name"])[:200],
-            "description": str(data.get("description") or fallback["description"]),
-            "category": str(data.get("category") or payload.category),
-            "type": str(data.get("type") or "custom_python"),
-            "input_schema": data.get("input_schema") if isinstance(data.get("input_schema"), dict) else fallback["input_schema"],
-            "output_schema": data.get("output_schema") if isinstance(data.get("output_schema"), dict) else fallback["output_schema"],
-            "permissions": data.get("permissions") if isinstance(data.get("permissions"), list) else payload.allowed_permissions,
-            "implementation": implementation,
-            "runtime": data.get("runtime") if isinstance(data.get("runtime"), dict) else fallback["runtime"],
-            "tags": list(dict.fromkeys([*payload.tags, *(data.get("tags") if isinstance(data.get("tags"), list) else []), "ai-generated"])),
-            "config": config,
-        }
     except Exception as exc:
-        spec = _fallback_tool_spec(payload, f"adapter_error:{exc.__class__.__name__}")
+        spec = _fallback_tool_spec(payload, f"error:{exc.__class__.__name__}")
         spec["config"]["generation"]["error"] = str(exc)[:300]
         return spec
 
+    impl = data.get("implementation") if isinstance(data.get("implementation"), dict) else fallback["implementation"]
+    config = data.get("config") or {}
+    config = {**config, "generation": {**(config.get("generation") or {}), "status": "ok", "model": result.model or "unknown"}}
+    return {
+        "name": _safe_name(str(data.get("name") or fallback["name"])),
+        "display_name": str(data.get("display_name") or payload.name or fallback["display_name"])[:200],
+        "description": str(data.get("description") or fallback["description"]),
+        "category": str(data.get("category") or payload.category),
+        "type": str(data.get("type") or "custom_python"),
+        "input_schema": data.get("input_schema") if isinstance(data.get("input_schema"), dict) else fallback["input_schema"],
+        "output_schema": data.get("output_schema") if isinstance(data.get("output_schema"), dict) else fallback["output_schema"],
+        "permissions": data.get("permissions") if isinstance(data.get("permissions"), list) else payload.allowed_permissions,
+        "implementation": impl,
+        "runtime": data.get("runtime") if isinstance(data.get("runtime"), dict) else fallback["runtime"],
+        "tags": list(dict.fromkeys([*payload.tags, "ai-generated"])),
+        "config": config,
+    }
+
 
 @router.get("/tools", response_model=ApiResponse[dict])
-async def list_tool_catalog(
-    workspace_id: str | None = None,
-    q: str | None = None,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+async def list_tool_catalog(workspace_id: str | None = None, q: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _validate_workspace(db, user, workspace_id)
     items = list_tools(db, user, workspace_id=workspace_id, q=q)
     return ok({"items": items, "total": len(items)})
 
 
 @router.post("/tools", response_model=ApiResponse[ToolDefinitionOut])
-async def create_tool(
-    payload: CreateToolRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+async def create_tool(payload: CreateToolRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     ensure_tool_tables(db)
     _validate_workspace(db, user, payload.workspace_id)
     if payload.name in BUILTIN_TOOLS:
         raise ValidationAppError("不能覆盖平台内置工具")
-    duplicate = db.scalar(
-        select(ToolDefinition).where(
-            ToolDefinition.owner_id == user.id,
-            ToolDefinition.workspace_id == payload.workspace_id,
-            ToolDefinition.name == payload.name,
-            ToolDefinition.deleted_at.is_(None),
-        )
-    )
+    duplicate = db.scalar(select(ToolDefinition).where(ToolDefinition.owner_id == user.id, ToolDefinition.workspace_id == payload.workspace_id, ToolDefinition.name == payload.name, ToolDefinition.deleted_at.is_(None)))
     if duplicate:
         raise ValidationAppError("工具名称已存在")
     implementation = redact_sensitive(payload.implementation)
     code = str(implementation.get("code") or "")
     source_path = _tool_workspace_file(payload.name, code) if code else None
     tool = ToolDefinition(
-        owner_id=user.id,
-        workspace_id=payload.workspace_id,
-        name=_safe_name(payload.name),
-        display_name=payload.display_name or payload.name,
-        description=payload.description,
-        category=payload.category,
-        type=payload.type,
-        status=payload.status,
-        version=payload.version,
-        input_schema=payload.input_schema,
-        output_schema=payload.output_schema,
-        permissions=payload.permissions,
+        owner_id=user.id, workspace_id=payload.workspace_id, name=_safe_name(payload.name),
+        display_name=payload.display_name or payload.name, description=payload.description,
+        category=payload.category, type=payload.type, status=payload.status, version=payload.version,
+        input_schema=payload.input_schema, output_schema=payload.output_schema, permissions=payload.permissions,
         implementation={**implementation, **({"source_path": source_path} if source_path else {})},
         runtime=payload.runtime or {"mode": "restricted_python", "workspace": "var/ai-tools"},
-        tags=payload.tags,
-        config=redact_sensitive(payload.config),
+        tags=payload.tags, config=redact_sensitive(payload.config),
     )
     db.add(tool)
     db.commit()
@@ -229,11 +184,7 @@ async def create_tool(
 
 
 @router.post("/tools/generate", response_model=ApiResponse[ToolDefinitionOut])
-async def generate_tool(
-    payload: GenerateToolRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+async def generate_tool(payload: GenerateToolRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     ensure_tool_tables(db)
     _validate_workspace(db, user, payload.workspace_id)
     spec = await _generate_tool_spec(payload)
@@ -242,22 +193,11 @@ async def generate_tool(
     code = str((spec.get("implementation") or {}).get("code") or "")
     source_path = _tool_workspace_file(spec["name"], code) if code else None
     tool = ToolDefinition(
-        owner_id=user.id,
-        workspace_id=payload.workspace_id,
-        name=spec["name"],
-        display_name=spec["display_name"],
-        description=spec["description"],
-        category=spec["category"],
-        type=spec["type"],
-        status="active",
-        version="1.0.0",
-        input_schema=spec["input_schema"],
-        output_schema=spec["output_schema"],
-        permissions=spec["permissions"],
+        owner_id=user.id, workspace_id=payload.workspace_id, name=spec["name"], display_name=spec["display_name"],
+        description=spec["description"], category=spec["category"], type=spec["type"], status="active", version="1.0.0",
+        input_schema=spec["input_schema"], output_schema=spec["output_schema"], permissions=spec["permissions"],
         implementation=redact_sensitive({**spec["implementation"], **({"source_path": source_path} if source_path else {})}),
-        runtime=redact_sensitive(spec["runtime"]),
-        tags=spec["tags"],
-        config=redact_sensitive(spec["config"]),
+        runtime=redact_sensitive(spec["runtime"]), tags=spec["tags"], config=redact_sensitive(spec["config"]),
     )
     db.add(tool)
     db.commit()
@@ -266,23 +206,14 @@ async def generate_tool(
 
 
 @router.get("/tools/{tool_id}", response_model=ApiResponse[ToolDefinitionOut])
-async def get_tool(
-    tool_id: str,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+async def get_tool(tool_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if tool_id in BUILTIN_TOOLS:
         return ok(BUILTIN_TOOLS[tool_id].to_dict())
     return ok(tool_definition_to_dict(_owned_tool(db, user, tool_id)))
 
 
 @router.patch("/tools/{tool_id}", response_model=ApiResponse[ToolDefinitionOut])
-async def update_tool(
-    tool_id: str,
-    payload: UpdateToolRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+async def update_tool(tool_id: str, payload: UpdateToolRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     tool = _owned_tool(db, user, tool_id)
     data = payload.model_dump(exclude_unset=True)
     if "workspace_id" in data:
@@ -301,11 +232,7 @@ async def update_tool(
 
 
 @router.delete("/tools/{tool_id}", response_model=ApiResponse[dict])
-async def delete_tool(
-    tool_id: str,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+async def delete_tool(tool_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     tool = _owned_tool(db, user, tool_id)
     tool.deleted_at = utcnow()
     tool.status = "deleted"
@@ -314,12 +241,7 @@ async def delete_tool(
 
 
 @router.post("/tools/{tool_id}/invoke", response_model=ApiResponse[dict])
-async def invoke_tool_endpoint(
-    tool_id: str,
-    payload: InvokeToolRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+async def invoke_tool_endpoint(tool_id: str, payload: InvokeToolRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _validate_workspace(db, user, payload.workspace_id)
     result = invoke_tool(db, user, tool_id, payload.arguments)
     return ok(result, "工具调用完成")
