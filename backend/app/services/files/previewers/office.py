@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.services.tools.builtins.file.extractors import extract_text_from_path
+from app.services.tools.builtins.file.converters import generate_pdf
 from app.services.workspaces.filesystem import safe_segment, workspace_root
 
 OFFICE_SUFFIXES = {".docx", ".pptx", ".xlsx"}
@@ -47,7 +48,13 @@ def build_office_preview(
 
     soffice = _find_soffice()
     if not soffice:
-        return _fallback(source.path, mime_type, filename, "当前环境未安装 LibreOffice，无法生成 Office PDF 预览")
+        return _fallback_pdf(
+            source.path,
+            preview_pdf,
+            mime_type,
+            filename,
+            "当前环境未安装 LibreOffice，已使用文本抽取生成 PDF 预览",
+        )
 
     try:
         _convert_with_libreoffice(soffice, source.path, source.cache_dir, timeout_seconds)
@@ -55,12 +62,12 @@ def build_office_preview(
         if generated.exists() and generated != preview_pdf:
             generated.replace(preview_pdf)
         if not preview_pdf.exists() or preview_pdf.stat().st_size <= 0:
-            return _fallback(source.path, mime_type, filename, "LibreOffice 未生成可用的 PDF 预览文件")
+            return _fallback_pdf(source.path, preview_pdf, mime_type, filename, "LibreOffice 未生成可用的 PDF 预览文件")
         return OfficePreviewResult(preview_pdf_path=preview_pdf, cached=False)
     except subprocess.TimeoutExpired:
-        return _fallback(source.path, mime_type, filename, "Office PDF 预览生成超时，请下载原文件查看")
+        return _fallback_pdf(source.path, preview_pdf, mime_type, filename, "Office PDF 预览生成超时，已降级生成文本 PDF 预览")
     except Exception as exc:
-        return _fallback(source.path, mime_type, filename, f"Office PDF 预览生成失败：{exc}")
+        return _fallback_pdf(source.path, preview_pdf, mime_type, filename, f"Office PDF 预览生成失败，已降级：{exc}")
 
 
 @dataclass(frozen=True)
@@ -166,3 +173,25 @@ def _fallback(path: Path, mime_type: str, filename: str, error: str) -> OfficePr
     except Exception:
         text = ""
     return OfficePreviewResult(preview_pdf_path=None, cached=False, error=error, fallback_text=text)
+
+
+def _fallback_pdf(path: Path, preview_pdf: Path, mime_type: str, filename: str, error: str) -> OfficePreviewResult:
+    fallback = _fallback(path, mime_type, filename, error)
+    source_text = fallback.fallback_text.strip()
+    body = source_text or "原文件为空或无法提取可预览文本。请下载原文件查看。"
+    try:
+        preview_pdf.parent.mkdir(parents=True, exist_ok=True)
+        preview_pdf.write_bytes(
+            generate_pdf(
+                f"{Path(filename).stem or 'Office 文件'} PDF 预览",
+                f"{error}\n\n{body}",
+            )
+        )
+    except Exception:
+        return fallback
+    return OfficePreviewResult(
+        preview_pdf_path=preview_pdf,
+        cached=False,
+        error=error,
+        fallback_text=fallback.fallback_text,
+    )

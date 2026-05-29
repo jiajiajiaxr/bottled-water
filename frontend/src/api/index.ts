@@ -36,6 +36,7 @@ export {
   artifactById,
   saveArtifact,
   exportArtifact,
+  previewArtifactPdf,
 } from "./artifact";
 
 export {

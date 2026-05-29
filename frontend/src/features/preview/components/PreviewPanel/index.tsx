@@ -30,6 +30,7 @@ import { ResizeHandle } from "./ResizeHandle";
 import {
   artifactExportFormats,
   downloadLabel,
+  isOfficeArtifact,
   isPdfArtifact as checkPdfArtifact,
   openOrDownloadExport,
   preferredArtifactFormat,
@@ -98,6 +99,7 @@ export function PreviewPanel({
     [artifact],
   );
   const isPdfArtifact = checkPdfArtifact(artifact, preferredFormat);
+  const previewAsPdf = isPdfArtifact || isOfficeArtifact(artifact, preferredFormat);
 
   if (!artifact) {
     return (
@@ -171,7 +173,7 @@ export function PreviewPanel({
                 <ArtifactPreviewFrame
                   artifact={artifact}
                   draft={draft}
-                  isPdfArtifact={isPdfArtifact}
+                  previewAsPdf={previewAsPdf}
                 />
               </div>
             ),

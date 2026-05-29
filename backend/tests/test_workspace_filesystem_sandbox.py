@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.database import Base
 from app.core.errors import ValidationAppError
 from app.models import Artifact, Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
+from app.api.artifacts import download_artifact_preview_pdf
 from app.api.messages import _send
 from app.api.workspace_files import download_workspace_file, download_workspace_file_preview_pdf, preview_workspace_file
 from app.services.files.workspace_tree import (
@@ -352,6 +353,34 @@ def test_workspace_file_preview_converts_docx_artifact_to_cached_pdf(db: Session
         _cleanup(workspace.id)
 
 
+def test_chat_artifact_preview_converts_docx_to_pdf(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    calls = _fake_libreoffice(monkeypatch)
+
+    try:
+        result = invoke_tool(
+            db,
+            user,
+            "artifact.create_docx",
+            {
+                "workspace_id": workspace.id,
+                "conversation_id": conversation.id,
+                "title": "主聊天 Word 预览",
+                "body": "这是用于主聊天产物预览的 Word 文件。",
+            },
+        )["result"]
+
+        pdf = asyncio.run(download_artifact_preview_pdf(result["artifact_id"], db, user))
+        pdf_again = asyncio.run(download_artifact_preview_pdf(result["artifact_id"], db, user))
+
+        assert pdf.media_type == "application/pdf"
+        assert pdf.path.endswith("preview.pdf")
+        assert pdf_again.path == pdf.path
+        assert len(calls) == 1
+    finally:
+        _cleanup(workspace.id)
+
+
 def test_workspace_file_preview_converts_pptx_artifact_to_pdf(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     user, workspace, conversation = _user_workspace_conversation(db)
     _fake_libreoffice(monkeypatch)
@@ -408,7 +437,10 @@ def test_workspace_file_preview_converts_xlsx_artifact_to_pdf(db: Session, monke
         _cleanup(workspace.id)
 
 
-def test_workspace_file_preview_reports_missing_libreoffice(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_workspace_file_preview_falls_back_to_text_pdf_when_libreoffice_missing(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     user, workspace, conversation = _user_workspace_conversation(db)
     monkeypatch.setattr(office_preview, "_find_soffice", lambda: None)
 
@@ -427,10 +459,13 @@ def test_workspace_file_preview_reports_missing_libreoffice(db: Session, monkeyp
         node_id = f"artifact:{result['artifact_id']}"
 
         preview = asyncio.run(preview_workspace_file(workspace.id, node_id, db, user))["data"]
+        pdf = asyncio.run(download_workspace_file_preview_pdf(workspace.id, node_id, db, user))
         downloaded = asyncio.run(download_workspace_file(workspace.id, node_id, db, user))
 
-        assert preview["mode"] == "office_text"
-        assert "LibreOffice" in preview["preview_error"]
+        assert preview["mode"] == "pdf"
+        assert "LibreOffice" in preview["office_preview"]["warning"]
+        assert pdf.media_type == "application/pdf"
+        assert pdf.path.endswith("preview.pdf")
         assert downloaded.media_type.startswith("application/vnd.openxmlformats-officedocument")
     finally:
         _cleanup(workspace.id)

@@ -219,7 +219,8 @@ WorkspaceFilesContent
 
 Office 转 PDF 预览依赖本机或容器安装 LibreOffice。Windows 可安装 LibreOffice 后把 `soffice.exe`
 加入 `PATH`，或设置 `LIBREOFFICE_PATH` / `SOFFICE_PATH` 指向可执行文件；Linux/Docker 环境需要安装
-`libreoffice`。未检测到 LibreOffice 时，后端会返回明确错误并降级为文本摘要预览，不影响原文件下载。
+`libreoffice`。未检测到 LibreOffice 或转换失败时，后端会把可抽取文本生成一份降级 PDF 预览；
+如果旧文件为空或损坏，也会生成带错误说明的 PDF 页面，不影响原文件下载。
 
 群聊工作流：
 

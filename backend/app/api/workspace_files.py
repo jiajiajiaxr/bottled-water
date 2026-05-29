@@ -291,6 +291,9 @@ def _office_preview_payload(
         mime_type=content_type,
     )
     if result.preview_pdf_path:
+        preview_info = {"cached": result.cached}
+        if result.error:
+            preview_info["warning"] = result.error
         return {
             "type": "file_preview",
             "mode": "pdf",
@@ -300,7 +303,7 @@ def _office_preview_payload(
             "preview_pdf_url": preview_pdf_url,
             "preview_download_url": preview_pdf_url,
             "download_url": download_url,
-            "office_preview": {"cached": result.cached},
+            "office_preview": preview_info,
         }
     return {
         "type": "file_preview",

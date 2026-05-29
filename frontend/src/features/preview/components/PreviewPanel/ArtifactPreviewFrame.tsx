@@ -9,11 +9,11 @@ const { Text } = Typography;
 export function ArtifactPreviewFrame({
   artifact,
   draft,
-  isPdfArtifact,
+  previewAsPdf,
 }: {
   artifact: WorkspaceArtifact;
   draft: string;
-  isPdfArtifact: boolean;
+  previewAsPdf: boolean;
 }) {
   const [pdfPreview, setPdfPreview] = useState<{
     previewUrl?: string;
@@ -27,16 +27,16 @@ export function ArtifactPreviewFrame({
 
   useEffect(() => {
     setPdfPreview(undefined);
-    if (!isPdfArtifact || !artifact.id) return undefined;
+    if (!previewAsPdf || !artifact.id) return undefined;
     let cancelled = false;
     setLoadingPdf(true);
     api
-      .exportArtifact(artifact.id, "pdf")
+      .previewArtifactPdf(artifact.id)
       .then((result) => {
         if (!cancelled) setPdfPreview(result);
       })
       .catch(() => {
-        if (!cancelled) setPdfPreview({ previewText: "PDF 预览加载失败，请使用 PDF 主下载查看。" });
+        if (!cancelled) setPdfPreview({ previewText: "PDF 预览加载失败，请使用主下载查看原文件。" });
       })
       .finally(() => {
         if (!cancelled) setLoadingPdf(false);
@@ -44,7 +44,7 @@ export function ArtifactPreviewFrame({
     return () => {
       cancelled = true;
     };
-  }, [artifact.id, isPdfArtifact]);
+  }, [artifact.id, previewAsPdf]);
 
   useEffect(() => {
     return () => {
@@ -52,11 +52,11 @@ export function ArtifactPreviewFrame({
     };
   }, [pdfPreview?.previewUrl]);
 
-  if (isPdfArtifact) {
+  if (previewAsPdf) {
     if (loadingPdf) {
       return (
         <Flex className="preview-loading" align="center" justify="center">
-          <Text type="secondary">PDF 预览加载中...</Text>
+          <Text type="secondary">正在生成 PDF 预览…</Text>
         </Flex>
       );
     }

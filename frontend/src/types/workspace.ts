@@ -71,6 +71,6 @@ export interface WorkspaceFilePreview {
   preview_download_url?: string;
   preview_error?: string;
   download_url?: string;
-  office_preview?: { cached?: boolean };
+  office_preview?: { cached?: boolean; warning?: string };
   metadata?: Record<string, unknown>;
 }

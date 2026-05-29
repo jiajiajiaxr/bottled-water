@@ -28,6 +28,23 @@ export function isPdfArtifact(artifact: WorkspaceArtifact | undefined, format: s
   );
 }
 
+export function isOfficeArtifact(artifact: WorkspaceArtifact | undefined, format: string) {
+  const normalized = normalizeArtifactFormat(format);
+  const mediaType = [
+    artifact?.media_type,
+    artifact?.content?.media_type,
+    artifact?.content?.tool_output?.media_type,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return (
+    ["docx", "pptx", "xlsx"].includes(normalized) ||
+    mediaType.includes("officedocument") ||
+    /\.(docx|pptx|xlsx)$/i.test(artifact?.filename ?? artifact?.content?.filename ?? "")
+  );
+}
+
 export function artifactExportFormats(preferredFormat: string): string[] {
   return [normalizeArtifactFormat(preferredFormat)];
 }
