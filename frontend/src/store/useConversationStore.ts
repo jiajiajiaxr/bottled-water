@@ -29,12 +29,14 @@ function saveThinkingEnabled(map: Map<string, boolean>) {
 
 interface ConversationState {
   conversations: Conversation[];
+  activeId: string | undefined;
   activeConversation: Conversation | undefined;
   conversationCategories: string[];
   isLoading: boolean;
   loadingMessages: boolean;
 
   setConversations: (conversations: Conversation[]) => void;
+  setActiveId: (id: string | undefined) => void;
   setActiveConversation: (id: string) => void;
   updateActiveConversation: (patch: Partial<Conversation>) => void;
   setConversationCategories: (categories: string[]) => void;
@@ -62,6 +64,7 @@ interface ConversationState {
 
 export const useConversationStore = create<ConversationState>((set, get) => ({
   conversations: [],
+  activeId: undefined,
   activeConversation: undefined,
   conversationCategories: [],
   isLoading: false,
@@ -70,15 +73,24 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   localRunningConversationIds: new Set(),
 
   setConversations: (conversations) => set({ conversations }),
+  setActiveId: (id) => {
+    const conversation = id ? get().conversations.find((item) => item.id === id) : undefined;
+    set({ activeId: id, activeConversation: conversation });
+  },
   setActiveConversation: (id) => {
     const conversation = get().conversations.find((item) => item.id === id);
-
-    set({ activeConversation: conversation });
+    set({ activeId: id, activeConversation: conversation });
   },
   updateActiveConversation: (patch) => {
     const conversation = get().activeConversation;
     if (conversation) {
-      set({ activeConversation: { ...conversation, ...patch } });
+      const updated = { ...conversation, ...patch };
+      set({
+        activeConversation: updated,
+        conversations: get().conversations.map((c) =>
+          c.id === conversation.id ? updated : c,
+        ),
+      });
     }
   },
   setConversationCategories: (conversationCategories) =>

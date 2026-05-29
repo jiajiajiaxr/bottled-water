@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 
 from fastapi import APIRouter, Depends
@@ -13,6 +14,7 @@ from app.deps import get_current_user
 from app.models import Conversation, FileAsset, Message, User, utcnow
 from app.schemas.common import ApiResponse
 from app.schemas.requests import SendMessagePayload
+from app.events import SseSink
 from app.events import app_event_bus as event_bus
 from app.services.runtime_service import OrchestratorService
 from app.services.serialization import artifact_to_dict, message_to_dict
@@ -198,12 +200,45 @@ async def stream_conversation(
     # 保存用户消息并触发编排
     message = _send(db, user, conversation_id, message_payload, trigger_agent=True)
 
+    # 先推送用户消息事件
     await event_bus.publish(channel, "message:new", message_to_dict(message))
 
-    # 返回 SSE 流
+    # 返回 SSE 流：从 SseSink 读取运行时事件
     async def generator():
-        async for event in event_bus.subscribe(channel, replay=False):
-            yield event.as_sse()
+        queue = SseSink.get_queue_for(conversation_id)
+        if queue is None:
+            return
+
+        # 同时监听 event_bus 的业务层事件（如取消信号）
+        bus_iterator = event_bus.subscribe(channel, replay=False)
+        bus_has_next = True
+
+        while True:
+            # 优先处理 SseSink 队列中的运行时事件
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                yield {
+                    "event": event.type,
+                    "data": json.dumps(event.payload, ensure_ascii=False),
+                }
+            except asyncio.TimeoutError:
+                pass
+            except asyncio.CancelledError:
+                # 客户端断开连接
+                break
+
+            # 检查 event_bus 是否有业务层事件（如取消信号）
+            if bus_has_next:
+                try:
+                    bus_event = await asyncio.wait_for(bus_iterator.__anext__(), timeout=0.05)
+                    yield bus_event.as_sse()
+                    # generation:cancelled 是终止信号
+                    if bus_event.event == "generation:cancelled":
+                        break
+                except asyncio.TimeoutError:
+                    pass
+                except StopAsyncIteration:
+                    bus_has_next = False
 
     return EventSourceResponse(generator())
 

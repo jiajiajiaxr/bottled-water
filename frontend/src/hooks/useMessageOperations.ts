@@ -29,8 +29,13 @@ import {
  */
 export function useMessageOperations(currentUserName: string) {
   const { message } = AntApp.useApp();
-  const { conversations, activeId, updateConversations } =
-    useConversationStore();
+  const {
+    conversations,
+    activeId,
+    activeConversation,
+    updateConversations,
+    updateActiveConversation,
+  } = useConversationStore();
   const { historyMessages, setMessages, updateMessages } = useMessageStore();
   const { setArtifact } = useArtifactStore();
   const { updateLocalRunningConversationIds } = useConversationStore();
@@ -206,6 +211,7 @@ export function useMessageOperations(currentUserName: string) {
         kind: "text",
         author,
         content: "",
+        state: "active",
         rawContent: {
           agent_id: participant.agent_id,
           participant_id: participant.id,
@@ -230,13 +236,7 @@ export function useMessageOperations(currentUserName: string) {
     });
     stopStreamRef.current = undefined;
 
-    // delta 累积器
-    const latestContentById = new Map<string, string>();
-    const latestThinkingById = new Map<string, string>();
-
-    // 节流 RAF
-    let contentRafId = 0;
-    let thinkingRafId = 0;
+    // 文本累积（来自 agent_completed 的 work_product）
     let rawBuffer = "";
     let completedPreview = "";
     const activeToolCalls = new Map<
@@ -258,88 +258,40 @@ export function useMessageOperations(currentUserName: string) {
     };
 
     try {
-      await api.streamAssistantReply(
+      await api.sendMessage(
         conversationId,
+        "",
         {
           onMessageStart: (payload) => {
-            const messageId = String(
-              payload.agent_message_id ||
-                payload.message_id ||
-                `stream-${Date.now()}`,
-            );
-            currentMessageId = messageId;
-            // 单 Agent 模式下后端可能不推 agent_id，从对话参与者兜底推断
-            const inferredAgentId =
-              agentParticipants.length === 1
-                ? (agentParticipants[0].agent_id ?? agentParticipants[0].id)
-                : undefined;
-            const agentId = payload.agent_id
-              ? String(payload.agent_id)
-              : inferredAgentId;
-            const author = String(
-              payload.agent_name ||
-                payload.sender_name ||
-                (agentId ? "Agent" : "Assistant"),
-            );
-            ensureStreamingMessage(messageId, author, agentId);
+            // system.session_started / system.round_started / system.agent_started
+            const agentId = String(payload.agent_id || "");
+            const author = String(payload.agent_name || "Agent");
+            currentMessageId = agentId || `stream-${Date.now()}`;
+            ensureStreamingMessage(currentMessageId, author, agentId);
             activeToolCalls.clear();
           },
-          onDelta: (delta, payload) => {
-            rawBuffer += delta;
-            const messageId = String(
-              payload.agent_message_id || payload.message_id || "",
-            );
-            if (messageId) currentMessageId = messageId;
-            if (!messageId) return;
-            const deltaAgentId = payload.agent_id
-              ? String(payload.agent_id)
-              : agentParticipants.length === 1
-                ? (agentParticipants[0].agent_id ?? agentParticipants[0].id)
-                : undefined;
-            ensureStreamingMessage(
-              messageId,
-              String(payload.agent_name || "Agent"),
-              deltaAgentId,
-            );
-            const existing = latestContentById.get(messageId) ?? "";
-            const nextContent = existing + delta;
-            latestContentById.set(messageId, nextContent);
-            if (contentRafId) return;
-            contentRafId = requestAnimationFrame(() => {
-              contentRafId = 0;
-              for (const [id, content] of latestContentById) {
-                streaming.updateStreamingContent(id, content);
-              }
+          onMessageUpdated: (payload) => {
+            // system.agent_completed / system.agent_failed：提取 work_product
+            const p = payload as unknown as Record<string, unknown>;
+            const workProduct = String(p.work_product ?? "");
+            const agentId = String(p.agent_id || "");
+            if (workProduct && currentMessageId) {
+              streaming.updateStreamingContent(currentMessageId, workProduct);
+            }
+            rawBuffer += workProduct;
+            upsertFinalMessage({
+              id: currentMessageId || "",
+              conversationId,
+              role: "assistant",
+              kind: "text",
+              author: String(p.agent_name || "Agent"),
+              content: workProduct,
+              state: "active",
+              rawContent: { agent_id: agentId },
+              createdAt: new Date().toISOString(),
+              streamState: "done",
             });
           },
-          onReasoningDelta: (delta, payload) => {
-            const messageId = String(
-              payload.agent_message_id || payload.message_id || "",
-            );
-            if (messageId) currentMessageId = messageId;
-            if (!messageId) return;
-            const reasoningAgentId = payload.agent_id
-              ? String(payload.agent_id)
-              : agentParticipants.length === 1
-                ? (agentParticipants[0].agent_id ?? agentParticipants[0].id)
-                : undefined;
-            ensureStreamingMessage(
-              messageId,
-              String(payload.agent_name || "Agent"),
-              reasoningAgentId,
-            );
-            const existing = latestThinkingById.get(messageId) ?? "";
-            const nextThinking = existing + delta;
-            latestThinkingById.set(messageId, nextThinking);
-            if (thinkingRafId) return;
-            thinkingRafId = requestAnimationFrame(() => {
-              thinkingRafId = 0;
-              for (const [id, thinking] of latestThinkingById) {
-                streaming.updateStreamingThinking(id, thinking);
-              }
-            });
-          },
-          onMessageUpdated: upsertFinalMessage,
           onMessageNew: (incoming) => {
             if (incoming.kind === "preview_card") upsertFinalMessage(incoming);
           },
@@ -360,21 +312,6 @@ export function useMessageOperations(currentUserName: string) {
           },
           onDone: () => {
             activeToolCalls.clear();
-            // 强制 flush pending 的 RAF，避免最后一批 delta 丢失
-            if (contentRafId) {
-              cancelAnimationFrame(contentRafId);
-              contentRafId = 0;
-              for (const [id, content] of latestContentById) {
-                streaming.updateStreamingContent(id, content);
-              }
-            }
-            if (thinkingRafId) {
-              cancelAnimationFrame(thinkingRafId);
-              thinkingRafId = 0;
-              for (const [id, thinking] of latestThinkingById) {
-                streaming.updateStreamingThinking(id, thinking);
-              }
-            }
             streaming.finishAllStreamingMessages((msg) => ({
               content:
                 msg.role === "assistant" && msg.kind === "text"
@@ -390,7 +327,9 @@ export function useMessageOperations(currentUserName: string) {
             stopStreamRef.current = stop;
           },
         },
-        body,
+        (body as { reply_to_message_id?: string })?.reply_to_message_id,
+        (body as { content?: { attachments: UploadedFile[] } })?.content?.attachments ?? [],
+        (body as { thinking_enabled?: boolean })?.thinking_enabled,
       );
       streaming.setStreamState("done");
 
@@ -545,6 +484,7 @@ export function useMessageOperations(currentUserName: string) {
       kind: "text",
       author: currentUserName,
       content,
+      state: "active",
       rawContent: { text: content, attachments: localAttachments },
       attachments: localAttachments,
       quotedMessageId: quoted?.id,
@@ -605,6 +545,7 @@ export function useMessageOperations(currentUserName: string) {
                 kind: "preview_card",
                 author: "Artifact Agent",
                 content: `预览产物：${freshArtifact.title}`,
+                state: "inactive",
                 rawContent: { artifact_id: freshArtifact.id },
                 streamState: "done",
               }),

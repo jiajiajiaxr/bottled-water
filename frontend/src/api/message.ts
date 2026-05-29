@@ -121,44 +121,61 @@ export async function sendMessage(
 
   for await (const { event, data } of parseSSEStream(reader)) {
     switch (event) {
-      case "message_start":
-        handlers.onMessageStart?.(data as Record<string, unknown>);
-        break;
-      case "content_block_delta": {
-        const payload = data as Record<string, unknown>;
-        const deltaPayload = payload.delta;
-        const deltaType =
-          deltaPayload && typeof deltaPayload === "object"
-            ? String((deltaPayload as { type?: unknown }).type ?? "text_delta")
-            : "text_delta";
-        const deltaText =
-          deltaPayload &&
-          typeof deltaPayload === "object" &&
-          "text" in deltaPayload
-            ? String((deltaPayload as { text?: unknown }).text ?? "")
-            : "";
-        if (deltaType === "reasoning_delta" && deltaText) {
-          handlers.onReasoningDelta?.(deltaText, payload);
-        } else if (deltaText) {
-          handlers.onDelta?.(deltaText, payload);
-        }
-        break;
-      }
-      case "message:updated":
-        handlers.onMessageUpdated?.(data as unknown as ChatMessage);
-        break;
+      // 业务层事件：用户消息已保存
       case "message:new":
         handlers.onMessageNew?.(data as unknown as ChatMessage);
         break;
-      case "tool_call_start":
-        handlers.onToolCallStart?.(data as Record<string, unknown>);
+
+      // 运行时事件：Session 生命周期
+      case "system.session_started":
+        handlers.onMessageStart?.(data as Record<string, unknown>);
         break;
-      case "tool_call_done":
-        handlers.onToolCallDone?.(data as Record<string, unknown>);
-        break;
-      case "message_stop":
+      case "system.session_completed":
+      case "system.session_error":
         window.clearTimeout(timeout);
         handlers.onDone?.(data as Record<string, unknown>);
+        break;
+
+      // 运行时事件：Round / Agent 生命周期
+      case "system.round_started":
+      case "system.agent_started":
+        handlers.onMessageStart?.(data as Record<string, unknown>);
+        break;
+      case "system.agent_completed":
+      case "system.agent_failed":
+        handlers.onMessageUpdated?.(data as unknown as ChatMessage);
+        break;
+
+      // 运行时事件：工具调用
+      case "agent.tool_calls_executed": {
+        const payload = data as Record<string, unknown>;
+        const toolEvents = payload.tool_events as Record<string, unknown>[];
+        if (Array.isArray(toolEvents)) {
+          for (const te of toolEvents) {
+            const teRecord = te as Record<string, unknown>;
+            const toolCallId = String(teRecord.call_id ?? "");
+            const toolName = String(
+              teRecord.tool_name ??
+                (teRecord.function as Record<string, unknown>)?.name ??
+                "",
+            );
+            if (toolCallId && toolName) {
+              handlers.onToolCallStart?.({ tool_call_id: toolCallId, tool_name: toolName });
+              handlers.onToolCallDone?.({ tool_call_id: toolCallId, tool_name: toolName });
+            }
+          }
+        }
+        break;
+      }
+
+      // 控制类 / 用户事件：前端暂不直接展示
+      case "control.watchdog_triggered":
+      case "control.scheduling_decision":
+      case "control.escalation":
+      case "user.waiting_for_input":
+      case "user.input_received":
+      case "user.input_queued":
+        break;
     }
   }
 
@@ -175,4 +192,12 @@ export async function cancelAssistantReply(
     `/conversations/${conversationId}/stream/cancel`,
     {},
   );
+}
+
+/** 流式发送消息（统一走 sendMessage）。 */
+export async function streamAssistantReply(
+  conversationId: string,
+  options: StreamAssistantHandlers,
+): Promise<string> {
+  return sendMessage(conversationId, "", options);
 }
