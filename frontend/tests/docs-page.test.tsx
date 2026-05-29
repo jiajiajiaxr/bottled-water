@@ -21,6 +21,13 @@ describe("DocsPage", () => {
       screen.getByRole("heading", { name: "演示链路" }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("本地启动").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("heading", { name: "模型与运行模式" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "API 总览" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "常见问题与排查入口" }),
+    ).toBeInTheDocument();
   });
 
   it("filters sidebar links from the search input", () => {

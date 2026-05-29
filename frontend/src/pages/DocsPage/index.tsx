@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  CloudServerOutlined,
   MenuFoldOutlined,
   SearchOutlined,
   UsergroupAddOutlined,
@@ -12,9 +11,20 @@ import {
   maintainCards,
   navGroups,
   quickEntries,
+  localBootCode,
 } from "./content";
 import type { NavGroup } from "./content";
+import {
+  ApiDetailsSection,
+  CodePanel,
+  FirstRunGuide,
+  IntegrationSection,
+  ModelRuntimeSection,
+  TroubleshootingSection,
+  UpdatesSection,
+} from "./DetailSections";
 import "./docs.css";
+import "./docs-detail.css";
 import "./docs-hero.css";
 import "./docs-responsive.css";
 
@@ -25,7 +35,7 @@ function DocsAnnouncement() {
   return (
     <div className="docs-announcement">
       <span>
-        AgentHub 文档站已加入新版说明前端，覆盖会话、Agent、工作流、工具与部署链路。
+        AgentHub 文档站已扩展为详细指南，覆盖快速开始、API、模型运行、工具接入和排查入口。
       </span>
       <a href="#updates">查看详情 →</a>
       <button
@@ -53,8 +63,8 @@ function DocsTopbar() {
       <nav className="docs-nav" aria-label="文档导航">
         <a href="#contact">联系我们</a>
         <a href="#welcome">文档</a>
-        <a href="#api-auth">API</a>
-        <a className="docs-token" href="#demo-flow">
+        <a href="#api-overview">API</a>
+        <a className="docs-token" href="#first-run">
           Demo Plan ↗
         </a>
         <Link to="/app">控制台</Link>
@@ -105,8 +115,10 @@ function DocsSidebar({
         </section>
       ))}
       <div className="docs-sidebar-foot">
-        <a href="#contact">开发者交流群</a>
-        <a href="#demo-flow">
+        <a id="contact" href="#faq">
+          开发者交流群
+        </a>
+        <a href="#first-run">
           免费体验 AgentHub <strong>HOT</strong>
         </a>
       </div>
@@ -125,8 +137,7 @@ function DocsHero() {
         <div className="docs-hero-copy">
           <h2>AgentHub Docs 正式上线</h2>
           <p>
-            会话优先、画布编排、工具真实执行、产物可预览导出，把多 Agent
-            协作沉到一个可维护的工作台里。
+            从首次登录、模型运行、API 接入到工具/Skill/MCP 扩展，按真实使用链路组织说明，让开发和演示都能顺着文档走完闭环。
           </p>
         </div>
         <Link className="docs-hero-action" to="/app">
@@ -150,7 +161,7 @@ function QuickStartSection() {
       <h2>快速开始</h2>
       <div className="docs-quick-grid">
         {quickEntries.map((entry) => (
-          <a className="docs-entry-card" href="#demo-flow" key={entry.title}>
+          <a className="docs-entry-card" href="#first-run" key={entry.title}>
             <span className="docs-entry-icon">{entry.icon}</span>
             <span>
               <strong>{entry.title}</strong>
@@ -169,9 +180,8 @@ function DemoFlowSection() {
       <div>
         <h2>演示链路</h2>
         <p>
-          推荐从演示用户进入系统，创建一个工作区，再发起单聊或多 Agent
-          群聊。单聊会使用当前 Agent 的工具权限执行，群聊会优先读取画布
-          workflow。
+          推荐从演示用户进入系统，创建一个工作区，再发起单聊或多 Agent 群聊。单聊会使用当前
+          Agent 的工具权限执行，群聊会优先读取画布 workflow。
         </p>
         <div className="docs-steps">
           <span>登录</span>
@@ -181,19 +191,8 @@ function DemoFlowSection() {
           <span>预览产物</span>
         </div>
       </div>
-      <div id="local" className="docs-code-panel">
-        <div className="docs-code-title">
-          <CloudServerOutlined />
-          本地启动
-        </div>
-        <pre>{`cd backend
-uv sync --extra dev
-uv run alembic upgrade head
-uv run uvicorn app:app --reload --reload-dir ./app
-
-cd ../frontend
-pnpm install
-pnpm dev`}</pre>
+      <div id="local">
+        <CodePanel title="本地启动" code={localBootCode} />
       </div>
     </section>
   );
@@ -228,7 +227,7 @@ function ApiSection() {
       </div>
       <div className="docs-api-list">
         {apiSections.map((item) => (
-          <a id={item.id} href="#api-auth" key={item.id}>
+          <a id={item.id} href="#api-overview" key={item.id}>
             <span>{item.icon}</span>
             <strong>{item.title}</strong>
             <small>{item.meta}</small>
@@ -284,12 +283,18 @@ export function DocsPage() {
           <DocsHero />
           <QuickStartSection />
           <DemoFlowSection />
+          <FirstRunGuide />
           <CapabilitySection />
+          <ModelRuntimeSection />
           <ApiSection />
+          <ApiDetailsSection />
+          <IntegrationSection />
           <MaintainSection />
-          <section id="updates" className="docs-next">
+          <TroubleshootingSection />
+          <UpdatesSection />
+          <section className="docs-next">
             <span>下一篇</span>
-            <a href="#local">本地启动与环境配置 ›</a>
+            <a href="#first-run">首次运行会话 ›</a>
           </section>
         </section>
       </div>
