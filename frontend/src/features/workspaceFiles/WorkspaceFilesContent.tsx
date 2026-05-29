@@ -96,6 +96,15 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
 
   const handlePreview = async (node: WorkspaceFileNode) => {
     if (!workspaceId || node.type !== "file") return;
+    if (preview?.objectUrl) URL.revokeObjectURL(preview.objectUrl);
+    if (isOfficeFileNode(node)) {
+      setPreview({
+        node,
+        payload: { mode: "loading", filename: node.display_name ?? node.name },
+        loading: true,
+        loadingText: "正在生成 PDF 预览…",
+      });
+    }
     try {
       const rawPayload = await api.previewWorkspaceFile(workspaceId, node.id);
       let payload = { ...rawPayload, mode: normalizePreviewMode(rawPayload, node) };
@@ -103,7 +112,11 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
       let error: string | undefined;
       if (payload.mode === "pdf" || payload.mode === "image") {
         try {
-          objectUrl = (await api.downloadWorkspaceFile(workspaceId, node.id)).previewUrl;
+          const file =
+            payload.preview_pdf_url || payload.preview_download_url
+              ? await api.downloadWorkspaceFilePreviewPdf(workspaceId, node.id)
+              : await api.downloadWorkspaceFile(workspaceId, node.id);
+          objectUrl = file.previewUrl;
           if (!objectUrl) {
             error = payload.mode === "pdf" ? "PDF 文件下载失败，无法在线预览。" : "图片文件下载失败，无法在线预览。";
           }
@@ -133,7 +146,13 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
       }
       setPreview({ node, payload, objectUrl, error });
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "预览失败");
+      const detail = error instanceof Error ? error.message : "预览失败";
+      message.error(detail);
+      setPreview({
+        node,
+        payload: { mode: "binary", filename: node.display_name ?? node.name },
+        error: detail,
+      });
     }
   };
 
@@ -345,6 +364,12 @@ function normalizePreviewMode(payload: { mode?: string; content_type?: string; f
   }
   if (mode === "binary") return "binary";
   return mode || "text";
+}
+
+function isOfficeFileNode(node: WorkspaceFileNode) {
+  const contentType = String(node.mime_type || "").toLowerCase();
+  const filename = String(node.name || node.path || "").toLowerCase();
+  return contentType.includes("officedocument") || /\.(docx|pptx|xlsx)$/.test(filename);
 }
 
 function expandedStorageKey(workspaceId: string) {

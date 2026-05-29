@@ -22,6 +22,12 @@ export async function downloadWorkspaceFile(workspaceId: string, nodeId: string)
   );
 }
 
+export async function downloadWorkspaceFilePreviewPdf(workspaceId: string, nodeId: string) {
+  return await requestFile(
+    `/workspaces/${encodeURIComponent(workspaceId)}/files/preview-pdf?node_id=${encodeURIComponent(nodeId)}`,
+  );
+}
+
 export async function deleteWorkspaceFile(workspaceId: string, nodeId: string) {
   return await request<{ id: string; deleted: boolean }>(
     `/workspaces/${encodeURIComponent(workspaceId)}/files?node_id=${encodeURIComponent(nodeId)}`,

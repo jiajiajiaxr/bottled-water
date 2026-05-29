@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import subprocess
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -15,7 +17,7 @@ from app.core.database import Base
 from app.core.errors import ValidationAppError
 from app.models import Artifact, Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
 from app.api.messages import _send
-from app.api.workspace_files import download_workspace_file, preview_workspace_file
+from app.api.workspace_files import download_workspace_file, download_workspace_file_preview_pdf, preview_workspace_file
 from app.services.files.workspace_tree import (
     bulk_delete_workspace_file_nodes,
     create_workspace_folder,
@@ -25,6 +27,7 @@ from app.services.files.workspace_tree import (
     set_workspace_file_favorite,
     workspace_file_tree,
 )
+from app.services.files.previewers import office as office_preview
 from app.services.tools.builtins.file.preview import preview_payload
 from app.services.tools.executor import invoke_tool
 from app.services.workspaces.filesystem import scoped_dir, workspace_root
@@ -315,8 +318,9 @@ def test_workspace_file_preview_supports_pdf_artifact(db: Session) -> None:
         _cleanup(workspace.id)
 
 
-def test_workspace_file_preview_prefers_docx_artifact_preview_html(db: Session) -> None:
+def test_workspace_file_preview_converts_docx_artifact_to_cached_pdf(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     user, workspace, conversation = _user_workspace_conversation(db)
+    calls = _fake_libreoffice(monkeypatch)
 
     try:
         result = invoke_tool(
@@ -333,12 +337,101 @@ def test_workspace_file_preview_prefers_docx_artifact_preview_html(db: Session) 
         node_id = f"artifact:{result['artifact_id']}"
 
         preview = asyncio.run(preview_workspace_file(workspace.id, node_id, db, user))["data"]
+        preview_again = asyncio.run(preview_workspace_file(workspace.id, node_id, db, user))["data"]
+        pdf = asyncio.run(download_workspace_file_preview_pdf(workspace.id, node_id, db, user))
 
-        assert preview["mode"] == "html"
+        assert preview["mode"] == "pdf"
         assert preview["artifact_id"] == result["artifact_id"]
         assert preview["artifact_type"] == "document"
-        assert "Word 工作区预览" in preview["text"]
-        assert "preview" in preview["text"].lower()
+        assert preview["preview_pdf_url"]
+        assert preview_again["office_preview"]["cached"] is True
+        assert pdf.media_type == "application/pdf"
+        assert pdf.path.endswith("preview.pdf")
+        assert len(calls) == 1
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_preview_converts_pptx_artifact_to_pdf(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    _fake_libreoffice(monkeypatch)
+
+    try:
+        result = invoke_tool(
+            db,
+            user,
+            "artifact.create_pptx",
+            {
+                "workspace_id": workspace.id,
+                "conversation_id": conversation.id,
+                "title": "PPT 工作区预览",
+                "body": "第一页\n第二页",
+            },
+        )["result"]
+        node_id = f"artifact:{result['artifact_id']}"
+
+        preview = asyncio.run(preview_workspace_file(workspace.id, node_id, db, user))["data"]
+        pdf = asyncio.run(download_workspace_file_preview_pdf(workspace.id, node_id, db, user))
+
+        assert preview["mode"] == "pdf"
+        assert preview["content_type"] == "application/pdf"
+        assert pdf.media_type == "application/pdf"
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_preview_converts_xlsx_artifact_to_pdf(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    _fake_libreoffice(monkeypatch)
+
+    try:
+        result = invoke_tool(
+            db,
+            user,
+            "artifact.create_xlsx",
+            {
+                "workspace_id": workspace.id,
+                "conversation_id": conversation.id,
+                "title": "Excel 工作区预览",
+                "body": "名称,数量\nAgentHub,1",
+            },
+        )["result"]
+        node_id = f"artifact:{result['artifact_id']}"
+
+        preview = asyncio.run(preview_workspace_file(workspace.id, node_id, db, user))["data"]
+        pdf = asyncio.run(download_workspace_file_preview_pdf(workspace.id, node_id, db, user))
+
+        assert preview["mode"] == "pdf"
+        assert preview["preview_pdf_url"]
+        assert pdf.media_type == "application/pdf"
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_preview_reports_missing_libreoffice(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    monkeypatch.setattr(office_preview, "_find_soffice", lambda: None)
+
+    try:
+        result = invoke_tool(
+            db,
+            user,
+            "artifact.create_docx",
+            {
+                "workspace_id": workspace.id,
+                "conversation_id": conversation.id,
+                "title": "No LibreOffice",
+                "body": "fallback text",
+            },
+        )["result"]
+        node_id = f"artifact:{result['artifact_id']}"
+
+        preview = asyncio.run(preview_workspace_file(workspace.id, node_id, db, user))["data"]
+        downloaded = asyncio.run(download_workspace_file(workspace.id, node_id, db, user))
+
+        assert preview["mode"] == "office_text"
+        assert "LibreOffice" in preview["preview_error"]
+        assert downloaded.media_type.startswith("application/vnd.openxmlformats-officedocument")
     finally:
         _cleanup(workspace.id)
 
@@ -365,8 +458,9 @@ def test_workspace_file_preview_supports_legacy_artifact_html(db: Session) -> No
         _cleanup(workspace.id)
 
 
-def test_workspace_file_preview_supports_legacy_docx_artifact_html(db: Session) -> None:
+def test_workspace_file_preview_converts_legacy_docx_artifact_to_pdf(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     user, workspace, conversation = _user_workspace_conversation(db)
+    _fake_libreoffice(monkeypatch)
     artifact = Artifact(
         conversation_id=conversation.id,
         type="document",
@@ -386,8 +480,8 @@ def test_workspace_file_preview_supports_legacy_docx_artifact_html(db: Session) 
         flat = _flatten(tree["root"])
         folder = next(item for item in flat if item.get("path") == f"artifacts/{artifact.id}")
 
-        assert preview["mode"] == "html"
-        assert "旧版 Word 文档" in preview["text"]
+        assert preview["mode"] == "pdf"
+        assert preview["preview_pdf_url"]
         assert folder["display_name"] == f"产物：旧版 Word 文档 · {artifact.id[:8]}"
     finally:
         _cleanup(workspace.id)
@@ -679,6 +773,31 @@ def _workspace(user: User, suffix: str) -> Workspace:
 def _cleanup(*workspace_ids: Any) -> None:
     for workspace_id in workspace_ids:
         shutil.rmtree(workspace_root(str(workspace_id)), ignore_errors=True)
+
+
+def _fake_libreoffice(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(office_preview, "_find_soffice", lambda: "soffice")
+
+    def fake_run(
+        command: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        encoding: str,
+        errors: str,
+        timeout: int,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        out_dir = Path(command[command.index("--outdir") + 1])
+        source = Path(command[-1])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / f"{source.stem}.pdf").write_bytes(b"%PDF-1.4\n% fake office preview\n")
+        return subprocess.CompletedProcess(command, 0, stdout="converted", stderr="")
+
+    monkeypatch.setattr(office_preview.subprocess, "run", fake_run)
+    return calls
 
 
 def _flatten(node: dict[str, Any]) -> list[dict[str, Any]]:

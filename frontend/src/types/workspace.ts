@@ -62,10 +62,15 @@ export interface WorkspaceFilePreview {
   text?: string;
   preview_text?: string;
   content_type?: string;
+  original_content_type?: string;
   filename?: string;
   artifact_id?: string;
   artifact_type?: string;
   preview_url?: string;
+  preview_pdf_url?: string;
+  preview_download_url?: string;
+  preview_error?: string;
   download_url?: string;
+  office_preview?: { cached?: boolean };
   metadata?: Record<string, unknown>;
 }

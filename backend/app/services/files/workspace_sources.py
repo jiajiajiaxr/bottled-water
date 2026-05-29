@@ -107,7 +107,7 @@ def filesystem_nodes(workspace_id: str, root: Path, seen_paths: set[str]) -> lis
         if not path.is_file():
             continue
         relative_path = path.relative_to(root).as_posix()
-        if relative_path.startswith("artifacts/") or relative_path in seen_paths:
+        if relative_path.startswith(("artifacts/", "previews/")) or relative_path in seen_paths:
             continue
         stat = path.stat()
         if should_hide_file(path.name, stat.st_size):

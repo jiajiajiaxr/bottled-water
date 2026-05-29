@@ -1,4 +1,4 @@
-import { Empty, Typography } from "antd";
+import { Empty, Spin, Typography } from "antd";
 import type { WorkspaceFileNode, WorkspaceFilePreview } from "../../types";
 
 const { Text } = Typography;
@@ -8,11 +8,21 @@ export type PreviewState = {
   payload: WorkspaceFilePreview;
   objectUrl?: string;
   error?: string;
+  loading?: boolean;
+  loadingText?: string;
 };
 
 export function WorkspaceFilePreviewView({ preview }: { preview: PreviewState }) {
   const payload = preview.payload;
   const text = payload.text ?? payload.preview_text ?? "";
+  if (preview.loading) {
+    return (
+      <div className="workspace-file-loading">
+        <Spin />
+        <Text type="secondary">{preview.loadingText ?? "正在生成预览…"}</Text>
+      </div>
+    );
+  }
   if (preview.error) {
     return <Empty description={preview.error} />;
   }
@@ -48,7 +58,9 @@ export function WorkspaceFilePreviewView({ preview }: { preview: PreviewState })
   if (payload.mode === "office_text") {
     return (
       <div className="workspace-file-preview-office">
-        <Text type="secondary">Office 文件暂以文本摘要预览；如需完整格式，请下载原文件打开。</Text>
+        <Text type={payload.preview_error ? "danger" : "secondary"}>
+          {payload.preview_error || "Office 文件暂以文本摘要预览；如需完整格式，请下载原文件打开。"}
+        </Text>
         {text ? (
           <pre className="workspace-file-preview-text">{text}</pre>
         ) : (

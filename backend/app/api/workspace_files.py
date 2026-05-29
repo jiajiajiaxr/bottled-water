@@ -9,9 +9,11 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.errors import ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import User
+from app.services.files.previewers.office import build_office_preview, is_office_file
 from app.services.files.workspace_tree import (
     bulk_delete_workspace_file_nodes,
     create_workspace_folder,
@@ -64,6 +66,32 @@ async def download_workspace_file(
     )
 
 
+@router.get("/workspaces/{workspace_id}/files/preview-pdf")
+async def download_workspace_file_preview_pdf(
+    workspace_id: str,
+    node_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    target = get_workspace_file_target(db, user, workspace_id, node_id)
+    filename = str(target.get("filename") or "workspace-file")
+    media_type = str(target.get("mime_type") or "application/octet-stream")
+    result = build_office_preview(
+        workspace_id=workspace_id,
+        node_id=node_id,
+        target=target,
+        filename=filename,
+        mime_type=media_type,
+    )
+    if not result.preview_pdf_path:
+        raise ValidationAppError(result.error or "Office PDF 预览生成失败")
+    return FileResponse(
+        str(result.preview_pdf_path),
+        media_type="application/pdf",
+        filename=f"{Path(filename).stem or 'preview'}.preview.pdf",
+    )
+
+
 @router.get("/workspaces/{workspace_id}/files/preview")
 async def preview_workspace_file(
     workspace_id: str,
@@ -91,6 +119,8 @@ async def preview_workspace_file(
         content = target.get("bytes")
         content_type = str(target.get("mime_type") or "application/octet-stream")
         filename = str(target.get("filename") or "")
+        if is_office_file(content_type, filename):
+            return ok(_office_preview_payload(workspace_id, node_id, target, filename, content_type))
         if isinstance(content, bytes) and _is_text_preview(content_type, filename):
             text = content.decode("utf-8", errors="replace")
             return ok(
@@ -114,10 +144,14 @@ async def preview_workspace_file(
             }
         )
     path = Path(str(target["path"]))
+    content_type = str(target.get("mime_type") or "application/octet-stream")
+    filename = str(target.get("filename") or path.name)
+    if is_office_file(content_type, filename):
+        return ok(_office_preview_payload(workspace_id, node_id, target, filename, content_type))
     payload = preview_payload(
         path,
-        content_type=str(target.get("mime_type") or "application/octet-stream"),
-        filename=str(target.get("filename") or path.name),
+        content_type=content_type,
+        filename=filename,
     )
     return ok(
         {
@@ -240,6 +274,46 @@ def _is_text_preview(content_type: str, filename: str) -> bool:
     return _preview_mode(content_type, filename) in {"text", "html", "markdown"}
 
 
+def _office_preview_payload(
+    workspace_id: str,
+    node_id: str,
+    target: dict[str, Any],
+    filename: str,
+    content_type: str,
+) -> dict[str, Any]:
+    download_url = f"/api/v1/workspaces/{workspace_id}/files/download?node_id={quote(node_id, safe=':')}"
+    preview_pdf_url = f"/api/v1/workspaces/{workspace_id}/files/preview-pdf?node_id={quote(node_id, safe=':')}"
+    result = build_office_preview(
+        workspace_id=workspace_id,
+        node_id=node_id,
+        target=target,
+        filename=filename,
+        mime_type=content_type,
+    )
+    if result.preview_pdf_path:
+        return {
+            "type": "file_preview",
+            "mode": "pdf",
+            "content_type": "application/pdf",
+            "original_content_type": content_type,
+            "filename": filename,
+            "preview_pdf_url": preview_pdf_url,
+            "preview_download_url": preview_pdf_url,
+            "download_url": download_url,
+            "office_preview": {"cached": result.cached},
+        }
+    return {
+        "type": "file_preview",
+        "mode": "office_text",
+        "content_type": content_type,
+        "filename": filename,
+        "text": result.fallback_text,
+        "preview_text": result.fallback_text,
+        "download_url": download_url,
+        "preview_error": result.error,
+    }
+
+
 def _artifact_preview_payload(workspace_id: str, node_id: str, target: dict[str, Any]) -> dict[str, Any]:
     artifact = target["artifact"]
     content = artifact.content or {}
@@ -248,6 +322,12 @@ def _artifact_preview_payload(workspace_id: str, node_id: str, target: dict[str,
     download_url = f"/api/v1/workspaces/{workspace_id}/files/download?node_id={quote(node_id, safe=':')}"
     preview_url = f"/api/v1/artifacts/{artifact.id}/preview"
     mode = _preview_mode(content_type, filename)
+    if is_office_file(content_type, filename):
+        payload = _office_preview_payload(workspace_id, node_id, target, filename, content_type)
+        payload["artifact_id"] = artifact.id
+        payload["artifact_type"] = artifact.type
+        payload["preview_url"] = preview_url
+        return payload
     preview_html = _artifact_preview_html(content)
     if not preview_html and mode == "html" and isinstance(target.get("bytes"), bytes):
         preview_html = target["bytes"].decode("utf-8", errors="replace")
