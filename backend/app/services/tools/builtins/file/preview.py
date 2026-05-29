@@ -23,6 +23,8 @@ def preview_payload(path: Path, *, content_type: str = "", filename: str = "") -
     elif suffix in {".docx", ".xlsx", ".pptx"}:
         mode = "office_text"
     text = raw_text or extracted["text"][:30_000]
+    if not text and mode == "text" and extracted["metadata"].get("extractor") == "unsupported":
+        mode = "binary"
     return {
         "filename": filename or path.name,
         "content_type": content_type or "application/octet-stream",

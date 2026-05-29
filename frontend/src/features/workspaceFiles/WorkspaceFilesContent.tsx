@@ -77,12 +77,22 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
   const handlePreview = async (node: WorkspaceFileNode) => {
     if (!workspaceId || node.type !== "file") return;
     try {
-      const payload = await api.previewWorkspaceFile(workspaceId, node.id);
+      const rawPayload = await api.previewWorkspaceFile(workspaceId, node.id);
+      const payload = { ...rawPayload, mode: normalizePreviewMode(rawPayload, node) };
       let objectUrl: string | undefined;
+      let error: string | undefined;
       if (payload.mode === "pdf" || payload.mode === "image") {
-        objectUrl = (await api.downloadWorkspaceFile(workspaceId, node.id)).previewUrl;
+        try {
+          objectUrl = (await api.downloadWorkspaceFile(workspaceId, node.id)).previewUrl;
+          if (!objectUrl) {
+            error = payload.mode === "pdf" ? "PDF 文件下载失败，无法在线预览。" : "图片文件下载失败，无法在线预览。";
+          }
+        } catch (downloadError) {
+          const detail = downloadError instanceof Error ? downloadError.message : "下载接口异常";
+          error = payload.mode === "pdf" ? `PDF 文件下载失败：${detail}` : `图片文件下载失败：${detail}`;
+        }
       }
-      setPreview({ node, payload, objectUrl });
+      setPreview({ node, payload, objectUrl, error });
     } catch (error) {
       message.error(error instanceof Error ? error.message : "预览失败");
     }
@@ -247,7 +257,12 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
         )}
       </div>
       <Modal
-        title={preview?.node.display_name ?? preview?.node.name}
+        title={preview && (
+          <Space>
+            <span>{preview.payload.filename ?? preview.node.display_name ?? preview.node.name}</span>
+            <a onClick={() => handleDownload(preview.node)}>下载原文件</a>
+          </Space>
+        )}
         open={!!preview}
         onCancel={closePreview}
         footer={null}
@@ -266,4 +281,20 @@ function toTreeData(nodes: WorkspaceFileNode[], actions: FileRowActions): DataNo
     title: <FileTreeRow node={node} actions={actions} />,
     children: node.children?.length ? toTreeData(node.children, actions) : undefined,
   }));
+}
+
+function normalizePreviewMode(payload: { mode?: string; content_type?: string; filename?: string }, node: WorkspaceFileNode) {
+  const mode = String(payload.mode || "").toLowerCase();
+  const contentType = String(payload.content_type || node.mime_type || "").toLowerCase();
+  const filename = String(payload.filename || node.name || node.path || "").toLowerCase();
+  if (mode === "pdf" || contentType.includes("application/pdf") || filename.endsWith(".pdf")) return "pdf";
+  if (mode === "image" || contentType.startsWith("image/")) return "image";
+  if (mode === "html" || contentType.includes("html") || filename.endsWith(".html") || filename.endsWith(".htm")) {
+    return "html";
+  }
+  if (mode === "office_text" || contentType.includes("officedocument") || /\.(docx|pptx|xlsx)$/.test(filename)) {
+    return "office_text";
+  }
+  if (mode === "binary") return "binary";
+  return mode || "text";
 }

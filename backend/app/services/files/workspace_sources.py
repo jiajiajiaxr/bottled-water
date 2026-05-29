@@ -155,6 +155,11 @@ def _artifact_size(artifact: Artifact) -> int:
         candidate = content.get(key)
         if candidate and Path(str(candidate)).is_file():
             return Path(str(candidate)).stat().st_size
+        if isinstance(candidate, dict) and candidate.get("size"):
+            return int(candidate["size"])
+    files = content.get("files") if isinstance(content.get("files"), dict) else {}
+    if files:
+        return sum(len(str(value).encode("utf-8")) for value in files.values())
     return 0
 
 

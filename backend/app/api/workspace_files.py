@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends
@@ -71,6 +72,8 @@ async def preview_workspace_file(
     user: User = Depends(get_current_user),
 ):
     target = get_workspace_file_target(db, user, workspace_id, node_id)
+    if target.get("kind") == "artifact":
+        return ok(_artifact_preview_payload(workspace_id, node_id, target))
     if target.get("text") is not None:
         content_type = str(target.get("mime_type") or "text/plain")
         return ok(
@@ -220,7 +223,7 @@ def _preview_mode(content_type: str, filename: str) -> str:
     suffix = Path(filename).suffix.lower()
     if normalized.startswith("image/"):
         return "image"
-    if normalized == "application/pdf" or suffix == ".pdf":
+    if "application/pdf" in normalized or suffix == ".pdf":
         return "pdf"
     if "html" in normalized or suffix in {".html", ".htm"}:
         return "html"
@@ -235,3 +238,51 @@ def _preview_mode(content_type: str, filename: str) -> str:
 
 def _is_text_preview(content_type: str, filename: str) -> bool:
     return _preview_mode(content_type, filename) in {"text", "html", "markdown"}
+
+
+def _artifact_preview_payload(workspace_id: str, node_id: str, target: dict[str, Any]) -> dict[str, Any]:
+    artifact = target["artifact"]
+    content = artifact.content or {}
+    filename = str(target.get("filename") or content.get("filename") or artifact.name)
+    content_type = str(target.get("mime_type") or content.get("media_type") or artifact.mime_type)
+    download_url = f"/api/v1/workspaces/{workspace_id}/files/download?node_id={quote(node_id, safe=':')}"
+    preview_url = f"/api/v1/artifacts/{artifact.id}/preview"
+    mode = _preview_mode(content_type, filename)
+    preview_html = _artifact_preview_html(content)
+    if not preview_html and mode == "html" and isinstance(target.get("bytes"), bytes):
+        preview_html = target["bytes"].decode("utf-8", errors="replace")
+    if preview_html and mode in {"office_text", "html", "text", "binary"}:
+        return {
+            "type": "file_preview",
+            "mode": "html",
+            "text": preview_html[:500_000],
+            "preview_text": preview_html[:500_000],
+            "content_type": "text/html; charset=utf-8",
+            "filename": filename,
+            "artifact_id": artifact.id,
+            "artifact_type": artifact.type,
+            "preview_url": preview_url,
+            "download_url": download_url,
+        }
+    return {
+        "type": "file_preview",
+        "mode": mode,
+        "content_type": content_type,
+        "filename": filename,
+        "artifact_id": artifact.id,
+        "artifact_type": artifact.type,
+        "preview_url": preview_url,
+        "download_url": download_url,
+    }
+
+
+def _artifact_preview_html(content: dict[str, Any]) -> str:
+    files = content.get("files") if isinstance(content.get("files"), dict) else {}
+    return str(
+        content.get("preview_html")
+        or files.get("index.html")
+        or content.get("html")
+        or content.get("source_text")
+        or content.get("summary")
+        or ""
+    )

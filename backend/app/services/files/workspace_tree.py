@@ -70,8 +70,17 @@ def get_workspace_file_target(db: Session, user: User, workspace_id: str, node_i
         asset = file_asset(db, workspace_id, value)
         return file_asset_target(workspace_id, asset)
     if kind == "artifact":
-        exported = export_artifact(artifact(db, workspace_id, value))
-        return {"kind": kind, "bytes": exported.content, "filename": exported.filename, "mime_type": exported.media_type}
+        item = artifact(db, workspace_id, value)
+        exported = export_artifact(item)
+        return {
+            "kind": kind,
+            "artifact": item,
+            "artifact_id": item.id,
+            "artifact_type": item.type,
+            "bytes": exported.content,
+            "filename": exported.filename,
+            "mime_type": exported.media_type,
+        }
     if kind == "project":
         item = project_file(db, workspace_id, value)
         return {

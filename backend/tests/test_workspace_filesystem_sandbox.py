@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
 import uuid
 from collections.abc import Iterator
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -11,8 +13,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import Base
 from app.core.errors import ValidationAppError
-from app.models import Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
+from app.models import Artifact, Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
 from app.api.messages import _send
+from app.api.workspace_files import download_workspace_file, preview_workspace_file
 from app.services.files.workspace_tree import (
     bulk_delete_workspace_file_nodes,
     create_workspace_folder,
@@ -278,6 +281,178 @@ def test_workspace_file_tree_labels_conversation_uuid_folders(db: Session) -> No
 
         assert conversation.id not in display_names
         assert f"单聊：{conversation.title} · {conversation.id[:8]}" in display_names
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_preview_supports_pdf_artifact(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+
+    try:
+        result = invoke_tool(
+            db,
+            user,
+            "artifact.create_pdf",
+            {
+                "workspace_id": workspace.id,
+                "conversation_id": conversation.id,
+                "title": "PDF 工作区预览",
+                "body": "这是用于工作区文件系统预览的 PDF 产物。",
+            },
+        )["result"]
+        node_id = f"artifact:{result['artifact_id']}"
+
+        preview = asyncio.run(preview_workspace_file(workspace.id, node_id, db, user))["data"]
+        downloaded = asyncio.run(download_workspace_file(workspace.id, node_id, db, user))
+
+        assert preview["mode"] == "pdf"
+        assert preview["artifact_id"] == result["artifact_id"]
+        assert preview["content_type"].startswith("application/pdf")
+        assert preview["download_url"]
+        assert downloaded.media_type == "application/pdf"
+        assert downloaded.body.startswith(b"%PDF")
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_preview_prefers_docx_artifact_preview_html(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+
+    try:
+        result = invoke_tool(
+            db,
+            user,
+            "artifact.create_docx",
+            {
+                "workspace_id": workspace.id,
+                "conversation_id": conversation.id,
+                "title": "Word 工作区预览",
+                "body": "这是用于工作区文件系统预览的 Word 产物。",
+            },
+        )["result"]
+        node_id = f"artifact:{result['artifact_id']}"
+
+        preview = asyncio.run(preview_workspace_file(workspace.id, node_id, db, user))["data"]
+
+        assert preview["mode"] == "html"
+        assert preview["artifact_id"] == result["artifact_id"]
+        assert preview["artifact_type"] == "document"
+        assert "Word 工作区预览" in preview["text"]
+        assert "preview" in preview["text"].lower()
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_preview_supports_legacy_artifact_html(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    artifact = Artifact(
+        conversation_id=conversation.id,
+        type="web_app",
+        name="旧版 HTML 页面",
+        mime_type="text/html",
+        content={"files": {"index.html": "<!doctype html><h1>旧版 HTML 页面</h1>"}},
+    )
+    db.add(artifact)
+    db.commit()
+
+    try:
+        preview = asyncio.run(preview_workspace_file(workspace.id, f"artifact:{artifact.id}", db, user))["data"]
+
+        assert preview["mode"] == "html"
+        assert "旧版 HTML 页面" in preview["text"]
+        assert preview["artifact_id"] == artifact.id
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_preview_supports_legacy_docx_artifact_html(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    artifact = Artifact(
+        conversation_id=conversation.id,
+        type="document",
+        name="旧版 Word 文档",
+        mime_type="text/html",
+        content={
+            "tool_output": {"format": "docx"},
+            "files": {"index.html": "<article><h1>旧版 Word 文档</h1><p>可预览正文</p></article>"},
+        },
+    )
+    db.add(artifact)
+    db.commit()
+
+    try:
+        preview = asyncio.run(preview_workspace_file(workspace.id, f"artifact:{artifact.id}", db, user))["data"]
+        tree = workspace_file_tree(db, user, workspace.id)
+        flat = _flatten(tree["root"])
+        folder = next(item for item in flat if item.get("path") == f"artifacts/{artifact.id}")
+
+        assert preview["mode"] == "html"
+        assert "旧版 Word 文档" in preview["text"]
+        assert folder["display_name"] == f"产物：旧版 Word 文档 · {artifact.id[:8]}"
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_preview_handles_text_markdown_json_and_binary(db: Session) -> None:
+    user, workspace, _conversation = _user_workspace_conversation(db)
+    root = workspace_root(workspace.id) / "files"
+    root.mkdir(parents=True, exist_ok=True)
+    markdown = root / "说明.md"
+    json_file = root / "data.json"
+    text_file = root / "notes.txt"
+    binary = root / "archive.bin"
+    markdown.write_text("# 标题\n正文", encoding="utf-8")
+    json_file.write_text('{"name": "AgentHub"}', encoding="utf-8")
+    text_file.write_text("普通文本", encoding="utf-8")
+    binary.write_bytes(b"\x00\x01\x02\x03")
+
+    try:
+        markdown_payload = asyncio.run(
+            preview_workspace_file(workspace.id, f"fs:{quote('files/说明.md', safe='')}", db, user)
+        )["data"]
+        json_payload = asyncio.run(
+            preview_workspace_file(workspace.id, f"fs:{quote('files/data.json', safe='')}", db, user)
+        )["data"]
+        text_payload = asyncio.run(
+            preview_workspace_file(workspace.id, f"fs:{quote('files/notes.txt', safe='')}", db, user)
+        )["data"]
+        binary_payload = asyncio.run(
+            preview_workspace_file(workspace.id, f"fs:{quote('files/archive.bin', safe='')}", db, user)
+        )["data"]
+
+        assert markdown_payload["mode"] == "text"
+        assert "AgentHub" in json_payload["text"]
+        assert "普通文本" in text_payload["text"]
+        assert binary_payload["mode"] == "binary"
+        assert binary_payload["text"] == ""
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_artifact_directory_display_name_uses_artifact_name(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+
+    try:
+        result = invoke_tool(
+            db,
+            user,
+            "artifact.create_html",
+            {
+                "workspace_id": workspace.id,
+                "conversation_id": conversation.id,
+                "title": "HTML 示例演示页面",
+                "html": "<!doctype html><h1>HTML 示例演示页面</h1>",
+            },
+        )["result"]
+        tree = workspace_file_tree(db, user, workspace.id)
+        flat = _flatten(tree["root"])
+        display_names = {str(item.get("display_name") or "") for item in flat}
+        file_node = next(item for item in flat if item.get("id") == f"artifact:{result['artifact_id']}")
+
+        assert result["artifact_id"] not in display_names
+        assert f"产物：HTML 示例演示页面 · {result['artifact_id'][:8]}" in display_names
+        assert result["artifact_id"] not in str(file_node.get("display_path"))
+        assert "产物：HTML 示例演示页面" in str(file_node.get("display_path"))
     finally:
         _cleanup(workspace.id)
 

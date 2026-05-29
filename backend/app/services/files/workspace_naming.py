@@ -44,7 +44,7 @@ def readable_segment(part: str, *, path: str = "") -> str:
         return part
     short_id = part[:8]
     if path.startswith("artifacts/"):
-        return f"产物 {short_id}"
+        return f"产物：{short_id}"
     if path.startswith("uploads/") or path.startswith("files/"):
         return f"上传记录 {short_id}"
     if path.startswith("exports/"):

@@ -33,6 +33,7 @@ export interface WorkspaceFileNode {
   display_name?: string;
   type: "file" | "directory" | string;
   path: string;
+  display_path?: string;
   size?: number;
   updated_at?: string;
   source: string;
@@ -62,6 +63,9 @@ export interface WorkspaceFilePreview {
   preview_text?: string;
   content_type?: string;
   filename?: string;
+  artifact_id?: string;
+  artifact_type?: string;
+  preview_url?: string;
   download_url?: string;
   metadata?: Record<string, unknown>;
 }

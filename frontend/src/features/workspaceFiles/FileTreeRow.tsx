@@ -9,7 +9,7 @@ import {
 } from "@ant-design/icons";
 import { Button, Tag, Tooltip, Typography } from "antd";
 import type { WorkspaceFileNode } from "../../types";
-import { formatDate, formatSize, sourceLabel } from "./workspaceFileUtils";
+import { displayNodeName, displayNodePath, formatDate, formatSize, sourceLabel } from "./workspaceFileUtils";
 
 const { Text } = Typography;
 
@@ -27,12 +27,12 @@ export function FileTreeRow({ node, actions }: { node: WorkspaceFileNode; action
   return (
     <div className={`workspace-file-row ${isFile ? "is-file" : "is-dir"}`}>
       <div className="workspace-file-name-cell">
-        <Text strong={isFile} ellipsis={{ tooltip: node.display_name ?? node.name }}>
-          {node.display_name ?? node.name}
+        <Text strong={isFile} ellipsis={{ tooltip: displayNodeName(node) }}>
+          {displayNodeName(node)}
         </Text>
         {isFile && (
           <Text type="secondary" ellipsis={{ tooltip: node.path }}>
-            {node.path}
+            {displayNodePath(node)}
           </Text>
         )}
       </div>

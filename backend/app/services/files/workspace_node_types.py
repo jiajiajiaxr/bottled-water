@@ -13,6 +13,7 @@ class WorkspaceFileNode:
     path: str
     source: str
     size: int = 0
+    display_path: str | None = None
     updated_at: str | None = None
     mime_type: str | None = None
     download_url: str | None = None
@@ -27,6 +28,7 @@ class WorkspaceFileNode:
             "display_name": self.display_name,
             "type": self.type,
             "path": self.path,
+            "display_path": self.display_path,
             "size": self.size,
             "updated_at": self.updated_at,
             "source": self.source,
