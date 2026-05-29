@@ -24,7 +24,8 @@
             "**/node_modules": true,
             "**/dist": true,
             "**/.pytest_cache": true,
-            "**/.ruff_cache": true
+            "**/.ruff_cache": true,
+            "**/*.egg-info": true
         }
     },
     "launch": {
@@ -95,9 +96,9 @@
                 }
             },
             {
-                "label": "Setup .env",
+                "label": "Setup .env from example",
                 "type": "shell",
-                "command": "if (-not (Test-Path .env)) { Copy-Item .env.sample .env; Write-Host '已复制 .env.sample 到 .env，请按需修改配置。' } else { Write-Host '.env 已存在，跳过复制。' }",
+                "command": "if (-not (Test-Path .env)) { Copy-Item .env.example .env; Write-Host '已复制 .env.example 到 .env，请按需修改配置。' } else { Write-Host '.env 已存在，跳过复制。' }",
                 "options": {
                     "cwd": "${workspaceFolder:Root}"
                 },
@@ -149,7 +150,7 @@
             {
                 "label": "Setup All",
                 "dependsOn": [
-                    "Setup .env",
+                    "Setup .env from example",
                     "Setup Backend",
                     "Run Migrations",
                     "Setup Frontend"
