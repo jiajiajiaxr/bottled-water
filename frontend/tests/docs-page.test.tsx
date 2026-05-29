@@ -45,4 +45,24 @@ describe("DocsPage", () => {
     expect(within(sidebar).getByText("部署预览")).toBeInTheDocument();
     expect(within(sidebar).queryByText("首次登录")).not.toBeInTheDocument();
   });
+
+  it("removes the announcement sticky offset after closing the banner", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <DocsPage />
+      </MemoryRouter>,
+    );
+
+    const shell = screen.getByRole("main");
+    const closeButton = container.querySelector<HTMLButtonElement>(
+      ".docs-announcement button",
+    );
+    if (!closeButton) throw new Error("Missing docs announcement close button");
+
+    expect(shell).toHaveClass("docs-shell-announced");
+    fireEvent.click(closeButton);
+
+    expect(container.querySelector(".docs-announcement")).not.toBeInTheDocument();
+    expect(shell).toHaveClass("docs-shell-plain");
+  });
 });

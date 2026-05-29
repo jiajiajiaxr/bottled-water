@@ -3,6 +3,10 @@
     top: 0;
   }
 
+  .docs-shell-announced .docs-topbar {
+    top: 0;
+  }
+
   .docs-announcement {
     position: static;
   }
@@ -15,7 +19,16 @@
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
+  .docs-shell-announced .docs-layout {
+    min-height: calc(100vh - 64px);
+  }
+
   .docs-sidebar {
+    top: 64px;
+    height: calc(100vh - 64px);
+  }
+
+  .docs-shell-announced .docs-sidebar {
     top: 64px;
     height: calc(100vh - 64px);
   }

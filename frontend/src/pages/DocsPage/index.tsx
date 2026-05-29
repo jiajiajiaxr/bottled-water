@@ -28,10 +28,7 @@ import "./docs-detail.css";
 import "./docs-hero.css";
 import "./docs-responsive.css";
 
-function DocsAnnouncement() {
-  const [visible, setVisible] = useState(true);
-  if (!visible) return null;
-
+function DocsAnnouncement({ onClose }: { onClose: () => void }) {
   return (
     <div className="docs-announcement">
       <span>
@@ -41,7 +38,7 @@ function DocsAnnouncement() {
       <button
         type="button"
         aria-label="关闭公告"
-        onClick={() => setVisible(false)}
+        onClick={onClose}
       >
         ×
       </button>
@@ -254,6 +251,7 @@ function MaintainSection() {
 
 export function DocsPage() {
   const [query, setQuery] = useState("");
+  const [announcementVisible, setAnnouncementVisible] = useState(true);
   const filteredGroups = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return navGroups;
@@ -269,8 +267,14 @@ export function DocsPage() {
   }, [query]);
 
   return (
-    <main className="docs-shell">
-      <DocsAnnouncement />
+    <main
+      className={`docs-shell ${
+        announcementVisible ? "docs-shell-announced" : "docs-shell-plain"
+      }`}
+    >
+      {announcementVisible ? (
+        <DocsAnnouncement onClose={() => setAnnouncementVisible(false)} />
+      ) : null}
       <DocsTopbar />
       <div className="docs-layout">
         <DocsSidebar

@@ -43,7 +43,7 @@
 
 .docs-topbar {
   position: sticky;
-  top: 40px;
+  top: 0;
   z-index: 25;
   height: 64px;
   display: flex;
@@ -53,6 +53,10 @@
   border-bottom: 1px solid #e5e9f0;
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(10px);
+}
+
+.docs-shell-announced .docs-topbar {
+  top: 40px;
 }
 
 .docs-brand,
@@ -130,13 +134,17 @@
 .docs-layout {
   display: grid;
   grid-template-columns: 268px minmax(0, 1fr);
+  min-height: calc(100vh - 64px);
+}
+
+.docs-shell-announced .docs-layout {
   min-height: calc(100vh - 104px);
 }
 
 .docs-sidebar {
   position: sticky;
-  top: 104px;
-  height: calc(100vh - 104px);
+  top: 64px;
+  height: calc(100vh - 64px);
   display: grid;
   grid-template-rows: auto auto auto 1fr auto;
   gap: 10px;
@@ -144,6 +152,11 @@
   border-right: 1px solid #e5e9f0;
   background: #fbfcfe;
   overflow: auto;
+}
+
+.docs-shell-announced .docs-sidebar {
+  top: 104px;
+  height: calc(100vh - 104px);
 }
 
 .docs-menu-button {
