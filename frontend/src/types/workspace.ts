@@ -30,6 +30,7 @@ export interface Project {
 export interface WorkspaceFileNode {
   id: string;
   name: string;
+  display_name?: string;
   type: "file" | "directory" | string;
   path: string;
   size?: number;
@@ -49,7 +50,7 @@ export interface WorkspaceFileTree {
 
 export interface WorkspaceFilePreview {
   type?: string;
-  mode?: "text" | "pdf" | "image" | "office_text" | string;
+  mode?: "text" | "markdown" | "html" | "pdf" | "image" | "office_text" | "binary" | string;
   text?: string;
   preview_text?: string;
   content_type?: string;

@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.database import Base
 from app.core.errors import ValidationAppError
 from app.models import Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
-from app.services.files.workspace_tree import delete_workspace_file_node, workspace_file_tree
+from app.api.messages import _send
+from app.services.files.workspace_tree import delete_workspace_file_node, rename_workspace_file_node, workspace_file_tree
 from app.services.tools.executor import invoke_tool
 from app.services.workspaces.filesystem import scoped_dir, workspace_root
 
@@ -183,6 +184,126 @@ def test_workspace_file_tree_aggregates_upload_artifact_and_sandbox_files(db: Se
         assert any(path.startswith("artifacts/") for path in paths)
         assert any(path.endswith("script.py") and path.startswith("sandbox/") for path in paths)
         assert {"upload", "artifact", "sandbox"} <= sources
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_tree_normalizes_display_names_and_conversation_folders(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    first = scoped_dir(workspace.id, "uploads", conversation_id=conversation.id) / "Figure_1.png"
+    second = scoped_dir(workspace.id, "uploads", conversation_id=conversation.id) / "nested" / "Figure_1.png"
+    second.parent.mkdir(parents=True, exist_ok=True)
+    first.write_bytes(b"fake-image-a")
+    second.write_bytes(b"fake-image-b")
+    db.add_all(
+        [
+            FileAsset(
+                owner_id=user.id,
+                conversation_id=conversation.id,
+                filename="Figure_1.png",
+                original_filename="Figure_1.png",
+                content_type="image/png",
+                size=first.stat().st_size,
+                checksum="figure-a",
+                storage_path=str(first),
+                purpose="attachment",
+                parse_status="parsed",
+                extra={"workspace_id": workspace.id},
+            ),
+            FileAsset(
+                owner_id=user.id,
+                conversation_id=conversation.id,
+                filename="Figure_1.png",
+                original_filename="Figure_1.png",
+                content_type="image/png",
+                size=second.stat().st_size,
+                checksum="figure-b",
+                storage_path=str(second),
+                purpose="attachment",
+                parse_status="parsed",
+                extra={"workspace_id": workspace.id},
+            ),
+        ]
+    )
+    db.commit()
+
+    try:
+        tree = workspace_file_tree(db, user, workspace.id)
+        flat = _flatten(tree["root"])
+        names = {item.get("display_name") for item in flat}
+
+        assert "上传文件" in names
+        assert any(str(name).startswith("Workspace Sandbox · ") for name in names)
+        assert all(item.get("display_name") for item in flat)
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_at_file_reference_is_resolved_into_message_attachment(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    path = scoped_dir(workspace.id, "sandbox", conversation_id=conversation.id) / "summary.md"
+    path.write_text("# Summary\nAgentHub workspace context", encoding="utf-8")
+
+    try:
+        message = _send(
+            db,
+            user,
+            conversation.id,
+            {"content": {"text": "请总结 @file(sandbox/conversations/%s/summary.md)" % conversation.id}},
+            trigger_agent=False,
+        )
+        attachments = message.content["attachments"]
+
+        assert attachments[0]["filename"] == "summary.md"
+        assert "AgentHub workspace context" in attachments[0]["extracted_text"]
+        assert attachments[0]["metadata"]["reference_type"] == "workspace_file"
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_at_file_reference_missing_file_reports_clear_error(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+
+    try:
+        with pytest.raises(ValidationAppError, match="文件引用不存在"):
+            _send(
+                db,
+                user,
+                conversation.id,
+                {"content": {"text": "请总结 @file(sandbox/missing.md)"}},
+                trigger_agent=False,
+            )
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_rename_updates_file_asset_display_name(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    path = scoped_dir(workspace.id, "uploads", conversation_id=conversation.id) / "old.txt"
+    path.write_text("hello", encoding="utf-8")
+    asset = FileAsset(
+        owner_id=user.id,
+        conversation_id=conversation.id,
+        filename="old.txt",
+        original_filename="old.txt",
+        content_type="text/plain",
+        size=path.stat().st_size,
+        checksum="rename-checksum",
+        storage_path=str(path),
+        purpose="attachment",
+        parse_status="parsed",
+        extra={"workspace_id": workspace.id},
+    )
+    db.add(asset)
+    db.commit()
+
+    try:
+        result = rename_workspace_file_node(db, user, workspace.id, f"file:{asset.id}", "renamed.txt")
+        db.refresh(asset)
+
+        assert result["display_name"] == "renamed.txt"
+        assert asset.original_filename == "renamed.txt"
+        assert "renamed.txt" in {item["display_name"] for item in _flatten(workspace_file_tree(db, user, workspace.id)["root"])}
     finally:
         _cleanup(workspace.id)
 

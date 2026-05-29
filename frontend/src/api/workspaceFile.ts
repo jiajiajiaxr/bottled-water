@@ -28,3 +28,14 @@ export async function deleteWorkspaceFile(workspaceId: string, nodeId: string) {
     { method: "DELETE" },
   );
 }
+
+export async function renameWorkspaceFile(
+  workspaceId: string,
+  nodeId: string,
+  name: string,
+) {
+  return await request<{ id: string; name: string; display_name?: string }>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/files?node_id=${encodeURIComponent(nodeId)}`,
+    { method: "PATCH", body: JSON.stringify({ name }) },
+  );
+}

@@ -1,0 +1,206 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ArrowLeftOutlined,
+  FileOutlined,
+  FolderOpenOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+} from "@ant-design/icons";
+import { App as AntApp, Button, Empty, Input, Modal, Select, Space, Spin, Tree, Typography } from "antd";
+import type { DataNode } from "antd/es/tree";
+import { api } from "../../api";
+import type { WorkspaceFileNode } from "../../types";
+import { FileTreeRow } from "./FileTreeRow";
+import type { FileRowActions } from "./FileTreeRow";
+import type { PreviewState } from "./WorkspaceFilePreviewView";
+import { WorkspaceFilePreviewView } from "./WorkspaceFilePreviewView";
+import { filterNodes, sourceLabel, walk } from "./workspaceFileUtils";
+
+const { Title, Text } = Typography;
+
+type Props = {
+  workspaceId?: string;
+  onBack: () => void;
+  onAttachReference: (snippet: string) => void;
+};
+
+export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }: Props) {
+  const { message } = AntApp.useApp();
+  const [loading, setLoading] = useState(false);
+  const [nodes, setNodes] = useState<WorkspaceFileNode[]>([]);
+  const [query, setQuery] = useState("");
+  const [source, setSource] = useState<string>("all");
+  const [preview, setPreview] = useState<PreviewState>();
+
+  const closePreview = useCallback(() => {
+    if (preview?.objectUrl) URL.revokeObjectURL(preview.objectUrl);
+    setPreview(undefined);
+  }, [preview]);
+
+  const load = useCallback(async () => {
+    if (!workspaceId) return;
+    setLoading(true);
+    try {
+      const tree = await api.workspaceFileTree(workspaceId);
+      setNodes(tree.items ?? tree.root.children ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => closePreview, [closePreview]);
+
+  const visibleNodes = useMemo(() => filterNodes(nodes, query, source), [nodes, query, source]);
+  const sources = useMemo(() => {
+    const values = new Set<string>();
+    walk(nodes, (node) => {
+      if (node.type === "file") values.add(node.source);
+    });
+    return [...values].sort();
+  }, [nodes]);
+
+  const handlePreview = async (node: WorkspaceFileNode) => {
+    if (!workspaceId || node.type !== "file") return;
+    try {
+      const payload = await api.previewWorkspaceFile(workspaceId, node.id);
+      let objectUrl: string | undefined;
+      if (payload.mode === "pdf" || payload.mode === "image") {
+        objectUrl = (await api.downloadWorkspaceFile(workspaceId, node.id)).previewUrl;
+      }
+      setPreview({ node, payload, objectUrl });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "预览失败");
+    }
+  };
+
+  const handleDownload = async (node: WorkspaceFileNode) => {
+    if (!workspaceId || node.type !== "file") return;
+    const file = await api.downloadWorkspaceFile(workspaceId, node.id);
+    const href =
+      file.previewUrl ?? URL.createObjectURL(new Blob([file.previewText ?? ""], { type: file.contentType }));
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = file.filename ?? node.display_name ?? node.name;
+    anchor.click();
+    if (!file.previewUrl) URL.revokeObjectURL(href);
+  };
+
+  const handleRename = (node: WorkspaceFileNode) => {
+    if (!workspaceId || node.type !== "file") return;
+    let nextName = node.display_name ?? node.name;
+    Modal.confirm({
+      title: "重命名文件",
+      content: <Input defaultValue={nextName} autoFocus onChange={(event) => { nextName = event.target.value; }} />,
+      okText: "保存",
+      onOk: async () => {
+        await api.renameWorkspaceFile(workspaceId, node.id, nextName);
+        message.success("文件已重命名");
+        await load();
+      },
+    });
+  };
+
+  const handleDelete = (node: WorkspaceFileNode) => {
+    if (!workspaceId || node.type !== "file") return;
+    Modal.confirm({
+      title: "删除文件",
+      content: `确认删除 ${node.display_name ?? node.name}？`,
+      okText: "删除",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await api.deleteWorkspaceFile(workspaceId, node.id);
+        message.success("文件已删除");
+        await load();
+      },
+    });
+  };
+
+  const attach = (node: WorkspaceFileNode) => {
+    if (node.type !== "file") return;
+    const fileId = node.id.startsWith("file:") ? ` file_id=${node.id.slice(5)}` : "";
+    onAttachReference(`@file(${node.path}${fileId}) `);
+    message.success("文件引用已加入输入框");
+  };
+
+  return (
+    <section className="workspace-files-page">
+      <div className="workspace-files-page-head">
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={onBack}>返回聊天</Button>
+          <div>
+            <Title level={4}>工作区文件</Title>
+            <Text type="secondary">上传、产物、沙箱、导出和项目文件统一视图</Text>
+          </div>
+        </Space>
+        <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>
+      </div>
+      <Space.Compact block className="workspace-file-toolbar">
+        <Input
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder="搜索文件名或路径"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <Select
+          value={source}
+          onChange={setSource}
+          style={{ width: 150 }}
+          options={[
+            { label: "全部来源", value: "all" },
+            ...sources.map((item) => ({ label: sourceLabel(item), value: item })),
+          ]}
+        />
+      </Space.Compact>
+      <div className="workspace-file-table-head">
+        <span>名称</span>
+        <span>来源</span>
+        <span>大小</span>
+        <span>修改时间</span>
+        <span>操作</span>
+      </div>
+      <div className="workspace-file-tree-host">
+        {loading ? (
+          <div className="workspace-file-loading"><Spin /></div>
+        ) : visibleNodes.length ? (
+          <Tree
+            blockNode
+            showIcon
+            defaultExpandAll
+            treeData={toTreeData(visibleNodes, {
+              onPreview: handlePreview,
+              onDownload: handleDownload,
+              onDelete: handleDelete,
+              onAttach: attach,
+              onRename: handleRename,
+            })}
+          />
+        ) : (
+          <Empty description="当前工作区暂无文件" />
+        )}
+      </div>
+      <Modal
+        title={preview?.node.display_name ?? preview?.node.name}
+        open={!!preview}
+        onCancel={closePreview}
+        footer={null}
+        width={900}
+      >
+        {preview && <WorkspaceFilePreviewView preview={preview} />}
+      </Modal>
+    </section>
+  );
+}
+
+function toTreeData(nodes: WorkspaceFileNode[], actions: FileRowActions): DataNode[] {
+  return nodes.map((node) => ({
+    key: node.id,
+    icon: node.type === "directory" ? <FolderOpenOutlined /> : <FileOutlined />,
+    title: <FileTreeRow node={node} actions={actions} />,
+    children: node.children?.length ? toTreeData(node.children, actions) : undefined,
+  }));
+}

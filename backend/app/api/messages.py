@@ -13,9 +13,10 @@ from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Conversation, FileAsset, Message, User, utcnow
-from app.services.context.attachments import readable_attachment_text
 from app.services.chat.cancellation import cancel_conversation_generation
 from app.services.chat.orchestrator import run_orchestration
+from app.services.context.attachments import readable_attachment_text
+from app.services.files.references import resolve_file_reference_attachments
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import message_to_dict
 
@@ -64,10 +65,17 @@ def _list_messages(db: Session, user: User, conversation_id: str) -> list[dict]:
     return [message_to_dict(message) for message in messages]
 
 
-def _normalize_attachments(db: Session, user: User, payload: dict) -> list[dict]:
+def _normalize_attachments(
+    db: Session,
+    user: User,
+    conversation: Conversation,
+    payload: dict,
+    text: str,
+) -> list[dict]:
     raw_content = payload.get("content") if isinstance(payload.get("content"), dict) else {}
     attachments = raw_content.get("attachments") or payload.get("attachments") or []
     normalized: list[dict] = []
+    seen_file_ids: set[str] = set()
     for item in attachments:
         file_id = item.get("file_id") or item.get("id") if isinstance(item, dict) else str(item)
         if not file_id:
@@ -81,24 +89,36 @@ def _normalize_attachments(db: Session, user: User, payload: dict) -> list[dict]
         )
         if not file_asset:
             continue
-        normalized.append(
+        seen_file_ids.add(file_asset.id)
+        normalized.append(_attachment_from_file_asset(file_asset))
+    normalized.extend(
+        resolve_file_reference_attachments(
+            db,
+            user=user,
+            conversation=conversation,
+            text=text,
+            existing_file_ids=seen_file_ids,
+        )
+    )
+    return normalized
+
+
+def _attachment_from_file_asset(file_asset: FileAsset) -> dict:
+    return {
+        "file_id": file_asset.id,
+        "filename": file_asset.original_filename,
+        "content_type": file_asset.content_type,
+        "size": file_asset.size,
+        "parse_status": file_asset.parse_status,
+        "extracted_text": readable_attachment_text(
             {
-                "file_id": file_asset.id,
-                "filename": file_asset.original_filename,
                 "content_type": file_asset.content_type,
-                "size": file_asset.size,
-                "parse_status": file_asset.parse_status,
-                "extracted_text": readable_attachment_text(
-                    {
-                        "content_type": file_asset.content_type,
-                        "extracted_text": file_asset.extracted_text,
-                        "metadata": file_asset.extra or {},
-                    }
-                )[:12000],
+                "extracted_text": file_asset.extracted_text,
                 "metadata": file_asset.extra or {},
             }
-        )
-    return normalized
+        )[:12000],
+        "metadata": file_asset.extra or {},
+    }
 
 
 def _schedule_orchestration(conversation_id: str, message_id: str) -> None:
@@ -119,6 +139,7 @@ def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigg
     text = _message_text(payload).strip()
     if not text:
         raise ValidationAppError("消息内容不能为空")
+    attachments = _normalize_attachments(db, user, conversation, payload, text)
     message = Message(
         client_message_id=payload.get("client_message_id") or str(uuid.uuid4()),
         conversation_id=conversation.id,
@@ -126,7 +147,7 @@ def _send(db: Session, user: User, conversation_id: str, payload: dict, *, trigg
         sender_id=user.id,
         sender_name=user.display_name,
         content_type=payload.get("content_type") or "text",
-        content={"text": text, "attachments": _normalize_attachments(db, user, payload)},
+        content={"text": text, "attachments": attachments},
         status="sent",
         reply_to_message_id=payload.get("reply_to_message_id") or payload.get("quotedMessageId"),
         extra={"thinking_enabled": bool(payload.get("thinking_enabled"))},
@@ -242,7 +263,7 @@ async def cancel_stream(
         channel=f"conversation:{conversation.id}",
         task_cancelled=task_cancelled,
     )
-    return ok(result, "Generation cancelled")
+    return ok(result, "已停止本次响应")
 
 
 @compat_router.get("/conversations/{conversation_id}/messages")

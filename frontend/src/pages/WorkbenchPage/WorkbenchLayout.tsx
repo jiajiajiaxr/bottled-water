@@ -27,7 +27,7 @@ import { ConversationSidebar } from "../../features/chat/components/Conversation
 import { ChatPanel } from "../../features/chat/components/ChatPanel";
 import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
 import { WorkflowStudioContent } from "../../features/workflow/WorkflowStudioContent";
-import { WorkspaceFilesDrawer } from "../../features/workspaceFiles/WorkspaceFilesDrawer";
+import { WorkspaceFilesContent } from "../../features/workspaceFiles/WorkspaceFilesContent";
 import type {
   AgentTask,
   ChatMessage,
@@ -90,6 +90,9 @@ export interface WorkbenchLayoutProps {
   openWorkflowPage: () => void;
   closeWorkflowPage: () => void;
   workflowMode: boolean;
+  workspaceFilesMode: boolean;
+  openWorkspaceFilesPage: () => void;
+  closeWorkspaceFilesPage: () => void;
 
   // File upload
   uploadFile: (file: File) => Promise<UploadedFile>;
@@ -124,7 +127,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
       ? value
       : PREVIEW_DEFAULT_WIDTH;
   });
-  const [workspaceFilesOpen, setWorkspaceFilesOpen] = useState(false);
   const [draftSnippet, setDraftSnippet] = useState("");
 
   const {
@@ -157,6 +159,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     openWorkflowPage,
     closeWorkflowPage,
     workflowMode,
+    workspaceFilesMode,
+    openWorkspaceFilesPage,
+    closeWorkspaceFilesPage,
     uploadFile,
     artifactPanelOpen,
     artifact,
@@ -282,7 +287,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             </Button>
             <Button
               icon={<FileOutlined />}
-              onClick={() => setWorkspaceFilesOpen(true)}
+              onClick={openWorkspaceFilesPage}
               disabled={!activeWorkspaceId}
               data-testid="workspace-files"
             >
@@ -349,7 +354,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
           onOpenMembers={() => setMembersOpen(true)}
           onOpenSettings={() => setConversationSettingsOpen(true)}
           onOpenWorkflow={openWorkflowPage}
-          workflowMode={workflowMode}
+          workflowMode={workflowMode || workspaceFilesMode}
           workflowContent={
             workflowMode && activeId && workflowWorkspaceId ? (
               <WorkflowStudioContent
@@ -360,6 +365,12 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                 onError={(value) => message.error(value)}
                 onSuccess={(value) => message.success(value)}
               />
+            ) : workspaceFilesMode ? (
+              <WorkspaceFilesContent
+                workspaceId={activeWorkspaceId}
+                onBack={closeWorkspaceFilesPage}
+                onAttachReference={(snippet) => setDraftSnippet(snippet)}
+              />
             ) : undefined
           }
           onUploadFile={uploadFile}
@@ -369,12 +380,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
           onDraftSnippetConsumed={() => setDraftSnippet("")}
         />
       </Layout>
-      <WorkspaceFilesDrawer
-        open={workspaceFilesOpen}
-        workspaceId={activeWorkspaceId}
-        onClose={() => setWorkspaceFilesOpen(false)}
-        onAttachReference={(snippet) => setDraftSnippet(snippet)}
-      />
       {artifactPanelOpen && artifact && (
         <PreviewPanel
           artifact={artifact}

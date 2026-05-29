@@ -14,6 +14,7 @@ from app.models import User
 from app.services.files.workspace_tree import (
     delete_workspace_file_node,
     get_workspace_file_target,
+    rename_workspace_file_node,
     workspace_file_tree,
 )
 from app.services.tools.builtins.file.preview import preview_payload
@@ -67,20 +68,41 @@ async def preview_workspace_file(
 ):
     target = get_workspace_file_target(db, user, workspace_id, node_id)
     if target.get("text") is not None:
+        content_type = str(target.get("mime_type") or "text/plain")
         return ok(
             {
-                "type": "text",
+                "type": "file_preview",
+                "mode": _preview_mode(content_type, str(target.get("filename") or "")),
                 "text": str(target.get("text") or "")[:200_000],
-                "content_type": target.get("mime_type"),
+                "preview_text": str(target.get("text") or "")[:200_000],
+                "content_type": content_type,
+                "filename": target.get("filename"),
                 "download_url": f"/api/v1/workspaces/{workspace_id}/files/download?node_id={quote(node_id, safe=':')}",
             }
         )
     if target.get("bytes") is not None:
+        content = target.get("bytes")
+        content_type = str(target.get("mime_type") or "application/octet-stream")
+        filename = str(target.get("filename") or "")
+        if isinstance(content, bytes) and _is_text_preview(content_type, filename):
+            text = content.decode("utf-8", errors="replace")
+            return ok(
+                {
+                    "type": "file_preview",
+                    "mode": _preview_mode(content_type, filename),
+                    "text": text[:200_000],
+                    "preview_text": text[:200_000],
+                    "content_type": content_type,
+                    "filename": filename,
+                    "download_url": f"/api/v1/workspaces/{workspace_id}/files/download?node_id={quote(node_id, safe=':')}",
+                }
+            )
         return ok(
             {
-                "type": "binary",
-                "content_type": target.get("mime_type"),
-                "filename": target.get("filename"),
+                "type": "file_preview",
+                "mode": _preview_mode(content_type, filename),
+                "content_type": content_type,
+                "filename": filename,
                 "download_url": f"/api/v1/workspaces/{workspace_id}/files/download?node_id={quote(node_id, safe=':')}",
             }
         )
@@ -93,6 +115,7 @@ async def preview_workspace_file(
     return ok(
         {
             **payload,
+            "type": "file_preview",
             "download_url": f"/api/v1/workspaces/{workspace_id}/files/download?node_id={quote(node_id, safe=':')}",
         }
     )
@@ -108,5 +131,38 @@ async def delete_workspace_file(
     return ok(delete_workspace_file_node(db, user, workspace_id, node_id))
 
 
+@router.patch("/workspaces/{workspace_id}/files")
+async def rename_workspace_file(
+    workspace_id: str,
+    node_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return ok(rename_workspace_file_node(db, user, workspace_id, node_id, str(payload.get("name") or "")))
+
+
 def _attachment_header(filename: str) -> str:
     return f"attachment; filename*=UTF-8''{quote(filename)}"
+
+
+def _preview_mode(content_type: str, filename: str) -> str:
+    normalized = content_type.lower()
+    suffix = Path(filename).suffix.lower()
+    if normalized.startswith("image/"):
+        return "image"
+    if normalized == "application/pdf" or suffix == ".pdf":
+        return "pdf"
+    if "html" in normalized or suffix in {".html", ".htm"}:
+        return "html"
+    if "markdown" in normalized or suffix in {".md", ".markdown"}:
+        return "markdown"
+    if suffix in {".docx", ".pptx", ".xlsx"} or "officedocument" in normalized:
+        return "office_text"
+    if normalized.startswith("text/") or "json" in normalized:
+        return "text"
+    return "binary"
+
+
+def _is_text_preview(content_type: str, filename: str) -> bool:
+    return _preview_mode(content_type, filename) in {"text", "html", "markdown"}
