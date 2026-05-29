@@ -39,6 +39,7 @@ export interface WorkspaceFileNode {
   mime_type?: string;
   download_url?: string;
   preview_url?: string;
+  favorite?: boolean;
   children?: WorkspaceFileNode[];
 }
 
@@ -46,6 +47,12 @@ export interface WorkspaceFileTree {
   workspace_id: string;
   root: WorkspaceFileNode;
   items: WorkspaceFileNode[];
+  stats?: {
+    file_count: number;
+    directory_count: number;
+    total_size: number;
+    source_counts?: Record<string, number>;
+  };
 }
 
 export interface WorkspaceFilePreview {

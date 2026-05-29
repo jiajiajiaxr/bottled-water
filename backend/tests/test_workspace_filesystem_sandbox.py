@@ -13,7 +13,16 @@ from app.core.database import Base
 from app.core.errors import ValidationAppError
 from app.models import Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
 from app.api.messages import _send
-from app.services.files.workspace_tree import delete_workspace_file_node, rename_workspace_file_node, workspace_file_tree
+from app.services.files.workspace_tree import (
+    bulk_delete_workspace_file_nodes,
+    create_workspace_folder,
+    delete_workspace_file_node,
+    move_workspace_file_nodes,
+    rename_workspace_file_node,
+    set_workspace_file_favorite,
+    workspace_file_tree,
+)
+from app.services.tools.builtins.file.preview import preview_payload
 from app.services.tools.executor import invoke_tool
 from app.services.workspaces.filesystem import scoped_dir, workspace_root
 
@@ -233,7 +242,7 @@ def test_workspace_file_tree_normalizes_display_names_and_conversation_folders(d
         names = {item.get("display_name") for item in flat}
 
         assert "上传文件" in names
-        assert any(str(name).startswith("Workspace Sandbox · ") for name in names)
+        assert any(str(name).startswith("单聊：Workspace Sandbox · ") for name in names)
         assert all(item.get("display_name") for item in flat)
     finally:
         _cleanup(workspace.id)
@@ -255,6 +264,65 @@ def test_workspace_file_tree_replaces_uuid_directories_with_readable_labels(db: 
         assert "上传记录 3ef804b7" in display_names
     finally:
         _cleanup(workspace.id)
+
+
+def test_workspace_file_tree_labels_conversation_uuid_folders(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    path = scoped_dir(workspace.id, "uploads") / "legacy" / conversation.id / "Figure_1.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"fake-image")
+
+    try:
+        tree = workspace_file_tree(db, user, workspace.id)
+        display_names = {str(item.get("display_name") or "") for item in _flatten(tree["root"])}
+
+        assert conversation.id not in display_names
+        assert f"单聊：{conversation.title} · {conversation.id[:8]}" in display_names
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_operations_create_move_favorite_and_bulk_delete(db: Session) -> None:
+    user, workspace, _conversation = _user_workspace_conversation(db)
+    source = workspace_root(workspace.id) / "files" / "draft.txt"
+    source.write_text("draft", encoding="utf-8")
+    node_id = "fs:files%2Fdraft.txt"
+
+    try:
+        created = create_workspace_folder(db, user, workspace.id, "files", "方案资料")
+        moved = move_workspace_file_nodes(db, user, workspace.id, [node_id], created["path"])
+        moved_node = next(
+            item["id"]
+            for item in _flatten(workspace_file_tree(db, user, workspace.id)["root"])
+            if item.get("path") == f"{created['path']}/draft.txt"
+        )
+        set_workspace_file_favorite(db, user, workspace.id, moved_node, True)
+        tree = workspace_file_tree(db, user, workspace.id)
+        flat = _flatten(tree["root"])
+
+        assert moved["moved"][0]["path"] == f"{created['path']}/draft.txt"
+        assert any(item["id"] == moved_node and item["favorite"] for item in flat)
+        assert tree["stats"]["file_count"] >= 1
+
+        deleted = bulk_delete_workspace_file_nodes(db, user, workspace.id, [moved_node])
+        assert deleted["deleted"] == [moved_node]
+        assert not (workspace_root(workspace.id) / created["path"] / "draft.txt").exists()
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_html_preview_returns_raw_html() -> None:
+    path = workspace_root("preview-test") / "files" / "HTML示例演示页面.html"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("<!doctype html><html><body><h1>HTML示例演示页面</h1></body></html>", encoding="utf-8")
+
+    try:
+        payload = preview_payload(path, content_type="text/html", filename=path.name)
+
+        assert payload["mode"] == "html"
+        assert "<h1>HTML示例演示页面</h1>" in payload["text"]
+    finally:
+        _cleanup("preview-test")
 
 
 def test_at_file_reference_is_resolved_into_message_attachment(db: Session) -> None:

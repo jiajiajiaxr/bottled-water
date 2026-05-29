@@ -12,9 +12,13 @@ from app.core.response import ok
 from app.deps import get_current_user
 from app.models import User
 from app.services.files.workspace_tree import (
+    bulk_delete_workspace_file_nodes,
+    create_workspace_folder,
     delete_workspace_file_node,
     get_workspace_file_target,
+    move_workspace_file_nodes,
     rename_workspace_file_node,
+    set_workspace_file_favorite,
     workspace_file_tree,
 )
 from app.services.tools.builtins.file.preview import preview_payload
@@ -131,6 +135,17 @@ async def delete_workspace_file(
     return ok(delete_workspace_file_node(db, user, workspace_id, node_id))
 
 
+@router.post("/workspaces/{workspace_id}/files/bulk-delete")
+async def bulk_delete_workspace_files(
+    workspace_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    node_ids = [str(item) for item in payload.get("node_ids") or []]
+    return ok(bulk_delete_workspace_file_nodes(db, user, workspace_id, node_ids))
+
+
 @router.patch("/workspaces/{workspace_id}/files")
 async def rename_workspace_file(
     workspace_id: str,
@@ -140,6 +155,60 @@ async def rename_workspace_file(
     user: User = Depends(get_current_user),
 ):
     return ok(rename_workspace_file_node(db, user, workspace_id, node_id, str(payload.get("name") or "")))
+
+
+@router.post("/workspaces/{workspace_id}/files/folders")
+async def create_folder(
+    workspace_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return ok(
+        create_workspace_folder(
+            db,
+            user,
+            workspace_id,
+            str(payload.get("parent_path") or "files"),
+            str(payload.get("name") or ""),
+        )
+    )
+
+
+@router.post("/workspaces/{workspace_id}/files/move")
+async def move_files(
+    workspace_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return ok(
+        move_workspace_file_nodes(
+            db,
+            user,
+            workspace_id,
+            [str(item) for item in payload.get("node_ids") or []],
+            str(payload.get("target_path") or "files"),
+        )
+    )
+
+
+@router.post("/workspaces/{workspace_id}/files/favorite")
+async def favorite_file(
+    workspace_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return ok(
+        set_workspace_file_favorite(
+            db,
+            user,
+            workspace_id,
+            str(payload.get("node_id") or ""),
+            bool(payload.get("favorite")),
+        )
+    )
 
 
 def _attachment_header(filename: str) -> str:

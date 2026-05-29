@@ -2,6 +2,8 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
+  StarFilled,
+  StarOutlined,
   LinkOutlined,
   PlusCircleOutlined,
 } from "@ant-design/icons";
@@ -17,6 +19,7 @@ export type FileRowActions = {
   onDelete: (node: WorkspaceFileNode) => void;
   onAttach: (node: WorkspaceFileNode) => void;
   onRename: (node: WorkspaceFileNode) => void;
+  onFavorite: (node: WorkspaceFileNode) => void;
 };
 
 export function FileTreeRow({ node, actions }: { node: WorkspaceFileNode; actions: FileRowActions }) {
@@ -41,18 +44,29 @@ export function FileTreeRow({ node, actions }: { node: WorkspaceFileNode; action
         {isFile ? formatDate(node.updated_at) : ""}
       </Text>
       <div className="workspace-file-actions">
-        {isFile && <FileActions node={node} actions={actions} />}
+        <FileActions node={node} actions={actions} />
       </div>
     </div>
   );
 }
 
 function FileActions({ node, actions }: { node: WorkspaceFileNode; actions: FileRowActions }) {
+  const isFile = node.type === "file";
   return (
     <>
-      <Tooltip title="加入聊天上下文">
-        <Button size="small" type="text" icon={<PlusCircleOutlined />} onClick={() => actions.onAttach(node)} />
+      <Tooltip title={node.favorite ? "取消收藏" : "收藏"}>
+        <Button
+          size="small"
+          type="text"
+          icon={node.favorite ? <StarFilled /> : <StarOutlined />}
+          onClick={() => actions.onFavorite(node)}
+        />
       </Tooltip>
+      {isFile && (
+        <Tooltip title="加入聊天上下文">
+          <Button size="small" type="text" icon={<PlusCircleOutlined />} onClick={() => actions.onAttach(node)} />
+        </Tooltip>
+      )}
       <Tooltip title="复制路径">
         <Button
           size="small"
@@ -64,12 +78,16 @@ function FileActions({ node, actions }: { node: WorkspaceFileNode; actions: File
       <Tooltip title="重命名">
         <Button size="small" type="text" icon={<EditOutlined />} onClick={() => actions.onRename(node)} />
       </Tooltip>
-      <Button size="small" onClick={() => actions.onPreview(node)}>
-        预览
-      </Button>
-      <Tooltip title="下载">
-        <Button size="small" type="text" icon={<DownloadOutlined />} onClick={() => actions.onDownload(node)} />
-      </Tooltip>
+      {isFile && (
+        <>
+          <Button size="small" onClick={() => actions.onPreview(node)}>
+            预览
+          </Button>
+          <Tooltip title="下载">
+            <Button size="small" type="text" icon={<DownloadOutlined />} onClick={() => actions.onDownload(node)} />
+          </Tooltip>
+        </>
+      )}
       <Tooltip title="删除">
         <Button danger size="small" type="text" icon={<DeleteOutlined />} onClick={() => actions.onDelete(node)} />
       </Tooltip>

@@ -1594,6 +1594,16 @@ body.is-resizing-preview {
   margin-bottom: 12px;
 }
 
+.workspace-file-stat .ant-statistic-title {
+  margin-bottom: 0;
+  font-size: 12px;
+}
+
+.workspace-file-stat .ant-statistic-content {
+  font-size: 13px;
+  color: #64748b;
+}
+
 .workspace-file-tree-host {
   min-height: 0;
   flex: 1;
@@ -1635,7 +1645,7 @@ body.is-resizing-preview {
 
 .workspace-file-table-head {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 72px 80px 112px 212px;
+  grid-template-columns: minmax(260px, 1fr) 72px 80px 112px 250px;
   gap: 10px;
   align-items: center;
   padding: 8px 10px 8px 34px;
@@ -1656,7 +1666,7 @@ body.is-resizing-preview {
 
 .workspace-file-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 72px 80px 112px 212px;
+  grid-template-columns: minmax(260px, 1fr) 72px 80px 112px 250px;
   gap: 10px;
   align-items: center;
   width: 100%;
@@ -1687,6 +1697,7 @@ body.is-resizing-preview {
   align-items: center;
   justify-content: end;
   min-width: 0;
+  white-space: nowrap;
 }
 
 .workspace-file-source {

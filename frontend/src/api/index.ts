@@ -82,6 +82,11 @@ export {
   previewWorkspaceFile,
   downloadWorkspaceFile,
   deleteWorkspaceFile,
+  renameWorkspaceFile,
+  createWorkspaceFolder,
+  moveWorkspaceFiles,
+  favoriteWorkspaceFile,
+  bulkDeleteWorkspaceFiles,
 } from "./workspaceFile";
 
 export {

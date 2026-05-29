@@ -1,22 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ArrowLeftOutlined,
-  FileOutlined,
-  FolderOpenOutlined,
-  ReloadOutlined,
-  SearchOutlined,
-} from "@ant-design/icons";
-import { App as AntApp, Button, Empty, Input, Modal, Select, Space, Spin, Tree, Typography } from "antd";
+import { FileOutlined, FolderOpenOutlined } from "@ant-design/icons";
+import { App as AntApp, Empty, Input, Modal, Select, Space, Spin, Tree } from "antd";
 import type { DataNode } from "antd/es/tree";
 import { api } from "../../api";
 import type { WorkspaceFileNode } from "../../types";
 import { FileTreeRow } from "./FileTreeRow";
 import type { FileRowActions } from "./FileTreeRow";
+import { WorkspaceFileToolbar } from "./WorkspaceFileToolbar";
 import type { PreviewState } from "./WorkspaceFilePreviewView";
 import { WorkspaceFilePreviewView } from "./WorkspaceFilePreviewView";
 import { filterNodes, sourceLabel, walk } from "./workspaceFileUtils";
-
-const { Title, Text } = Typography;
 
 type Props = {
   workspaceId?: string;
@@ -28,9 +21,11 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
   const { message } = AntApp.useApp();
   const [loading, setLoading] = useState(false);
   const [nodes, setNodes] = useState<WorkspaceFileNode[]>([]);
+  const [stats, setStats] = useState<{ file_count: number; total_size: number }>();
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<string>("all");
   const [preview, setPreview] = useState<PreviewState>();
+  const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const previewObjectUrl = preview?.objectUrl;
 
   const closePreview = useCallback(() => {
@@ -44,6 +39,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
     try {
       const tree = await api.workspaceFileTree(workspaceId);
       setNodes(tree.items ?? tree.root.children ?? []);
+      setStats(tree.stats);
     } finally {
       setLoading(false);
     }
@@ -67,6 +63,15 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
       if (node.type === "file") values.add(node.source);
     });
     return [...values].sort();
+  }, [nodes]);
+  const directories = useMemo(() => {
+    const items: Array<{ label: string; value: string }> = [{ label: "文件区", value: "files" }];
+    walk(nodes, (node) => {
+      if (node.type === "directory" && node.path) {
+        items.push({ label: `${node.display_name ?? node.name} · ${node.path}`, value: node.path });
+      }
+    });
+    return items;
   }, [nodes]);
 
   const handlePreview = async (node: WorkspaceFileNode) => {
@@ -96,7 +101,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
   };
 
   const handleRename = (node: WorkspaceFileNode) => {
-    if (!workspaceId || node.type !== "file") return;
+    if (!workspaceId) return;
     let nextName = node.display_name ?? node.name;
     Modal.confirm({
       title: "重命名文件",
@@ -111,7 +116,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
   };
 
   const handleDelete = (node: WorkspaceFileNode) => {
-    if (!workspaceId || node.type !== "file") return;
+    if (!workspaceId) return;
     Modal.confirm({
       title: "删除文件",
       content: `确认删除 ${node.display_name ?? node.name}？`,
@@ -131,37 +136,85 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
     onAttachReference(`@file(${node.path}${fileId}) `);
     message.success("文件引用已加入输入框");
   };
+  const favorite = async (node: WorkspaceFileNode) => {
+    if (!workspaceId) return;
+    await api.favoriteWorkspaceFile(workspaceId, node.id, !node.favorite);
+    await load();
+  };
+
+  const createFolder = () => {
+    if (!workspaceId) return;
+    let name = "";
+    let parent = "files";
+    Modal.confirm({
+      title: "新建文件夹",
+      content: (
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <Select defaultValue={parent} options={directories} onChange={(value) => { parent = value; }} />
+          <Input placeholder="文件夹名称" autoFocus onChange={(event) => { name = event.target.value; }} />
+        </Space>
+      ),
+      okText: "创建",
+      onOk: async () => {
+        await api.createWorkspaceFolder(workspaceId, parent, name);
+        message.success("文件夹已创建");
+        await load();
+      },
+    });
+  };
+
+  const moveSelected = () => {
+    if (!workspaceId || !checkedKeys.length) return;
+    let target = "files";
+    Modal.confirm({
+      title: "移动到",
+      content: <Select style={{ width: "100%" }} defaultValue={target} options={directories} onChange={(value) => { target = value; }} />,
+      okText: "移动",
+      onOk: async () => {
+        await api.moveWorkspaceFiles(workspaceId, checkedKeys, target);
+        setCheckedKeys([]);
+        message.success("已移动所选文件");
+        await load();
+      },
+    });
+  };
+
+  const bulkDelete = () => {
+    if (!workspaceId || !checkedKeys.length) return;
+    Modal.confirm({
+      title: "批量删除",
+      content: `确认删除已选择的 ${checkedKeys.length} 项？`,
+      okText: "删除",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await api.bulkDeleteWorkspaceFiles(workspaceId, checkedKeys);
+        setCheckedKeys([]);
+        message.success("已删除所选文件");
+        await load();
+      },
+    });
+  };
 
   return (
     <section className="workspace-files-page">
-      <div className="workspace-files-page-head">
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={onBack}>返回聊天</Button>
-          <div>
-            <Title level={4}>工作区文件</Title>
-            <Text type="secondary">上传、产物、沙箱、导出和项目文件统一视图</Text>
-          </div>
-        </Space>
-        <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>
-      </div>
-      <Space.Compact block className="workspace-file-toolbar">
-        <Input
-          allowClear
-          prefix={<SearchOutlined />}
-          placeholder="搜索文件名或路径"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <Select
-          value={source}
-          onChange={setSource}
-          style={{ width: 150 }}
-          options={[
-            { label: "全部来源", value: "all" },
-            ...sources.map((item) => ({ label: sourceLabel(item), value: item })),
-          ]}
-        />
-      </Space.Compact>
+      <WorkspaceFileToolbar
+        query={query}
+        source={source}
+        sources={[
+          { label: "全部来源", value: "all" },
+          ...sources.map((item) => ({ label: sourceLabel(item), value: item })),
+        ]}
+        stats={stats}
+        loading={loading}
+        checkedCount={checkedKeys.length}
+        onBack={onBack}
+        onQueryChange={setQuery}
+        onSourceChange={setSource}
+        onCreateFolder={createFolder}
+        onMoveSelected={moveSelected}
+        onBulkDelete={bulkDelete}
+        onReload={load}
+      />
       <div className="workspace-file-table-head">
         <span>名称</span>
         <span>来源</span>
@@ -175,14 +228,18 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
         ) : visibleNodes.length ? (
           <Tree
             blockNode
+            checkable
             showIcon
             defaultExpandAll
+            checkedKeys={checkedKeys}
+            onCheck={(keys) => setCheckedKeys(Array.isArray(keys) ? keys.map(String) : keys.checked.map(String))}
             treeData={toTreeData(visibleNodes, {
               onPreview: handlePreview,
               onDownload: handleDownload,
               onDelete: handleDelete,
               onAttach: attach,
               onRename: handleRename,
+              onFavorite: favorite,
             })}
           />
         ) : (
