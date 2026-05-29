@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Artifact, Message, utcnow
+from app.models import Artifact, Conversation, Message, utcnow
+from app.services.artifacts import create_preview_message
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import artifact_to_dict, message_to_dict
 
@@ -21,7 +23,7 @@ async def _publish_tool_artifacts(db: Session, channel: str, tool_context: dict[
         tool_name = str(item.get("tool_name") or output.get("tool") or "")
         if not output:
             continue
-        await _publish_artifact_outputs(db, channel, output)
+        await _publish_artifact_outputs(db, channel, output, tool_name=tool_name)
         if _should_show_tool_message(tool_name, output):
             if tool_name not in final_failed_tools:
                 continue
@@ -38,17 +40,63 @@ async def _publish_tool_artifacts(db: Session, channel: str, tool_context: dict[
             await event_bus.publish(channel, "message:new", message_to_dict(message))
 
 
-async def _publish_artifact_outputs(db: Session, channel: str, output: dict[str, Any]) -> None:
+async def _publish_artifact_outputs(
+    db: Session,
+    channel: str,
+    output: dict[str, Any],
+    *,
+    tool_name: str = "",
+) -> None:
     artifact_id = _artifact_id(output)
+    artifact: Artifact | None = None
     if artifact_id:
         artifact = db.get(Artifact, artifact_id)
         if artifact:
             await event_bus.publish(channel, "artifact:created", artifact_to_dict(artifact))
+    if artifact:
+        preview = _preview_message_for_artifact_output(db, output, artifact, tool_name)
+        if preview:
+            await event_bus.publish(channel, "message:new", message_to_dict(preview))
+
+
+def _preview_message_for_artifact_output(
+    db: Session,
+    output: dict[str, Any],
+    artifact: Artifact,
+    tool_name: str,
+) -> Message | None:
     preview_message_id = output.get("preview_message_id")
     if preview_message_id:
         preview = db.get(Message, str(preview_message_id))
         if preview:
-            await event_bus.publish(channel, "message:new", message_to_dict(preview))
+            return preview
+    if not _is_artifact_create_output(tool_name, output):
+        return None
+    existing = db.scalars(
+        select(Message)
+        .where(
+            Message.conversation_id == artifact.conversation_id,
+            Message.content_type == "preview_card",
+            Message.deleted_at.is_(None),
+        )
+        .order_by(Message.created_at.desc())
+    ).all()
+    for message in existing:
+        content = message.content if isinstance(message.content, dict) else {}
+        if content.get("artifact_id") == artifact.id:
+            return message
+    conversation = db.get(Conversation, artifact.conversation_id)
+    if not conversation:
+        return None
+    preview = create_preview_message(db, conversation, artifact)
+    db.commit()
+    db.refresh(preview)
+    return preview
+
+
+def _is_artifact_create_output(tool_name: str, output: dict[str, Any]) -> bool:
+    output_tool = str(output.get("tool") or "")
+    return tool_name.startswith("artifact.create_") or output_tool.startswith("artifact.create_")
 
 
 def _message_for_tool_result(

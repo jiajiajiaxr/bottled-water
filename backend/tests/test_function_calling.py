@@ -24,6 +24,7 @@ from app.models import (
 from app.services.ark import LLMStreamEvent, ArkClient
 from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
+from app.services.chat.artifacts import _publish_tool_artifacts
 from app.services.tools.builtins.artifact.export import export_artifact
 from app.services.llm_gateway import stream_model_config_chat
 from app.services.workflows.engine import WorkflowEngine
@@ -552,6 +553,122 @@ class TestAgentFunctionCallLoop:
         assert tool_output["filename"].endswith(".pdf")
         assert tool_output["media_type"] == "application/pdf"
         assert any(message.get("role") == "tool" for message in calls[1])
+
+    @pytest.mark.asyncio
+    async def test_repeated_html_create_calls_create_distinct_preview_cards(self) -> None:
+        db = _memory_session()
+        user, conversation, first_message = _user_conversation_message(db, "生成一个 HTML 示例")
+        agent = Agent(
+            owner_id=user.id,
+            name="Writing Agent",
+            type="document",
+            description="Writes artifacts",
+            config={"tools": ["artifact.create_html"]},
+            capabilities=[],
+        )
+        db.add(agent)
+        db.commit()
+
+        create_count = 0
+
+        async def fake_stream_chat(messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
+            nonlocal create_count
+            if not any(message.get("role") == "tool" for message in messages):
+                create_count += 1
+                yield LLMStreamEvent(
+                    type="tool_calls",
+                    tool_calls=[
+                        {
+                            "id": f"call-html-{create_count}",
+                            "type": "function",
+                            "function": {
+                                "name": "artifact.create_html",
+                                "arguments": json.dumps(
+                                    {
+                                        "title": f"HTML 示例 {create_count}",
+                                        "html": f"<main><h1>示例 {create_count}</h1></main>",
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        }
+                    ],
+                )
+                yield LLMStreamEvent(type="done", usage={})
+                return
+            yield LLMStreamEvent(type="delta", text=f"已生成 HTML 示例 {create_count}。")
+            yield LLMStreamEvent(type="done", usage={})
+
+        with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream_chat):
+            with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock):
+                first_result = await run_agent_function_call_loop(
+                    db,
+                    conversation=conversation,
+                    user_message=first_message,
+                    agent=agent,
+                    prompt="生成一个 HTML 示例",
+                    channel=f"conversation:{conversation.id}",
+                    mode="unit-test",
+                )
+
+                second_message = Message(
+                    conversation_id=conversation.id,
+                    sender_type="user",
+                    sender_id=user.id,
+                    sender_name=user.display_name,
+                    content_type="text",
+                    content={"text": "再生成一个 HTML 示例"},
+                    status="sent",
+                    extra={},
+                )
+                db.add(second_message)
+                db.commit()
+                db.refresh(second_message)
+
+                second_result = await run_agent_function_call_loop(
+                    db,
+                    conversation=conversation,
+                    user_message=second_message,
+                    agent=agent,
+                    prompt="再生成一个 HTML 示例",
+                    channel=f"conversation:{conversation.id}",
+                    mode="unit-test",
+                )
+
+        previews = db.scalars(
+            select(Message)
+            .where(Message.content_type == "preview_card")
+            .order_by(Message.created_at.asc())
+        ).all()
+        artifact_ids = [message.content["artifact_id"] for message in previews]
+
+        assert len(previews) == 2
+        assert len(set(artifact_ids)) == 2
+        assert first_result.tool_results[0]["result"]["output"]["artifact_id"] == artifact_ids[0]
+        assert second_result.tool_results[0]["result"]["output"]["artifact_id"] == artifact_ids[1]
+
+        with patch("app.services.chat.artifacts.event_bus.publish", new_callable=AsyncMock) as publish:
+            await _publish_tool_artifacts(
+                db,
+                f"conversation:{conversation.id}",
+                {
+                    "executions": [
+                        first_result.tool_results[0]["result"],
+                        second_result.tool_results[0]["result"],
+                    ]
+                },
+            )
+
+        event_names = [call.args[1] for call in publish.await_args_list]
+        published_preview_ids = [
+            call.args[2]["rawContent"]["artifact_id"]
+            for call in publish.await_args_list
+            if call.args[1] == "message:new"
+        ]
+
+        assert event_names.count("artifact:created") == 2
+        assert event_names.count("message:new") == 2
+        assert published_preview_ids == artifact_ids
 
     @pytest.mark.parametrize(
         ("tool_name", "prompt", "expected_format", "expected_media_type", "extension"),
