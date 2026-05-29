@@ -98,7 +98,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
     if (!workspaceId || node.type !== "file") return;
     try {
       const rawPayload = await api.previewWorkspaceFile(workspaceId, node.id);
-      const payload = { ...rawPayload, mode: normalizePreviewMode(rawPayload, node) };
+      let payload = { ...rawPayload, mode: normalizePreviewMode(rawPayload, node) };
       let objectUrl: string | undefined;
       let error: string | undefined;
       if (payload.mode === "pdf" || payload.mode === "image") {
@@ -110,6 +110,25 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
         } catch (downloadError) {
           const detail = downloadError instanceof Error ? downloadError.message : "下载接口异常";
           error = payload.mode === "pdf" ? `PDF 文件下载失败：${detail}` : `图片文件下载失败：${detail}`;
+        }
+      }
+      if (payload.mode === "html" && !previewText(payload)) {
+        try {
+          const file = await api.downloadWorkspaceFile(workspaceId, node.id);
+          if (file.previewText) {
+            payload = {
+              ...payload,
+              text: file.previewText,
+              preview_text: file.previewText,
+              content_type: file.contentType,
+              filename: file.filename ?? payload.filename,
+            };
+          } else if (file.previewUrl) {
+            objectUrl = file.previewUrl;
+          }
+        } catch (downloadError) {
+          const detail = downloadError instanceof Error ? downloadError.message : "下载接口异常";
+          error = `HTML 文件下载失败：${detail}`;
         }
       }
       setPreview({ node, payload, objectUrl, error });
@@ -330,4 +349,8 @@ function normalizePreviewMode(payload: { mode?: string; content_type?: string; f
 
 function expandedStorageKey(workspaceId: string) {
   return `agenthub.workspaceFiles.expanded.${workspaceId}`;
+}
+
+function previewText(payload: { text?: string; preview_text?: string }) {
+  return payload.text || payload.preview_text || "";
 }

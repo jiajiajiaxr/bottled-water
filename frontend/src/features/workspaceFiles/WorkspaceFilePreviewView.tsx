@@ -37,6 +37,8 @@ export function WorkspaceFilePreviewView({ preview }: { preview: PreviewState })
   if (payload.mode === "html") {
     return text ? (
       <iframe title="workspace-file-html-preview" className="workspace-file-preview-frame" srcDoc={text} />
+    ) : preview.objectUrl ? (
+      <iframe title="workspace-file-html-preview" className="workspace-file-preview-frame" src={preview.objectUrl} />
     ) : payload.artifact_id && payload.preview_url ? (
       <iframe title="workspace-artifact-html-preview" className="workspace-file-preview-frame" src={payload.preview_url} />
     ) : (
