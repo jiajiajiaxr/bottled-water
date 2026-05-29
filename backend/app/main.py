@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import agents, artifacts, auth, context, conversations, deployments, files, knowledge, mcp, messages, models, sandbox, security_ops, skills, tasks, tools, websocket, workspaces
+from app.api import agents, artifacts, auth, context, conversations, deployments, files, knowledge, mcp, messages, models, sandbox, security_ops, skills, tasks, tools, websocket, workspace_files, workspaces
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.errors import AppError
@@ -83,6 +83,7 @@ for router in [
     tools.router,
     sandbox.router,
     workspaces.router,
+    workspace_files.router,
     security_ops.router,
     context.router,
 ]:

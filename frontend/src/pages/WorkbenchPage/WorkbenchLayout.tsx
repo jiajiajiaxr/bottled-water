@@ -17,6 +17,7 @@ import {
 import {
   AppstoreOutlined,
   BookOutlined,
+  FileOutlined,
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
@@ -26,6 +27,7 @@ import { ConversationSidebar } from "../../features/chat/components/Conversation
 import { ChatPanel } from "../../features/chat/components/ChatPanel";
 import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
 import { WorkflowStudioContent } from "../../features/workflow/WorkflowStudioContent";
+import { WorkspaceFilesDrawer } from "../../features/workspaceFiles/WorkspaceFilesDrawer";
 import type {
   AgentTask,
   ChatMessage,
@@ -122,6 +124,8 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
       ? value
       : PREVIEW_DEFAULT_WIDTH;
   });
+  const [workspaceFilesOpen, setWorkspaceFilesOpen] = useState(false);
+  const [draftSnippet, setDraftSnippet] = useState("");
 
   const {
     currentUser,
@@ -276,6 +280,14 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             >
               工作区
             </Button>
+            <Button
+              icon={<FileOutlined />}
+              onClick={() => setWorkspaceFilesOpen(true)}
+              disabled={!activeWorkspaceId}
+              data-testid="workspace-files"
+            >
+              工作区文件
+            </Button>
             <BackgroundTasksButton
               tasks={visibleBackgroundTasks}
               conversations={conversations}
@@ -353,8 +365,16 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
           onUploadFile={uploadFile}
           onOpenPreview={openArtifactPreview}
           onStopStreaming={stopStreaming}
+          draftSnippet={draftSnippet}
+          onDraftSnippetConsumed={() => setDraftSnippet("")}
         />
       </Layout>
+      <WorkspaceFilesDrawer
+        open={workspaceFilesOpen}
+        workspaceId={activeWorkspaceId}
+        onClose={() => setWorkspaceFilesOpen(false)}
+        onAttachReference={(snippet) => setDraftSnippet(snippet)}
+      />
       {artifactPanelOpen && artifact && (
         <PreviewPanel
           artifact={artifact}

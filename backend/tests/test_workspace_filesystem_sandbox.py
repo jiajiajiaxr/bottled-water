@@ -11,9 +11,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import Base
 from app.core.errors import ValidationAppError
-from app.models import Conversation, SandboxSession, ToolInvocation, User, Workspace
+from app.models import Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
+from app.services.files.workspace_tree import delete_workspace_file_node, workspace_file_tree
 from app.services.tools.executor import invoke_tool
-from app.services.workspaces.filesystem import workspace_root
+from app.services.workspaces.filesystem import scoped_dir, workspace_root
 
 
 @pytest.fixture
@@ -129,6 +130,113 @@ def test_sandbox_scopes_do_not_leak_between_workspaces(db: Session) -> None:
         _cleanup(workspace_a.id, workspace_b.id)
 
 
+def test_workspace_file_tree_aggregates_upload_artifact_and_sandbox_files(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    upload_path = scoped_dir(workspace.id, "uploads", conversation_id=conversation.id) / "notes.md"
+    upload_path.write_text("# AgentHub\nworkspace file", encoding="utf-8")
+    upload = FileAsset(
+        owner_id=user.id,
+        conversation_id=conversation.id,
+        filename="notes.md",
+        original_filename="notes.md",
+        content_type="text/markdown",
+        size=upload_path.stat().st_size,
+        checksum="upload-checksum",
+        storage_path=str(upload_path),
+        purpose="attachment",
+        parse_status="parsed",
+        extra={"workspace_id": workspace.id},
+    )
+    db.add(upload)
+    db.commit()
+
+    try:
+        invoke_tool(
+            db,
+            user,
+            "artifact.create_html",
+            {
+                "workspace_id": workspace.id,
+                "conversation_id": conversation.id,
+                "title": "Demo Page",
+                "html": "<h1>Demo</h1>",
+            },
+        )
+        invoke_tool(
+            db,
+            user,
+            "file.write",
+            {
+                "workspace_id": workspace.id,
+                "conversation_id": conversation.id,
+                "path": "script.py",
+                "content": "print('ok')",
+            },
+        )
+
+        tree = workspace_file_tree(db, user, workspace.id)
+        flat = _flatten(tree["root"])
+        paths = {item["path"] for item in flat}
+        sources = {item["source"] for item in flat if item["type"] == "file"}
+
+        assert any(path.endswith("notes.md") and path.startswith("uploads/") for path in paths)
+        assert any(path.startswith("artifacts/") for path in paths)
+        assert any(path.endswith("script.py") and path.startswith("sandbox/") for path in paths)
+        assert {"upload", "artifact", "sandbox"} <= sources
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_workspace_file_tree_isolation_and_delete_permissions(db: Session) -> None:
+    owner = _user()
+    other = _user()
+    workspace_a = _workspace(owner, "tree-a")
+    workspace_b = _workspace(owner, "tree-b")
+    conversation_a = Conversation(
+        creator_id=owner.id,
+        chat_type="single",
+        title="A",
+        extra={"workspace_id": workspace_a.id},
+    )
+    db.add_all([owner, other, workspace_a, workspace_b, conversation_a])
+    db.commit()
+    path = scoped_dir(workspace_a.id, "uploads", conversation_id=conversation_a.id) / "secret.txt"
+    path.write_text("workspace-a-only", encoding="utf-8")
+    asset = FileAsset(
+        owner_id=owner.id,
+        conversation_id=conversation_a.id,
+        filename="secret.txt",
+        original_filename="secret.txt",
+        content_type="text/plain",
+        size=path.stat().st_size,
+        checksum="secret-checksum",
+        storage_path=str(path),
+        purpose="attachment",
+        parse_status="parsed",
+        extra={"workspace_id": workspace_a.id},
+    )
+    db.add(asset)
+    db.commit()
+
+    try:
+        assert "secret.txt" in {item["name"] for item in _flatten(workspace_file_tree(db, owner, workspace_a.id)["root"])}
+        assert "secret.txt" not in {item["name"] for item in _flatten(workspace_file_tree(db, owner, workspace_b.id)["root"])}
+
+        with pytest.raises(Exception):
+            workspace_file_tree(db, other, workspace_a.id)
+
+        db.add(WorkspaceMember(workspace_id=workspace_a.id, user_id=other.id, role="member", permissions=["files:read"]))
+        db.commit()
+        assert "secret.txt" in {item["name"] for item in _flatten(workspace_file_tree(db, other, workspace_a.id)["root"])}
+
+        deleted = delete_workspace_file_node(db, owner, workspace_a.id, f"file:{asset.id}")
+        assert deleted["deleted"] is True
+        db.refresh(asset)
+        assert asset.deleted_at is not None
+    finally:
+        _cleanup(workspace_a.id, workspace_b.id)
+
+
 def test_dangerous_sandbox_command_is_rejected_and_recorded(db: Session) -> None:
     user, workspace, conversation = _user_workspace_conversation(db)
 
@@ -189,3 +297,10 @@ def _workspace(user: User, suffix: str) -> Workspace:
 def _cleanup(*workspace_ids: Any) -> None:
     for workspace_id in workspace_ids:
         shutil.rmtree(workspace_root(str(workspace_id)), ignore_errors=True)
+
+
+def _flatten(node: dict[str, Any]) -> list[dict[str, Any]]:
+    items = [node]
+    for child in node.get("children") or []:
+        items.extend(_flatten(child))
+    return items

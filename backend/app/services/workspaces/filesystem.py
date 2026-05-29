@@ -10,7 +10,16 @@ from app.core.errors import ValidationAppError
 from app.models import Conversation, Workspace
 
 
-WORKSPACE_AREAS = ("files", "artifacts", "sandbox", "tools", "logs")
+WORKSPACE_AREAS = (
+    "uploads",
+    "files",
+    "artifacts",
+    "sandbox",
+    "exports",
+    "projects",
+    "tools",
+    "logs",
+)
 
 def workspace_id_from_conversation(db: Session, conversation_id: str | None) -> str | None:
     if not conversation_id:

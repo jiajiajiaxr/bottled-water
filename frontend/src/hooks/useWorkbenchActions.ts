@@ -104,7 +104,7 @@ export function useWorkbenchActions(
   };
 
   const uploadFile = async (file: File) => {
-    const uploaded = await api.uploadFile(file, activeId);
+    const uploaded = await api.uploadFile(file, activeId, activeWorkspaceId);
     setFiles([uploaded, ...files]);
     message.success("文件已加入输入框，发送后会进入模型上下文");
     return uploaded;

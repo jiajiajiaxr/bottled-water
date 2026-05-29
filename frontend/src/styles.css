@@ -1569,3 +1569,115 @@ body.is-resizing-preview {
   padding-top: 14px;
   border-top: 1px solid #edf1f7;
 }
+.workspace-file-toolbar {
+  margin-bottom: 12px;
+}
+
+.workspace-files-drawer .ant-drawer-body {
+  overflow-x: hidden;
+}
+
+.workspace-files-drawer .ant-tree {
+  min-width: 0;
+}
+
+.workspace-files-drawer .ant-tree-treenode {
+  width: 100%;
+}
+
+.workspace-files-drawer .ant-tree-node-content-wrapper {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.workspace-files-drawer .ant-tree-title {
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+
+.workspace-file-loading {
+  display: grid;
+  min-height: 240px;
+  place-items: center;
+}
+
+.workspace-file-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(350px, auto);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.workspace-file-meta {
+  display: grid;
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.workspace-file-meta .ant-typography {
+  max-width: 100%;
+}
+
+.workspace-file-actions {
+  display: grid;
+  grid-template-columns: 52px 64px 104px 28px 28px 54px 28px 28px;
+  gap: 6px;
+  align-items: center;
+  justify-content: end;
+  min-width: 0;
+}
+
+.workspace-file-source {
+  width: 52px;
+  margin-inline-end: 0;
+  text-align: center;
+}
+
+.workspace-file-size,
+.workspace-file-date {
+  display: inline-block;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-file-date {
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .workspace-file-row {
+    grid-template-columns: minmax(160px, 1fr) minmax(240px, auto);
+  }
+
+  .workspace-file-actions {
+    grid-template-columns: 52px 60px 28px 28px 54px 28px 28px;
+  }
+
+  .workspace-file-date {
+    display: none;
+  }
+}
+
+.workspace-file-preview-frame {
+  width: 100%;
+  min-height: 520px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.workspace-file-preview-text {
+  max-height: 580px;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  white-space: pre-wrap;
+}

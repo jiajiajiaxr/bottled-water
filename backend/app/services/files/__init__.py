@@ -42,6 +42,7 @@ async def save_upload(
     user: User,
     upload: UploadFile,
     conversation_id: str | None = None,
+    workspace_id: str | None = None,
     purpose: str = "attachment",
 ) -> FileAsset:
     ensure_extension_tables(db)
@@ -54,9 +55,10 @@ async def save_upload(
         raise ValidationAppError(f"文件超过 {settings.max_upload_mb}MB 限制")
     checksum = hashlib.sha256(raw).hexdigest()
     name = safe_filename(upload.filename or "upload.bin")
+    storage_workspace_id = workspace_id or workspace_id_from_conversation(db, conversation_id)
     folder = scoped_dir(
-        workspace_id_from_conversation(db, conversation_id),
-        "files",
+        storage_workspace_id,
+        "uploads",
         conversation_id=conversation_id,
     ) / safe_segment(user.id[:8], default="user")
     folder.mkdir(parents=True, exist_ok=True)
@@ -68,6 +70,8 @@ async def save_upload(
     extracted = extracted_result["text"][:200_000]
     metadata = {
         "extension": Path(name).suffix.lower(),
+        "workspace_id": storage_workspace_id,
+        "workspace_area": "uploads",
         "tool_chain": ["file.upload", "file.extract_text"],
         **(extracted_result.get("metadata") or {}),
     }
