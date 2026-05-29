@@ -14,7 +14,7 @@ from app.models import Conversation, Subtask, Task, User, utcnow
 from app.schemas.common import ApiResponse, SubtaskOut, TaskOut
 from app.schemas.requests import CreateTaskRequest
 from app.services.orchestrator import create_task_for_prompt
-from app.services.events import event_bus
+from app.events import app_event_bus as event_bus
 from app.services.serialization import subtask_to_dict, task_to_dict
 
 

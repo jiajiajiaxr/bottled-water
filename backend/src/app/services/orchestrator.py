@@ -44,7 +44,7 @@ from app.services.artifacts import (
     create_artifact,
     create_preview_message,
 )
-from app.services.events import event_bus
+from app.events import app_event_bus as event_bus
 from app.services.output_filter import strip_internal_agent_output
 from app.services.queue import queue_service
 from app.services.serialization import (

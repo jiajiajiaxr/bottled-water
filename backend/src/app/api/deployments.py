@@ -13,7 +13,7 @@ from app.models import Artifact, Conversation, Deployment, User, utcnow
 from app.schemas.common import ApiResponse, DeploymentOut
 from app.schemas.requests import CreateDeploymentRequest
 from app.services.artifacts import create_deployment
-from app.services.events import event_bus
+from app.events import app_event_bus as event_bus
 from app.services.serialization import deployment_to_dict
 
 

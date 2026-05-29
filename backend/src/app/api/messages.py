@@ -13,7 +13,7 @@ from app.deps import get_current_user
 from app.models import Conversation, FileAsset, Message, User, utcnow
 from app.schemas.common import ApiResponse
 from app.schemas.requests import SendMessagePayload
-from app.services.events import event_bus
+from app.events import app_event_bus as event_bus
 from app.services.runtime_service import OrchestratorService
 from app.services.serialization import artifact_to_dict, message_to_dict
 

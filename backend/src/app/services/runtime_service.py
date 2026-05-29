@@ -23,8 +23,8 @@ from model_provider.core.config import ModelConfig
 from app.core.config import get_settings
 from app.models import Agent, Conversation, Message, User
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
-from app.events.sse_sink import SSEEventSink
-from app.services.events import event_bus
+from app.events import SseSink
+from app.events import app_event_bus as event_bus
 from app.services.serialization import message_meta_to_dict
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,7 @@ class SingleAgentOrchestrator:
             scheduler=scheduler,
             model_provider=None,
             persistence=SQLAlchemyBackend(self.db),
-            event_sink=SSEEventSink(conversation_id=str(self.conversation.id)),
+            event_sink=SseSink(conversation_id=str(self.conversation.id)),
             tool_executor=tool_executor,
         )
 
@@ -204,7 +204,7 @@ class TechLeadOrchestrator:
             scheduler=scheduler,
             model_provider=model_provider,
             persistence=SQLAlchemyBackend(self.db),
-            event_sink=SSEEventSink(conversation_id=str(self.conversation.id)),
+            event_sink=SseSink(conversation_id=str(self.conversation.id)),
             tool_executor=tool_executor,
         )
 

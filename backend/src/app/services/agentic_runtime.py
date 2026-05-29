@@ -20,7 +20,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, McpServer, Skill, User
-from app.services.events import event_bus
+from app.events import app_event_bus as event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
 from app.services.tool_registry import BUILTIN_TOOLS, invoke_tool, normalize_tool_names
 from model_provider import create_provider
