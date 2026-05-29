@@ -36,6 +36,7 @@ from .runtime.session import Session
 from .runtime.watchdog import Watchdog, WatchdogConfig
 from .strategies.base import Scheduler
 from .strategies.tech_lead import TechLeadScheduler
+from .strategies.single_agent import SingleAgentScheduler
 from .context.blackboard import BlackboardManager
 from .context.agent_ctx import AgentContextManager, AgentContext
 from .tools.registry import ToolRegistry
@@ -63,6 +64,7 @@ __all__ = [
     # 调度策略
     "Scheduler",
     "TechLeadScheduler",
+    "SingleAgentScheduler",
     # 上下文管理
     "BlackboardManager",
     "AgentContextManager",
