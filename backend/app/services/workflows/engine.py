@@ -13,6 +13,7 @@ from app.services.context.workspace import build_workspace_context
 from app.services.workflows.events import publish_node_event, publish_run_updated
 from app.services.workflows.graph import Node, WorkflowGraph
 from app.services.workflows.io import resolve_node_input, resolve_node_output
+from app.services.workflows.mentions import MentionTargetFilter, resolve_mention_target_filter
 from app.services.workflows.nodes import get_executor
 from app.services.workflows.nodes.base import NodeExecutionResult, WorkflowExecutionContext
 from app.services.workflows.runtime import (
@@ -75,6 +76,7 @@ class WorkflowEngine:
         self.output_mode = str(
             workflow.get("output_mode") or settings.get("output_mode") or "independent_messages"
         )
+        self.mention_filter = self._resolve_mention_filter()
 
     async def run(self) -> WorkflowEngineResult:
         validation = validate_workflow_graph(self.workflow, agents=self.agents)
@@ -84,6 +86,7 @@ class WorkflowEngine:
         append_run_event(self.workflow_run, "run.engine_started", {"warnings": validation.warnings})
         self.db.commit()
         await publish_run_updated(self.channel, self.workflow_run)
+        await self._apply_mention_target_filter()
 
         for level in self.scheduler.parallel_levels():
             runnable = [node for node in level if node.id not in self.result.skipped_nodes]
@@ -158,6 +161,46 @@ class WorkflowEngine:
             return node, ok, isolated.result
         finally:
             db.close()
+
+    def _resolve_mention_filter(self) -> MentionTargetFilter | None:
+        if getattr(self.conversation, "chat_type", None) != "group":
+            return None
+        mention_filter = resolve_mention_target_filter(self.prompt, self.agents)
+        if not mention_filter:
+            return None
+        has_target_node = any(
+            node.type in {"agent", "review"} and node.agent_id in mention_filter.agent_ids
+            for node in self.graph.nodes
+        )
+        return mention_filter if has_target_node else None
+
+    async def _apply_mention_target_filter(self) -> None:
+        if not self.mention_filter:
+            return
+        for node in self.graph.nodes:
+            if node.type not in {"agent", "review"}:
+                continue
+            if node.agent_id in self.mention_filter.agent_ids:
+                continue
+            output = {
+                "reason": "mention_target_filter",
+                "target_agent_ids": sorted(self.mention_filter.agent_ids),
+                "target_agent_names": self.mention_filter.agent_names,
+            }
+            self.result.skipped_nodes.add(node.id)
+            self.result.outputs[node.id] = output
+            edge_updates = [
+                (edge.source, edge.target, "skipped")
+                for edge in [*self.graph.incoming.get(node.id, []), *self.graph.outgoing.get(node.id, [])]
+            ]
+            await self._mark_node(
+                node,
+                "skipped",
+                100,
+                output=output,
+                message="Skipped by @Agent target",
+                edge_updates=edge_updates,
+            )
 
     async def _run_node(self, node: Node) -> bool:
         if self.workflow_run.status == "cancelled":

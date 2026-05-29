@@ -552,6 +552,93 @@ async def test_aggregate_mode_agent_node_suppresses_chat_bubble() -> None:
 
 
 @pytest.mark.asyncio
+async def test_group_mention_runs_only_target_agent_and_skips_others() -> None:
+    workflow = {
+        "mode": "all_agents_independent",
+        "output_mode": "independent_messages",
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {
+                "id": "frontend",
+                "type": "agent",
+                "title": "Frontend Worker",
+                "agent_id": "agent-frontend",
+            },
+            {
+                "id": "daily",
+                "type": "agent",
+                "title": "Daily Chat Agent",
+                "agent_id": "agent-daily",
+            },
+            {
+                "id": "deploy",
+                "type": "agent",
+                "title": "Deploy Agent",
+                "agent_id": "agent-deploy",
+            },
+            {"id": "end", "type": "end", "title": "End"},
+        ],
+        "edges": [
+            ["start", "frontend"],
+            ["start", "daily"],
+            ["start", "deploy"],
+            ["frontend", "end"],
+            ["daily", "end"],
+            ["deploy", "end"],
+        ],
+    }
+    db, conversation, user_message, task, run = _runtime(workflow)
+    conversation.chat_type = "group"
+    agents = [
+        SimpleNamespace(id="agent-frontend", name="Frontend Worker", deleted_at=None),
+        SimpleNamespace(id="agent-daily", name="Daily Chat Agent", deleted_at=None),
+        SimpleNamespace(id="agent-deploy", name="Deploy Agent", deleted_at=None),
+    ]
+    agent_by_id = {agent.id: agent for agent in agents}
+
+    def get_model(model: Any, item_id: str) -> Any:
+        if model is Agent:
+            return agent_by_id.get(item_id)
+        return None
+
+    db.get.side_effect = get_model
+    loop_result = SimpleNamespace(
+        assistant=SimpleNamespace(id="assistant-daily"),
+        text="daily only",
+        tool_context={"agent_name": "Daily Chat Agent", "summary": "ok"},
+    )
+
+    with patch(
+        "app.services.workflows.nodes.agent.run_agent_function_call_loop",
+        new_callable=AsyncMock,
+    ) as call_loop:
+        call_loop.return_value = loop_result
+        with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+            result = await WorkflowEngine(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                task=task,
+                workflow_run=run,
+                workflow=workflow,
+                prompt="@Daily Chat Agent 你来回答一下",
+                channel="conversation:conv-1",
+                agents=agents,
+            ).run()
+
+    call_loop.assert_awaited_once()
+    assert call_loop.await_args.kwargs["agent"].id == "agent-daily"
+    assert len(result.agent_replies) == 1
+    assert result.agent_replies[0]["agent_name"] == "Daily Chat Agent"
+    states = {state["id"]: state for state in run.node_states}
+    assert states["daily"]["status"] == "completed"
+    assert states["frontend"]["status"] == "skipped"
+    assert states["frontend"]["output"]["reason"] == "mention_target_filter"
+    assert states["deploy"]["status"] == "skipped"
+    assert states["deploy"]["output"]["reason"] == "mention_target_filter"
+
+
+@pytest.mark.asyncio
 async def test_end_node_aggregates_upstream_outputs() -> None:
     context = SimpleNamespace(
         outputs={
