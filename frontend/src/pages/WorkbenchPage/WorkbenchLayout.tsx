@@ -3,6 +3,7 @@ import {
   useState,
 } from "react";
 import type { PointerEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   App as AntApp,
   Avatar,
@@ -15,6 +16,7 @@ import {
 } from "antd";
 import {
   AppstoreOutlined,
+  BookOutlined,
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
@@ -113,6 +115,7 @@ export interface WorkbenchLayoutProps {
 
 export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const { message } = AntApp.useApp();
+  const navigate = useNavigate();
   const [previewWidth, setPreviewWidth] = useState(() => {
     const value = Number(window.localStorage.getItem("agenthub_preview_width"));
     return Number.isFinite(value) && value >= PREVIEW_MIN_WIDTH
@@ -305,6 +308,13 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
               data-testid="global-settings"
             >
               设置
+            </Button>
+            <Button
+              icon={<BookOutlined />}
+              onClick={() => navigate("/docs")}
+              data-testid="docs-link"
+            >
+              文档
             </Button>
             <Button
               icon={<RobotOutlined />}
