@@ -4,8 +4,12 @@
 !.env.example
 !.env.development
 !.env.production
-.venv/
-venv/
+# Python build artifacts
+*.egg-info/
+*.eggs/
+build/
+dist/
+*.whl
 
 # Python caches and local databases
 __pycache__/
