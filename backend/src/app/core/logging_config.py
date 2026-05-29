@@ -40,7 +40,7 @@ def configure_logging(
         backupCount=30,
         encoding="utf-8",
     )
-    backend_handler.suffix = "%Y-%m-%d"
+    backend_handler.suffix = "%Y-%m-%d.log"
     backend_handler.setFormatter(formatter)
 
     console_handler = logging.StreamHandler(sys.stdout)
@@ -94,7 +94,7 @@ def get_frontend_logger() -> logging.Logger:
         backupCount=30,
         encoding="utf-8",
     )
-    handler.suffix = "%Y-%m-%d"
+    handler.suffix = "%Y-%m-%d.log"
     handler.setFormatter(formatter)
 
     logger = logging.getLogger("frontend")
