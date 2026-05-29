@@ -1,8 +1,9 @@
 # Secrets and local environment
 .env
 .env.*
-!.env.template
-!.env.sample
+!.env.example
+!.env.development
+!.env.production
 .venv/
 venv/
 
