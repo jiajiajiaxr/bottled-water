@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Key } from "react";
 import { FileOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import { App as AntApp, Empty, Input, Modal, Select, Space, Spin, Tree } from "antd";
 import type { DataNode } from "antd/es/tree";
@@ -26,6 +27,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
   const [source, setSource] = useState<string>("all");
   const [preview, setPreview] = useState<PreviewState>();
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const previewObjectUrl = preview?.objectUrl;
 
   const closePreview = useCallback(() => {
@@ -48,6 +50,24 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setExpandedKeys([]);
+      return;
+    }
+    const stored = window.localStorage.getItem(expandedStorageKey(workspaceId));
+    if (!stored) {
+      setExpandedKeys([]);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(stored);
+      setExpandedKeys(Array.isArray(parsed) ? parsed.map(String) : []);
+    } catch {
+      setExpandedKeys([]);
+    }
+  }, [workspaceId]);
 
   useEffect(
     () => () => {
@@ -205,6 +225,14 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
     });
   };
 
+  const handleExpand = (keys: Key[]) => {
+    const nextKeys = keys.map(String);
+    setExpandedKeys(nextKeys);
+    if (workspaceId) {
+      window.localStorage.setItem(expandedStorageKey(workspaceId), JSON.stringify(nextKeys));
+    }
+  };
+
   return (
     <section className="workspace-files-page">
       <WorkspaceFileToolbar
@@ -240,8 +268,9 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
             blockNode
             checkable
             showIcon
-            defaultExpandAll
+            expandedKeys={expandedKeys}
             checkedKeys={checkedKeys}
+            onExpand={handleExpand}
             onCheck={(keys) => setCheckedKeys(Array.isArray(keys) ? keys.map(String) : keys.checked.map(String))}
             treeData={toTreeData(visibleNodes, {
               onPreview: handlePreview,
@@ -297,4 +326,8 @@ function normalizePreviewMode(payload: { mode?: string; content_type?: string; f
   }
   if (mode === "binary") return "binary";
   return mode || "text";
+}
+
+function expandedStorageKey(workspaceId: string) {
+  return `agenthub.workspaceFiles.expanded.${workspaceId}`;
 }
