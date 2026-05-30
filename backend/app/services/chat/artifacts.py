@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Artifact, Message, utcnow
+from app.models import Artifact, Conversation, Message, utcnow
+from app.services.artifacts import create_preview_message
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import artifact_to_dict, message_to_dict
 
@@ -13,12 +15,21 @@ from app.services.serialization import artifact_to_dict, message_to_dict
 async def _publish_tool_artifacts(db: Session, channel: str, tool_context: dict[str, Any]) -> None:
     created_messages: list[Message] = []
     fallback_conversation_id = _conversation_id_from_channel(channel)
-    for item in _collect_tool_results(tool_context):
+    tool_results = _collect_tool_results(tool_context)
+    final_failed_tools = _final_failed_tool_names(tool_results)
+    failed_tool_message_created = False
+    for item in tool_results:
         output = item.get("output") if isinstance(item.get("output"), dict) else {}
         tool_name = str(item.get("tool_name") or output.get("tool") or "")
         if not output:
             continue
-        await _publish_artifact_outputs(db, channel, output)
+        await _publish_artifact_outputs(db, channel, output, tool_name=tool_name)
+        if _should_show_tool_message(tool_name, output):
+            if tool_name not in final_failed_tools:
+                continue
+            if failed_tool_message_created:
+                continue
+            failed_tool_message_created = True
         message = _message_for_tool_result(db, tool_name, output, fallback_conversation_id)
         if message:
             created_messages.append(message)
@@ -29,17 +40,63 @@ async def _publish_tool_artifacts(db: Session, channel: str, tool_context: dict[
             await event_bus.publish(channel, "message:new", message_to_dict(message))
 
 
-async def _publish_artifact_outputs(db: Session, channel: str, output: dict[str, Any]) -> None:
+async def _publish_artifact_outputs(
+    db: Session,
+    channel: str,
+    output: dict[str, Any],
+    *,
+    tool_name: str = "",
+) -> None:
     artifact_id = _artifact_id(output)
+    artifact: Artifact | None = None
     if artifact_id:
         artifact = db.get(Artifact, artifact_id)
         if artifact:
             await event_bus.publish(channel, "artifact:created", artifact_to_dict(artifact))
+    if artifact:
+        preview = _preview_message_for_artifact_output(db, output, artifact, tool_name)
+        if preview:
+            await event_bus.publish(channel, "message:new", message_to_dict(preview))
+
+
+def _preview_message_for_artifact_output(
+    db: Session,
+    output: dict[str, Any],
+    artifact: Artifact,
+    tool_name: str,
+) -> Message | None:
     preview_message_id = output.get("preview_message_id")
     if preview_message_id:
         preview = db.get(Message, str(preview_message_id))
         if preview:
-            await event_bus.publish(channel, "message:new", message_to_dict(preview))
+            return preview
+    if not _is_artifact_create_output(tool_name, output):
+        return None
+    existing = db.scalars(
+        select(Message)
+        .where(
+            Message.conversation_id == artifact.conversation_id,
+            Message.content_type == "preview_card",
+            Message.deleted_at.is_(None),
+        )
+        .order_by(Message.created_at.desc())
+    ).all()
+    for message in existing:
+        content = message.content if isinstance(message.content, dict) else {}
+        if content.get("artifact_id") == artifact.id:
+            return message
+    conversation = db.get(Conversation, artifact.conversation_id)
+    if not conversation:
+        return None
+    preview = create_preview_message(db, conversation, artifact)
+    db.commit()
+    db.refresh(preview)
+    return preview
+
+
+def _is_artifact_create_output(tool_name: str, output: dict[str, Any]) -> bool:
+    output_tool = str(output.get("tool") or "")
+    return tool_name.startswith("artifact.create_") or output_tool.startswith("artifact.create_")
 
 
 def _message_for_tool_result(
@@ -139,6 +196,20 @@ def _collect_tool_results(value: Any) -> list[dict[str, Any]]:
     return results
 
 
+def _final_failed_tool_names(items: list[dict[str, Any]]) -> set[str]:
+    final_by_tool: dict[str, dict[str, Any]] = {}
+    for item in items:
+        output = item.get("output") if isinstance(item.get("output"), dict) else {}
+        tool_name = str(item.get("tool_name") or output.get("tool") or "")
+        if tool_name:
+            final_by_tool[tool_name] = output
+    return {
+        tool_name
+        for tool_name, output in final_by_tool.items()
+        if _should_show_tool_message(tool_name, output)
+    }
+
+
 def _artifact_id(output: dict[str, Any]) -> str | None:
     if output.get("artifact_id"):
         return str(output["artifact_id"])
@@ -185,10 +256,19 @@ def _tool_summary(tool_name: str, output: dict[str, Any]) -> str:
     if tool_name == "api.test":
         return f"API 测试 {status}：{output.get('status_code')}"
     if tool_name in {"sandbox.run", "test.run"}:
-        return f"{tool_name} {status}，exit_code={output.get('exit_code')}"
+        return f"{tool_name} {status}，exit_code={_exit_code(output)}"
     if tool_name.startswith("file."):
         return f"{tool_name} {status}"
     return f"{tool_name or 'tool'} {status}"
+
+
+def _exit_code(output: dict[str, Any]) -> Any:
+    if output.get("exit_code") is not None:
+        return output.get("exit_code")
+    result = output.get("result")
+    if isinstance(result, dict):
+        return result.get("exit_code")
+    return None
 
 
 def _compact(value: dict[str, Any]) -> dict[str, Any]:

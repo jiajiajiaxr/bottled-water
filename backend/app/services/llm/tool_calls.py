@@ -3,13 +3,45 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.services.llm.html_artifacts import html_artifact_arguments
+
 
 ARTIFACT_TOOL_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "artifact.create_html",
+        (
+            "html",
+            "HTML",
+            "网页",
+            "页面",
+            "网页页面",
+            "web app",
+            "webapp",
+            "计算器",
+            "表单",
+            "看板",
+            "登录页",
+            "登陆页",
+        ),
+    ),
     ("artifact.create_pdf", ("pdf", "PDF")),
-    ("artifact.create_docx", ("word", "docx", "Word", "DOCX")),
-    ("artifact.create_xlsx", ("excel", "xlsx", "Excel", "表格")),
+    ("artifact.create_docx", ("word", "docx", "Word", "DOCX", "Word 文档", "文档")),
+    ("artifact.create_xlsx", ("excel", "xlsx", "Excel", "表格", "电子表格")),
     ("artifact.create_pptx", ("ppt", "pptx", "PPT", "幻灯片", "演示文稿")),
-    ("artifact.create_html", ("html", "HTML", "网页", "页面")),
+)
+ARTIFACT_VERBS = (
+    "生成",
+    "创建",
+    "导出",
+    "制作",
+    "写一个",
+    "写一份",
+    "做一个",
+    "做一份",
+    "create",
+    "generate",
+    "export",
+    "make",
 )
 
 
@@ -18,7 +50,7 @@ def detect_artifact_tool(prompt: str) -> str | None:
     lower = text.lower()
     for tool_name, patterns in ARTIFACT_TOOL_PATTERNS:
         if any(pattern.lower() in lower for pattern in patterns):
-            if any(verb in text for verb in ("生成", "创建", "导出", "制作", "写一份", "做一份", "create", "generate", "export")):
+            if any(verb in lower for verb in ARTIFACT_VERBS):
                 return tool_name
     return None
 
@@ -30,7 +62,7 @@ def select_mock_tool_call(messages: list[dict[str, Any]], tools: list[dict[str, 
     tool_names = _tool_names(tools)
     requested_artifact = detect_artifact_tool(user_text)
     if requested_artifact and requested_artifact in tool_names:
-        return _tool_call(requested_artifact, _artifact_arguments(requested_artifact, user_text))
+        return _tool_call(requested_artifact, artifact_arguments(requested_artifact, user_text))
     if "file" in user_text.lower() and "file.extract_text" in tool_names:
         return _tool_call("file.extract_text", {"file_id": "mock-file-id"})
     if any(token in user_text.lower() for token in ("api", "接口")) and "api.test" in tool_names:
@@ -53,11 +85,11 @@ def _tool_names(tools: list[dict[str, Any]]) -> set[str]:
     return names
 
 
-def _artifact_arguments(tool_name: str, prompt: str) -> dict[str, str]:
+def artifact_arguments(tool_name: str, prompt: str) -> dict[str, str]:
     title = prompt.strip().splitlines()[0][:60] or "AgentHub 产物"
     args = {"title": title, "body": prompt}
-    if tool_name == "artifact.create_html":
-        return {"title": title, "html": f"<main><h1>{title}</h1><p>{prompt}</p></main>"}
+    if tool_name in {"artifact.create_html", "artifact.create_web_app"}:
+        return html_artifact_arguments(prompt)
     return args
 
 

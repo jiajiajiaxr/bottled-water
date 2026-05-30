@@ -31,13 +31,15 @@ export function Workbench({
   onRouteTabChange,
   onOpenWorkflowPage,
   onCloseWorkflowPage,
+  onOpenWorkspaceFilesPage,
+  onCloseWorkspaceFilesPage,
 }: {
   user: User;
   onLogout: () => void;
   routeWorkspaceId?: string;
   routeConversationId?: string;
   routeTab?: string;
-  routeView?: "chat" | "workflow";
+  routeView?: "chat" | "workflow" | "files";
   onRouteChange: (
     workspaceId?: string,
     conversationId?: string,
@@ -49,6 +51,8 @@ export function Workbench({
   ) => void;
   onOpenWorkflowPage: (workspaceId: string, conversationId: string) => void;
   onCloseWorkflowPage: (workspaceId: string, conversationId: string) => void;
+  onOpenWorkspaceFilesPage: (workspaceId: string) => void;
+  onCloseWorkspaceFilesPage: (workspaceId: string, conversationId?: string) => void;
 }) {
   const [currentUser, setCurrentUser] = useState(user);
   const [loadingConversationsList, setLoadingConversationsList] =
@@ -187,6 +191,18 @@ export function Workbench({
     onCloseWorkflowPage(workspaceId, active.id);
   };
 
+  const openWorkspaceFilesPage = () => {
+    const workspaceId = active?.workspace_id || activeWorkspaceId || activeWorkspace?.id;
+    if (!workspaceId) return;
+    onOpenWorkspaceFilesPage(workspaceId);
+  };
+
+  const closeWorkspaceFilesPage = () => {
+    const workspaceId = active?.workspace_id || activeWorkspaceId || activeWorkspace?.id;
+    if (!workspaceId) return;
+    onCloseWorkspaceFilesPage(workspaceId, active?.id);
+  };
+
   const closeMainTab = (tab: "agents" | "workspace" | "settings") => {
     if (tab === "agents") setAgentDrawerOpen(false);
     if (tab === "workspace") setWorkspacesOpen(false);
@@ -318,8 +334,9 @@ export function Workbench({
     if (activeId !== nextConversation.id) setActiveId(nextConversation.id);
     const workspaceId = nextConversation.workspace_id || activeWorkspaceId;
     if (
-      routeWorkspaceId !== workspaceId ||
-      routeConversationId !== nextConversation.id
+      routeView !== "files" &&
+      (routeWorkspaceId !== workspaceId ||
+        routeConversationId !== nextConversation.id)
     ) {
       navigateToConversation(workspaceId, nextConversation.id, true);
     }
@@ -330,6 +347,7 @@ export function Workbench({
     conversations,
     loadingConversationsList,
     routeConversationId,
+    routeView,
     routeWorkspaceId,
   ]);
 
@@ -382,6 +400,9 @@ export function Workbench({
         openWorkflowPage={openWorkflowPage}
         closeWorkflowPage={closeWorkflowPage}
         workflowMode={routeView === "workflow" && active?.chat_type === "group"}
+        workspaceFilesMode={routeView === "files"}
+        openWorkspaceFilesPage={openWorkspaceFilesPage}
+        closeWorkspaceFilesPage={closeWorkspaceFilesPage}
         uploadFile={uploadFile}
         artifactPanelOpen={artifactPanelOpen}
         artifact={artifact}

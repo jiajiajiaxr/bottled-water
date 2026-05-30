@@ -3,6 +3,7 @@ import {
   useState,
 } from "react";
 import type { PointerEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   App as AntApp,
   Avatar,
@@ -15,6 +16,8 @@ import {
 } from "antd";
 import {
   AppstoreOutlined,
+  BookOutlined,
+  FileOutlined,
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
@@ -24,6 +27,7 @@ import { ConversationSidebar } from "../../features/chat/components/Conversation
 import { ChatPanel } from "../../features/chat/components/ChatPanel";
 import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
 import { WorkflowStudioContent } from "../../features/workflow/WorkflowStudioContent";
+import { WorkspaceFilesContent } from "../../features/workspaceFiles/WorkspaceFilesContent";
 import type {
   AgentTask,
   ChatMessage,
@@ -86,6 +90,9 @@ export interface WorkbenchLayoutProps {
   openWorkflowPage: () => void;
   closeWorkflowPage: () => void;
   workflowMode: boolean;
+  workspaceFilesMode: boolean;
+  openWorkspaceFilesPage: () => void;
+  closeWorkspaceFilesPage: () => void;
 
   // File upload
   uploadFile: (file: File) => Promise<UploadedFile>;
@@ -113,12 +120,14 @@ export interface WorkbenchLayoutProps {
 
 export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const { message } = AntApp.useApp();
+  const navigate = useNavigate();
   const [previewWidth, setPreviewWidth] = useState(() => {
     const value = Number(window.localStorage.getItem("agenthub_preview_width"));
     return Number.isFinite(value) && value >= PREVIEW_MIN_WIDTH
       ? value
       : PREVIEW_DEFAULT_WIDTH;
   });
+  const [draftSnippet, setDraftSnippet] = useState("");
 
   const {
     currentUser,
@@ -150,6 +159,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     openWorkflowPage,
     closeWorkflowPage,
     workflowMode,
+    workspaceFilesMode,
+    openWorkspaceFilesPage,
+    closeWorkspaceFilesPage,
     uploadFile,
     artifactPanelOpen,
     artifact,
@@ -273,6 +285,14 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             >
               工作区
             </Button>
+            <Button
+              icon={<FileOutlined />}
+              onClick={openWorkspaceFilesPage}
+              disabled={!activeWorkspaceId}
+              data-testid="workspace-files"
+            >
+              工作区文件
+            </Button>
             <BackgroundTasksButton
               tasks={visibleBackgroundTasks}
               conversations={conversations}
@@ -307,6 +327,13 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
               设置
             </Button>
             <Button
+              icon={<BookOutlined />}
+              onClick={() => navigate("/docs")}
+              data-testid="docs-link"
+            >
+              文档
+            </Button>
+            <Button
               icon={<RobotOutlined />}
               onClick={() => openMainTab("agents")}
               data-testid="agent-directory"
@@ -327,7 +354,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
           onOpenMembers={() => setMembersOpen(true)}
           onOpenSettings={() => setConversationSettingsOpen(true)}
           onOpenWorkflow={openWorkflowPage}
-          workflowMode={workflowMode}
+          workflowMode={workflowMode || workspaceFilesMode}
           workflowContent={
             workflowMode && activeId && workflowWorkspaceId ? (
               <WorkflowStudioContent
@@ -338,11 +365,19 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                 onError={(value) => message.error(value)}
                 onSuccess={(value) => message.success(value)}
               />
+            ) : workspaceFilesMode ? (
+              <WorkspaceFilesContent
+                workspaceId={activeWorkspaceId}
+                onBack={closeWorkspaceFilesPage}
+                onAttachReference={(snippet) => setDraftSnippet(snippet)}
+              />
             ) : undefined
           }
           onUploadFile={uploadFile}
           onOpenPreview={openArtifactPreview}
           onStopStreaming={stopStreaming}
+          draftSnippet={draftSnippet}
+          onDraftSnippetConsumed={() => setDraftSnippet("")}
         />
       </Layout>
       {artifactPanelOpen && artifact && (

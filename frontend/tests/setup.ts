@@ -13,3 +13,10 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => false
   })
 });
+
+const jsdomGetComputedStyle = window.getComputedStyle.bind(window);
+
+Object.defineProperty(window, "getComputedStyle", {
+  writable: true,
+  value: (element: Element) => jsdomGetComputedStyle(element)
+});

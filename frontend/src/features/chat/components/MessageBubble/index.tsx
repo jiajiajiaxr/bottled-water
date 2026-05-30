@@ -5,7 +5,6 @@ import {
   CloudUploadOutlined,
   CopyOutlined,
   EyeOutlined,
-  LoadingOutlined,
   MessageOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
@@ -28,8 +27,10 @@ import {
   messageAttachments,
   stripInternalAgentOutput,
 } from "../../../../lib/message";
+import { toolEventsFromMessage } from "../../../../lib/toolEvents";
 import { formatTime } from "../../../../lib/format";
 import type { ChatMessage, MessageAttachment } from "../../../../types";
+import { ToolCallSummary } from "./ToolCallSummary";
 
 const { Text, Paragraph } = Typography;
 
@@ -186,16 +187,6 @@ function MessageBubbleComponent({
               {message.streamState === "streaming" && (
                 <Tag color="processing">流式生成中</Tag>
               )}
-              {(message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ? (
-                <Tag icon={<LoadingOutlined />} color="blue">
-                  正在使用{" "}
-                  {(
-                    message.rawContent?._activeToolCalls as Array<{ toolName: string }>
-                  )
-                    .map((t) => t.toolName)
-                    .join(", ")}
-                </Tag>
-              ) : null}
             </Space>
             <Text type="secondary" className="time">
               {formatTime(message.createdAt)}
@@ -259,6 +250,7 @@ function MessageBubbleComponent({
                 />
               </Tooltip>
             )}
+            {!isUser && <ToolCallSummary message={message} />}
           </Space>
         </div>
       </div>
@@ -349,8 +341,8 @@ export const MessageBubble = React.memo(MessageBubbleComponent, (prev, next) => 
   if (prev.message.streamState !== next.message.streamState) return false;
   if (prev.message.kind !== next.message.kind) return false;
   if (prev.quoted?.id !== next.quoted?.id) return false;
-  const prevTools = (prev.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0;
-  const nextTools = (next.message.rawContent?._activeToolCalls as Array<{ toolName: string }> | undefined)?.length ?? 0;
+  const prevTools = JSON.stringify(toolEventsFromMessage(prev.message));
+  const nextTools = JSON.stringify(toolEventsFromMessage(next.message));
   if (prevTools !== nextTools) return false;
   return true;
 });

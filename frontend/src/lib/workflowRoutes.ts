@@ -10,3 +10,7 @@ export function conversationRoutePath(
 export function workflowRoutePath(workspaceId: string, conversationId: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/workflow`;
 }
+
+export function workspaceFilesRoutePath(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/files`;
+}

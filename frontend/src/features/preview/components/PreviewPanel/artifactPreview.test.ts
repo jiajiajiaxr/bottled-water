@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   artifactExportFormats,
   downloadLabel,
+  isOfficeArtifact,
   preferredArtifactFormat,
   openOrDownloadExport,
 } from "./artifactPreview";
@@ -98,5 +99,20 @@ describe("artifact export semantics", () => {
     });
 
     expect(format).toBe("docx");
+  });
+
+  it("detects Office artifacts for PDF preview conversion", () => {
+    expect(isOfficeArtifact({
+      id: "artifact-1",
+      conversationId: "conversation-1",
+      type: "document",
+      format: "docx",
+      title: "Word",
+      language: "html",
+      code: "",
+      previousCode: "",
+      updatedAt: new Date().toISOString(),
+      content: { format: "docx" },
+    }, "docx")).toBe(true);
   });
 });

@@ -20,6 +20,20 @@ describe("chat message visibility", () => {
     expect(isVisibleChatMessage(message)).toBe(false);
   });
 
+  it("hides legacy successful Tool Runner messages without explicit status", () => {
+    const message = makeMessage({
+      author: "Tool Runner",
+      kind: "text",
+      rawContent: {
+        tool_name: "sandbox.run",
+        output: { stdout: "ok", exit_code: 0 },
+      },
+    });
+
+    expect(isSuccessfulToolRunnerMessage(message)).toBe(true);
+    expect(isVisibleChatMessage(message)).toBe(false);
+  });
+
   it("keeps failed Tool Runner messages visible", () => {
     const message = makeMessage({
       author: "Tool Runner",

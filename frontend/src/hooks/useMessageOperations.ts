@@ -7,7 +7,7 @@ import {
   useArtifactStore,
   useTaskStore,
 } from "../store";
-import type { ChatMessage, UploadedFile, MessageAttachment } from "../types";
+import type { ChatMessage, UploadedFile, MessageAttachment, ToolEventRecord } from "../types";
 import {
   makeMessage,
   stripInternalAgentOutput,
@@ -15,6 +15,7 @@ import {
   participantName,
   isVisibleChatMessage,
 } from "../lib/message";
+import { mergeToolEvents, toolEventsFromMessage } from "../lib/toolEvents";
 
 /** 批量触发更新：16ms 窗口内收到 delta 的消息 id 合并为一次 state 更新（约 60fps） */
 function createDeltaBatcher(
@@ -91,7 +92,8 @@ export function useMessageOperations(currentUserName: string) {
     const tempIdsByAgentId = new Map<string, string>();
     const tempIdsByAuthor = new Map<string, string>();
     const pendingMessageIds = new Set<string>();
-    const activeToolCalls = new Map<string, { toolName: string; toolCallId: string }>();
+    const activeToolCalls = new Map<string, Map<string, ToolEventRecord>>();
+    const toolEventsByMessageId = new Map<string, ToolEventRecord[]>();
     const isSingleAgentConversation = agentParticipants.length === 1;
 
     const isTerminalMessageStatus = (status?: string) =>
@@ -123,14 +125,18 @@ export function useMessageOperations(currentUserName: string) {
     const clearMessagePending = (messageId?: string) => {
       if (!messageId) return;
       pendingMessageIds.delete(messageId);
-      activeToolCalls.clear();
+      activeToolCalls.delete(messageId);
       updateMessages((current) =>
         current.map((item) =>
           item.id === messageId
             ? {
                 ...item,
                 streamState: item.streamState === "streaming" ? "done" : item.streamState,
-                rawContent: { ...item.rawContent, _activeToolCalls: [] },
+                rawContent: {
+                  ...item.rawContent,
+                  _activeToolCalls: [],
+                  _toolEvents: toolEventsByMessageId.get(messageId) ?? toolEventsFromMessage(item),
+                },
               }
             : item,
         ),
@@ -227,9 +233,26 @@ export function useMessageOperations(currentUserName: string) {
         normalized.sender_id ||
         (normalized.rawContent?.agent_id as string | undefined);
       updateMessages((current) => {
+        const withToolEvents = (target: ChatMessage | undefined) => {
+          const mergedEvents = mergeToolEvents(
+            target ? toolEventsFromMessage(target) : [],
+            toolEventsFromMessage(normalized),
+            toolEventsByMessageId.get(normalized.id) ?? [],
+          );
+          if (mergedEvents.length) toolEventsByMessageId.set(normalized.id, mergedEvents);
+          return {
+            ...normalized,
+            toolEvents: mergedEvents,
+            rawContent: {
+              ...normalized.rawContent,
+              _activeToolCalls: [],
+              _toolEvents: mergedEvents,
+            },
+          };
+        };
         if (current.some((item) => item.id === normalized.id)) {
           return current.map((item) =>
-            item.id === normalized.id ? { ...item, ...normalized } : item,
+            item.id === normalized.id ? { ...item, ...withToolEvents(item) } : item,
           );
         }
         const tempId =
@@ -239,11 +262,15 @@ export function useMessageOperations(currentUserName: string) {
           if (agentId) tempIdsByAgentId.set(agentId, normalized.id);
           tempIdsByAuthor.set(normalized.author, normalized.id);
           return current.map((item) =>
-            item.id === tempId ? { ...item, ...normalized } : item,
+            item.id === tempId ? { ...item, ...withToolEvents(item) } : item,
           );
         }
-        return [...current, normalized];
+        return [...current, withToolEvents(undefined)];
       });
+    };
+
+    const closeStreamControl = () => {
+      stopStreamRef.current = undefined;
     };
 
     if (agentParticipants.length === 1) {
@@ -305,7 +332,7 @@ export function useMessageOperations(currentUserName: string) {
     // 追踪当前消息上正在执行的工具调用
     let currentMessageId = "";
 
-    const updateActiveToolCalls = (messageId: string) => {
+    const updateToolState = (messageId: string) => {
       if (!messageId) return;
       updateMessages((current) =>
         current.map((item) =>
@@ -314,12 +341,31 @@ export function useMessageOperations(currentUserName: string) {
                 ...item,
                 rawContent: {
                   ...item.rawContent,
-                  _activeToolCalls: Array.from(activeToolCalls.values()),
+                  _activeToolCalls: Array.from(activeToolCalls.get(messageId)?.values() ?? []),
+                  _toolEvents: toolEventsByMessageId.get(messageId) ?? toolEventsFromMessage(item),
                 },
               }
             : item,
         ),
       );
+    };
+    const messageIdFromToolPayload = (payload: Record<string, unknown>) =>
+      String(payload.agent_message_id || payload.message_id || currentMessageId || "");
+    const toolEventFromPayload = (payload: Record<string, unknown>): ToolEventRecord => {
+      const detail = payload.detail && typeof payload.detail === "object"
+        ? (payload.detail as Record<string, unknown>)
+        : payload;
+      return {
+        toolName: String(detail.tool_name || detail.toolName || payload.tool_name || ""),
+        toolCallId: String(detail.tool_call_id || detail.toolCallId || payload.tool_call_id || ""),
+        status: String(detail.status || payload.status || ""),
+        exit_code: detail.exit_code as string | number | undefined,
+        duration_ms: detail.duration_ms as string | number | undefined,
+        stdout: typeof detail.stdout === "string" ? detail.stdout : undefined,
+        stderr: typeof detail.stderr === "string" ? detail.stderr : undefined,
+        summary: typeof detail.summary === "string" ? detail.summary : undefined,
+        error: typeof detail.error === "string" ? detail.error : undefined,
+      };
     };
     const finishConversationRunningState = () => {
       updateLocalRunningConversationIds((current) => {
@@ -364,7 +410,7 @@ export function useMessageOperations(currentUserName: string) {
           );
           pendingMessageIds.add(messageId);
           ensureStreamingMessage(messageId, author, agentId);
-          activeToolCalls.clear();
+          activeToolCalls.delete(messageId);
         },
         onDelta: (delta, payload) => {
           rawBuffer += delta;
@@ -407,18 +453,29 @@ export function useMessageOperations(currentUserName: string) {
           }
         },
         onToolCallStart: (payload) => {
-          const toolName = String(payload.tool_name || "");
-          const toolCallId = String(payload.tool_call_id || "");
+          const messageId = messageIdFromToolPayload(payload);
+          const event = toolEventFromPayload(payload);
+          const toolName = event.toolName;
+          const toolCallId = event.toolCallId || `${toolName}-${Date.now()}`;
           if (toolName && toolCallId) {
-            activeToolCalls.set(toolCallId, { toolName, toolCallId });
-            updateActiveToolCalls(currentMessageId);
+            const calls = activeToolCalls.get(messageId) ?? new Map<string, ToolEventRecord>();
+            calls.set(toolCallId, { ...event, toolCallId, status: "running" });
+            activeToolCalls.set(messageId, calls);
+            updateToolState(messageId);
           }
         },
         onToolCallDone: (payload) => {
-          const toolCallId = String(payload.tool_call_id || "");
-          if (toolCallId) {
-            activeToolCalls.delete(toolCallId);
-            updateActiveToolCalls(currentMessageId);
+          const messageId = messageIdFromToolPayload(payload);
+          const event = toolEventFromPayload(payload);
+          const toolCallId = event.toolCallId;
+          if (messageId && toolCallId) {
+            activeToolCalls.get(messageId)?.delete(toolCallId);
+            const mergedEvents = mergeToolEvents(
+              toolEventsByMessageId.get(messageId) ?? [],
+              [event],
+            );
+            toolEventsByMessageId.set(messageId, mergedEvents);
+            updateToolState(messageId);
           }
         },
         onTaskStatusChanged: (task) => {
@@ -467,6 +524,7 @@ export function useMessageOperations(currentUserName: string) {
           }
         },
         onDone: () => {
+          closeStreamControl();
           deltaBatcher.flushNow();
           thinkingBatcher.flushNow();
           clearConversationRunning("done");
@@ -574,6 +632,11 @@ export function useMessageOperations(currentUserName: string) {
 
   const stopStreaming = async () => {
     if (!activeId) return;
+    const conversationId = activeId;
+    await api.cancelAssistantReply(conversationId).catch(() => undefined);
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 500);
+    });
     stopStreamRef.current?.();
     stopStreamRef.current = undefined;
     setStreamState("done");
@@ -593,18 +656,48 @@ export function useMessageOperations(currentUserName: string) {
           : item,
       ),
     );
-    updateMessages((current) =>
+    updateConversations((current) =>
       current.map((item) =>
-        item.streamState === "streaming"
+        item.id === conversationId
           ? {
               ...item,
+              lastMessage: "已停止本次响应",
+              updatedAt: new Date().toISOString(),
+              workflow_runtime: item.workflow_runtime
+                ? { ...item.workflow_runtime, status: "cancelled" }
+                : item.workflow_runtime,
+            }
+          : item,
+      ),
+    );
+    updateMessages((current) =>
+      current.map((item) =>
+        item.conversationId === conversationId && item.streamState === "streaming"
+          ? {
+              ...item,
+              status: "cancelled",
               streamState: "done",
+              rawContent: { ...item.rawContent, _activeToolCalls: [] },
               content: item.content || "已停止接收本次回复。",
             }
           : item,
       ),
     );
-    await api.cancelAssistantReply(activeId).catch(() => undefined);
+    const { backgroundTasks, setBackgroundTasks: setTasks } =
+      useTaskStore.getState();
+    setTasks(
+      backgroundTasks.map((task) =>
+        task.conversation_id === conversationId && isTaskRunning(task.status)
+          ? {
+              ...task,
+              status: "CANCELLED",
+              progress: Math.min(task.progress ?? 0, 95),
+              updated_at: new Date().toISOString(),
+              output: { ...(task.output ?? {}), cancelled: true },
+            }
+          : task,
+      ),
+    );
     await refreshTasks().catch(() => undefined);
     message.info("已停止本次响应");
   };

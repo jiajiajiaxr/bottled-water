@@ -55,6 +55,18 @@ export interface MessageAttachment {
   url?: string;
 }
 
+export interface ToolEventRecord {
+  toolName: string;
+  toolCallId?: string;
+  status?: string;
+  exit_code?: number | string;
+  duration_ms?: number | string;
+  stdout?: string;
+  stderr?: string;
+  summary?: string;
+  error?: string;
+}
+
 export interface ChatMessage {
   id: string;
   conversationId: string;
@@ -65,6 +77,7 @@ export interface ChatMessage {
   author: string;
   content: string;
   thinking?: string;
+  toolEvents?: ToolEventRecord[];
   rawContent?: Record<string, unknown>;
   attachments?: MessageAttachment[];
   createdAt: string;

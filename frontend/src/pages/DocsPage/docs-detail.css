@@ -1,0 +1,145 @@
+.docs-guide-band,
+.docs-api-detail,
+.docs-faq-band,
+.docs-updates {
+  padding: 24px;
+  border: 1px solid #e1e6ee;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.docs-guide-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 460px;
+  gap: 24px;
+  align-items: start;
+}
+
+.docs-numbered-list {
+  margin: 16px 0 0;
+  padding-left: 22px;
+  color: #3f4b5c;
+  line-height: 1.8;
+}
+
+.docs-numbered-list li + li {
+  margin-top: 6px;
+}
+
+.docs-table-wrap {
+  margin-top: 16px;
+  overflow: auto;
+  border: 1px solid #e1e6ee;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.docs-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 680px;
+  font-size: 14px;
+}
+
+.docs-table th,
+.docs-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid #eef2f7;
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-table th {
+  background: #f8fbff;
+  color: #374151;
+  font-weight: 700;
+}
+
+.docs-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.docs-table code {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid #dce5f2;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #0f4c81;
+  overflow-wrap: anywhere;
+}
+
+.docs-note-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.docs-note-grid article,
+.docs-callout {
+  border: 1px solid #e1e6ee;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.docs-note-grid article {
+  padding: 18px;
+}
+
+.docs-note-grid svg {
+  color: #64748b;
+  font-size: 22px;
+}
+
+.docs-note-grid h3 {
+  margin: 10px 0 8px;
+  color: #252b36;
+  font-size: 17px;
+}
+
+.docs-section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.docs-section-head > .anticon {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 24px;
+}
+
+.docs-wide-notes {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.docs-callout {
+  margin-top: 16px;
+  padding: 14px 16px;
+  color: #315f8d;
+  line-height: 1.7;
+}
+
+.docs-updates ul {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: #3f4b5c;
+  line-height: 1.8;
+}
+
+.docs-updates p {
+  margin-top: 14px;
+  color: #697586;
+}
+
+@media (max-width: 1120px) {
+  .docs-guide-band,
+  .docs-note-grid,
+  .docs-wide-notes {
+    grid-template-columns: 1fr;
+  }
+}
+

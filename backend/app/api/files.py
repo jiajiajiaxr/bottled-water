@@ -39,11 +39,19 @@ def _get_file(db: Session, user: User, file_id: str) -> FileAsset:
 async def upload_file(
     file: UploadFile = File(...),
     conversation_id: str | None = Form(None),
+    workspace_id: str | None = Form(None),
     purpose: str = Form("attachment"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    asset = await save_upload(db, user=user, upload=file, conversation_id=conversation_id, purpose=purpose)
+    asset = await save_upload(
+        db,
+        user=user,
+        upload=file,
+        conversation_id=conversation_id,
+        workspace_id=workspace_id,
+        purpose=purpose,
+    )
     return ok(file_asset_to_dict(asset), "文件上传成功")
 
 
@@ -51,11 +59,12 @@ async def upload_file(
 async def upload_file_alias(
     file: UploadFile = File(...),
     conversation_id: str | None = Form(None),
+    workspace_id: str | None = Form(None),
     purpose: str = Form("attachment"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return await upload_file(file, conversation_id, purpose, db, user)
+    return await upload_file(file, conversation_id, workspace_id, purpose, db, user)
 
 
 @router.get("/files")

@@ -36,6 +36,7 @@ export {
   artifactById,
   saveArtifact,
   exportArtifact,
+  previewArtifactPdf,
 } from "./artifact";
 
 export {
@@ -76,6 +77,18 @@ export {
   createProject,
   saveProjectFile,
 } from "./workspace";
+
+export {
+  workspaceFileTree,
+  previewWorkspaceFile,
+  downloadWorkspaceFile,
+  deleteWorkspaceFile,
+  renameWorkspaceFile,
+  createWorkspaceFolder,
+  moveWorkspaceFiles,
+  favoriteWorkspaceFile,
+  bulkDeleteWorkspaceFiles,
+} from "./workspaceFile";
 
 export {
   modelProviders,
@@ -144,6 +157,7 @@ import * as agent from "./agent";
 import * as file from "./file";
 import * as knowledge from "./knowledge";
 import * as workspace from "./workspace";
+import * as workspaceFile from "./workspaceFile";
 import * as model from "./model";
 import * as mcp from "./mcp";
 import * as skill from "./skill";
@@ -164,6 +178,7 @@ export const api = {
   ...file,
   ...knowledge,
   ...workspace,
+  ...workspaceFile,
   ...model,
   ...mcp,
   ...skill,

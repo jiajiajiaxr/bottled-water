@@ -11,12 +11,14 @@ from app.models import Agent, Conversation, Message, Task, User, WorkflowRun, ut
 from app.services.agents.function_messages import agent_system_prompt, tool_arguments, tool_names
 from app.services.agents.function_types import AgentFunctionLoopResult
 from app.services.agents.permission_guard import complete_missing_artifact_tool
+from app.services.agents.tool_events import tool_event_from_record
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
 from app.services.ark import ark_client
 from app.services.context.attachments import attachment_preflight_reply
 from app.services.context.builder import ContextBuilder
 from app.services.context.state import update_conversation_state_after_turn
-from app.services.llm.tool_calls import detect_artifact_tool
+from app.services.llm.tool_calls import artifact_arguments, detect_artifact_tool
+from app.services.llm.html_artifacts import HTML_ARTIFACT_TOOLS, normalize_html_artifact_arguments
 from app.services.llm_gateway import stream_model_config_chat
 from app.services.output_filter import strip_internal_agent_output
 from app.services.realtime.event_bus import event_bus
@@ -98,6 +100,7 @@ async def _publish_message_tool_event(
     tool_call_id: str,
     emit_message: bool,
     status: str | None = None,
+    detail: dict[str, Any] | None = None,
 ) -> None:
     if not emit_message or not assistant:
         return
@@ -111,6 +114,7 @@ async def _publish_message_tool_event(
             "tool_name": tool_name,
             "tool_call_id": tool_call_id,
             **({"status": status} if status else {}),
+            **({"detail": detail} if detail else {}),
         },
     )
 
@@ -129,7 +133,10 @@ async def _fail_agent_loop(
 ) -> AgentFunctionLoopResult:
     final_text = strip_internal_agent_output(error_text) or "本轮响应异常结束，已停止生成。"
     if assistant:
-        assistant.content = {"text": final_text}
+        assistant.content = {
+            "text": final_text,
+            "tool_events": [tool_event_from_record(db, item) for item in (tool_results or [])],
+        }
         assistant.status = "failed"
     db.commit()
     if assistant:
@@ -185,7 +192,7 @@ async def _complete_agent_loop_without_model(
 ) -> AgentFunctionLoopResult:
     text = strip_internal_agent_output(final_text)
     if assistant:
-        assistant.content = {"text": text}
+        assistant.content = {"text": text, "tool_events": []}
         assistant.status = "completed"
     update_conversation_state_after_turn(
         db,
@@ -318,6 +325,12 @@ async def run_agent_function_call_loop(
     )
 
     requested_artifact_tool = detect_artifact_tool(prompt)
+    if (
+        requested_artifact_tool == "artifact.create_html"
+        and requested_artifact_tool not in allowed_tool_names
+        and "artifact.create_web_app" in allowed_tool_names
+    ):
+        requested_artifact_tool = "artifact.create_web_app"
     if requested_artifact_tool and requested_artifact_tool not in allowed_tool_names:
         logger.info(
             "[agent_function_loop] missing_artifact_tool agent=%s requested=%s exposed_tools=%s",
@@ -396,6 +409,7 @@ async def run_agent_function_call_loop(
     for round_num in range(max_tool_rounds + 1):
         current_text = ""
         current_tool_calls: list[dict[str, Any]] | None = None
+        buffer_text_delta = bool(tools) and round_num == 0
         try:
             if model_config_id:
                 event_stream = stream_model_config_chat(
@@ -414,15 +428,16 @@ async def run_agent_function_call_loop(
             async for event in event_stream:
                 if event.type == "delta":
                     if event.text:
-                        stream_text += event.text
                         current_text += event.text
-                        await _publish_text_delta(
-                            channel=channel,
-                            assistant=assistant,
-                            agent=agent,
-                            text=event.text,
-                            emit_message=emit_message,
-                        )
+                        if not buffer_text_delta:
+                            stream_text += event.text
+                            await _publish_text_delta(
+                                channel=channel,
+                                assistant=assistant,
+                                agent=agent,
+                                text=event.text,
+                                emit_message=emit_message,
+                            )
                     if event.reasoning:
                         reasoning_text += event.reasoning
                         await _publish_text_delta(
@@ -474,6 +489,32 @@ async def run_agent_function_call_loop(
                 )
             break
 
+        if (
+            round_num == 0
+            and requested_artifact_tool
+            and requested_artifact_tool in allowed_tool_names
+            and not current_tool_calls
+        ):
+            logger.warning(
+                "[agent_function_loop] forcing_artifact_tool agent=%s tool=%s buffered_text=%r",
+                agent.id,
+                requested_artifact_tool,
+                current_text[:120],
+            )
+            current_tool_calls = [_forced_artifact_tool_call(requested_artifact_tool, prompt)]
+            current_text = ""
+
+        if not current_tool_calls:
+            if buffer_text_delta and current_text and not _looks_like_tool_argument_fragment(current_text):
+                stream_text += current_text
+                await _publish_text_delta(
+                    channel=channel,
+                    assistant=assistant,
+                    agent=agent,
+                    text=current_text,
+                    emit_message=emit_message,
+                )
+
         if not current_tool_calls or round_num >= max_tool_rounds:
             if round_num == 0 and not current_tool_calls:
                 logger.info(
@@ -497,6 +538,7 @@ async def run_agent_function_call_loop(
                 agent=agent,
                 task=task,
             )
+            arguments = _normalize_tool_arguments_for_request(tool_name, prompt, arguments)
             logger.info(
                 "[agent_function_loop] tool_call agent=%s name=%s arguments=%s",
                 agent.id,
@@ -511,6 +553,7 @@ async def run_agent_function_call_loop(
                 tool_name=tool_name,
                 tool_call_id=tool_call_id,
                 emit_message=emit_message,
+                status="running",
             )
             await _publish_workflow_update(
                 db,
@@ -586,6 +629,7 @@ async def run_agent_function_call_loop(
             tool_results.append(record)
             round_tool_results.append(record)
             db.commit()
+            tool_event = tool_event_from_record(db, record)
             await _publish_message_tool_event(
                 channel=channel,
                 assistant=assistant,
@@ -595,6 +639,7 @@ async def run_agent_function_call_loop(
                 tool_call_id=tool_call_id,
                 emit_message=emit_message,
                 status=status,
+                detail=tool_event,
             )
             await _publish_workflow_update(
                 db,
@@ -632,11 +677,34 @@ async def run_agent_function_call_loop(
             db.commit()
             await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
-    final_text = strip_internal_agent_output(stream_text) or f"{agent.name} 已完成本次处理。"
+    if requested_artifact_tool and requested_artifact_tool in allowed_tool_names:
+        artifact_success = _artifact_tool_succeeded(tool_results, requested_artifact_tool)
+        if not artifact_success:
+            return await _fail_agent_loop(
+                db,
+                conversation=conversation,
+                assistant=assistant,
+                agent=agent,
+                channel=channel,
+                workflow_run=workflow_run,
+                workflow_node_id=workflow_node_id,
+                error_text=(
+                    f"{agent.name} 未能生成真实产物：模型没有返回有效工具调用，"
+                    "且产物工具未成功返回 artifact_id。"
+                ),
+                tool_results=tool_results,
+            )
+
+    final_text = strip_internal_agent_output(stream_text)
+    if requested_artifact_tool and _looks_like_tool_argument_fragment(final_text):
+        final_text = ""
+    if not final_text:
+        final_text = _artifact_success_text(requested_artifact_tool, tool_results) or f"{agent.name} 已完成本次处理。"
     thinking_text = strip_internal_agent_output(reasoning_text) if reasoning_text else ""
     assistant_message_id = assistant.id if assistant else None
+    tool_events = [tool_event_from_record(db, item) for item in tool_results]
     if assistant:
-        assistant.content = {"text": final_text, "thinking": thinking_text}
+        assistant.content = {"text": final_text, "thinking": thinking_text, "tool_events": tool_events}
         assistant.status = "completed"
     update_conversation_state_after_turn(
         db,
@@ -695,6 +763,64 @@ async def run_agent_function_call_loop(
             ),
         },
     )
+
+
+def _forced_artifact_tool_call(tool_name: str, prompt: str) -> dict[str, Any]:
+    return {
+        "id": f"call_forced_{tool_name.replace('.', '_')}",
+        "type": "function",
+        "function": {
+            "name": tool_name,
+            "arguments": json.dumps(artifact_arguments(tool_name, prompt), ensure_ascii=False),
+        },
+    }
+
+
+def _normalize_tool_arguments_for_request(
+    tool_name: str,
+    prompt: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if tool_name in HTML_ARTIFACT_TOOLS:
+        return normalize_html_artifact_arguments(prompt, arguments)
+    return arguments
+
+
+def _looks_like_tool_argument_fragment(text: str) -> bool:
+    normalized = (text or "").strip()
+    if not normalized:
+        return False
+    lower = normalized.lower()
+    if lower in {"0", "1", ">", "<", "/>", "li", "/li", "<li", "</li>", "ul", "/ul"}:
+        return True
+    if len(lower) <= 3 and all(ch.isalnum() or ch in "<>/{}[],:;\"'" for ch in lower):
+        return True
+    return False
+
+
+def _artifact_tool_succeeded(tool_results: list[dict[str, Any]], requested_tool: str) -> bool:
+    for item in tool_results:
+        if item.get("tool_name") != requested_tool or item.get("status") != "succeeded":
+            continue
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        output = result.get("output") if isinstance(result, dict) else None
+        if isinstance(output, dict) and output.get("artifact_id"):
+            return True
+    return False
+
+
+def _artifact_success_text(requested_tool: str | None, tool_results: list[dict[str, Any]]) -> str:
+    if not requested_tool:
+        return ""
+    for item in tool_results:
+        if item.get("tool_name") != requested_tool or item.get("status") != "succeeded":
+            continue
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        output = result.get("output") if isinstance(result, dict) else {}
+        if isinstance(output, dict) and output.get("artifact_id"):
+            fmt = str(output.get("format") or requested_tool.rsplit("_", 1)[-1]).upper()
+            return f"已生成真实 {fmt} 产物，可点击产物卡片预览和下载。"
+    return ""
 
 
 def _tool_arguments_with_context(

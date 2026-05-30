@@ -12,9 +12,11 @@ import {
 } from "react-router-dom";
 import { api } from "./api";
 import { LoginScreen } from "./features/auth/components/LoginScreen";
+import { DocsPage } from "./pages/DocsPage";
 import { Workbench } from "./pages/WorkbenchPage/Workbench";
 import {
   conversationRoutePath,
+  workspaceFilesRoutePath,
   workflowRoutePath,
 } from "./lib/workflowRoutes";
 import type { User } from "./types";
@@ -65,7 +67,7 @@ function WorkbenchRoute({
 }: {
   user?: User;
   onLogout: () => void;
-  routeView?: "chat" | "workflow";
+  routeView?: "chat" | "workflow" | "files";
 }) {
   const params = useParams();
   const navigate = useNavigate();
@@ -109,6 +111,14 @@ function WorkbenchRoute({
           replace: true,
         });
       }}
+      onOpenWorkspaceFilesPage={(workspaceId) => {
+        navigate(workspaceFilesRoutePath(workspaceId));
+      }}
+      onCloseWorkspaceFilesPage={(workspaceId, conversationId) => {
+        navigate(conversationRoutePath(workspaceId, conversationId), {
+          replace: true,
+        });
+      }}
     />
   );
 }
@@ -143,6 +153,7 @@ function RoutedApp() {
   return (
     <AntApp>
       <Routes>
+        <Route path="/docs" element={<DocsPage />} />
         <Route
           path="/login"
           element={<LoginRoute user={user} onLogin={setUser} />}
@@ -186,6 +197,18 @@ function RoutedApp() {
             <WorkbenchRoute
               user={user}
               routeView="workflow"
+              onLogout={() => {
+                api.logout().finally(() => setUser(undefined));
+              }}
+            />
+          }
+        />
+        <Route
+          path="/workspaces/:workspaceId/files"
+          element={
+            <WorkbenchRoute
+              user={user}
+              routeView="files"
               onLogout={() => {
                 api.logout().finally(() => setUser(undefined));
               }}

@@ -32,6 +32,8 @@ coverage/
 var/
 test-results/
 *.log
+*.log.*
+backend/logs/
 
 # OS / editor noise
 .DS_Store

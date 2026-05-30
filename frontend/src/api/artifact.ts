@@ -66,3 +66,14 @@ export async function exportArtifact(
     `/artifacts/${artifactId}/export?format=${encodeURIComponent(format)}`,
   );
 }
+
+export async function previewArtifactPdf(
+  artifactId: string,
+): Promise<{
+  previewUrl?: string;
+  previewText?: string;
+  contentType: string;
+  filename?: string;
+}> {
+  return await requestFile(`/artifacts/${artifactId}/preview-pdf`);
+}

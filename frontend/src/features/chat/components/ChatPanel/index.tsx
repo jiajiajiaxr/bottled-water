@@ -55,6 +55,8 @@ export function ChatPanel({
   onUploadFile,
   onOpenPreview,
   onStopStreaming,
+  draftSnippet,
+  onDraftSnippetConsumed,
 }: {
   user: User;
   active?: Conversation;
@@ -76,12 +78,20 @@ export function ChatPanel({
   onUploadFile: (file: File) => Promise<UploadedFile>;
   onOpenPreview: (message: ChatMessage) => void;
   onStopStreaming: () => void;
+  draftSnippet?: string;
+  onDraftSnippetConsumed?: () => void;
 }) {
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const { message } = AntApp.useApp();
+
+  useEffect(() => {
+    if (!draftSnippet) return;
+    setText((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${draftSnippet}`);
+    onDraftSnippetConsumed?.();
+  }, [draftSnippet, onDraftSnippetConsumed]);
 
   const submit = () => {
     const value =

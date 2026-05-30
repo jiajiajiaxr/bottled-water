@@ -22,6 +22,7 @@ from app.services.tools.builtins.artifact.export import default_export_format, e
 from app.services.audit import write_audit_log
 from app.schemas.requests import CreateKnowledgeBaseRequest, ImportKnowledgeTextRequest, RetrieveKnowledgeRequest
 from app.services.files import attachment_path, ensure_extension_tables, save_upload
+from app.services.files.previewers.office import build_office_preview, is_office_file
 from app.services.knowledge import index_document, retrieve
 from app.services.serialization import (
     artifact_to_dict,
@@ -69,6 +70,15 @@ def _owned_file(db: Session, user: User, file_id: str) -> FileAsset:
     if not file_asset or file_asset.owner_id != user.id or file_asset.deleted_at is not None:
         raise NotFoundError("文件不存在")
     return file_asset
+
+
+def _artifact_workspace_id(db: Session, artifact: Artifact) -> str:
+    conversation = db.get(Conversation, artifact.conversation_id)
+    if conversation and isinstance(conversation.extra, dict):
+        value = conversation.extra.get("workspace_id") or conversation.extra.get("workspaceId")
+        if value:
+            return str(value)
+    return artifact.conversation_id or artifact.id
 
 
 def _owned_kb(db: Session, user: User, knowledge_base_id: str) -> KnowledgeBase:
@@ -229,6 +239,42 @@ async def download_artifact_export(
         content=exported.content,
         media_type=exported.media_type,
         headers=_attachment_headers(exported.filename),
+    )
+
+
+@router.get("/artifacts/{artifact_id}/preview-pdf")
+async def download_artifact_preview_pdf(
+    artifact_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    artifact = _owned_artifact(db, user, artifact_id)
+    exported = export_artifact(artifact, default_export_format(artifact))
+    if not is_office_file(exported.media_type, exported.filename):
+        if exported.media_type == "application/pdf" or exported.filename.lower().endswith(".pdf"):
+            return Response(content=exported.content, media_type="application/pdf")
+        raise ValidationAppError("当前产物不是可转换的 Office 文件")
+    result = build_office_preview(
+        workspace_id=_artifact_workspace_id(db, artifact),
+        node_id=f"artifact:{artifact.id}",
+        target={
+            "kind": "artifact",
+            "artifact": artifact,
+            "artifact_id": artifact.id,
+            "artifact_type": artifact.type,
+            "bytes": exported.content,
+            "filename": exported.filename,
+            "mime_type": exported.media_type,
+        },
+        filename=exported.filename,
+        mime_type=exported.media_type,
+    )
+    if not result.preview_pdf_path:
+        raise ValidationAppError(result.error or "Office PDF 预览生成失败")
+    return FileResponse(
+        str(result.preview_pdf_path),
+        media_type="application/pdf",
+        filename=f"{artifact.name}.preview.pdf",
     )
 
 

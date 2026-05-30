@@ -11,7 +11,12 @@ from app.models import FileAsset, User
 from app.services.tools.builtins.file.converters import convert_file
 from app.services.tools.builtins.file.extractors import embed_text, extract_text_from_path, summarize_text
 from app.services.tools.builtins.file.preview import preview_payload
-from app.services.workspaces.filesystem import resolve_workspace_path, scoped_dir, workspace_id_from_args
+from app.services.workspaces.filesystem import (
+    normalize_relative_path,
+    resolve_workspace_path,
+    scoped_dir,
+    workspace_id_from_args,
+)
 
 
 def invoke_file_tool(db: Session, user: User, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -38,24 +43,30 @@ def _read_workspace_file(
         content = Path(asset.storage_path).read_text(encoding="utf-8", errors="ignore")[:200_000]
         return {"status": "succeeded", "file_id": asset.id, "content": content}
     path = _safe_tool_path(db, arguments)
+    relative_path = normalize_relative_path(str(arguments.get("path") or ""))
     return {
         "status": "succeeded",
         "workspace_id": workspace_id_from_args(db, arguments),
-        "path": str(path),
+        "path": relative_path,
+        "relative_path": relative_path,
         "content": path.read_text(encoding="utf-8", errors="ignore")[:200_000],
     }
 
 
 def _write_workspace_file(db: Session, arguments: dict[str, Any]) -> dict[str, Any]:
     path = _safe_tool_path(db, arguments)
+    relative_path = normalize_relative_path(str(arguments.get("path") or ""))
     content = str(arguments.get("content") or "")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return {
         "status": "succeeded",
         "workspace_id": workspace_id_from_args(db, arguments),
-        "path": str(path),
-        "relative_path": str(arguments.get("path") or ""),
+        "path": relative_path,
+        "relative_path": relative_path,
+        "sandbox_path": relative_path,
+        "sandbox_command": f"python {relative_path}",
+        "message": f"文件已写入工作区沙箱：{relative_path}；可用 sandbox.run 执行 `python {relative_path}`。",
         "size": len(content.encode("utf-8")),
     }
 
