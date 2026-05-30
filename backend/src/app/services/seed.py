@@ -313,7 +313,7 @@ async def ensure_seed_data(db: AsyncSession) -> User:
                 "avatar_color": spec["avatar_color"],
             }
 
-    Skill.__table__.create(bind=db.get_bind(), checkfirst=True)
+    await db.run_sync(lambda session: Skill.__table__.create(bind=session.get_bind(), checkfirst=True))
     existing_skill_names = {item.name for item in (await db.scalars(select(Skill).where(Skill.source == "system"))).all()}
     for spec in DEFAULT_SKILLS:
         if spec["name"] in existing_skill_names:

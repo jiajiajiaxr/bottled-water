@@ -336,7 +336,7 @@ TOOLBOXES = {
 
 
 async def ensure_tool_tables(db: AsyncSession) -> None:
-    ToolDefinition.__table__.create(bind=db.get_bind(), checkfirst=True)
+    await db.run_sync(lambda session: ToolDefinition.__table__.create(bind=session.get_bind(), checkfirst=True))
 
 
 def builtin_tool_dicts() -> list[dict[str, Any]]:
@@ -633,7 +633,9 @@ async def invoke_builtin_tool(db: AsyncSession, user: User, name: str, arguments
         return {"status": "succeeded", "files_changed": sorted(set(current) | set(previous)), "version": artifact.current_version}
 
     if name == "db.inspect":
-        inspector = inspect(db.get_bind())
+        async def _inspect():
+            return await db.run_sync(lambda session: inspect(session.get_bind()))
+        inspector = await _inspect()
         return {"status": "succeeded", "tables": [{"name": table, "columns": [column["name"] for column in inspector.get_columns(table)]} for table in inspector.get_table_names()]}
     if name == "api.test":
         return {"status": "succeeded", "path": arguments.get("path") or "/api/v1/health", "result": "health route reachable in current app"}
