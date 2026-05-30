@@ -104,21 +104,9 @@ class OrchestratorService:
         return (await db.scalars(base_query.where(Agent.type != "custom"))).all()
 
     @staticmethod
-    def _create_model_provider(agent: Agent | None = None, model_config_id: str | None = None) -> Any:
-        """创建模型提供者
-
-        Args:
-            agent: Agent 实例（从中获取默认模型配置）
-            model_config_id: 用户指定的模型配置ID，优先于 agent 配置
-        """
+    def _create_model_provider(agent: Agent | None = None) -> Any:
+        """创建模型提供者（默认配置，用于无 model_config_id 时）"""
         settings = get_settings()
-
-        if model_config_id:
-            from app.models import ModelConfig
-            # 需要同步获取，这里用同步方式临时处理
-            # 实际在 run() 中已通过 db.get() 获取
-            pass
-
         api_key = getattr(settings, "ark_api_key", "") or ""
         model = getattr(settings, "ark_model", "ep-xxx") or "ep-xxx"
 
@@ -126,7 +114,8 @@ class OrchestratorService:
             logger.warning("未配置 ARK API Key，使用 mock 提供者")
             return _MockModelProvider()
 
-        return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
+        from model_provider.core.config import ModelConfig as MPModelConfig
+        return create_provider(MPModelConfig(provider="ark", model=model, api_key=api_key))
 
     @staticmethod
     async def create_provider_from_config(db: AsyncSession, model_config_id: str) -> Any:
