@@ -47,11 +47,11 @@ async def _get_sandbox(db: AsyncSession, user: User, sandbox_id: str) -> Sandbox
 @router.get("/sandboxes", response_model=ApiResponse[dict])
 async def list_sandboxes(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     await ensure_sandbox_tables(db)
-    items = await db.scalars(
+    items = (await db.scalars(
         select(SandboxSession)
         .where(SandboxSession.owner_id == user.id, SandboxSession.deleted_at.is_(None))
         .order_by(SandboxSession.updated_at.desc())
-    ).all()
+    )).all()
     return ok({"items": [sandbox_to_dict(item) for item in items], "total": len(items)})
 
 
@@ -124,11 +124,11 @@ async def stop_sandbox(
 @router.get("/remote-connections", response_model=ApiResponse[dict])
 async def list_remote_connections(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     await ensure_sandbox_tables(db)
-    items = await db.scalars(
+    items = (await db.scalars(
         select(RemoteConnection)
         .where(RemoteConnection.owner_id == user.id, RemoteConnection.deleted_at.is_(None))
         .order_by(RemoteConnection.updated_at.desc())
-    ).all()
+    )).all()
     return ok({"items": [remote_connection_to_dict(item) for item in items], "total": len(items)})
 
 

@@ -37,14 +37,14 @@ async def list_knowledge_bases(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    items = await db.scalars(
+    items = (await db.scalars(
         select(KnowledgeBase)
         .where(
             KnowledgeBase.deleted_at.is_(None),
             (KnowledgeBase.owner_id == user.id) | (KnowledgeBase.visibility == "public"),
         )
         .order_by(KnowledgeBase.updated_at.desc())
-    ).all()
+    )).all()
     return ok({"items": [knowledge_base_to_dict(item) for item in items], "total": len(items)})
 
 
@@ -99,11 +99,11 @@ async def list_documents(
     user: User = Depends(get_current_user),
 ):
     kb = await _get_kb(db, user, kb_id)
-    docs = await db.scalars(
+    docs = (await db.scalars(
         select(KnowledgeDocument)
         .where(KnowledgeDocument.knowledge_base_id == kb.id, KnowledgeDocument.deleted_at.is_(None))
         .order_by(KnowledgeDocument.created_at.desc())
-    ).all()
+    )).all()
     return ok({"items": [knowledge_document_to_dict(item) for item in docs], "total": len(docs)})
 
 

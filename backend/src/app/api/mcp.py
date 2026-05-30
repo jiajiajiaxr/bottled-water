@@ -60,8 +60,7 @@ async def list_mcp_servers(
     query = select(McpServer).where(McpServer.deleted_at.is_(None)).where((McpServer.owner_id == user.id) | (McpServer.owner_id.is_(None)))
     if workspace_id:
         query = query.where(McpServer.workspace_id == workspace_id)
-    servers = await db.scalars(query.order_by(McpServer.created_at.desc()))
-    servers_list = servers.all()
+    servers = (await db.scalars(query.order_by(McpServer.created_at.desc()))).all()
     return ok({"items": [mcp_server_to_dict(item) for item in servers_list], "total": len(servers_list)})
 
 
@@ -246,8 +245,7 @@ async def list_mcp_invocations(
         query = query.where(McpToolInvocation.server_id == server_id)
     if status:
         query = query.where(McpToolInvocation.status == status)
-    items = await db.scalars(query.order_by(McpToolInvocation.created_at.desc()).limit(100))
-    items_list = items.all()
+    items_list = (await db.scalars(query.order_by(McpToolInvocation.created_at.desc()).limit(100))).all()
     return ok({"items": [mcp_invocation_to_dict(item) for item in items_list], "total": len(items_list)})
 
 

@@ -321,8 +321,7 @@ async def list_files(
         query = query.where(FileAsset.conversation_id == conversation_id)
     if purpose:
         query = query.where(FileAsset.purpose == purpose)
-    items = await db.scalars(query.order_by(FileAsset.created_at.desc()))
-    items = items.all()
+    items = (await db.scalars(query.order_by(FileAsset.created_at.desc()))).all()
     return ok({"items": [file_asset_to_dict(item) for item in items], "total": len(items)})
 
 
@@ -371,13 +370,12 @@ async def list_knowledge_bases(
     user: User = Depends(get_current_user),
 ):
     await ensure_extension_tables(db)
-    items = await db.scalars(
+    items = (await db.scalars(
         select(KnowledgeBase)
         .options(selectinload(KnowledgeBase.documents))
         .where(KnowledgeBase.owner_id == user.id, KnowledgeBase.deleted_at.is_(None))
         .order_by(KnowledgeBase.updated_at.desc())
-    )
-    items = items.all()
+    )).all()
     return ok({"items": [knowledge_base_to_dict(item) for item in items], "total": len(items)})
 
 
@@ -535,12 +533,11 @@ async def compat_list_files(
     user: User = Depends(get_current_user),
 ):
     await ensure_extension_tables(db)
-    items = await db.scalars(
+    items = (await db.scalars(
         select(FileAsset)
         .where(FileAsset.owner_id == user.id, FileAsset.deleted_at.is_(None))
         .order_by(FileAsset.created_at.desc())
-    )
-    items = items.all()
+    )).all()
     return ok({"items": [file_asset_to_dict(item) for item in items]})
 
 
@@ -565,12 +562,11 @@ async def compat_list_knowledge_bases(
     user: User = Depends(get_current_user),
 ):
     await ensure_extension_tables(db)
-    items = await db.scalars(
+    items = (await db.scalars(
         select(KnowledgeBase)
         .options(selectinload(KnowledgeBase.documents))
         .where(KnowledgeBase.owner_id == user.id, KnowledgeBase.deleted_at.is_(None))
-    )
-    items = items.all()
+    )).all()
     return ok([knowledge_base_to_dict(item) for item in items])
 
 

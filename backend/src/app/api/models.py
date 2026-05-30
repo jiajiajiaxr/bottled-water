@@ -41,13 +41,13 @@ async def _get_provider(db: AsyncSession, user: User, provider_id: str) -> Model
 @router.get("/model-providers", response_model=ApiResponse[dict])
 async def list_model_providers(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     await ensure_model_tables(db)
-    providers = await db.scalars(
+    providers = (await db.scalars(
         select(ModelProvider)
         .options(selectinload(ModelProvider.models))
         .where(ModelProvider.deleted_at.is_(None))
         .where((ModelProvider.owner_id == user.id) | (ModelProvider.owner_id.is_(None)))
         .order_by(ModelProvider.created_at.desc())
-    ).all()
+    )).all()
     return ok({"items": [model_provider_to_dict(item) for item in providers], "total": len(providers)})
 
 
@@ -129,14 +129,14 @@ async def list_model_configs(
     user: User = Depends(get_current_user),
 ):
     await ensure_model_tables(db)
-    configs = await db.scalars(
+    configs = (await db.scalars(
         select(ModelConfig)
         .options(selectinload(ModelConfig.provider))
         .join(ModelProvider)
         .where(ModelConfig.deleted_at.is_(None), ModelProvider.deleted_at.is_(None))
         .where((ModelProvider.owner_id == user.id) | (ModelProvider.owner_id.is_(None)))
         .order_by(ModelConfig.updated_at.desc())
-    ).all()
+    )).all()
     return ok({"items": [model_config_to_dict(item) for item in configs], "total": len(configs)})
 
 

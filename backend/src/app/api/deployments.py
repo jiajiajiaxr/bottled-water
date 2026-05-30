@@ -49,12 +49,12 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Deployment:
     artifact_id = payload.get("artifact_id")
     if not artifact_id and payload.get("conversationId"):
         from sqlalchemy import select
-        artifact_result = await db.scalars(
+        artifact_result = (await db.scalars(
             select(Artifact)
             .where(Artifact.conversation_id == payload["conversationId"], Artifact.deleted_at.is_(None))
             .order_by(Artifact.updated_at.desc())
             .limit(1)
-        )
+        ))
         artifact = artifact_result.first()
         artifact_id = artifact.id if artifact else None
     if not artifact_id:
@@ -183,13 +183,12 @@ async def list_artifact_deployments(
     user: User = Depends(get_current_user),
 ):
     await _check_artifact_owner(db, user, artifact_id)
-    deployments = await db.scalars(
+    deployments_list = (await db.scalars(
         select(Deployment)
         .where(Deployment.artifact_id == artifact_id, Deployment.deleted_at.is_(None))
         .order_by(Deployment.created_at.desc())
-    )
-    deployments_list = deployments.all()
-    return ok({"items": [deployment_to_dict(item) for item in deployments], "total": len(deployments)})
+    )).all()
+    return ok({"items": [deployment_to_dict(item) for item in deployments_list], "total": len(deployments_list)})
 
 
 @router.post("/deployments/parse-command", response_model=ApiResponse[dict])

@@ -106,11 +106,11 @@ async def retrieve(
     query_terms = Counter(tokenize(query))
     if not query_terms:
         return []
-    documents = await db.scalars(
+    documents = (await db.scalars(
         select(KnowledgeDocument)
         .where(KnowledgeDocument.knowledge_base_id == kb.id)
         .order_by(KnowledgeDocument.updated_at.desc())
-    ).all()
+    )).all()
     candidates: list[dict] = []
     for document in documents:
         for chunk in document.chunks or []:

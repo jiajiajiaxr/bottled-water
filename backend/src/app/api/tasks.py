@@ -75,7 +75,7 @@ async def create_task(
 
 @router.get("/tasks", response_model=ApiResponse[list[TaskOut]])
 async def list_tasks(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    tasks = await db.scalars(select(Task).where(Task.creator_id == user.id).order_by(Task.created_at.desc()))
+    tasks = (await db.scalars(select(Task).where(Task.creator_id == user.id).order_by(Task.created_at.desc()))).all()
     return ok([task_to_dict(task) for task in tasks.all()])
 
 
