@@ -52,7 +52,7 @@ class ToolExecutorAdapter(ToolExecutor):
         """执行工具调用"""
         from app.services.agentic_runtime import execute_tool_by_name
 
-        logger.info("适配器执行工具", tool=tool_name, agent=self.agent.name)
+        logger.info(f"适配器执行工具 tool={tool_name} agent={self.agent.name}")
         result = await execute_tool_by_name(
             self.db,
             agent=self.agent,

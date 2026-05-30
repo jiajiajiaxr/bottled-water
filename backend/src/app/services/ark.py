@@ -269,7 +269,7 @@ class ArkClient:
                     data = json.loads(data_text)
                     line_count += 1
                     if line_count <= 3:
-                        logger.info("[ark_sse] chunk %d: %s", line_count, json.dumps(data, ensure_ascii=False)[:400])
+                        logger.info(f"[ark_sse] chunk {line_count}: {json.dumps(data, ensure_ascii=False)[:400]}")
                     if data.get("usage"):
                         usage = data["usage"]
                         yield LLMStreamEvent(type="usage", usage=usage, model=model)

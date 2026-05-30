@@ -192,7 +192,7 @@ class SingleAgentOrchestrator:
             tool_executor=tool_executor,
         )
 
-        logger.info("SingleAgentOrchestrator 启动 session_id=%s agent_id=%s", session.session_id, agent.id)
+        logger.info(f"SingleAgentOrchestrator 启动 session_id={session.session_id} agent_id={agent.id}")
 
         prompt = (
             self.message.content.get("text", "")
@@ -249,7 +249,7 @@ class TechLeadOrchestrator:
             tool_executor=tool_executor,
         )
 
-        logger.info("TechLeadOrchestrator 启动 session_id=%s agent_count=%s", session.session_id, len(agent_configs))
+        logger.info(f"TechLeadOrchestrator 启动 session_id={session.session_id} agent_count={len(agent_configs)}")
 
         prompt = (
             self.message.content.get("text", "")

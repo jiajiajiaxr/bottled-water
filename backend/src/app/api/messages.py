@@ -180,7 +180,7 @@ async def stream_conversation(
     Yields:
         str: SSE 事件字符串。
     """
-    _get_conversation(db, user, conversation_id)
+    await _get_conversation(db, user, conversation_id)
 
     channel = f"conversation:{conversation_id}"
 
@@ -249,7 +249,7 @@ async def cancel_stream(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    conversation = _get_conversation(db, user, conversation_id)
+    conversation = await _get_conversation(db, user, conversation_id)
     task = ORCHESTRATION_TASKS.get(conversation.id)
     cancelled = False
     if task and not task.done():
