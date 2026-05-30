@@ -21,7 +21,7 @@ async def ensure_extension_tables(db: AsyncSession) -> None:
         KnowledgeDocument.__table__,
         AuditLog.__table__,
     ):
-        await db.run_sync(table.create, bind=db.get_bind(), checkfirst=True)
+        await db.run_sync(lambda session: table.create(bind=session.get_bind(), checkfirst=True))
 
 
 def safe_filename(name: str) -> str:

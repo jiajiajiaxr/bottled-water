@@ -21,7 +21,7 @@ router = APIRouter(tags=["sandbox-remote"])
 
 async def ensure_sandbox_tables(db: AsyncSession) -> None:
     for table in (SandboxSession.__table__, RemoteConnection.__table__):
-        await db.run_sync(lambda bind: table.create(bind=bind, checkfirst=True))
+        await db.run_sync(lambda session: table.create(bind=session.get_bind(), checkfirst=True))
 
 
 async def _validate_workspace(db: AsyncSession, user: User, workspace_id: str | None) -> None:

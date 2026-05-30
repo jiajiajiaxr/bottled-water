@@ -87,7 +87,7 @@ async def ensure_workspace_tables(db: AsyncSession) -> None:
         ShortcutCommand.__table__,
         AuditLog.__table__,
     ):
-        await db.run_sync(lambda conn: table.create(bind=conn, checkfirst=True))
+        await db.run_sync(lambda session: table.create(bind=session.get_bind(), checkfirst=True))
 
 
 def _workspace_query(user: User):
