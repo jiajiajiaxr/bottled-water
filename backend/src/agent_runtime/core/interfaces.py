@@ -74,6 +74,6 @@ class ToolExecutor(ABC):
         pass
 
     @abstractmethod
-    def list_tools(self) -> List[Dict]:
+    async def list_tools(self) -> List[Dict]:
         """列出可用工具"""
         pass
