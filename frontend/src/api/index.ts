@@ -95,6 +95,7 @@ export {
   modelConfigs,
   createModelConfig,
   testModel,
+  availableModels,
 } from "./model";
 
 export {

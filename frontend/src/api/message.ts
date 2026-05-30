@@ -74,6 +74,7 @@ export async function sendMessage(
   quotedMessageId?: string,
   attachments: UploadedFile[] = [],
   thinkingEnabled?: boolean,
+  modelConfigId?: string,
 ): Promise<string> {
   const abortController = new AbortController();
   const stop = () => {
@@ -105,6 +106,7 @@ export async function sendMessage(
       },
       reply_to_message_id: quotedMessageId,
       thinking_enabled: thinkingEnabled,
+      model_config_id: modelConfigId,
     },
     abortController,
   );

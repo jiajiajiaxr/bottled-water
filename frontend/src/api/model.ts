@@ -53,3 +53,20 @@ export async function testModel(
     usage?: Record<string, unknown>;
   }>("/model-configs/test", { prompt, model_config_id });
 }
+
+export interface AvailableModel {
+  provider_id: string;
+  provider_name: string;
+  model_id: string;
+  config_id: string;
+  name: string;
+  context_window: number;
+  status: string;
+}
+
+export async function availableModels(forceRefresh = false): Promise<AvailableModel[]> {
+  const result = await get<{ items: AvailableModel[] }>(
+    `/models/available${forceRefresh ? "?force_refresh=true" : ""}`,
+  );
+  return result.items;
+}

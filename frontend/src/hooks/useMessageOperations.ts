@@ -330,6 +330,7 @@ export function useMessageOperations(currentUserName: string) {
         (body as { reply_to_message_id?: string })?.reply_to_message_id,
         (body as { content?: { attachments: UploadedFile[] } })?.content?.attachments ?? [],
         (body as { thinking_enabled?: boolean })?.thinking_enabled,
+        (body as { model_config_id?: string })?.model_config_id,
       );
       streaming.setStreamState("done");
 
@@ -465,6 +466,7 @@ export function useMessageOperations(currentUserName: string) {
     quoted?: ChatMessage,
     attachments: UploadedFile[] = [],
     thinkingEnabled?: boolean,
+    modelConfigId?: string,
   ) => {
     if (!activeId) return;
     const conversationId = activeId;
@@ -519,6 +521,7 @@ export function useMessageOperations(currentUserName: string) {
       },
       reply_to_message_id: quoted?.id,
       thinking_enabled: thinkingEnabled,
+      model_config_id: modelConfigId,
     };
 
     try {

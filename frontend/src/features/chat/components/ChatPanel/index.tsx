@@ -4,6 +4,7 @@ import {
   BulbOutlined,
   ReloadOutlined,
   SendOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
 import {
   App as AntApp,
@@ -12,6 +13,7 @@ import {
   Flex,
   Input,
   Layout,
+  Select,
   Space,
   Spin,
   Tag,
@@ -23,6 +25,8 @@ import type { UploadProps } from "antd";
 import { MessageBubble } from "@/features/chat/components/MessageBubble";
 import { useMessageStore, useConversationStore } from "@/store";
 import { useMessageOperations } from "@/hooks";
+import { api } from "@/api";
+import type { AvailableModel } from "@/api/model";
 import type { ChatMessage, Conversation, UploadedFile } from "@/types";
 
 const { Content } = Layout;
@@ -45,10 +49,17 @@ export function ChatPanel({
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
+  const [selectedModelConfigId, setSelectedModelConfigId] = useState<string>();
+  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const { message } = AntApp.useApp();
 
   const { send, regenerate, stopStreaming, streamingMessages, streamState } =
     useMessageOperations(currentUserName);
+
+  // 加载可用模型列表
+  useEffect(() => {
+    api.availableModels().then(setAvailableModels).catch(() => {});
+  }, []);
 
   // 从 Conversation Store 读取当前会话的思考模式状态（持久化）
   const thinkingEnabled = useConversationStore((s) =>
@@ -83,7 +94,7 @@ export function ChatPanel({
     const value =
       text.trim() || (pendingFiles.length ? "请结合上传附件继续处理。" : "");
     if (!value || !active) return;
-    send(value, quoted, pendingFiles, thinkingEnabled);
+    send(value, quoted, pendingFiles, thinkingEnabled, selectedModelConfigId);
     setText("");
     setQuoted(undefined);
     setPendingFiles([]);
@@ -247,6 +258,28 @@ export function ChatPanel({
               >
                 思考
               </Button>
+            </Tooltip>
+            <Select
+              placeholder="选择模型"
+              value={selectedModelConfigId}
+              onChange={setSelectedModelConfigId}
+              allowClear
+              style={{ minWidth: 160 }}
+              options={availableModels.map((m) => ({
+                value: m.config_id,
+                label: `${m.name} (${m.model_id})`,
+              }))}
+              onClear={() => setSelectedModelConfigId(undefined)}
+              disabled={!active}
+            />
+            <Tooltip title="刷新模型列表">
+              <Button
+                icon={<SyncOutlined />}
+                onClick={() =>
+                  api.availableModels(true).then(setAvailableModels).catch(() => {})
+                }
+                disabled={!active}
+              />
             </Tooltip>
             {streamState === "streaming" ? (
               <Button danger icon={<ReloadOutlined />} onClick={stopStreaming}>
