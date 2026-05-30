@@ -18,6 +18,7 @@ from app.services.context.attachments import attachment_preflight_reply
 from app.services.context.builder import ContextBuilder
 from app.services.context.state import update_conversation_state_after_turn
 from app.services.llm.tool_calls import artifact_arguments, detect_artifact_tool
+from app.services.llm.html_artifacts import HTML_ARTIFACT_TOOLS, normalize_html_artifact_arguments
 from app.services.llm_gateway import stream_model_config_chat
 from app.services.output_filter import strip_internal_agent_output
 from app.services.realtime.event_bus import event_bus
@@ -324,6 +325,12 @@ async def run_agent_function_call_loop(
     )
 
     requested_artifact_tool = detect_artifact_tool(prompt)
+    if (
+        requested_artifact_tool == "artifact.create_html"
+        and requested_artifact_tool not in allowed_tool_names
+        and "artifact.create_web_app" in allowed_tool_names
+    ):
+        requested_artifact_tool = "artifact.create_web_app"
     if requested_artifact_tool and requested_artifact_tool not in allowed_tool_names:
         logger.info(
             "[agent_function_loop] missing_artifact_tool agent=%s requested=%s exposed_tools=%s",
@@ -531,6 +538,7 @@ async def run_agent_function_call_loop(
                 agent=agent,
                 task=task,
             )
+            arguments = _normalize_tool_arguments_for_request(tool_name, prompt, arguments)
             logger.info(
                 "[agent_function_loop] tool_call agent=%s name=%s arguments=%s",
                 agent.id,
@@ -766,6 +774,16 @@ def _forced_artifact_tool_call(tool_name: str, prompt: str) -> dict[str, Any]:
             "arguments": json.dumps(artifact_arguments(tool_name, prompt), ensure_ascii=False),
         },
     }
+
+
+def _normalize_tool_arguments_for_request(
+    tool_name: str,
+    prompt: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if tool_name in HTML_ARTIFACT_TOOLS:
+        return normalize_html_artifact_arguments(prompt, arguments)
+    return arguments
 
 
 def _looks_like_tool_argument_fragment(text: str) -> bool:

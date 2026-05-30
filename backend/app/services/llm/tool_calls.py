@@ -3,9 +3,27 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.services.llm.html_artifacts import html_artifact_arguments
+
 
 ARTIFACT_TOOL_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("artifact.create_html", ("html", "HTML", "网页", "页面", "网页页面")),
+    (
+        "artifact.create_html",
+        (
+            "html",
+            "HTML",
+            "网页",
+            "页面",
+            "网页页面",
+            "web app",
+            "webapp",
+            "计算器",
+            "表单",
+            "看板",
+            "登录页",
+            "登陆页",
+        ),
+    ),
     ("artifact.create_pdf", ("pdf", "PDF")),
     ("artifact.create_docx", ("word", "docx", "Word", "DOCX", "Word 文档", "文档")),
     ("artifact.create_xlsx", ("excel", "xlsx", "Excel", "表格", "电子表格")),
@@ -70,15 +88,8 @@ def _tool_names(tools: list[dict[str, Any]]) -> set[str]:
 def artifact_arguments(tool_name: str, prompt: str) -> dict[str, str]:
     title = prompt.strip().splitlines()[0][:60] or "AgentHub 产物"
     args = {"title": title, "body": prompt}
-    if tool_name == "artifact.create_html":
-        return {
-            "title": title,
-            "html": (
-                "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\" />"
-                f"<title>{title}</title></head><body><main><h1>{title}</h1>"
-                f"<p>{prompt}</p></main></body></html>"
-            ),
-        }
+    if tool_name in {"artifact.create_html", "artifact.create_web_app"}:
+        return html_artifact_arguments(prompt)
     return args
 
 

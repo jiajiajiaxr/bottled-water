@@ -722,6 +722,64 @@ class TestAgentFunctionCallLoop:
         assert result.text == "HTML 产物已生成。"
         assert result.assistant is not None
         assert result.assistant.content["text"] != "li>"
+        assert artifact.content is not None
+        html = artifact.content["preview_html"]
+        assert "<!doctype html>" in html.lower()
+        assert "<script>" in html
+        assert "<button" in html
+        assert len(html) > 1000
+
+    @pytest.mark.asyncio
+    async def test_calculator_request_forces_runnable_html_artifact(self) -> None:
+        db = _memory_session()
+        user, conversation, user_message = _user_conversation_message(db, "做一个计算器")
+        agent = Agent(
+            owner_id=user.id,
+            name="Writing Agent",
+            type="document",
+            description="Writes artifacts",
+            config={"tools": ["artifact.create_html"]},
+            capabilities=[],
+        )
+        db.add(agent)
+        db.commit()
+
+        async def fake_stream_chat(messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
+            if not any(message.get("role") == "tool" for message in messages):
+                yield LLMStreamEvent(type="delta", text=">")
+                yield LLMStreamEvent(type="done", usage={})
+                return
+            yield LLMStreamEvent(type="delta", text="计算器 HTML 已生成。")
+            yield LLMStreamEvent(type="done", usage={})
+
+        with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream_chat):
+            with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock):
+                result = await run_agent_function_call_loop(
+                    db,
+                    conversation=conversation,
+                    user_message=user_message,
+                    agent=agent,
+                    prompt="做一个计算器",
+                    channel=f"conversation:{conversation.id}",
+                    mode="unit-test",
+                )
+
+        artifact = db.scalar(select(Artifact).where(Artifact.conversation_id == conversation.id))
+        preview = db.scalar(select(Message).where(Message.content_type == "preview_card"))
+
+        assert artifact is not None
+        assert preview is not None
+        assert result.tool_results[0]["result"]["output"]["artifact_id"] == artifact.id
+        assert artifact.content is not None
+        html = artifact.content["preview_html"]
+        assert preview.content["artifact_id"] == artifact.id
+        assert "<!doctype html>" in html.lower()
+        assert "function calculate" in html
+        assert "appendValue" in html
+        assert 'id="display"' in html
+        assert "<button" in html
+        assert "calculatorButtons" in html
+        assert len(html) > 2000
 
     @pytest.mark.asyncio
     async def test_artifact_request_without_permission_does_not_create_fake_card(self) -> None:
