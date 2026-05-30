@@ -262,6 +262,7 @@
 
 .docs-content {
   width: min(100%, 1540px);
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 30px 48px 64px;
 }
@@ -359,6 +360,10 @@
   grid-template-columns: minmax(0, 1fr) 440px;
   gap: 24px;
   align-items: stretch;
+}
+
+.docs-two-column > * {
+  min-width: 0;
 }
 
 .docs-steps {

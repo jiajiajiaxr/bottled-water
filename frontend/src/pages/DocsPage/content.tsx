@@ -55,6 +55,7 @@ export const navGroups: NavGroup[] = [
   {
     title: "快速开始",
     links: [
+      { title: "产品总览", href: "#platform-overview" },
       { title: "首次登录", href: "#start" },
       { title: "本地启动", href: "#local" },
       { title: "工作区配置", href: "#workspace" },
@@ -94,7 +95,10 @@ export const navGroups: NavGroup[] = [
   {
     title: "使用指南",
     links: [
+      { title: "平台能力地图", href: "#capability-map" },
+      { title: "工作流节点说明", href: "#workflow-nodes" },
       { title: "文件与知识库", href: "#files" },
+      { title: "文件产物生命周期", href: "#asset-lifecycle" },
       { title: "多 Agent 协作", href: "#collaboration" },
       { title: "产物预览与导出", href: "#artifacts" },
       { title: "部署预览", href: "#deploy" },
@@ -243,6 +247,7 @@ export const runtimeEntries: RuntimeEntry[] = [
 export const endpointEntries: EndpointEntry[] = [
   { module: "认证", endpoint: "/api/v1/auth/login", purpose: "登录、演示登录、会话恢复" },
   { module: "工作区", endpoint: "/api/v1/workspaces", purpose: "工作区隔离、成员、项目文件入口" },
+  { module: "工作区文件", endpoint: "/api/v1/workspace-files", purpose: "文件树、预览、下载、重命名、收藏、移动" },
   { module: "会话", endpoint: "/api/v1/conversations", purpose: "单聊、群聊、分类、归档、工作流保存" },
   { module: "消息", endpoint: "/api/v1/messages", purpose: "消息发送、流式事件、停止生成、重试" },
   { module: "Agent", endpoint: "/api/v1/agents", purpose: "官方 Agent、自定义 Agent、权限绑定" },
@@ -250,6 +255,9 @@ export const endpointEntries: EndpointEntry[] = [
   { module: "MCP", endpoint: "/api/v1/mcp", purpose: "服务注册、探测、工具调用、调用记录" },
   { module: "文件", endpoint: "/api/v1/files", purpose: "上传、解析、预览、摘要、向量化入口" },
   { module: "产物", endpoint: "/api/v1/artifacts", purpose: "产物创建、版本、Diff、预览、导出" },
+  { module: "部署", endpoint: "/api/v1/deployments", purpose: "预览部署、部署记录、回滚入口" },
+  { module: "沙箱", endpoint: "/api/v1/sandbox", purpose: "沙箱会话、受限命令、远程连接" },
+  { module: "安全", endpoint: "/api/v1/security", purpose: "审计日志、角色、权限、用户权限后台" },
   { module: "任务", endpoint: "/api/v1/tasks", purpose: "后台任务、取消、刷新、运行态展示" },
 ];
 
@@ -267,6 +275,9 @@ export const troubleshootingRows = [
   ["Agent 不调用工具", "检查 Agent 权限、tool_loop、工具 schema 和调用参数。"],
   ["工作流不运行", "检查 conversation.extra.workflow、节点类型、边和 workflow run 状态。"],
   ["产物打不开", "检查 artifact 文件路径、预览 URL、导出格式和浏览器控制台错误。"],
+  ["Office 预览失败", "检查 LibreOffice / soffice 路径；后端会尝试生成文本降级 PDF。"],
+  ["MCP 工具不可用", "先执行 probe，再检查 server 类型、URL、stdio 命令和调用记录。"],
+  ["沙箱命令失败", "检查工作区路径、命令白名单、SandboxSession 状态和审计日志。"],
 ];
 
 export const localBootCode = `cd backend
@@ -305,6 +316,7 @@ export const workflowExampleCode = `{
 }`;
 
 export const updateItems = [
+  "补充产品平台级说明，覆盖角色路径、能力地图、工作流节点和文件产物生命周期。",
   "新增公开 /docs 文档站，控制台顶部可一键进入。",
   "补充工作流画布独立页面与嵌入式运行视图。",
   "工具、Skill、MCP 模块完成目录边界拆分，旧入口保留兼容 shim。",

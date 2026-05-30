@@ -3,6 +3,8 @@ import {
   BranchesOutlined,
   CloudServerOutlined,
   CodeOutlined,
+  DatabaseOutlined,
+  FileProtectOutlined,
   SafetyCertificateOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
@@ -15,6 +17,13 @@ import {
   updateItems,
   workflowExampleCode,
 } from "./content";
+import {
+  assetLifecycleEntries,
+  capabilityRows,
+  journeyEntries,
+  productModules,
+  workflowNodeDocs,
+} from "./platformContent";
 
 export function CodePanel({ title, code }: { title: string; code: string }) {
   return (
@@ -25,6 +34,58 @@ export function CodePanel({ title, code }: { title: string; code: string }) {
       </div>
       <pre>{code}</pre>
     </div>
+  );
+}
+
+export function ProductPlatformSection() {
+  return (
+    <section id="platform-overview" className="docs-section docs-platform-band">
+      <div className="docs-section-head">
+        <DatabaseOutlined />
+        <div>
+          <h2>产品平台总览</h2>
+          <p>
+            AgentHub 是围绕 IM 协作组织的多 Agent 工作台。平台把会话、工作区、Agent 能力、工作流、文件产物和安全治理放在同一套产品链路里，适合演示从需求输入到交付预览的完整过程。
+          </p>
+        </div>
+      </div>
+      <div className="docs-platform-grid">
+        {productModules.map((module) => (
+          <article className="docs-platform-card" key={module.title}>
+            <span className="docs-platform-icon">{module.icon}</span>
+            <h3>{module.title}</h3>
+            <p>{module.description}</p>
+            <ul>
+              {module.points.map((point) => (
+                <li key={point}>{point}</li>
+              ))}
+            </ul>
+          </article>
+        ))}
+      </div>
+      <div id="personas" className="docs-table-wrap">
+        <table className="docs-table">
+          <thead>
+            <tr>
+              <th>角色</th>
+              <th>入口</th>
+              <th>推荐路径</th>
+              <th>完成结果</th>
+            </tr>
+          </thead>
+          <tbody>
+            {journeyEntries.map((entry) => (
+              <tr key={entry.role}>
+                <td>{entry.role}</td>
+                <td>{entry.entry}</td>
+                <td>{entry.path}</td>
+                <td>{entry.outcome}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -45,6 +106,46 @@ export function FirstRunGuide() {
         </ol>
       </div>
       <CodePanel title="前端 SDK 调用示例" code={apiExampleCode} />
+    </section>
+  );
+}
+
+export function CapabilityMapSection() {
+  return (
+    <section id="capability-map" className="docs-section docs-capability-map">
+      <div className="docs-section-head">
+        <ToolOutlined />
+        <div>
+          <h2>平台能力地图</h2>
+          <p>
+            下表按产品控制台入口梳理能力边界。排查问题时先定位用户正在使用的控制台区域，再顺着后端 API 和服务层查运行记录。
+          </p>
+        </div>
+      </div>
+      <div className="docs-table-wrap">
+        <table className="docs-table">
+          <thead>
+            <tr>
+              <th>能力域</th>
+              <th>控制台入口</th>
+              <th>后端边界</th>
+              <th>用户得到什么</th>
+            </tr>
+          </thead>
+          <tbody>
+            {capabilityRows.map((row) => (
+              <tr key={row.domain}>
+                <td>{row.domain}</td>
+                <td>{row.console}</td>
+                <td>
+                  <code>{row.backend}</code>
+                </td>
+                <td>{row.outcome}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
@@ -94,6 +195,49 @@ export function ModelRuntimeSection() {
   );
 }
 
+export function WorkflowNodeSection() {
+  return (
+    <section id="workflow-nodes" className="docs-section docs-workflow-nodes">
+      <div className="docs-section-head">
+        <BranchesOutlined />
+        <div>
+          <h2>工作流节点说明</h2>
+          <p>
+            群聊运行时不会把任务交给隐藏的总控 Agent，而是优先读取当前会话保存的 workflow。每个节点都有明确输入、配置和运行态，方便复盘失败节点。
+          </p>
+        </div>
+      </div>
+      <div className="docs-table-wrap">
+        <table className="docs-table">
+          <thead>
+            <tr>
+              <th>节点</th>
+              <th>用途</th>
+              <th>关键配置</th>
+              <th>运行输出</th>
+            </tr>
+          </thead>
+          <tbody>
+            {workflowNodeDocs.map((node) => (
+              <tr key={node.type}>
+                <td>
+                  <code>{node.type}</code>
+                </td>
+                <td>{node.purpose}</td>
+                <td>{node.config}</td>
+                <td>{node.output}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="docs-callout">
+        画布保存后写入 conversation.extra.workflow；运行后产生 WorkflowRun，节点状态会记录 status、progress、message、output、started_at 和 completed_at。
+      </div>
+    </section>
+  );
+}
+
 export function ApiDetailsSection() {
   return (
     <section id="api-overview" className="docs-section docs-api-detail">
@@ -125,6 +269,47 @@ export function ApiDetailsSection() {
             ))}
           </tbody>
         </table>
+      </div>
+    </section>
+  );
+}
+
+export function AssetLifecycleSection() {
+  return (
+    <section id="asset-lifecycle" className="docs-section docs-asset-band">
+      <div className="docs-section-head">
+        <FileProtectOutlined />
+        <div>
+          <h2>文件、知识库与产物生命周期</h2>
+          <p>
+            AgentHub 的文件不是临时附件，而是工作区上下文的一部分。上传、预览、抽取、知识库检索、工具执行和产物交付都会尽量保留可追踪记录。
+          </p>
+        </div>
+      </div>
+      <div className="docs-lifecycle-grid">
+        {assetLifecycleEntries.map((entry) => (
+          <article key={entry.title}>
+            <strong>{entry.title}</strong>
+            <p>{entry.detail}</p>
+          </article>
+        ))}
+      </div>
+      <div className="docs-note-grid docs-wide-notes">
+        <article id="files">
+          <FileProtectOutlined />
+          <h3>文件与知识库</h3>
+          <p>文件可作为会话附件，也可以通过知识库导入后被检索；上下文层会负责摘要、变量和记忆拼装。</p>
+        </article>
+        <article id="artifacts">
+          <CodeOutlined />
+          <h3>产物预览与导出</h3>
+          <p>产物卡片只在需要交付内容时出现，点击后进入右侧预览，可编辑、保存版本、Diff、导出。</p>
+        </article>
+        <article id="deploy">
+          <CloudServerOutlined />
+          <h3>部署预览</h3>
+          <p>HTML 和 Web App 类产物可以创建部署预览记录，后续可在部署模块查看状态和回滚入口。</p>
+        </article>
       </div>
     </section>
   );

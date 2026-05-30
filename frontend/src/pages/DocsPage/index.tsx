@@ -15,13 +15,17 @@ import {
 } from "./content";
 import type { NavGroup } from "./content";
 import {
+  AssetLifecycleSection,
   ApiDetailsSection,
+  CapabilityMapSection,
   CodePanel,
   FirstRunGuide,
   IntegrationSection,
   ModelRuntimeSection,
+  ProductPlatformSection,
   TroubleshootingSection,
   UpdatesSection,
+  WorkflowNodeSection,
 } from "./DetailSections";
 import "./docs.css";
 import "./docs-detail.css";
@@ -286,13 +290,17 @@ export function DocsPage() {
           <div className="docs-breadcrumb">文档 &gt; 欢迎使用</div>
           <DocsHero />
           <QuickStartSection />
+          <ProductPlatformSection />
           <DemoFlowSection />
           <FirstRunGuide />
           <CapabilitySection />
+          <CapabilityMapSection />
           <ModelRuntimeSection />
+          <WorkflowNodeSection />
           <ApiSection />
           <ApiDetailsSection />
           <IntegrationSection />
+          <AssetLifecycleSection />
           <MaintainSection />
           <TroubleshootingSection />
           <UpdatesSection />
