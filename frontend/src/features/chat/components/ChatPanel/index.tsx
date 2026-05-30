@@ -79,10 +79,10 @@ export function ChatPanel({
   const messageVersions = useMessageStore((s) => s.messageVersions);
 
   // 流式消息列表
-  const streamingList = useMemo(
-    () => Array.from<ChatMessage>(streamingMessages.values()),
-    [streamingMessages],
-  );
+  const streamingList = useMemo(() => {
+    console.log("streamingList render", streamingMessages.size);
+    return Array.from<ChatMessage>(streamingMessages.values());
+  }, [streamingMessages]);
 
   // 合并所有消息用于 quoted 查找
   const allMessages = useMemo(

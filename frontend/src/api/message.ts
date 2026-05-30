@@ -170,6 +170,22 @@ export async function sendMessage(
         break;
       }
 
+      // 流式 token 和思考过程（增量追加）
+      case "agent.thinking":
+      case "agent.token": {
+        const p = data as Record<string, unknown>;
+        const agentId = String(p.agent_id || "");
+        if (!agentId) break;
+        if (event === "agent.token") {
+          const token = String(p.token || "");
+          if (token) handlers.onToken?.(agentId, token);
+        } else {
+          const thinking = String(p.thinking || p.task || "");
+          if (thinking) handlers.onThinking?.(agentId, thinking);
+        }
+        break;
+      }
+
       // 控制类 / 用户事件：前端暂不直接展示
       case "control.watchdog_triggered":
       case "control.scheduling_decision":

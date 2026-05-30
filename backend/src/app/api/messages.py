@@ -222,6 +222,9 @@ async def stream_conversation(
                     "event": event.type,
                     "data": json.dumps(event.payload, ensure_ascii=False),
                 }
+                # session_completed 是终止信号
+                if event.type in ("system.session_completed", "system.session_error"):
+                    break
             except asyncio.TimeoutError:
                 pass
             except asyncio.CancelledError:

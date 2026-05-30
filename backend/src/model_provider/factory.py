@@ -18,9 +18,9 @@ logger = get_logger(__name__)
 _PROVIDER_REGISTRY: Dict[str, type] = {
     "ark": ArkProvider,
     "volcengine": ArkProvider,
-    # 后续扩展：
-    # "openai": OpenAIProvider,
-    # "anthropic": AnthropicProvider,
+    # 别名映射
+    "openai_compatible": ArkProvider,
+    "openai": ArkProvider,
 }
 
 

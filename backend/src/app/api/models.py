@@ -192,7 +192,10 @@ async def list_available_models(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """返回所有可用的模型（来自数据库配置）"""
+    """返回所有可用的模型（来自数据库配置）
+
+    force_refresh=True 时，向服务商请求最新模型列表并同步到数据库。
+    """
     await ensure_model_tables(db)
 
     providers = (await db.scalars(
@@ -201,11 +204,66 @@ async def list_available_models(
         .where((ModelProvider.owner_id == user.id) | (ModelProvider.owner_id.is_(None)))
     )).all()
 
+    if force_refresh:
+        for provider in providers:
+            api_key = ""
+            if provider.api_key_ref == "env:ARK_API_KEY":
+                from app.core.config import get_settings
+                api_key = getattr(get_settings(), "ark_api_key", "") or ""
+            elif provider.api_key_ref and provider.api_key_ref != "mock":
+                api_key = provider.api_key_ref
+
+            try:
+                from model_provider import create_provider
+                from model_provider.core.config import ModelConfig as MPModelConfig
+                mp_config = MPModelConfig(
+                    provider=provider.provider_type or "ark",
+                    model=provider.default_model or "gpt-4o",
+                    api_key=api_key,
+                    base_url=provider.base_url or None,
+                )
+                prov = create_provider(mp_config)
+                remote_models = await prov.list_models()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"list_models 失败 provider={provider.name} error={e}")
+                remote_models = []
+
+            # 同步到数据库： upsert ModelConfig
+            existing = {c.model_id: c for c in (
+                await db.scalars(select(ModelConfig).where(ModelConfig.provider_id == provider.id))
+            ).all()}
+
+            for rm in remote_models:
+                model_id = rm.get("id") or rm.get("model_id") or rm.get("name", "")
+                if not model_id:
+                    continue
+                if model_id in existing:
+                    existing[model_id].name = rm.get("name", model_id)
+                    existing[model_id].status = rm.get("status", "active")
+                else:
+                    new_cfg = ModelConfig(
+                        provider_id=provider.id,
+                        name=rm.get("name", model_id),
+                        model_id=model_id,
+                        purpose="chat",
+                        context_window=rm.get("context_window", 128000),
+                        status=rm.get("status", "active"),
+                        config={"source": "remote", "remote_id": rm.get("id")},
+                    )
+                    db.add(new_cfg)
+
+            for model_id, cfg in existing.items():
+                if model_id not in {rm.get("id") or rm.get("model_id") or rm.get("name", "") for rm in remote_models}:
+                    cfg.status = "unavailable"
+
+            await db.flush()
+
     items = []
     for provider in providers:
         configs = (await db.scalars(
             select(ModelConfig)
-            .where(ModelConfig.provider_id == provider.id, ModelConfig.deleted_at.is_(None), ModelConfig.status == "active")
+            .where(ModelConfig.provider_id == provider.id, ModelConfig.deleted_at.is_(None))
         )).all()
 
         for config in configs:
@@ -216,7 +274,8 @@ async def list_available_models(
                 "config_id": config.id,
                 "name": config.name,
                 "context_window": config.context_window,
-                "status": "active",
+                "status": config.status,
             })
 
+    await db.commit()
     return ok({"items": items, "total": len(items)})

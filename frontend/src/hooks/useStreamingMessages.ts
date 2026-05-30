@@ -57,16 +57,18 @@ export function useStreamingMessages() {
     [updateMessageVersions],
   );
 
-  /** 更新指定流式消息的内容字段 */
+  /** 更新指定流式消息的内容字段（支持增量追加）。 */
   const updateStreamingContent = useCallback(
-    (messageId: string, content: string) => {
+    (messageId: string, updater: string | ((prev: string) => string)) => {
       const msg = streamingMessagesRef.current.get(messageId);
-      if (!msg || msg.content === content) return;
+      if (!msg) return;
+      const newContent = typeof updater === "function" ? updater(msg.content || "") : updater;
+      if (msg.content === newContent) return;
       setStreamingMessages((prev) => {
         const existing = prev.get(messageId);
-        if (!existing || existing.content === content) return prev;
+        if (!existing || existing.content === newContent) return prev;
         const next = new Map(prev);
-        next.set(messageId, { ...existing, content });
+        next.set(messageId, { ...existing, content: newContent });
         return next;
       });
       updateMessageVersions((prev) => bumpVersion(prev, messageId));
@@ -74,16 +76,18 @@ export function useStreamingMessages() {
     [updateMessageVersions],
   );
 
-  /** 更新指定流式消息的 thinking 字段 */
+  /** 更新指定流式消息的 thinking 字段（支持增量追加）。 */
   const updateStreamingThinking = useCallback(
-    (messageId: string, thinking: string) => {
+    (messageId: string, updater: string | ((prev: string) => string)) => {
       const msg = streamingMessagesRef.current.get(messageId);
-      if (!msg || msg.thinking === thinking) return;
+      if (!msg) return;
+      const newThinking = typeof updater === "function" ? updater(msg.thinking || "") : updater;
+      if (msg.thinking === newThinking) return;
       setStreamingMessages((prev) => {
         const existing = prev.get(messageId);
-        if (!existing || existing.thinking === thinking) return prev;
+        if (!existing || existing.thinking === newThinking) return prev;
         const next = new Map(prev);
-        next.set(messageId, { ...existing, thinking });
+        next.set(messageId, { ...existing, thinking: newThinking });
         return next;
       });
       updateMessageVersions((prev) => bumpVersion(prev, messageId));

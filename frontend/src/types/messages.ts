@@ -10,6 +10,8 @@ export type StreamAssistantHandlers = {
   onToolCallDone?: (payload: Record<string, unknown>) => void;
   onDone?: (payload?: Record<string, unknown>) => void;
   onControl?: (stop: () => void) => void;
+  onToken?: (agentId: string, token: string) => void;
+  onThinking?: (agentId: string, thinking: string) => void;
 };
 
 export type MessageBody = {

@@ -326,6 +326,15 @@ export function useMessageOperations(currentUserName: string) {
           onControl: (stop) => {
             stopStreamRef.current = stop;
           },
+          onToken: (agentId, token) => {
+            console.log("onToken", agentId, token);
+            // 确保流式消息已存在（可能在 agent_started 之前就收到 token）
+            ensureStreamingMessage(agentId, "Agent", agentId);
+            streaming.updateStreamingContent(agentId, (prev) => prev + token);
+          },
+          onThinking: (agentId, thinking) => {
+            streaming.updateStreamingThinking(agentId, (prev) => prev + thinking);
+          },
         },
         (body as { reply_to_message_id?: string })?.reply_to_message_id,
         (body as { content?: { attachments: UploadedFile[] } })?.content?.attachments ?? [],
