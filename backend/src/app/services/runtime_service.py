@@ -121,7 +121,7 @@ class OrchestratorService:
         """运行编排"""
         agents = await OrchestratorService._get_conversation_agents(db, conversation)
         if not agents:
-            logger.warning("会话没有可用 Agent conversation_id=%s", conversation.id)
+            logger.warning(f"会话没有可用 Agent conversation_id={conversation.id}")
             return
 
         agent_count = len(agents)
@@ -204,11 +204,11 @@ class SingleAgentOrchestrator:
             async for event in session.run(prompt):
                 logger.debug("SingleAgentOrchestrator 事件", type=event.type)
         except Exception as e:
-            logger.error("SingleAgentOrchestrator 运行失败 error=%s", str(e))
+            logger.error(f"SingleAgentOrchestrator 运行失败 error={str(e)}")
             await event_bus.publish(self.channel, "orchestrator:error", {"error": str(e), "error_type": type(e).__name__})
             raise
 
-        logger.info("SingleAgentOrchestrator 完成 session_id=%s", session.session_id)
+        logger.info(f"SingleAgentOrchestrator 完成 session_id={session.session_id}")
 
 
 class TechLeadOrchestrator:
@@ -259,10 +259,10 @@ class TechLeadOrchestrator:
 
         try:
             async for event in session.run(prompt):
-                logger.debug("TechLeadOrchestrator 事件", type=event.type)
+                logger.debug(f"TechLeadOrchestrator 事件 type={event.type}")
         except Exception as e:
-            logger.error("TechLeadOrchestrator 运行失败 error=%s", str(e))
+            logger.error(f"TechLeadOrchestrator 运行失败 error={str(e)}")
             await event_bus.publish(self.channel, "orchestrator:error", {"error": str(e), "error_type": type(e).__name__})
             raise
 
-        logger.info("TechLeadOrchestrator 完成 session_id=%s", session.session_id)
+        logger.info(f"TechLeadOrchestrator 完成 session_id={session.session_id}")

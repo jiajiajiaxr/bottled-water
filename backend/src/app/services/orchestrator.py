@@ -887,7 +887,7 @@ async def _run_direct_agent(
                         },
                     )
         except Exception as exc:
-            logger.error("[_run_direct_agent] stream_chat error: %s", exc)
+            logger.error(f"[_run_direct_agent] stream_chat error: {exc}")
             if not stream_text:
                 stream_text = f"\n模型调用异常，已降级：{exc}"
                 await event_bus.publish(

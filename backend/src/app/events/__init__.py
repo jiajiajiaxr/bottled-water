@@ -151,7 +151,7 @@ class SseSink(EventSink):
         if queue:
             await queue.put(event)
         else:
-            logger.warning("SSE 队列不存在", conversation_id=self.conversation_id)
+            logger.warning(f"SSE 队列不存在 conversation_id={self.conversation_id}")
 
     async def emit_batch(self, events: list[RuntimeEvent]) -> None:
         for event in events:
@@ -194,7 +194,7 @@ class RedisSink(EventSink):
             await client.ping()
             self._redis = client
         except Exception as exc:
-            logger.warning("Redis Sink 初始化失败，降级", error=str(exc))
+            logger.warning(f"Redis Sink 初始化失败，降级 error={str(exc)}")
             self._redis = None
         return self._redis
 
@@ -214,7 +214,7 @@ class RedisSink(EventSink):
         try:
             await client.publish(channel, payload)
         except Exception as exc:
-            logger.warning("Redis emit 失败", error=str(exc))
+            logger.warning(f"Redis emit 失败 error={str(exc)}")
 
     async def emit_batch(self, events: list[RuntimeEvent]) -> None:
         for event in events:
