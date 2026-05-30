@@ -400,9 +400,9 @@ async def list_workflow_runs(conversation_id: str, latest: bool = False, db: Asy
     conversation = await _get(db, user, conversation_id)
     query = select(WorkflowRun).where(WorkflowRun.conversation_id == conversation.id).order_by(WorkflowRun.created_at.desc())
     if latest:
-        run = await db.scalars(query.limit(1)).first()
+        run = (await db.scalars(query.limit(1))).first()
         return ok(workflow_run_to_dict(run) if run else None)
-    runs = await db.scalars(query.limit(50)).all()
+    runs = (await db.scalars(query.limit(50))).all()
     return ok({"items": [workflow_run_to_dict(it) for it in runs], "total": len(runs)})
 
 
@@ -536,7 +536,7 @@ async def add_participants(conversation_id: str, payload: AddParticipantRequest,
         raise ValidationAppError("群聊最多支持8个Agent")
     added: list[ConversationParticipant] = []
     if add_agents:
-        agents = await db.scalars(select(Agent).where(Agent.id.in_(add_agents), Agent.deleted_at.is_(None))).all()
+        agents = (await db.scalars(select(Agent).where(Agent.id.in_(add_agents), Agent.deleted_at.is_(None)))).all()
         found = {a.id for a in agents}
         missing = set(add_agents) - found
         if missing:
@@ -546,7 +546,7 @@ async def add_participants(conversation_id: str, payload: AddParticipantRequest,
             added.append(ConversationParticipant(conversation_id=conversation.id, participant_type="agent", agent_id=agent.id, role=payload.role))
     add_users = [uid for uid in payload.user_ids if uid not in existing_user_ids]
     if add_users:
-        users = await db.scalars(select(User).where(User.id.in_(add_users), User.deleted_at.is_(None))).all()
+        users = (await db.scalars(select(User).where(User.id.in_(add_users), User.deleted_at.is_(None)))).all()
         for member in users:
             participant = ConversationParticipant(conversation_id=conversation.id, participant_type="user", user_id=member.id, nickname=member.display_name, role=payload.role)
             await db.add(participant)
@@ -643,7 +643,7 @@ async def compat_add_participants(conversation_id: str, payload: AddParticipantR
     conversation = await _get(db, user, conversation_id)
     _ensure_can_manage(conversation, user)
     existing = {it.agent_id for it in _active_participants(conversation) if it.agent_id}
-    agents = await db.scalars(select(Agent).where(Agent.id.in_([aid for aid in payload.agent_ids if aid not in existing]))).all()
+    agents = (await db.scalars(select(Agent).where(Agent.id.in_([aid for aid in payload.agent_ids if aid not in existing])))).all()
     for agent in agents:
         await db.add(ConversationParticipant(conversation_id=conversation.id, participant_type="agent", agent_id=agent.id, role=payload.role))
     await db.commit()

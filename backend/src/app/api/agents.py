@@ -143,7 +143,7 @@ async def agent_status(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    agents = await db.scalars(select(Agent).where(Agent.deleted_at.is_(None))).all()
+    agents = (await db.scalars(select(Agent).where(Agent.deleted_at.is_(None)))).all()
     return ok({agent.id: {"status": agent.status, "name": agent.name} for agent in agents})
 
 
@@ -152,7 +152,7 @@ async def list_capabilities(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    agents = await db.scalars(select(Agent).where(Agent.deleted_at.is_(None))).all()
+    agents = (await db.scalars(select(Agent).where(Agent.deleted_at.is_(None)))).all()
     capabilities: dict = {}
     for agent in agents:
         for cap in agent_to_dict(agent).get("capabilities", []):
