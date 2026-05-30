@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.database import get_db
@@ -25,7 +25,7 @@ compat_router = APIRouter(tags=["messages-compat"])
 ORCHESTRATION_TASKS: dict[str, asyncio.Task] = {}
 
 
-def _get_conversation(db: Session, user: User, conversation_id: str) -> Conversation:
+def _get_conversation(db: AsyncSession, user: User, conversation_id: str) -> Conversation:
     conversation = db.scalar(
         select(Conversation).where(
             Conversation.id == conversation_id,
@@ -47,7 +47,7 @@ def _message_text(payload: dict) -> str:
     return str(payload.get("prompt") or "")
 
 
-def _list_messages(db: Session, user: User, conversation_id: str) -> list[dict]:
+def _list_messages(db: AsyncSession, user: User, conversation_id: str) -> list[dict]:
     _get_conversation(db, user, conversation_id)
     messages = db.scalars(
         select(Message)
@@ -58,7 +58,7 @@ def _list_messages(db: Session, user: User, conversation_id: str) -> list[dict]:
 
 
 def _send(
-    db: Session, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True
+    db: AsyncSession, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True
 ) -> Message:
     conversation = _get_conversation(db, user, conversation_id)
     text = _message_text(payload).strip()
@@ -151,7 +151,7 @@ def _send(
 @router.get("/conversations/{conversation_id}/messages", response_model=ApiResponse[dict])
 async def list_messages(
     conversation_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     return ok(
@@ -163,7 +163,7 @@ async def list_messages(
 async def stream_conversation(
     conversation_id: str,
     payload: SendMessagePayload,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """标准 SSE 流式接口：POST 发送消息，返回 text/event-stream。
@@ -246,7 +246,7 @@ async def stream_conversation(
 @router.post("/conversations/{conversation_id}/stream/cancel", response_model=ApiResponse[dict])
 async def cancel_stream(
     conversation_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     conversation = _get_conversation(db, user, conversation_id)
@@ -269,7 +269,7 @@ async def cancel_stream(
 @compat_router.get("/conversations/{conversation_id}/messages", response_model=list[dict])
 async def compat_list_messages(
     conversation_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     return _list_messages(db, user, conversation_id)
