@@ -48,7 +48,7 @@ class ArkProvider(BaseModelProvider):
         try:
             response = await self.client.chat.completions.create(**payload)
         except Exception as e:
-            logger.error("chat 调用失败", model=self.model, error=str(e))
+            logger.error(f"chat 调用失败 model={self.model} error={str(e)}")
             raise
 
         choice = response.choices[0]
@@ -129,7 +129,7 @@ class ArkProvider(BaseModelProvider):
                     finish_reason=chunk.choices[0].finish_reason if chunk.choices else None,
                 )
         except Exception as e:
-            logger.error("chat_stream 调用失败", model=self.model, error=str(e))
+            logger.error(f"chat_stream 调用失败 model={self.model} error={str(e)}")
             raise
 
         logger.info("chat_stream 调用完成", model=self.model, total_chars=total_chars)

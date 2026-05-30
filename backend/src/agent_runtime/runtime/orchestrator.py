@@ -143,6 +143,7 @@ class Orchestrator:
             self._agent_loops[agent_id] = AgentLoop(
                 agent_config=agent,
                 model_provider=self.model_provider,
+                use_streaming=True,
             )
 
         # 保存用户消息

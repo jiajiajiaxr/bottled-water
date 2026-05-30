@@ -46,7 +46,7 @@ class Agent:
         self.tool_executor = tool_executor
 
         # 内部引擎
-        self._loop = AgentLoop(config, model_provider)
+        self._loop = AgentLoop(config, model_provider, use_streaming=True)
 
         # 状态机
         self._state = AgentState.IDLE
