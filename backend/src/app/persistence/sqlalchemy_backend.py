@@ -91,15 +91,18 @@ class SQLAlchemyBackend(PersistenceBackend):
 
     async def save_blackboard(self, conversation_id: str, data: dict) -> None:
         """保存 Blackboard（写入 conversation.extra）"""
-        result = await self.db.execute(
-            select(Conversation).where(Conversation.id == conversation_id)
-        )
-        conv = result.scalar_one_or_none()
-        if conv:
-            if not conv.extra:
-                conv.extra = {}
-            conv.extra["blackboard"] = data
-            await self.db.commit()
+        try:
+            result = await self.db.execute(
+                select(Conversation).where(Conversation.id == conversation_id)
+            )
+            conv = result.scalar_one_or_none()
+            if conv:
+                if not conv.extra:
+                    conv.extra = {}
+                conv.extra["blackboard"] = data
+                await self.db.commit()
+        except Exception:
+            pass  # 持久化失败不影响主流程
 
     async def load_agent_context(self, agent_id: str, conversation_id: str) -> List[dict]:
         """加载 Agent 上下文"""

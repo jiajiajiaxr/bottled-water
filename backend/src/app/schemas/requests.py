@@ -480,6 +480,7 @@ class SendMessagePayload(BaseModel):
     quotedMessageId: str | None = None
     thinking_enabled: bool = False
     scheduling_strategy: Literal["workflow", "tech_lead"] = "workflow"
+    regenerate_message_id: str | None = None
 
 
 # ===== tasks =====

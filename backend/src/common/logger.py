@@ -149,11 +149,13 @@ class _KwargsLogger:
         self._logger = logger
 
     def _log(self, level: int, msg: str, **kwargs):
+        # 提取标准 Logger 参数（exc_info, stack_info, extra）
+        exc_info = kwargs.pop("exc_info", False)
         if kwargs:
             extra = {"context": " ".join(f"{k}={v}" for k, v in kwargs.items())}
-            self._logger.log(level, msg, extra=extra)
+            self._logger.log(level, msg, extra=extra, exc_info=exc_info)
         else:
-            self._logger.log(level, msg)
+            self._logger.log(level, msg, exc_info=exc_info)
 
     def debug(self, msg: str, **kwargs):
         self._log(logging.DEBUG, msg, **kwargs)

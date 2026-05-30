@@ -260,7 +260,7 @@ export function useMessageOperations(currentUserName: string) {
     try {
       await api.sendMessage(
         conversationId,
-        "",
+        (body.content as { text?: string }).text || "",
         {
           onMessageStart: (payload) => {
             // system.session_started / system.round_started / system.agent_started

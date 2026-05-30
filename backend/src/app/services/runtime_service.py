@@ -6,8 +6,7 @@
 
 from __future__ import annotations
 
-import logging
-from typing import Any
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,6 +18,7 @@ from agent_runtime.strategies.tech_lead import TechLeadScheduler
 from agent_runtime.strategies.single_agent import SingleAgentScheduler
 from model_provider import create_provider
 from model_provider.core.config import ModelConfig
+from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
 
 from app.core.config import get_settings
 from app.models import Agent, Conversation, Message, User
@@ -26,8 +26,46 @@ from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink
 from app.events import app_event_bus as event_bus
 from app.services.serialization import message_meta_to_dict
+from common.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("app.services.runtime_service")
+
+
+class _MockModelProvider(BaseModelProvider):
+    """Mock 模型提供者，用于单 Agent 纯代码模式（不实际调用 LLM）"""
+
+    def __init__(self):
+        super().__init__({"model": "mock"})
+
+    async def chat(
+        self,
+        messages: List[ChatMessage],
+        system_prompt: Optional[str] = None,
+        tools: Optional[List[Dict]] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+    ) -> ChatResponse:
+        last_message = messages[-1] if messages else None
+        content = last_message.content if last_message else "Mock response"
+        return ChatResponse(
+            content=content,
+            finish_reason="stop",
+        )
+
+    async def chat_stream(
+        self,
+        messages: List[ChatMessage],
+        system_prompt: Optional[str] = None,
+        tools: Optional[List[Dict]] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+    ) -> AsyncIterator[StreamChunk]:
+        last_message = messages[-1] if messages else None
+        content = last_message.content if last_message else "Mock response"
+        yield StreamChunk(
+            content=content,
+            finish_reason="stop",
+        )
 
 
 class OrchestratorService:
@@ -67,8 +105,8 @@ class OrchestratorService:
     def _create_model_provider(agent: Agent | None = None) -> Any:
         """创建模型提供者"""
         settings = get_settings()
-        api_key = getattr(settings, "ARK_API_KEY", "")
-        model = getattr(settings, "ARK_DEFAULT_MODEL", "ep-xxx")
+        api_key = getattr(settings, "ark_api_key", "") or ""
+        model = getattr(settings, "ark_model", "ep-xxx") or "ep-xxx"
 
         if not api_key:
             logger.warning("未配置 ARK API Key，使用 mock 提供者")
@@ -81,7 +119,7 @@ class OrchestratorService:
         """运行编排"""
         agents = OrchestratorService._get_conversation_agents(db, conversation)
         if not agents:
-            logger.warning("会话没有可用 Agent", conversation_id=conversation.id)
+            logger.warning("会话没有可用 Agent conversation_id=%s", conversation.id)
             return
 
         agent_count = len(agents)
@@ -139,19 +177,20 @@ class SingleAgentOrchestrator:
             tools=(agent.config or {}).get("tools", []),
         )
 
+        model_provider = OrchestratorService._create_model_provider(agent)
         scheduler = SingleAgentScheduler(agents={agent.id: agent_config})
         tool_executor = _ToolExecutorAdapter(self.db, agent, user, self.conversation)
 
         session = AgentSession.create(
             agents=[agent_config],
             scheduler=scheduler,
-            model_provider=None,
+            model_provider=model_provider,
             persistence=SQLAlchemyBackend(self.db),
             event_sink=SseSink(conversation_id=str(self.conversation.id)),
             tool_executor=tool_executor,
         )
 
-        logger.info("SingleAgentOrchestrator 启动", session_id=session.session_id, agent_id=agent.id)
+        logger.info("SingleAgentOrchestrator 启动 session_id=%s agent_id=%s", session.session_id, agent.id)
 
         prompt = (
             self.message.content.get("text", "")
@@ -163,11 +202,11 @@ class SingleAgentOrchestrator:
             async for event in session.run(prompt):
                 logger.debug("SingleAgentOrchestrator 事件", type=event.type)
         except Exception as e:
-            logger.error("SingleAgentOrchestrator 运行失败", error=str(e), exc_info=True)
+            logger.error("SingleAgentOrchestrator 运行失败 error=%s", str(e))
             await event_bus.publish(self.channel, "orchestrator:error", {"error": str(e), "error_type": type(e).__name__})
             raise
 
-        logger.info("SingleAgentOrchestrator 完成", session_id=session.session_id)
+        logger.info("SingleAgentOrchestrator 完成 session_id=%s", session.session_id)
 
 
 class TechLeadOrchestrator:
@@ -208,7 +247,7 @@ class TechLeadOrchestrator:
             tool_executor=tool_executor,
         )
 
-        logger.info("TechLeadOrchestrator 启动", session_id=session.session_id, agent_count=len(agent_configs))
+        logger.info("TechLeadOrchestrator 启动 session_id=%s agent_count=%s", session.session_id, len(agent_configs))
 
         prompt = (
             self.message.content.get("text", "")
@@ -220,8 +259,8 @@ class TechLeadOrchestrator:
             async for event in session.run(prompt):
                 logger.debug("TechLeadOrchestrator 事件", type=event.type)
         except Exception as e:
-            logger.error("TechLeadOrchestrator 运行失败", error=str(e), exc_info=True)
+            logger.error("TechLeadOrchestrator 运行失败 error=%s", str(e))
             await event_bus.publish(self.channel, "orchestrator:error", {"error": str(e), "error_type": type(e).__name__})
             raise
 
-        logger.info("TechLeadOrchestrator 完成", session_id=session.session_id)
+        logger.info("TechLeadOrchestrator 完成 session_id=%s", session.session_id)
