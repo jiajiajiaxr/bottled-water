@@ -105,7 +105,7 @@ async def list_agents(
     if status != "all":
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         query = query.where(Agent.status.in_(statuses))
-    agents = await db.scalars(query).all()
+    agents = (await db.scalars(query)).all()
     items = [agent_to_dict(agent) for agent in agents]
     if provider != "all":
         items = [it for it in items if it.get("provider") == provider]
