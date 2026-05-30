@@ -104,9 +104,21 @@ class OrchestratorService:
         return (await db.scalars(base_query.where(Agent.type != "custom"))).all()
 
     @staticmethod
-    def _create_model_provider(agent: Agent | None = None) -> Any:
-        """创建模型提供者"""
+    def _create_model_provider(agent: Agent | None = None, model_config_id: str | None = None) -> Any:
+        """创建模型提供者
+
+        Args:
+            agent: Agent 实例（从中获取默认模型配置）
+            model_config_id: 用户指定的模型配置ID，优先于 agent 配置
+        """
         settings = get_settings()
+
+        if model_config_id:
+            from app.models import ModelConfig
+            # 需要同步获取，这里用同步方式临时处理
+            # 实际在 run() 中已通过 db.get() 获取
+            pass
+
         api_key = getattr(settings, "ark_api_key", "") or ""
         model = getattr(settings, "ark_model", "ep-xxx") or "ep-xxx"
 
@@ -117,20 +129,59 @@ class OrchestratorService:
         return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
 
     @staticmethod
-    async def run(db: AsyncSession, conversation: Conversation, message: Message, strategy: str) -> None:
-        """运行编排"""
+    async def create_provider_from_config(db: AsyncSession, model_config_id: str) -> Any:
+        """根据 ModelConfig 创建模型提供者"""
+        from app.models import ModelConfig as DBModelConfig
+        from model_provider.core.config import ModelConfig as MPModelConfig
+
+        config = await db.get(DBModelConfig, model_config_id)
+        if not config or config.deleted_at is not None:
+            logger.warning(f"ModelConfig not found: {model_config_id}")
+            return OrchestratorService._create_model_provider()
+
+        provider = config.provider
+        if not provider or provider.status != "active":
+            logger.warning(f"Provider not active for config: {model_config_id}")
+            return OrchestratorService._create_model_provider()
+
+        api_key_ref = provider.api_key_ref
+        api_key = ""
+        if api_key_ref == "env:ARK_API_KEY":
+            settings = get_settings()
+            api_key = getattr(settings, "ark_api_key", "") or ""
+        elif api_key_ref and api_key_ref != "mock":
+            # 实际应该从密钥管理服务获取，这里简化处理
+            api_key = api_key_ref
+
+        if not api_key:
+            logger.warning(f"No API key for provider: {provider.name}")
+            return OrchestratorService._create_model_provider()
+
+        return create_provider(MPModelConfig(
+            provider=provider.provider_type or "ark",
+            model=config.model_id,
+            api_key=api_key,
+            base_url=provider.base_url or None,
+        ))
+
+    @staticmethod
+    async def run(db: AsyncSession, conversation: Conversation, message: Message, strategy: str, model_config_id: str | None = None) -> None:
+        """运行编排
+
+        Args:
+            model_config_id: 用户选择的模型配置ID，优先于 agent 配置
+        """
         agents = await OrchestratorService._get_conversation_agents(db, conversation)
         if not agents:
             logger.warning(f"会话没有可用 Agent conversation_id={conversation.id}")
             return
 
         agent_count = len(agents)
-        scheduler_name = "single" if agent_count == 1 else "tech_lead"
 
         if agent_count == 1:
-            await SingleAgentOrchestrator(db, conversation, message, str(conversation.id), agents).run()
+            await SingleAgentOrchestrator(db, conversation, message, str(conversation.id), agents, model_config_id).run()
         else:
-            await TechLeadOrchestrator(db, conversation, message, str(conversation.id), agents).run()
+            await TechLeadOrchestrator(db, conversation, message, str(conversation.id), agents, model_config_id).run()
 
 
 class _ToolExecutorAdapter(ToolExecutor):
@@ -161,12 +212,13 @@ class _ToolExecutorAdapter(ToolExecutor):
 class SingleAgentOrchestrator:
     """单 Agent 编排器，使用 SingleAgentScheduler（纯代码，无 LLM 开销）"""
 
-    def __init__(self, db: AsyncSession, conversation: Conversation, message: Message, channel: str, agents: list[Agent]):
+    def __init__(self, db: AsyncSession, conversation: Conversation, message: Message, channel: str, agents: list[Agent], model_config_id: str | None = None):
         self.db = db
         self.conversation = conversation
         self.message = message
         self.channel = channel
         self.agents = agents
+        self.model_config_id = model_config_id
 
     async def run(self) -> None:
         agent = self.agents[0]
@@ -179,7 +231,10 @@ class SingleAgentOrchestrator:
             tools=(agent.config or {}).get("tools", []),
         )
 
-        model_provider = OrchestratorService._create_model_provider(agent)
+        if self.model_config_id:
+            model_provider = await OrchestratorService.create_provider_from_config(self.db, self.model_config_id)
+        else:
+            model_provider = OrchestratorService._create_model_provider(agent)
         scheduler = SingleAgentScheduler(agents={agent.id: agent_config})
         tool_executor = _ToolExecutorAdapter(self.db, agent, user, self.conversation)
 
@@ -202,24 +257,26 @@ class SingleAgentOrchestrator:
 
         try:
             async for event in session.run(prompt):
-                logger.debug("SingleAgentOrchestrator 事件", type=event.type)
+                logger.debug(f"SingleAgentOrchestrator 事件 type={event.type}")
+                await event_bus.publish(self.channel, event.type, event.payload)
         except Exception as e:
             logger.error(f"SingleAgentOrchestrator 运行失败 error={str(e)}")
             await event_bus.publish(self.channel, "orchestrator:error", {"error": str(e), "error_type": type(e).__name__})
             raise
 
-        logger.info(f"SingleAgentOrchestrator 完成 session_id={session.session_id}")
+        await event_bus.publish(self.channel, "orchestrator:complete", {"session_id": session.session_id})
 
 
 class TechLeadOrchestrator:
     """多 Agent 编排器，使用 TechLeadScheduler（LLM 驱动协调）"""
 
-    def __init__(self, db: AsyncSession, conversation: Conversation, message: Message, channel: str, agents: list[Agent]):
+    def __init__(self, db: AsyncSession, conversation: Conversation, message: Message, channel: str, agents: list[Agent], model_config_id: str | None = None):
         self.db = db
         self.conversation = conversation
         self.message = message
         self.channel = channel
         self.agents = agents
+        self.model_config_id = model_config_id
 
     async def run(self) -> None:
         agents = self.agents
@@ -235,7 +292,10 @@ class TechLeadOrchestrator:
             for agent in agents
         ]
 
-        model_provider = OrchestratorService._create_model_provider(agents[0] if agents else None)
+        if self.model_config_id:
+            model_provider = await OrchestratorService.create_provider_from_config(self.db, self.model_config_id)
+        else:
+            model_provider = OrchestratorService._create_model_provider(agents[0] if agents else None)
         scheduler = TechLeadScheduler(agents={a.id: a for a in agent_configs})
         primary_agent = agents[0]
         tool_executor = _ToolExecutorAdapter(self.db, primary_agent, user, self.conversation)
@@ -260,9 +320,10 @@ class TechLeadOrchestrator:
         try:
             async for event in session.run(prompt):
                 logger.debug(f"TechLeadOrchestrator 事件 type={event.type}")
+                await event_bus.publish(self.channel, event.type, event.payload)
         except Exception as e:
             logger.error(f"TechLeadOrchestrator 运行失败 error={str(e)}")
             await event_bus.publish(self.channel, "orchestrator:error", {"error": str(e), "error_type": type(e).__name__})
             raise
 
-        logger.info(f"TechLeadOrchestrator 完成 session_id={session.session_id}")
+        await event_bus.publish(self.channel, "orchestrator:complete", {"session_id": session.session_id})

@@ -481,6 +481,7 @@ class SendMessagePayload(BaseModel):
     thinking_enabled: bool = False
     scheduling_strategy: Literal["workflow", "tech_lead"] = "workflow"
     regenerate_message_id: str | None = None
+    model_config_id: str | None = None  # 用户选择的模型配置ID
 
 
 # ===== tasks =====

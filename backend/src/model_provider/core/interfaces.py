@@ -80,3 +80,7 @@ class BaseModelProvider(ABC):
         cn_chars = len(re.findall(r'[一-鿿]', text))
         en_words = len(re.findall(r'[a-zA-Z]+', text))
         return cn_chars + int(en_words * 1.3) + 10
+
+    async def list_models(self) -> list[dict]:
+        """列出服务商下所有可用模型（子类实现）"""
+        return []

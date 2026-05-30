@@ -132,7 +132,17 @@ class ArkProvider(BaseModelProvider):
             logger.error(f"chat_stream 调用失败 model={self.model} error={str(e)}")
             raise
 
-        logger.info("chat_stream 调用完成", model=self.model, total_chars=total_chars)
+        async def list_models(self) -> list[dict]:
+        """列出 Ark provider 下可用的模型"""
+        try:
+            models_data = await self.client.models.list()
+            return [
+                {"id": m.id, "name": getattr(m, "name", m.id), "status": "active"}
+                for m in models_data.data
+            ]
+        except Exception as e:
+            logger.warning(f"list_models 调用失败: {e}")
+            return []
 
     def _build_payload(
         self,

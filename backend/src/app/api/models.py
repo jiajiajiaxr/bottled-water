@@ -184,3 +184,39 @@ async def test_model(
         model_id = model.id
     result = await test_model_config(db, model_id, payload.prompt)
     return ok({"response": result.text, "model": result.model, "usage": result.usage}, "模型测试完成")
+
+
+@router.get("/models/available", response_model=ApiResponse[dict])
+async def list_available_models(
+    force_refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """返回所有可用的模型（来自数据库配置）"""
+    await ensure_model_tables(db)
+
+    providers = (await db.scalars(
+        select(ModelProvider)
+        .where(ModelProvider.deleted_at.is_(None), ModelProvider.status == "active")
+        .where((ModelProvider.owner_id == user.id) | (ModelProvider.owner_id.is_(None)))
+    )).all()
+
+    items = []
+    for provider in providers:
+        configs = (await db.scalars(
+            select(ModelConfig)
+            .where(ModelConfig.provider_id == provider.id, ModelConfig.deleted_at.is_(None), ModelConfig.status == "active")
+        )).all()
+
+        for config in configs:
+            items.append({
+                "provider_id": provider.id,
+                "provider_name": provider.name,
+                "model_id": config.model_id,
+                "config_id": config.id,
+                "name": config.name,
+                "context_window": config.context_window,
+                "status": "active",
+            })
+
+    return ok({"items": items, "total": len(items)})

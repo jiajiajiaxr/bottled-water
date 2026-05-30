@@ -136,7 +136,8 @@ async def _send(
 
         if previous and not previous.done():
             previous.cancel()
-        task = asyncio.create_task(OrchestratorService.run(db, conversation, message, scheduling_strategy))
+        model_config_id = payload.get("model_config_id")
+        task = asyncio.create_task(OrchestratorService.run(db, conversation, message, scheduling_strategy, model_config_id))
         ORCHESTRATION_TASKS[conversation.id] = task
 
         task.add_done_callback(
