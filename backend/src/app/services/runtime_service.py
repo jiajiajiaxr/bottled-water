@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from agent_runtime import AgentConfig, Session as AgentSession
 from agent_runtime.core.interfaces import ToolExecutor
@@ -123,8 +124,12 @@ class OrchestratorService:
         from app.models import ModelConfig as DBModelConfig
         from model_provider.core.config import ModelConfig as MPModelConfig
 
-        config = await db.get(DBModelConfig, model_config_id)
-        if not config or config.deleted_at is not None:
+        config = await db.scalar(
+            select(DBModelConfig)
+            .options(selectinload(DBModelConfig.provider))
+            .where(DBModelConfig.id == model_config_id, DBModelConfig.deleted_at.is_(None))
+        )
+        if not config:
             logger.warning(f"ModelConfig not found: {model_config_id}")
             return OrchestratorService._create_model_provider()
 
