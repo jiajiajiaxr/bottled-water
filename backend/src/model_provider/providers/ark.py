@@ -132,7 +132,7 @@ class ArkProvider(BaseModelProvider):
             logger.error(f"chat_stream 调用失败 model={self.model} error={str(e)}")
             raise
 
-        async def list_models(self) -> list[dict]:
+    async def list_models(self) -> list[dict]:
         """列出 Ark provider 下可用的模型"""
         try:
             models_data = await self.client.models.list()
