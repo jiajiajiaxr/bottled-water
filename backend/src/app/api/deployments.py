@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -47,12 +48,14 @@ async def _check_artifact_owner(db: AsyncSession, user: User, artifact_id: str) 
 async def _create(db: AsyncSession, user: User, payload: dict) -> Deployment:
     artifact_id = payload.get("artifact_id")
     if not artifact_id and payload.get("conversationId"):
-        artifact = await db.run_sync(
-            lambda s: s.query(Artifact)
-            .filter(Artifact.conversation_id == payload["conversationId"], Artifact.deleted_at.is_(None))
+        from sqlalchemy import select
+        artifact_result = await db.scalars(
+            select(Artifact)
+            .where(Artifact.conversation_id == payload["conversationId"], Artifact.deleted_at.is_(None))
             .order_by(Artifact.updated_at.desc())
-            .first()
+            .limit(1)
         )
+        artifact = artifact_result.first()
         artifact_id = artifact.id if artifact else None
     if not artifact_id:
         raise NotFoundError("产物不存在")
@@ -180,12 +183,12 @@ async def list_artifact_deployments(
     user: User = Depends(get_current_user),
 ):
     await _check_artifact_owner(db, user, artifact_id)
-    deployments = await db.run_sync(
-        lambda s: s.query(Deployment)
-        .filter(Deployment.artifact_id == artifact_id, Deployment.deleted_at.is_(None))
+    deployments = await db.scalars(
+        select(Deployment)
+        .where(Deployment.artifact_id == artifact_id, Deployment.deleted_at.is_(None))
         .order_by(Deployment.created_at.desc())
-        .all()
     )
+    deployments_list = deployments.all()
     return ok({"items": [deployment_to_dict(item) for item in deployments], "total": len(deployments)})
 
 

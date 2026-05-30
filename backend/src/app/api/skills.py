@@ -40,7 +40,7 @@ def _model_provider():
 
 
 async def ensure_skill_tables(db: AsyncSession) -> None:
-    await db.run_sync(lambda conn: Skill.__table__.create(bind=conn, checkfirst=True))
+    await db.run_sync(lambda session: Skill.__table__.create(bind=session.get_bind(), checkfirst=True))
 
 
 def _visible_skill_filter(user: User):

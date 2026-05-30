@@ -22,8 +22,8 @@ router = APIRouter(tags=["mcp"])
 
 
 async def ensure_mcp_tables(db: AsyncSession) -> None:
-    await db.run_sync(lambda: McpServer.__table__.create(bind=db.get_bind(), checkfirst=True))
-    await db.run_sync(lambda: McpToolInvocation.__table__.create(bind=db.get_bind(), checkfirst=True))
+    await db.run_sync(lambda session: McpServer.__table__.create(bind=session.get_bind(), checkfirst=True))
+    await db.run_sync(lambda session: McpToolInvocation.__table__.create(bind=session.get_bind(), checkfirst=True))
 
 
 async def _get_server(db: AsyncSession, user: User, server_id: str) -> McpServer:
