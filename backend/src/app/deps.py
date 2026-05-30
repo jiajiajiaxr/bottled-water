@@ -11,7 +11,7 @@ from app.core.security import decode_access_token
 from app.models import User
 
 
-def get_current_user(
+async def get_current_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     authorization: Annotated[str | None, Header()] = None,
     token_query: Annotated[str | None, Query(alias="token")] = None,
