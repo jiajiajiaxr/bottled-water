@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.database import get_db
@@ -34,12 +34,12 @@ class RejectSubtaskRequest(BaseModel):
     reason: str | None = None
 
 
-def _create_task(db: Session, user: User, payload: dict) -> Task:
+async def _create_task(db: AsyncSession, user: User, payload: dict) -> Task:
     conversation_id = payload.get("conversation_id")
     prompt = payload.get("prompt") or payload.get("description") or payload.get("title")
     if not prompt:
         raise ValidationAppError("任务描述不能为空")
-    conversation = db.scalar(
+    conversation = await db.scalar(
         select(Conversation).where(
             Conversation.id == conversation_id,
             Conversation.creator_id == user.id,
@@ -48,16 +48,16 @@ def _create_task(db: Session, user: User, payload: dict) -> Task:
     )
     if not conversation:
         raise NotFoundError("会话不存在")
-    task = create_task_for_prompt(db, conversation, prompt)
+    task = await create_task_for_prompt(db, conversation, prompt)
     task.status = "QUEUED"
     task.progress = 10
-    db.commit()
-    db.refresh(task)
+    await db.commit()
+    await db.refresh(task)
     return task
 
 
-def _get_task(db: Session, user: User, task_id: str) -> Task:
-    task = db.scalar(select(Task).where(Task.id == task_id, Task.creator_id == user.id))
+async def _get_task(db: AsyncSession, user: User, task_id: str) -> Task:
+    task = await db.scalar(select(Task).where(Task.id == task_id, Task.creator_id == user.id))
     if not task:
         raise NotFoundError("任务不存在")
     return task
@@ -67,27 +67,27 @@ def _get_task(db: Session, user: User, task_id: str) -> Task:
 @router.post("/orchestrator/tasks", response_model=ApiResponse[TaskOut])
 async def create_task(
     payload: CreateTaskRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return ok(task_to_dict(_create_task(db, user, payload.model_dump())), "任务已创建")
+    return ok(task_to_dict(await _create_task(db, user, payload.model_dump())), "任务已创建")
 
 
 @router.get("/tasks", response_model=ApiResponse[list[TaskOut]])
-async def list_tasks(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    tasks = db.scalars(select(Task).where(Task.creator_id == user.id).order_by(Task.created_at.desc())).all()
-    return ok([task_to_dict(task) for task in tasks])
+async def list_tasks(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    tasks = await db.scalars(select(Task).where(Task.creator_id == user.id).order_by(Task.created_at.desc()))
+    return ok([task_to_dict(task) for task in tasks.all()])
 
 
 @router.get("/tasks/{task_id}", response_model=ApiResponse[TaskOut])
-async def get_task(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return ok(task_to_dict(_get_task(db, user, task_id)))
+async def get_task(task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    return ok(task_to_dict(await _get_task(db, user, task_id)))
 
 
 @router.get("/tasks/{task_id}/status", response_model=ApiResponse[dict])
-async def get_task_status(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    task = _get_task(db, user, task_id)
-    subtasks = db.scalars(select(Subtask).where(Subtask.parent_task_id == task.id)).all()
+async def get_task_status(task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    task = await _get_task(db, user, task_id)
+    subtasks = (await db.scalars(select(Subtask).where(Subtask.parent_task_id == task.id))).all()
     counts = {"total": len(subtasks), "completed": 0, "running": 0, "pending": 0, "failed": 0}
     for subtask in subtasks:
         status = subtask.status.lower()
@@ -104,18 +104,18 @@ async def get_task_status(task_id: str, db: Session = Depends(get_db), user: Use
 
 
 @router.get("/tasks/{task_id}/subtasks", response_model=ApiResponse[list[SubtaskOut]])
-async def list_subtasks(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    _get_task(db, user, task_id)
-    subtasks = db.scalars(select(Subtask).where(Subtask.parent_task_id == task_id)).all()
+async def list_subtasks(task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await _get_task(db, user, task_id)
+    subtasks = (await db.scalars(select(Subtask).where(Subtask.parent_task_id == task_id))).all()
     return ok([subtask_to_dict(item) for item in subtasks])
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=ApiResponse[TaskOut])
-async def cancel_task(task_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    task = _get_task(db, user, task_id)
+async def cancel_task(task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    task = await _get_task(db, user, task_id)
     task.status = "CANCELLED"
     task.completed_at = utcnow()
-    db.commit()
+    await db.commit()
     return ok(task_to_dict(task), "任务已取消")
 
 
@@ -123,15 +123,15 @@ async def cancel_task(task_id: str, db: Session = Depends(get_db), user: User = 
 async def retry_task(
     task_id: str,
     payload: RetryTaskRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    task = _get_task(db, user, task_id)
+    task = await _get_task(db, user, task_id)
     task.status = "QUEUED"
     task.progress = min(task.progress or 0, 15)
     task.error_info = None
     task.output = {**(task.output or {}), "retry": {"switch_agent": payload.switch_agent, "at": utcnow().isoformat()}}
-    db.commit()
+    await db.commit()
     await event_bus.publish(f"task:{task.id}", "task:retried", task_to_dict(task))
     return ok(task_to_dict(task), "任务已重新排队")
 
@@ -140,17 +140,17 @@ async def retry_task(
 async def approve_subtask(
     subtask_id: str,
     payload: ApproveSubtaskRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    subtask = db.get(Subtask, subtask_id)
+    subtask = await db.get(Subtask, subtask_id)
     if not subtask:
         raise NotFoundError("子任务不存在")
-    task = _get_task(db, user, subtask.parent_task_id)
+    task = await _get_task(db, user, subtask.parent_task_id)
     subtask.status = "APPROVED"
     subtask.output = {**(subtask.output or {}), "approval": {"approved_by": user.id, "comment": payload.comment, "at": utcnow().isoformat()}}
     task.output = {**(task.output or {}), "last_approval": subtask.id}
-    db.commit()
+    await db.commit()
     return ok(subtask_to_dict(subtask), "子任务已审批通过")
 
 
@@ -158,16 +158,16 @@ async def approve_subtask(
 async def reject_subtask(
     subtask_id: str,
     payload: RejectSubtaskRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    subtask = db.get(Subtask, subtask_id)
+    subtask = await db.get(Subtask, subtask_id)
     if not subtask:
         raise NotFoundError("子任务不存在")
-    _get_task(db, user, subtask.parent_task_id)
+    await _get_task(db, user, subtask.parent_task_id)
     subtask.status = "REJECTED"
     subtask.output = {**(subtask.output or {}), "rejection": {"rejected_by": user.id, "reason": payload.reason, "at": utcnow().isoformat()}}
-    db.commit()
+    await db.commit()
     return ok(subtask_to_dict(subtask), "子任务已驳回")
 
 
@@ -183,7 +183,7 @@ async def stream_task(task_id: str):
 @compat_router.post("/orchestrator/tasks", response_model=TaskOut)
 async def compat_create_task(
     payload: CreateTaskRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return task_to_dict(_create_task(db, user, payload.model_dump()))
+    return task_to_dict(await _create_task(db, user, payload.model_dump()))

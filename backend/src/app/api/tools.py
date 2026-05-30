@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
@@ -40,19 +40,19 @@ def _model_provider():
     return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
 
 
-def _validate_workspace(db: Session, user: User, workspace_id: str | None) -> None:
+async def _validate_workspace(db: AsyncSession, user: User, workspace_id: str | None) -> None:
     if not workspace_id:
         return
-    workspace = db.get(Workspace, workspace_id)
+    workspace = await db.get(Workspace, workspace_id)
     if not workspace or workspace.deleted_at is not None:
         raise NotFoundError("工作区不存在")
     if workspace.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("无权访问该工作区")
 
 
-def _owned_tool(db: Session, user: User, tool_id: str) -> ToolDefinition:
-    ensure_tool_tables(db)
-    tool = db.scalar(select(ToolDefinition).where(ToolDefinition.id == tool_id, ToolDefinition.deleted_at.is_(None)))
+async def _owned_tool(db: AsyncSession, user: User, tool_id: str) -> ToolDefinition:
+    await ensure_tool_tables(db)
+    tool = await db.scalar(select(ToolDefinition).where(ToolDefinition.id == tool_id, ToolDefinition.deleted_at.is_(None)))
     if not tool:
         raise NotFoundError("工具不存在")
     if tool.owner_id != user.id and user.role != "admin":
@@ -150,19 +150,19 @@ async def _generate_tool_spec(payload: GenerateToolRequest) -> dict:
 
 
 @router.get("/tools", response_model=ApiResponse[dict])
-async def list_tool_catalog(workspace_id: str | None = None, q: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    _validate_workspace(db, user, workspace_id)
-    items = list_tools(db, user, workspace_id=workspace_id, q=q)
+async def list_tool_catalog(workspace_id: str | None = None, q: str | None = None, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await _validate_workspace(db, user, workspace_id)
+    items = await list_tools(db, user, workspace_id=workspace_id, q=q)
     return ok({"items": items, "total": len(items)})
 
 
 @router.post("/tools", response_model=ApiResponse[ToolDefinitionOut])
-async def create_tool(payload: CreateToolRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    ensure_tool_tables(db)
-    _validate_workspace(db, user, payload.workspace_id)
+async def create_tool(payload: CreateToolRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await ensure_tool_tables(db)
+    await _validate_workspace(db, user, payload.workspace_id)
     if payload.name in BUILTIN_TOOLS:
         raise ValidationAppError("不能覆盖平台内置工具")
-    duplicate = db.scalar(select(ToolDefinition).where(ToolDefinition.owner_id == user.id, ToolDefinition.workspace_id == payload.workspace_id, ToolDefinition.name == payload.name, ToolDefinition.deleted_at.is_(None)))
+    duplicate = await db.scalar(select(ToolDefinition).where(ToolDefinition.owner_id == user.id, ToolDefinition.workspace_id == payload.workspace_id, ToolDefinition.name == payload.name, ToolDefinition.deleted_at.is_(None)))
     if duplicate:
         raise ValidationAppError("工具名称已存在")
     implementation = redact_sensitive(payload.implementation)
@@ -178,15 +178,15 @@ async def create_tool(payload: CreateToolRequest, db: Session = Depends(get_db),
         tags=payload.tags, config=redact_sensitive(payload.config),
     )
     db.add(tool)
-    db.commit()
-    db.refresh(tool)
+    await db.commit()
+    await db.refresh(tool)
     return ok(tool_definition_to_dict(tool), "工具已创建")
 
 
 @router.post("/tools/generate", response_model=ApiResponse[ToolDefinitionOut])
-async def generate_tool(payload: GenerateToolRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    ensure_tool_tables(db)
-    _validate_workspace(db, user, payload.workspace_id)
+async def generate_tool(payload: GenerateToolRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await ensure_tool_tables(db)
+    await _validate_workspace(db, user, payload.workspace_id)
     spec = await _generate_tool_spec(payload)
     if spec["name"] in BUILTIN_TOOLS:
         spec["name"] = f"custom_{spec['name']}"
@@ -200,24 +200,24 @@ async def generate_tool(payload: GenerateToolRequest, db: Session = Depends(get_
         runtime=redact_sensitive(spec["runtime"]), tags=spec["tags"], config=redact_sensitive(spec["config"]),
     )
     db.add(tool)
-    db.commit()
-    db.refresh(tool)
+    await db.commit()
+    await db.refresh(tool)
     return ok(tool_definition_to_dict(tool), "AI 已生成工具")
 
 
 @router.get("/tools/{tool_id}", response_model=ApiResponse[ToolDefinitionOut])
-async def get_tool(tool_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def get_tool(tool_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     if tool_id in BUILTIN_TOOLS:
         return ok(BUILTIN_TOOLS[tool_id].to_dict())
-    return ok(tool_definition_to_dict(_owned_tool(db, user, tool_id)))
+    return ok(tool_definition_to_dict(await _owned_tool(db, user, tool_id)))
 
 
 @router.patch("/tools/{tool_id}", response_model=ApiResponse[ToolDefinitionOut])
-async def update_tool(tool_id: str, payload: UpdateToolRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    tool = _owned_tool(db, user, tool_id)
+async def update_tool(tool_id: str, payload: UpdateToolRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    tool = await _owned_tool(db, user, tool_id)
     data = payload.model_dump(exclude_unset=True)
     if "workspace_id" in data:
-        _validate_workspace(db, user, data["workspace_id"])
+        await _validate_workspace(db, user, data["workspace_id"])
     if "implementation" in data and data["implementation"]:
         code = str(data["implementation"].get("code") or "")
         if code:
@@ -226,22 +226,22 @@ async def update_tool(tool_id: str, payload: UpdateToolRequest, db: Session = De
         if key in {"implementation", "runtime", "config"} and value is not None:
             value = redact_sensitive(value)
         setattr(tool, key, value)
-    db.commit()
-    db.refresh(tool)
+    await db.commit()
+    await db.refresh(tool)
     return ok(tool_definition_to_dict(tool), "工具已更新")
 
 
 @router.delete("/tools/{tool_id}", response_model=ApiResponse[dict])
-async def delete_tool(tool_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    tool = _owned_tool(db, user, tool_id)
+async def delete_tool(tool_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    tool = await _owned_tool(db, user, tool_id)
     tool.deleted_at = utcnow()
     tool.status = "deleted"
-    db.commit()
+    await db.commit()
     return ok({"id": tool.id, "deleted": True})
 
 
 @router.post("/tools/{tool_id}/invoke", response_model=ApiResponse[dict])
-async def invoke_tool_endpoint(tool_id: str, payload: InvokeToolRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    _validate_workspace(db, user, payload.workspace_id)
-    result = invoke_tool(db, user, tool_id, payload.arguments)
+async def invoke_tool_endpoint(tool_id: str, payload: InvokeToolRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await _validate_workspace(db, user, payload.workspace_id)
+    result = await invoke_tool(db, user, tool_id, payload.arguments)
     return ok(result, "工具调用完成")

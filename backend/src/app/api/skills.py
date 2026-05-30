@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import or_, select, true
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
@@ -39,8 +39,8 @@ def _model_provider():
     return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
 
 
-def ensure_skill_tables(db: Session) -> None:
-    Skill.__table__.create(bind=db.get_bind(), checkfirst=True)
+async def ensure_skill_tables(db: AsyncSession) -> None:
+    await db.run_sync(lambda conn: Skill.__table__.create(bind=conn, checkfirst=True))
 
 
 def _visible_skill_filter(user: User):
@@ -49,19 +49,19 @@ def _visible_skill_filter(user: User):
     return (Skill.owner_id == user.id) | (Skill.owner_id.is_(None))
 
 
-def _validate_workspace(db: Session, user: User, workspace_id: str | None) -> None:
+async def _validate_workspace(db: AsyncSession, user: User, workspace_id: str | None) -> None:
     if not workspace_id:
         return
-    workspace = db.get(Workspace, workspace_id)
+    workspace = await db.get(Workspace, workspace_id)
     if not workspace or workspace.deleted_at is not None:
         raise NotFoundError("Workspace not found")
     if workspace.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("No permission for this workspace")
 
 
-def _get_skill(db: Session, user: User, skill_id: str) -> Skill:
-    ensure_skill_tables(db)
-    skill = db.scalar(select(Skill).where(Skill.id == skill_id, Skill.deleted_at.is_(None)))
+async def _get_skill(db: AsyncSession, user: User, skill_id: str) -> Skill:
+    await ensure_skill_tables(db)
+    skill = await db.scalar(select(Skill).where(Skill.id == skill_id, Skill.deleted_at.is_(None)))
     if not skill:
         raise NotFoundError("Skill not found")
     if skill.owner_id not in {None, user.id} and user.role != "admin":
@@ -69,8 +69,8 @@ def _get_skill(db: Session, user: User, skill_id: str) -> Skill:
     return skill
 
 
-def _get_mcp_server(db: Session, user: User, server_id: str) -> McpServer:
-    server = db.scalar(select(McpServer).where(McpServer.id == server_id, McpServer.deleted_at.is_(None)))
+async def _get_mcp_server(db: AsyncSession, user: User, server_id: str) -> McpServer:
+    server = await db.scalar(select(McpServer).where(McpServer.id == server_id, McpServer.deleted_at.is_(None)))
     if not server:
         raise NotFoundError("MCP server not found")
     if server.owner_id not in {None, user.id} and user.role != "admin":
@@ -184,9 +184,9 @@ async def _generate_skill_spec(payload: GenerateSkillRequest) -> dict:
 
 
 @router.get("/skills", response_model=ApiResponse[dict])
-async def list_skills(workspace_id: str | None = None, status: str | None = None, source: str | None = None, q: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    ensure_skill_tables(db)
-    _validate_workspace(db, user, workspace_id)
+async def list_skills(workspace_id: str | None = None, status: str | None = None, source: str | None = None, q: str | None = None, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await ensure_skill_tables(db)
+    await _validate_workspace(db, user, workspace_id)
     query = select(Skill).where(Skill.deleted_at.is_(None)).where(_visible_skill_filter(user))
     if workspace_id:
         query = query.where(or_(Skill.workspace_id == workspace_id, Skill.workspace_id.is_(None)))
@@ -197,14 +197,14 @@ async def list_skills(workspace_id: str | None = None, status: str | None = None
     if q:
         pattern = f"%{q}%"
         query = query.where(or_(Skill.name.ilike(pattern), Skill.description.ilike(pattern)))
-    skills = db.scalars(query.order_by(Skill.updated_at.desc())).all()
+    skills = (await db.scalars(query.order_by(Skill.updated_at.desc()))).all()
     return ok({"items": [skill_to_dict(it) for it in skills], "total": len(skills)})
 
 
 @router.post("/skills", response_model=ApiResponse[SkillOut])
-async def create_skill(payload: CreateSkillRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    ensure_skill_tables(db)
-    _validate_workspace(db, user, payload.workspace_id)
+async def create_skill(payload: CreateSkillRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await ensure_skill_tables(db)
+    await _validate_workspace(db, user, payload.workspace_id)
     skill = Skill(
         owner_id=user.id, workspace_id=payload.workspace_id, name=payload.name,
         description=payload.description, category=payload.category, source=payload.source,
@@ -212,19 +212,19 @@ async def create_skill(payload: CreateSkillRequest, db: Session = Depends(get_db
         input_schema=payload.input_schema, output_schema=payload.output_schema,
         tools=redact_sensitive(payload.tools), tags=payload.tags, config=redact_sensitive(payload.config),
     )
-    db.add(skill)
-    db.commit()
-    db.refresh(skill)
+    await db.add(skill)
+    await db.commit()
+    await db.refresh(skill)
     return ok(skill_to_dict(skill), "Skill created")
 
 
 @router.post("/skills/import-mcp", response_model=ApiResponse[SkillOut])
 @router.post("/skills/import-mcp-tools", response_model=ApiResponse[SkillOut])
-async def import_mcp_skill(payload: ImportMcpSkillRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    ensure_skill_tables(db)
-    server = _get_mcp_server(db, user, payload.mcp_server_id)
+async def import_mcp_skill(payload: ImportMcpSkillRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await ensure_skill_tables(db)
+    server = await _get_mcp_server(db, user, payload.mcp_server_id)
     workspace_id = payload.workspace_id or server.workspace_id
-    _validate_workspace(db, user, workspace_id)
+    await _validate_workspace(db, user, workspace_id)
     tools = _select_mcp_tools(server, payload.tool_names)
     tool_refs = [_mcp_tool_ref(server, item) for item in tools]
     skill = Skill(
@@ -238,17 +238,17 @@ async def import_mcp_skill(payload: ImportMcpSkillRequest, db: Session = Depends
         tools=tool_refs, tags=list(dict.fromkeys([*payload.tags, "mcp", server.name])),
         config=redact_sensitive({**(payload.config or {}), "mcp": {"server_id": server.id, "server_name": server.name, "transport": server.transport, "tool_count": len(tool_refs)}}),
     )
-    db.add(skill)
-    db.commit()
-    db.refresh(skill)
+    await db.add(skill)
+    await db.commit()
+    await db.refresh(skill)
     return ok(skill_to_dict(skill), "Skill imported from MCP tools")
 
 
 @router.post("/skills/generate", response_model=ApiResponse[SkillOut])
 @router.post("/skills/ai-generate", response_model=ApiResponse[SkillOut])
-async def generate_skill(payload: GenerateSkillRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    ensure_skill_tables(db)
-    _validate_workspace(db, user, payload.workspace_id)
+async def generate_skill(payload: GenerateSkillRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await ensure_skill_tables(db)
+    await _validate_workspace(db, user, payload.workspace_id)
     spec = await _generate_skill_spec(payload)
     skill = Skill(
         owner_id=user.id, workspace_id=payload.workspace_id, name=spec["name"], description=spec["description"],
@@ -257,48 +257,48 @@ async def generate_skill(payload: GenerateSkillRequest, db: Session = Depends(ge
         output_schema=spec["output_schema"], tools=redact_sensitive(spec["tools"]),
         tags=spec["tags"], config=redact_sensitive(spec["config"]),
     )
-    db.add(skill)
-    db.commit()
-    db.refresh(skill)
+    await db.add(skill)
+    await db.commit()
+    await db.refresh(skill)
     return ok(skill_to_dict(skill), "Skill generated")
 
 
 @router.get("/skills/{skill_id}", response_model=ApiResponse[SkillOut])
-async def get_skill(skill_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return ok(skill_to_dict(_get_skill(db, user, skill_id)))
+async def get_skill(skill_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    return ok(skill_to_dict(await _get_skill(db, user, skill_id)))
 
 
 @router.patch("/skills/{skill_id}", response_model=ApiResponse[SkillOut])
-async def update_skill(skill_id: str, payload: UpdateSkillRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    skill = _get_skill(db, user, skill_id)
+async def update_skill(skill_id: str, payload: UpdateSkillRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    skill = await _get_skill(db, user, skill_id)
     if skill.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("Only the owner can modify this skill")
     data = payload.model_dump(exclude_unset=True)
     if "workspace_id" in data:
-        _validate_workspace(db, user, data["workspace_id"])
+        await _validate_workspace(db, user, data["workspace_id"])
     for key, value in data.items():
         if key in {"tools", "config"} and value is not None:
             value = redact_sensitive(value)
         setattr(skill, key, value)
-    db.commit()
-    db.refresh(skill)
+    await db.commit()
+    await db.refresh(skill)
     return ok(skill_to_dict(skill), "Skill updated")
 
 
 @router.delete("/skills/{skill_id}", response_model=ApiResponse[dict])
-async def delete_skill(skill_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    skill = _get_skill(db, user, skill_id)
+async def delete_skill(skill_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    skill = await _get_skill(db, user, skill_id)
     if skill.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("Only the owner can modify this skill")
     skill.deleted_at = utcnow()
     skill.status = "deleted"
-    db.commit()
+    await db.commit()
     return ok({"id": skill.id, "deleted": True})
 
 
 @router.post("/skills/{skill_id}/test", response_model=ApiResponse[dict])
-async def test_skill(skill_id: str, payload: TestSkillRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    skill = _get_skill(db, user, skill_id)
+async def test_skill(skill_id: str, payload: TestSkillRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    skill = await _get_skill(db, user, skill_id)
     input_text = payload.message or (payload.input if isinstance(payload.input, str) else json.dumps(payload.input, ensure_ascii=False))
     system_prompt = skill.prompt or skill.content or f"You are the skill {skill.name}."
     provider = _model_provider()
@@ -323,6 +323,6 @@ async def test_skill(skill_id: str, payload: TestSkillRequest, db: Session = Dep
         provider_status = f"error:{exc.__class__.__name__}"
 
     skill.extra = {**(skill.extra or {}), "last_test": {"status": "passed", "input_preview": input_text[:160], "provider_status": provider_status, "model": model, "tested_at": utcnow().isoformat()}}
-    db.commit()
-    db.refresh(skill)
+    await db.commit()
+    await db.refresh(skill)
     return ok({"skill": skill_to_dict(skill), "status": "passed", "response": response, "model": model, "usage": usage, "provider_status": provider_status}, "Skill test completed")

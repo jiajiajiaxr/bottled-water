@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import inspect, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.models import Artifact, Conversation, Deployment, FileAsset, SandboxSession, ToolDefinition, User, utcnow
@@ -335,7 +335,7 @@ TOOLBOXES = {
 }
 
 
-def ensure_tool_tables(db: Session) -> None:
+async def ensure_tool_tables(db: AsyncSession) -> None:
     ToolDefinition.__table__.create(bind=db.get_bind(), checkfirst=True)
 
 
@@ -393,10 +393,10 @@ def _visible_tool_query(user: User, workspace_id: str | None = None):
     return query
 
 
-def list_tools(db: Session, user: User, *, workspace_id: str | None = None, q: str | None = None) -> list[dict[str, Any]]:
-    ensure_tool_tables(db)
+async def list_tools(db: AsyncSession, user: User, *, workspace_id: str | None = None, q: str | None = None) -> list[dict[str, Any]]:
+    await ensure_tool_tables(db)
     items = builtin_tool_dicts()
-    custom = [tool_definition_to_dict(item) for item in db.scalars(_visible_tool_query(user, workspace_id)).all()]
+    custom = [tool_definition_to_dict(item) for item in (await db.scalars(_visible_tool_query(user, workspace_id))).all()]
     items.extend(custom)
     if q:
         needle = q.lower()
@@ -412,9 +412,9 @@ def list_tools(db: Session, user: User, *, workspace_id: str | None = None, q: s
     return items
 
 
-def get_custom_tool(db: Session, user: User, tool_id_or_name: str) -> ToolDefinition:
-    ensure_tool_tables(db)
-    tool = db.scalar(
+async def get_custom_tool(db: AsyncSession, user: User, tool_id_or_name: str) -> ToolDefinition:
+    await ensure_tool_tables(db)
+    tool = await db.scalar(
         _visible_tool_query(user).where(
             (ToolDefinition.id == tool_id_or_name) | (ToolDefinition.name == tool_id_or_name)
         )
@@ -424,8 +424,8 @@ def get_custom_tool(db: Session, user: User, tool_id_or_name: str) -> ToolDefini
     return tool
 
 
-def _get_file(db: Session, user: User, file_id: str) -> FileAsset:
-    asset = db.scalar(
+async def _get_file(db: AsyncSession, user: User, file_id: str) -> FileAsset:
+    asset = await db.scalar(
         select(FileAsset).where(
             FileAsset.id == file_id,
             FileAsset.deleted_at.is_(None),
@@ -438,10 +438,10 @@ def _get_file(db: Session, user: User, file_id: str) -> FileAsset:
     return asset
 
 
-def _get_conversation(db: Session, user: User, conversation_id: str | None) -> Conversation:
+async def _get_conversation(db: AsyncSession, user: User, conversation_id: str | None) -> Conversation:
     if not conversation_id:
         raise ValidationAppError("conversation_id 不能为空")
-    conversation = db.scalar(
+    conversation = await db.scalar(
         select(Conversation).where(
             Conversation.id == conversation_id,
             Conversation.deleted_at.is_(None),
@@ -454,18 +454,18 @@ def _get_conversation(db: Session, user: User, conversation_id: str | None) -> C
     return conversation
 
 
-def _artifact(db: Session, user: User, artifact_id: str) -> Artifact:
-    artifact = db.get(Artifact, artifact_id)
+async def _artifact(db: AsyncSession, user: User, artifact_id: str) -> Artifact:
+    artifact = await db.get(Artifact, artifact_id)
     if not artifact or artifact.deleted_at is not None:
         raise NotFoundError("产物不存在")
-    conversation = db.get(Conversation, artifact.conversation_id)
+    conversation = await db.get(Conversation, artifact.conversation_id)
     if not conversation or (conversation.creator_id != user.id and user.role != "admin"):
         raise ForbiddenError("无权访问该产物")
     return artifact
 
 
-def _make_artifact_from_content(
-    db: Session,
+async def _make_artifact_from_content(
+    db: AsyncSession,
     user: User,
     *,
     conversation_id: str | None,
@@ -474,7 +474,7 @@ def _make_artifact_from_content(
     format_name: str,
     html_content: str | None = None,
 ) -> dict[str, Any]:
-    conversation = _get_conversation(db, user, conversation_id)
+    conversation = await _get_conversation(db, user, conversation_id)
     artifact_type = {
         "pdf": "document",
         "docx": "document",
@@ -510,9 +510,9 @@ def _make_artifact_from_content(
     conversation.last_message_sender = "Artifact Tool"
     conversation.last_message_at = utcnow()
     conversation.message_count += 1
-    db.commit()
-    db.refresh(artifact)
-    db.refresh(preview)
+    await db.commit()
+    await db.refresh(artifact)
+    await db.refresh(preview)
     export_format = "html" if format_name in {"html", "web_app"} else format_name
     return {
         "artifact": artifact_to_dict(artifact),
@@ -549,20 +549,20 @@ def _run_custom_python(tool: ToolDefinition, arguments: dict[str, Any]) -> dict[
     return {"status": "succeeded", "result": namespace.get("result")}
 
 
-def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+async def invoke_builtin_tool(db: AsyncSession, user: User, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "file.upload":
         return {"status": "requires_upload", "message": "file.upload 通过 /files/upload multipart 接口执行。"}
     if name.startswith("file."):
         file_id = str(arguments.get("file_id") or "")
         if name in {"file.extract_text", "file.preview", "file.convert", "file.summarize", "file.embed"}:
-            asset = _get_file(db, user, file_id)
+            asset = await _get_file(db, user, file_id)
             path = Path(asset.storage_path)
             if name == "file.extract_text":
                 result = extract_text_from_path(path, content_type=asset.content_type, filename=asset.original_filename)
                 asset.extracted_text = result["text"]
                 asset.parse_status = result["status"]
                 asset.extra = {**(asset.extra or {}), **(result.get("metadata") or {}), "tool_chain": ["file.extract_text"]}
-                db.commit()
+                await db.commit()
                 return {"status": "succeeded", "text": asset.extracted_text, "metadata": asset.extra}
             if name == "file.preview":
                 return {"status": "succeeded", **preview_payload(path, content_type=asset.content_type, filename=asset.original_filename)}
@@ -583,7 +583,7 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
                 return {"status": "succeeded", "embedding": embed_text(text), "provider": "local-hash"}
         if name == "file.read":
             if file_id:
-                asset = _get_file(db, user, file_id)
+                asset = await _get_file(db, user, file_id)
                 return {"status": "succeeded", "content": Path(asset.storage_path).read_text(encoding="utf-8", errors="ignore")[:200_000]}
             path = _safe_tool_path(str(arguments.get("path") or ""))
             return {"status": "succeeded", "path": str(path), "content": path.read_text(encoding="utf-8", errors="ignore")[:200_000]}
@@ -599,7 +599,7 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
         title = str(arguments.get("title") or "AgentHub 产物")
         body = str(arguments.get("body") or arguments.get("content") or title)
         html_content = arguments.get("html") if isinstance(arguments.get("html"), str) else None
-        return _make_artifact_from_content(
+        return await _make_artifact_from_content(
             db,
             user,
             conversation_id=str(arguments.get("conversation_id") or ""),
@@ -609,7 +609,7 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
             html_content=html_content,
         )
     if name == "artifact.export":
-        artifact = _artifact(db, user, str(arguments.get("artifact_id") or ""))
+        artifact = await _artifact(db, user, str(arguments.get("artifact_id") or ""))
         fmt = str(arguments.get("format") or default_export_format(artifact))
         return {
             "status": "succeeded",
@@ -618,16 +618,16 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
             "export_url": f"/api/v1/artifacts/{artifact.id}/export?format={fmt}",
         }
     if name == "artifact.preview":
-        artifact = _artifact(db, user, str(arguments.get("artifact_id") or ""))
+        artifact = await _artifact(db, user, str(arguments.get("artifact_id") or ""))
         return {"status": "succeeded", "artifact_id": artifact.id, "preview_url": f"/api/v1/artifacts/{artifact.id}/preview"}
     if name == "artifact.revise":
         files = arguments.get("files")
         if not isinstance(files, dict):
             raise ValidationAppError("files 必须是对象")
-        artifact = update_artifact_files(db, str(arguments.get("artifact_id") or ""), {str(k): str(v) for k, v in files.items()}, str(arguments.get("summary") or "工具修订"))
+        artifact = await update_artifact_files(db, str(arguments.get("artifact_id") or ""), {str(k): str(v) for k, v in files.items()}, str(arguments.get("summary") or "工具修订"))
         return {"status": "succeeded", "artifact": artifact_to_dict(artifact)}
     if name == "artifact.diff":
-        artifact = _artifact(db, user, str(arguments.get("artifact_id") or ""))
+        artifact = await _artifact(db, user, str(arguments.get("artifact_id") or ""))
         current = artifact.content.get("files") or {}
         previous = artifact.content.get("previous_files") or {}
         return {"status": "succeeded", "files_changed": sorted(set(current) | set(previous)), "version": artifact.current_version}
@@ -657,7 +657,7 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
         findings = ["结构完整，适合继续交付。"] if len(text) > 80 else ["内容较短，建议补充背景、目标和验收标准。"]
         return {"status": "succeeded", "findings": findings}
     if name == "deploy.preview":
-        artifact = _artifact(db, user, str(arguments.get("artifact_id") or ""))
+        artifact = await _artifact(db, user, str(arguments.get("artifact_id") or ""))
         deployment = Deployment(
             artifact_id=artifact.id,
             mode="preview_link",
@@ -667,8 +667,8 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
             steps=[{"name": "preview", "status": "completed", "duration_ms": 120}],
             deployed_at=utcnow(),
         )
-        db.add(deployment)
-        db.commit()
+        await db.add(deployment)
+        await db.commit()
         return {"status": "succeeded", "deployment": {"id": deployment.id, "url": deployment.access_url, "status": deployment.status}}
     if name == "deploy.rollback":
         return {"status": "succeeded", "deployment_id": arguments.get("deployment_id"), "message": "已创建回滚记录，当前演示环境保持上一版本可访问。"}
@@ -676,15 +676,15 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
     raise NotFoundError("内置工具不存在")
 
 
-def invoke_tool(db: Session, user: User, tool_id_or_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    ensure_tool_tables(db)
+async def invoke_tool(db: AsyncSession, user: User, tool_id_or_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    await ensure_tool_tables(db)
     name = tool_id_or_name
     if name in BUILTIN_TOOLS:
-        return {"tool": BUILTIN_TOOLS[name].to_dict(), "result": invoke_builtin_tool(db, user, name, arguments)}
-    tool = get_custom_tool(db, user, tool_id_or_name)
+        return {"tool": BUILTIN_TOOLS[name].to_dict(), "result": await invoke_builtin_tool(db, user, name, arguments)}
+    tool = await get_custom_tool(db, user, tool_id_or_name)
     if tool.status != "active":
         raise ValidationAppError("工具未启用")
     result = _run_custom_python(tool, arguments)
     tool.extra = {**(tool.extra or {}), "last_invocation_at": utcnow().isoformat().replace("+00:00", "Z")}
-    db.commit()
+    await db.commit()
     return {"tool": tool_definition_to_dict(tool), "result": result}

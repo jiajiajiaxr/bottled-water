@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from fastapi import UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import ValidationAppError
@@ -14,14 +14,14 @@ from app.services.file_tools import extract_text_from_path
 
 
 SAFE_NAME = re.compile(r"[^a-zA-Z0-9._\-\u4e00-\u9fff]+")
-def ensure_extension_tables(db: Session) -> None:
+async def ensure_extension_tables(db: AsyncSession) -> None:
     for table in (
         FileAsset.__table__,
         KnowledgeBase.__table__,
         KnowledgeDocument.__table__,
         AuditLog.__table__,
     ):
-        table.create(bind=db.get_bind(), checkfirst=True)
+        await db.run_sync(table.create, bind=db.get_bind(), checkfirst=True)
 
 
 def safe_filename(name: str) -> str:
@@ -37,14 +37,14 @@ def attachment_path(file_asset: FileAsset) -> Path:
 
 
 async def save_upload(
-    db: Session,
+    db: AsyncSession,
     *,
     user: User,
     upload: UploadFile,
     conversation_id: str | None = None,
     purpose: str = "attachment",
 ) -> FileAsset:
-    ensure_extension_tables(db)
+    await ensure_extension_tables(db)
     settings = get_settings()
     max_bytes = settings.max_upload_mb * 1024 * 1024
     raw = await upload.read()
@@ -80,7 +80,7 @@ async def save_upload(
         extracted_text=extracted,
         extra=metadata,
     )
-    db.add(asset)
-    db.commit()
-    db.refresh(asset)
+    await db.add(asset)
+    await db.commit()
+    await db.refresh(asset)
     return asset

@@ -6,7 +6,7 @@ from collections import Counter
 from typing import Iterable
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import KnowledgeBase, KnowledgeDocument
 
@@ -65,8 +65,8 @@ def score_chunk(query_terms: Counter[str], text: str) -> float:
     return round((_cosine(query_terms, chunk_terms) * 0.65) + (bm25_like * 0.35), 4)
 
 
-def index_document(
-    db: Session,
+async def index_document(
+    db: AsyncSession,
     kb: KnowledgeBase,
     *,
     title: str,
@@ -88,15 +88,15 @@ def index_document(
         chunk_count=len(chunks),
         index_status="indexed",
     )
-    db.add(document)
+    await db.add(document)
     kb.document_count += 1
     kb.chunk_count += len(chunks)
     kb.total_tokens += document.token_count
     return document
 
 
-def retrieve(
-    db: Session,
+async def retrieve(
+    db: AsyncSession,
     kb: KnowledgeBase,
     *,
     query: str,
@@ -106,7 +106,7 @@ def retrieve(
     query_terms = Counter(tokenize(query))
     if not query_terms:
         return []
-    documents = db.scalars(
+    documents = await db.scalars(
         select(KnowledgeDocument)
         .where(KnowledgeDocument.knowledge_base_id == kb.id)
         .order_by(KnowledgeDocument.updated_at.desc())

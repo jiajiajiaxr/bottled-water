@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator, Dict, List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from agent_runtime import AgentConfig, Session as AgentSession
 from agent_runtime.core.interfaces import ToolExecutor
@@ -78,28 +78,30 @@ class OrchestratorService:
     """
 
     @staticmethod
-    def _get_conversation_agents(db: Session, conversation: Conversation) -> list[Agent]:
+    async def _get_conversation_agents(db: AsyncSession, conversation: Conversation) -> list[Agent]:
         """获取会话中的 Agent"""
         from app.models import ConversationParticipant
 
         participant_agent_ids = [
             item.agent_id
-            for item in db.scalars(
-                select(ConversationParticipant).where(
-                    ConversationParticipant.conversation_id == conversation.id,
-                    ConversationParticipant.participant_type == "agent",
-                    ConversationParticipant.left_at.is_(None),
-                    ConversationParticipant.agent_id.is_not(None),
+            for item in (
+                await db.scalars(
+                    select(ConversationParticipant).where(
+                        ConversationParticipant.conversation_id == conversation.id,
+                        ConversationParticipant.participant_type == "agent",
+                        ConversationParticipant.left_at.is_(None),
+                        ConversationParticipant.agent_id.is_not(None),
+                    )
                 )
             ).all()
             if item.agent_id
         ]
         base_query = select(Agent).where(Agent.deleted_at.is_(None), Agent.status.in_(["online", "degraded"]))
         if participant_agent_ids:
-            agents = db.scalars(base_query.where(Agent.id.in_(participant_agent_ids))).all()
+            agents = (await db.scalars(base_query.where(Agent.id.in_(participant_agent_ids)))).all()
             order = {agent_id: index for index, agent_id in enumerate(participant_agent_ids)}
             return sorted(agents, key=lambda a: order.get(a.id, 999))
-        return db.scalars(base_query.where(Agent.type != "custom")).all()
+        return (await db.scalars(base_query.where(Agent.type != "custom"))).all()
 
     @staticmethod
     def _create_model_provider(agent: Agent | None = None) -> Any:
@@ -115,9 +117,9 @@ class OrchestratorService:
         return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
 
     @staticmethod
-    async def run(db: Session, conversation: Conversation, message: Message, strategy: str) -> None:
+    async def run(db: AsyncSession, conversation: Conversation, message: Message, strategy: str) -> None:
         """运行编排"""
-        agents = OrchestratorService._get_conversation_agents(db, conversation)
+        agents = await OrchestratorService._get_conversation_agents(db, conversation)
         if not agents:
             logger.warning("会话没有可用 Agent conversation_id=%s", conversation.id)
             return
@@ -134,15 +136,15 @@ class OrchestratorService:
 class _ToolExecutorAdapter(ToolExecutor):
     """ToolExecutor 适配器，将 agent_runtime 的工具执行请求路由到 app 层工具注册表"""
 
-    def __init__(self, db: Session, agent: Agent, user: User, conversation: Conversation):
+    def __init__(self, db: AsyncSession, agent: Agent, user: User, conversation: Conversation):
         self.db = db
         self.agent = agent
         self.user = user
         self.conversation = conversation
 
-    def list_tools(self) -> list[dict]:
+    async def list_tools(self) -> list[dict]:
         from app.services.agentic_runtime import build_tools_for_agent
-        return build_tools_for_agent(self.db, self.agent)
+        return await build_tools_for_agent(self.db, self.agent)
 
     async def execute(self, tool_name: str, parameters: dict) -> Any:
         from app.services.agentic_runtime import execute_tool_by_name
@@ -159,7 +161,7 @@ class _ToolExecutorAdapter(ToolExecutor):
 class SingleAgentOrchestrator:
     """单 Agent 编排器，使用 SingleAgentScheduler（纯代码，无 LLM 开销）"""
 
-    def __init__(self, db: Session, conversation: Conversation, message: Message, channel: str, agents: list[Agent]):
+    def __init__(self, db: AsyncSession, conversation: Conversation, message: Message, channel: str, agents: list[Agent]):
         self.db = db
         self.conversation = conversation
         self.message = message
@@ -168,7 +170,7 @@ class SingleAgentOrchestrator:
 
     async def run(self) -> None:
         agent = self.agents[0]
-        user = self.db.get(User, self.conversation.creator_id)
+        user = await self.db.get(User, self.conversation.creator_id)
         agent_config = AgentConfig(
             id=agent.id,
             name=agent.name,
@@ -212,7 +214,7 @@ class SingleAgentOrchestrator:
 class TechLeadOrchestrator:
     """多 Agent 编排器，使用 TechLeadScheduler（LLM 驱动协调）"""
 
-    def __init__(self, db: Session, conversation: Conversation, message: Message, channel: str, agents: list[Agent]):
+    def __init__(self, db: AsyncSession, conversation: Conversation, message: Message, channel: str, agents: list[Agent]):
         self.db = db
         self.conversation = conversation
         self.message = message
@@ -221,7 +223,7 @@ class TechLeadOrchestrator:
 
     async def run(self) -> None:
         agents = self.agents
-        user = self.db.get(User, self.conversation.creator_id)
+        user = await self.db.get(User, self.conversation.creator_id)
         agent_configs = [
             AgentConfig(
                 id=agent.id,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError
@@ -23,8 +23,8 @@ from app.services.serialization import (
 router = APIRouter(tags=["knowledge"])
 
 
-def _get_kb(db: Session, user: User, kb_id: str) -> KnowledgeBase:
-    kb = db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id, KnowledgeBase.deleted_at.is_(None)))
+async def _get_kb(db: AsyncSession, user: User, kb_id: str) -> KnowledgeBase:
+    kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id, KnowledgeBase.deleted_at.is_(None)))
     if not kb:
         raise NotFoundError("知识库不存在")
     if kb.owner_id != user.id and kb.visibility != "public" and user.role != "admin":
@@ -34,10 +34,10 @@ def _get_kb(db: Session, user: User, kb_id: str) -> KnowledgeBase:
 
 @router.get("/knowledge-bases", response_model=ApiResponse[dict])
 async def list_knowledge_bases(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    items = db.scalars(
+    items = await db.scalars(
         select(KnowledgeBase)
         .where(
             KnowledgeBase.deleted_at.is_(None),
@@ -51,7 +51,7 @@ async def list_knowledge_bases(
 @router.post("/knowledge-bases", response_model=ApiResponse[KnowledgeBaseOut])
 async def create_knowledge_base(
     payload: CreateKnowledgeBaseRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     kb = KnowledgeBase(
@@ -62,44 +62,44 @@ async def create_knowledge_base(
         visibility=payload.visibility,
         config=payload.config,
     )
-    db.add(kb)
-    db.commit()
-    db.refresh(kb)
+    await db.add(kb)
+    await db.commit()
+    await db.refresh(kb)
     return ok(knowledge_base_to_dict(kb), "知识库已创建")
 
 
 @router.get("/knowledge-bases/{kb_id}", response_model=ApiResponse[KnowledgeBaseOut])
 async def get_knowledge_base(
     kb_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return ok(knowledge_base_to_dict(_get_kb(db, user, kb_id)))
+    return ok(knowledge_base_to_dict(await _get_kb(db, user, kb_id)))
 
 
 @router.delete("/knowledge-bases/{kb_id}", response_model=ApiResponse[dict])
 async def delete_knowledge_base(
     kb_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    kb = _get_kb(db, user, kb_id)
+    kb = await _get_kb(db, user, kb_id)
     if kb.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("只有知识库所有者可删除")
     kb.deleted_at = utcnow()
     kb.status = "deleted"
-    db.commit()
+    await db.commit()
     return ok({"id": kb.id, "deleted": True})
 
 
 @router.get("/knowledge-bases/{kb_id}/documents", response_model=ApiResponse[dict])
 async def list_documents(
     kb_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    kb = _get_kb(db, user, kb_id)
-    docs = db.scalars(
+    kb = await _get_kb(db, user, kb_id)
+    docs = await db.scalars(
         select(KnowledgeDocument)
         .where(KnowledgeDocument.knowledge_base_id == kb.id, KnowledgeDocument.deleted_at.is_(None))
         .order_by(KnowledgeDocument.created_at.desc())
@@ -111,11 +111,11 @@ async def list_documents(
 async def import_text_document(
     kb_id: str,
     payload: ImportKnowledgeTextRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    kb = _get_kb(db, user, kb_id)
-    document = index_document(
+    kb = await _get_kb(db, user, kb_id)
+    document = await index_document(
         db,
         kb,
         title=payload.title,
@@ -123,8 +123,8 @@ async def import_text_document(
         source_type=payload.source_type,
         source_uri=payload.source_uri,
     )
-    db.commit()
-    db.refresh(document)
+    await db.commit()
+    await db.refresh(document)
     return ok(knowledge_document_to_dict(document), "文档已索引")
 
 
@@ -132,13 +132,13 @@ async def import_text_document(
 async def upload_document(
     kb_id: str,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    kb = _get_kb(db, user, kb_id)
+    kb = await _get_kb(db, user, kb_id)
     asset = await save_upload(db, user=user, upload=file, purpose="knowledge")
-    db.refresh(asset)
-    document = index_document(
+    await db.refresh(asset)
+    document = await index_document(
         db,
         kb,
         title=asset.original_filename,
@@ -147,7 +147,7 @@ async def upload_document(
         source_uri=asset.storage_path,
         file_asset_id=asset.id,
     )
-    db.commit()
+    await db.commit()
     return ok(
         {"file": file_asset_to_dict(asset), "document": knowledge_document_to_dict(document)},
         "知识文档上传并索引完成",
@@ -158,11 +158,11 @@ async def upload_document(
 async def retrieve_knowledge(
     kb_id: str,
     payload: RetrieveKnowledgeRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    kb = _get_kb(db, user, kb_id)
-    results = retrieve(
+    kb = await _get_kb(db, user, kb_id)
+    results = await retrieve(
         db,
         kb,
         query=payload.query,

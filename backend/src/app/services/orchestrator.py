@@ -16,10 +16,10 @@ import re
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import SessionLocal
+from app.core.database import AsyncSessionLocal
 from app.models import (
     Agent,
     Artifact,
@@ -232,8 +232,8 @@ async def build_plan_with_llm(prompt: str, agents: list[Agent]) -> dict[str, Any
     return fallback
 
 
-def create_task_for_prompt(
-    db: Session, conversation: Conversation, prompt: str, plan: dict[str, Any] | None = None
+async def create_task_for_prompt(
+    db: AsyncSession, conversation: Conversation, prompt: str, plan: dict[str, Any] | None = None
 ) -> Task:
     agents = _conversation_agents(db, conversation)
     plan = plan or build_plan(prompt, agents)
@@ -248,10 +248,10 @@ def create_task_for_prompt(
         plan=plan,
         input={"prompt": prompt},
     )
-    db.add(task)
-    db.flush()
+    await db.add(task)
+    await db.flush()
     for index, spec in enumerate(plan["subtasks"]):
-        db.add(
+        await db.add(
             Subtask(
                 parent_task_id=task.id,
                 title=spec["title"],
@@ -262,14 +262,14 @@ def create_task_for_prompt(
                 input=spec,
             )
         )
-    db.flush()
+    await db.flush()
     return task
 
 
-def _single_agent_for_conversation(db: Session, conversation: Conversation) -> Agent | None:
+async def _single_agent_for_conversation(db: AsyncSession, conversation: Conversation) -> Agent | None:
     if conversation.chat_type != "single":
         return None
-    participant = db.scalar(
+    participant = await db.scalar(
         select(ConversationParticipant)
         .where(
             ConversationParticipant.conversation_id == conversation.id,
@@ -280,21 +280,23 @@ def _single_agent_for_conversation(db: Session, conversation: Conversation) -> A
     )
     if not participant or not participant.agent_id:
         return None
-    agent = db.get(Agent, participant.agent_id)
+    agent = await db.get(Agent, participant.agent_id)
     if not agent or agent.deleted_at is not None:
         return None
     return agent
 
 
-def _conversation_agents(db: Session, conversation: Conversation) -> list[Agent]:
+async def _conversation_agents(db: AsyncSession, conversation: Conversation) -> list[Agent]:
     participant_agent_ids = [
         item.agent_id
-        for item in db.scalars(
-            select(ConversationParticipant).where(
-                ConversationParticipant.conversation_id == conversation.id,
-                ConversationParticipant.participant_type == "agent",
-                ConversationParticipant.left_at.is_(None),
-                ConversationParticipant.agent_id.is_not(None),
+        for item in (
+            await db.scalars(
+                select(ConversationParticipant).where(
+                    ConversationParticipant.conversation_id == conversation.id,
+                    ConversationParticipant.participant_type == "agent",
+                    ConversationParticipant.left_at.is_(None),
+                    ConversationParticipant.agent_id.is_not(None),
+                )
             )
         ).all()
         if item.agent_id
@@ -303,10 +305,10 @@ def _conversation_agents(db: Session, conversation: Conversation) -> list[Agent]
         Agent.deleted_at.is_(None), Agent.status.in_(["online", "degraded"])
     )
     if participant_agent_ids:
-        agents = db.scalars(base_query.where(Agent.id.in_(participant_agent_ids))).all()
+        agents = (await db.scalars(base_query.where(Agent.id.in_(participant_agent_ids)))).all()
         order = {agent_id: index for index, agent_id in enumerate(participant_agent_ids)}
         return sorted(agents, key=lambda agent: order.get(agent.id, 999))
-    return db.scalars(base_query.where(Agent.type != "custom")).all()
+    return (await db.scalars(base_query.where(Agent.type != "custom"))).all()
 
 
 WORKFLOW_NODE_TYPES = {
@@ -593,7 +595,7 @@ def _set_workflow_node_state(
 
 
 async def _maybe_replan_workflow(
-    db: Session,
+    db: AsyncSession,
     *,
     conversation: Conversation,
     agents: list[Agent],
@@ -650,7 +652,7 @@ async def _maybe_replan_workflow(
             return workflow
         next_workflow = _sanitize_workflow(conversation, agents, raw)
         conversation.extra = {**(conversation.extra or {}), "workflow": next_workflow}
-        db.commit()
+        await db.commit()
         await event_bus.publish(channel, "workflow:updated", next_workflow)
         return next_workflow
     except Exception:
@@ -688,25 +690,25 @@ def _workflow_plan(prompt: str, workflow: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _publish_tool_artifacts(db: Session, channel: str, tool_context: dict[str, Any]) -> None:
+async def _publish_tool_artifacts(db: AsyncSession, channel: str, tool_context: dict[str, Any]) -> None:
     for item in tool_context.get("executions") or []:
         output = item.get("output")
         if not isinstance(output, dict):
             continue
         artifact_payload = output.get("artifact")
         if isinstance(artifact_payload, dict) and artifact_payload.get("id"):
-            artifact = db.get(Artifact, str(artifact_payload["id"]))
+            artifact = await db.get(Artifact, str(artifact_payload["id"]))
             if artifact:
                 await event_bus.publish(channel, "artifact:created", artifact_to_dict(artifact))
         preview_message_id = output.get("preview_message_id")
         if preview_message_id:
-            preview = db.get(Message, str(preview_message_id))
+            preview = await db.get(Message, str(preview_message_id))
             if preview:
                 await event_bus.publish(channel, "message:new", message_to_dict(preview))
 
 
 async def _run_direct_agent(
-    db: Session,
+    db: AsyncSession,
     *,
     conversation: Conversation,
     user_message: Message,
@@ -757,7 +759,7 @@ async def _run_direct_agent(
         started_at=utcnow(),
     )
     db.add(task)
-    db.flush()
+    await db.flush()
     subtask = Subtask(
         parent_task_id=task.id,
         title=f"{agent.name} Function Calling 执行",
@@ -768,7 +770,7 @@ async def _run_direct_agent(
         input={"prompt": prompt},
     )
     db.add(subtask)
-    db.commit()
+    await db.commit()
     await queue_service.enqueue(
         {"id": task.id, "conversation_id": conversation.id, "agent_id": agent.id}, priority=8
     )
@@ -786,8 +788,8 @@ async def _run_direct_agent(
         status="streaming",
     )
     db.add(assistant)
-    db.commit()
-    db.refresh(assistant)
+    await db.commit()
+    await db.refresh(assistant)
     await event_bus.publish(
         channel,
         "message_start",
@@ -795,7 +797,7 @@ async def _run_direct_agent(
     )
 
     # 3. 组装 tools 和 messages
-    user = db.get(User, conversation.creator_id)
+    user = await db.get(User, conversation.creator_id)
     tools = build_tools_for_agent(db, agent)
     system_prompt = (
         (agent.config or {}).get("system_prompt") or agent.description or f"你是 {agent.name}。"
@@ -941,7 +943,7 @@ async def _run_direct_agent(
                     "round": round_num,
                 }
             )
-            db.commit()
+            await db.commit()
 
             # 发送 tool_call_done
             await event_bus.publish(
@@ -970,7 +972,7 @@ async def _run_direct_agent(
                 )
 
         task.progress = min(90, 20 + (round_num + 1) * 25)
-        db.commit()
+        await db.commit()
         await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
     # 5. 完成收尾
@@ -1002,7 +1004,7 @@ async def _run_direct_agent(
     conversation.last_message_at = utcnow()
     conversation.activity_score = min(100, conversation.activity_score + 6)
     conversation.message_count += 1
-    db.commit()
+    await db.commit()
     await event_bus.publish(channel, "message:updated", message_meta_to_dict(assistant))
     await event_bus.publish(
         channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "end_turn"}
@@ -1012,7 +1014,7 @@ async def _run_direct_agent(
 
 
 async def _run_direct_agent_legacy(
-    db: Session,
+    db: AsyncSession,
     *,
     conversation: Conversation,
     user_message: Message,
@@ -1041,7 +1043,7 @@ async def _run_direct_agent_legacy(
         started_at=utcnow(),
     )
     db.add(task)
-    db.flush()
+    await db.flush()
     subtask = Subtask(
         parent_task_id=task.id,
         title=f"{agent.name} 自主执行",
@@ -1052,7 +1054,7 @@ async def _run_direct_agent_legacy(
         input={"prompt": prompt},
     )
     db.add(subtask)
-    db.commit()
+    await db.commit()
     await queue_service.enqueue(
         {"id": task.id, "conversation_id": conversation.id, "agent_id": agent.id}, priority=8
     )
@@ -1063,7 +1065,7 @@ async def _run_direct_agent_legacy(
     await _publish_tool_artifacts(db, channel, tool_context)
     task.output = {**(task.output or {}), "agentic_tools": tool_context}
     task.progress = 70
-    db.commit()
+    await db.commit()
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
     assistant = Message(
@@ -1076,8 +1078,8 @@ async def _run_direct_agent_legacy(
         status="streaming",
     )
     db.add(assistant)
-    db.commit()
-    db.refresh(assistant)
+    await db.commit()
+    await db.refresh(assistant)
     await event_bus.publish(
         channel,
         "message_start",
@@ -1184,7 +1186,7 @@ async def _run_direct_agent_legacy(
     conversation.last_message_at = utcnow()
     conversation.activity_score = min(100, conversation.activity_score + 6)
     conversation.message_count += 1
-    db.commit()
+    await db.commit()
     await event_bus.publish(channel, "message:updated", message_meta_to_dict(assistant))
     await event_bus.publish(
         channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "end_turn"}
@@ -1194,7 +1196,7 @@ async def _run_direct_agent_legacy(
 
 
 async def _run_canvas_agent_reply(
-    db: Session,
+    db: AsyncSession,
     *,
     conversation: Conversation,
     agent: Agent,
@@ -1212,8 +1214,8 @@ async def _run_canvas_agent_reply(
         status="streaming",
     )
     db.add(assistant)
-    db.commit()
-    db.refresh(assistant)
+    await db.commit()
+    await db.refresh(assistant)
     await event_bus.publish(
         channel,
         "message_start",
@@ -1288,13 +1290,13 @@ async def _run_canvas_agent_reply(
     conversation.last_message_at = utcnow()
     conversation.activity_score = min(100, conversation.activity_score + 4)
     conversation.message_count += 1
-    db.commit()
+    await db.commit()
     await event_bus.publish(channel, "message:updated", message_meta_to_dict(assistant))
     return assistant.content["text"]
 
 
 async def run_orchestration(message_id: str) -> None:
-    db = SessionLocal()
+    db = AsyncSessionLocal()
 
     task: Task | None = None
     assistant: Message | None = None
@@ -1306,12 +1308,12 @@ async def run_orchestration(message_id: str) -> None:
     channel: str | None = None
 
     try:
-        user_message = db.get(Message, message_id)
+        user_message = await db.get(Message, message_id)
 
         if not user_message:
             return
 
-        conversation = db.get(Conversation, user_message.conversation_id)
+        conversation = await db.get(Conversation, user_message.conversation_id)
 
         if not conversation:
             return
@@ -1397,7 +1399,7 @@ async def run_orchestration(message_id: str) -> None:
 
         workflow_run.node_states = list(workflow_run.node_states or [])
         _sync_workflow_run(conversation, workflow_run)
-        db.commit()
+        await db.commit()
 
         await queue_service.enqueue(
             {"id": task.id, "conversation_id": conversation.id}, priority=10
@@ -1417,7 +1419,7 @@ async def run_orchestration(message_id: str) -> None:
         task.status = "EXECUTING"
         task.started_at = utcnow()
         task.progress = 20
-        db.commit()
+        await db.commit()
         await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
         # 非独立群聊模式下提前创建主控 Agent 占位消息，让前端立刻显示气泡
@@ -1432,13 +1434,13 @@ async def run_orchestration(message_id: str) -> None:
                 status="streaming",
             )
             db.add(assistant)
-            db.commit()
-            db.refresh(assistant)
+            await db.commit()
+            await db.refresh(assistant)
             await event_bus.publish(channel, "message_start", {"agent_message_id": assistant.id})
 
         artifact_type = classify_artifact_request(prompt)
         if artifact_type:
-            existing_preview = db.scalar(
+            existing_preview = await db.scalar(
                 select(Message)
                 .where(
                     Message.conversation_id == conversation.id,
@@ -1455,13 +1457,13 @@ async def run_orchestration(message_id: str) -> None:
                     if isinstance(existing_preview.content, dict)
                     else None
                 )
-                artifact = db.get(Artifact, artifact_id) if artifact_id else None
+                artifact = await db.get(Artifact, artifact_id) if artifact_id else None
         subtasks = (
-            db.scalars(
+            (await db.scalars(
                 select(Subtask)
                 .where(Subtask.parent_task_id == task.id)
                 .order_by(Subtask.order_index)
-            )
+            ))
             .unique()
             .all()
         )
@@ -1469,7 +1471,7 @@ async def run_orchestration(message_id: str) -> None:
         for subtask in subtasks:
             subtask.status = "EXECUTING"
             subtask.started_at = utcnow()
-            db.commit()
+            await db.commit()
 
             await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
             await asyncio.sleep(0.15)
@@ -1484,7 +1486,7 @@ async def run_orchestration(message_id: str) -> None:
             if workflow_run:
                 _set_workflow_node_state(workflow_run, node_id, status="running", progress=30)
                 _sync_workflow_run(conversation, workflow_run)
-                db.commit()
+                await db.commit()
                 
                 await event_bus.publish(
                     channel,
@@ -1497,7 +1499,7 @@ async def run_orchestration(message_id: str) -> None:
                     },
                 )
             agent_id = node.get("agent_id") or node_config.get("agent_id") or subtask.agent_id
-            worker_agent = db.get(Agent, str(agent_id)) if agent_id else None
+            worker_agent = await db.get(Agent, str(agent_id)) if agent_id else None
             if (
                 node_type in {"agent", "review"}
                 and worker_agent
@@ -1576,7 +1578,7 @@ async def run_orchestration(message_id: str) -> None:
                     workflow_run, node_id, status="completed", progress=100, output=node_output
                 )
                 _sync_workflow_run(conversation, workflow_run)
-            db.commit()
+            await db.commit()
             await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
             if workflow_run:
                 await event_bus.publish(
@@ -1603,7 +1605,7 @@ async def run_orchestration(message_id: str) -> None:
         if tool_context["executions"]:
             task.output = {**(task.output or {}), "agentic_tools": tool_context}
             task.progress = 58
-            db.commit()
+            await db.commit()
             await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
         if artifact_type:
@@ -1631,9 +1633,9 @@ async def run_orchestration(message_id: str) -> None:
             conversation.last_message_sender = "Artifact Agent"
             conversation.last_message_at = utcnow()
             conversation.message_count += 1
-            db.commit()
-            db.refresh(artifact)
-            db.refresh(preview_message)
+            await db.commit()
+            await db.refresh(artifact)
+            await db.refresh(preview_message)
             await event_bus.publish(channel, "artifact:created", artifact_to_dict(artifact))
             await event_bus.publish(channel, "message:new", message_to_dict(preview_message))
 
@@ -1668,7 +1670,7 @@ async def run_orchestration(message_id: str) -> None:
                     {"type": "run.completed", "at": utcnow().isoformat()},
                 ][-200:]
                 _sync_workflow_run(conversation, workflow_run)
-            db.commit()
+            await db.commit()
             await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
             if workflow_run:
                 await event_bus.publish(
@@ -1739,7 +1741,7 @@ async def run_orchestration(message_id: str) -> None:
             "thinking": strip_internal_agent_output(reasoning_text) if reasoning_text else "",
         }
         assistant.status = "completed"
-        db.commit()
+        await db.commit()
         await event_bus.publish(channel, "message:updated", message_meta_to_dict(assistant))
 
         created_preview_after_stream = False
@@ -1770,10 +1772,10 @@ async def run_orchestration(message_id: str) -> None:
         conversation.last_message_at = utcnow()
         conversation.activity_score = min(100, conversation.activity_score + 8)
         conversation.message_count += 2 if created_preview_after_stream else 1
-        db.commit()
+        await db.commit()
         if created_preview_after_stream and preview_message:
-            db.refresh(artifact)
-            db.refresh(preview_message)
+            await db.refresh(artifact)
+            await db.refresh(preview_message)
             await event_bus.publish(channel, "artifact:created", artifact_to_dict(artifact))
             await event_bus.publish(channel, "message:new", message_to_dict(preview_message))
         await event_bus.publish(
@@ -1807,7 +1809,7 @@ async def run_orchestration(message_id: str) -> None:
                 {"type": "run.completed", "at": utcnow().isoformat()},
             ][-200:]
             _sync_workflow_run(conversation, workflow_run)
-        db.commit()
+        await db.commit()
         await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
         if workflow_run:
             await event_bus.publish(
@@ -1843,7 +1845,7 @@ async def run_orchestration(message_id: str) -> None:
             ][-200:]
             if conversation:
                 _sync_workflow_run(conversation, workflow_run)
-        db.commit()
+        await db.commit()
         if channel:
             if task:
                 await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
@@ -1866,7 +1868,7 @@ async def run_orchestration(message_id: str) -> None:
                 )
         raise
     finally:
-        db.close()
+        await db.close()
 
 
 async def _review(prompt: str) -> str:

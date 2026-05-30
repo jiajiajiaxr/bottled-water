@@ -5,7 +5,7 @@ import json
 import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
@@ -21,14 +21,14 @@ from app.services.serialization import mcp_invocation_to_dict, mcp_server_to_dic
 router = APIRouter(tags=["mcp"])
 
 
-def ensure_mcp_tables(db: Session) -> None:
-    McpServer.__table__.create(bind=db.get_bind(), checkfirst=True)
-    McpToolInvocation.__table__.create(bind=db.get_bind(), checkfirst=True)
+async def ensure_mcp_tables(db: AsyncSession) -> None:
+    await db.run_sync(lambda: McpServer.__table__.create(bind=db.get_bind(), checkfirst=True))
+    await db.run_sync(lambda: McpToolInvocation.__table__.create(bind=db.get_bind(), checkfirst=True))
 
 
-def _get_server(db: Session, user: User, server_id: str) -> McpServer:
-    ensure_mcp_tables(db)
-    server = db.scalar(select(McpServer).where(McpServer.id == server_id, McpServer.deleted_at.is_(None)))
+async def _get_server(db: AsyncSession, user: User, server_id: str) -> McpServer:
+    await ensure_mcp_tables(db)
+    server = await db.scalar(select(McpServer).where(McpServer.id == server_id, McpServer.deleted_at.is_(None)))
     if not server:
         raise NotFoundError("MCP服务不存在")
     if server.owner_id not in {None, user.id} and user.role != "admin":
@@ -36,10 +36,10 @@ def _get_server(db: Session, user: User, server_id: str) -> McpServer:
     return server
 
 
-def _validate_workspace(db: Session, user: User, workspace_id: str | None) -> None:
+async def _validate_workspace(db: AsyncSession, user: User, workspace_id: str | None) -> None:
     if not workspace_id:
         return
-    workspace = db.get(Workspace, workspace_id)
+    workspace = await db.get(Workspace, workspace_id)
     if not workspace or workspace.deleted_at is not None:
         raise NotFoundError("工作区不存在")
     if workspace.owner_id != user.id and user.role != "admin":
@@ -53,25 +53,26 @@ def _tool_allowed(server: McpServer, tool_name: str) -> bool:
 @router.get("/mcp-servers", response_model=ApiResponse[dict])
 async def list_mcp_servers(
     workspace_id: str | None = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    ensure_mcp_tables(db)
+    await ensure_mcp_tables(db)
     query = select(McpServer).where(McpServer.deleted_at.is_(None)).where((McpServer.owner_id == user.id) | (McpServer.owner_id.is_(None)))
     if workspace_id:
         query = query.where(McpServer.workspace_id == workspace_id)
-    servers = db.scalars(query.order_by(McpServer.created_at.desc())).all()
-    return ok({"items": [mcp_server_to_dict(item) for item in servers], "total": len(servers)})
+    servers = await db.scalars(query.order_by(McpServer.created_at.desc()))
+    servers_list = servers.all()
+    return ok({"items": [mcp_server_to_dict(item) for item in servers_list], "total": len(servers_list)})
 
 
 @router.post("/mcp-servers", response_model=ApiResponse[McpServerOut])
 async def create_mcp_server(
     payload: CreateMcpServerRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    ensure_mcp_tables(db)
-    _validate_workspace(db, user, payload.workspace_id)
+    await ensure_mcp_tables(db)
+    await _validate_workspace(db, user, payload.workspace_id)
     if payload.transport in {"httpStream", "ws", "sse"} and not payload.url:
         raise ValidationAppError("远程MCP服务必须配置URL")
     if payload.transport == "stdio" and not payload.command:
@@ -93,19 +94,19 @@ async def create_mcp_server(
         health_status="unknown",
     )
     db.add(server)
-    db.commit()
-    db.refresh(server)
+    await db.commit()
+    await db.refresh(server)
     return ok(mcp_server_to_dict(server), "MCP服务已创建")
 
 
 @router.post("/mcp-servers/import", response_model=ApiResponse[McpServerOut])
 async def import_mcp_server(
     payload: ImportMcpServerRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    ensure_mcp_tables(db)
-    _validate_workspace(db, user, payload.workspace_id)
+    await ensure_mcp_tables(db)
+    await _validate_workspace(db, user, payload.workspace_id)
     if payload.source_type == "manifest_url":
         try:
             response = httpx.get(payload.source, timeout=10)
@@ -144,8 +145,8 @@ async def import_mcp_server(
     if server.transport == "stdio" and not server.command:
         raise ValidationAppError("stdio MCP 配置必须包含 command")
     db.add(server)
-    db.commit()
-    db.refresh(server)
+    await db.commit()
+    await db.refresh(server)
     return ok(mcp_server_to_dict(server), "MCP 已导入")
 
 
@@ -153,13 +154,13 @@ async def import_mcp_server(
 async def update_mcp_server(
     server_id: str,
     payload: CreateMcpServerRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    server = _get_server(db, user, server_id)
+    server = await _get_server(db, user, server_id)
     if server.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("只有创建者可修改MCP服务")
-    _validate_workspace(db, user, payload.workspace_id)
+    await _validate_workspace(db, user, payload.workspace_id)
     server.workspace_id = payload.workspace_id
     server.name = payload.name
     server.transport = payload.transport
@@ -172,17 +173,17 @@ async def update_mcp_server(
     server.tool_filter = payload.tool_filter
     server.timeout_ms = payload.timeout_ms
     server.retry = payload.retry
-    db.commit()
+    await db.commit()
     return ok(mcp_server_to_dict(server), "MCP服务已更新")
 
 
 @router.post("/mcp-servers/{server_id}/probe", response_model=ApiResponse[McpServerOut])
 async def probe_mcp_server(
     server_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    server = _get_server(db, user, server_id)
+    server = await _get_server(db, user, server_id)
     server.health_status = "online" if server.enabled else "disabled"
     server.last_checked_at = utcnow()
     server.tools = server.tools or [
@@ -190,17 +191,17 @@ async def probe_mcp_server(
         {"name": "browser.open", "description": "打开浏览器页面", "enabled": server.transport != "stdio"},
         {"name": "sandbox.run", "description": "在沙箱执行命令", "enabled": True},
     ]
-    db.commit()
+    await db.commit()
     return ok(mcp_server_to_dict(server), "MCP服务探测完成")
 
 
 @router.get("/mcp-servers/{server_id}/tools", response_model=ApiResponse[dict])
 async def list_mcp_tools(
     server_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    server = _get_server(db, user, server_id)
+    server = await _get_server(db, user, server_id)
     tools = server.tools or [
         {"name": pattern, "description": "Allowed by tool_filter", "enabled": True}
         for pattern in (server.tool_filter or [])
@@ -213,10 +214,10 @@ async def invoke_mcp_tool(
     server_id: str,
     tool_name: str,
     payload: InvokeMcpToolRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    server = _get_server(db, user, server_id)
+    server = await _get_server(db, user, server_id)
     invocation = await invoke_mcp_tool_recorded(
         db,
         server=server,
@@ -226,7 +227,7 @@ async def invoke_mcp_tool(
         conversation_id=payload.conversation_id,
         timeout_ms=payload.timeout_ms or server.timeout_ms or 30000,
     )
-    db.commit()
+    await db.commit()
     return ok(invocation, "MCP tool invocation recorded")
 
 
@@ -234,10 +235,10 @@ async def invoke_mcp_tool(
 async def list_mcp_invocations(
     server_id: str | None = None,
     status: str | None = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    ensure_mcp_tables(db)
+    await ensure_mcp_tables(db)
     query = select(McpToolInvocation).where(McpToolInvocation.owner_id == user.id)
     if user.role in {"admin", "developer"}:
         query = select(McpToolInvocation)
@@ -245,18 +246,19 @@ async def list_mcp_invocations(
         query = query.where(McpToolInvocation.server_id == server_id)
     if status:
         query = query.where(McpToolInvocation.status == status)
-    items = db.scalars(query.order_by(McpToolInvocation.created_at.desc()).limit(100)).all()
-    return ok({"items": [mcp_invocation_to_dict(item) for item in items], "total": len(items)})
+    items = await db.scalars(query.order_by(McpToolInvocation.created_at.desc()).limit(100))
+    items_list = items.all()
+    return ok({"items": [mcp_invocation_to_dict(item) for item in items_list], "total": len(items_list)})
 
 
 @router.get("/mcp-invocations/{invocation_id}", response_model=ApiResponse[dict])
 async def get_mcp_invocation(
     invocation_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    ensure_mcp_tables(db)
-    invocation = db.get(McpToolInvocation, invocation_id)
+    await ensure_mcp_tables(db)
+    invocation = await db.get(McpToolInvocation, invocation_id)
     if not invocation or (invocation.owner_id != user.id and user.role not in {"admin", "developer"}):
         raise NotFoundError("MCP invocation not found")
     return ok(mcp_invocation_to_dict(invocation))
@@ -265,13 +267,13 @@ async def get_mcp_invocation(
 @router.delete("/mcp-servers/{server_id}", response_model=ApiResponse[dict])
 async def delete_mcp_server(
     server_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    server = _get_server(db, user, server_id)
+    server = await _get_server(db, user, server_id)
     if server.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("只有创建者可删除MCP服务")
     server.deleted_at = utcnow()
     server.enabled = False
-    db.commit()
+    await db.commit()
     return ok({"id": server.id, "deleted": True})

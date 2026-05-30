@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.database import get_db
@@ -34,21 +34,21 @@ class ParseDeploymentCommandRequest(BaseModel):
     text: str | None = None
 
 
-def _check_artifact_owner(db: Session, user: User, artifact_id: str) -> Artifact:
-    artifact = db.get(Artifact, artifact_id)
+async def _check_artifact_owner(db: AsyncSession, user: User, artifact_id: str) -> Artifact:
+    artifact = await db.get(Artifact, artifact_id)
     if not artifact:
         raise NotFoundError("产物不存在")
-    conversation = db.get(Conversation, artifact.conversation_id)
+    conversation = await db.get(Conversation, artifact.conversation_id)
     if not conversation or conversation.creator_id != user.id:
         raise NotFoundError("产物不存在")
     return artifact
 
 
-def _create(db: Session, user: User, payload: dict) -> Deployment:
+async def _create(db: AsyncSession, user: User, payload: dict) -> Deployment:
     artifact_id = payload.get("artifact_id")
     if not artifact_id and payload.get("conversationId"):
-        artifact = (
-            db.query(Artifact)
+        artifact = await db.run_sync(
+            lambda s: s.query(Artifact)
             .filter(Artifact.conversation_id == payload["conversationId"], Artifact.deleted_at.is_(None))
             .order_by(Artifact.updated_at.desc())
             .first()
@@ -56,18 +56,18 @@ def _create(db: Session, user: User, payload: dict) -> Deployment:
         artifact_id = artifact.id if artifact else None
     if not artifact_id:
         raise NotFoundError("产物不存在")
-    artifact = _check_artifact_owner(db, user, artifact_id)
-    deployment = create_deployment(db, artifact.id, payload.get("mode") or payload.get("environment") or "preview_link")
+    artifact = await _check_artifact_owner(db, user, artifact_id)
+    deployment = await create_deployment(db, artifact.id, payload.get("mode") or payload.get("environment") or "preview_link")
     return deployment
 
 
 @router.post("/deployments", response_model=ApiResponse[DeploymentOut])
 async def create_deployment_endpoint(
     payload: CreateDeploymentRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    deployment = _create(db, user, payload.model_dump())
+    deployment = await _create(db, user, payload.model_dump())
     await event_bus.publish(
         f"deployment:{deployment.id}",
         "deployment:status_changed",
@@ -79,10 +79,10 @@ async def create_deployment_endpoint(
 @router.get("/deployments/{deployment_id}", response_model=ApiResponse[DeploymentOut])
 async def get_deployment(
     deployment_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    deployment = db.get(Deployment, deployment_id)
+    deployment = await db.get(Deployment, deployment_id)
     if not deployment:
         raise NotFoundError("部署不存在")
     return ok(deployment_to_dict(deployment))
@@ -94,10 +94,10 @@ async def get_deployment_logs(
     level: str = "all",
     page: int = 1,
     page_size: int = 100,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    deployment = db.get(Deployment, deployment_id)
+    deployment = await db.get(Deployment, deployment_id)
     if not deployment:
         raise NotFoundError("部署不存在")
     lines = [line for line in (deployment.deploy_log or "").splitlines() if line.strip()]
@@ -121,10 +121,10 @@ async def get_deployment_logs(
 async def cancel_deployment(
     deployment_id: str,
     payload: CancelDeploymentRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    deployment = db.get(Deployment, deployment_id)
+    deployment = await db.get(Deployment, deployment_id)
     if not deployment:
         raise NotFoundError("部署不存在")
     if deployment.status in {"deployed", "failed", "cancelled", "rolled_back"}:
@@ -133,7 +133,7 @@ async def cancel_deployment(
     deployment.stopped_at = utcnow()
     deployment.error_message = payload.reason or "用户取消部署"
     deployment.deploy_log = f"{deployment.deploy_log}\n用户取消部署：{deployment.error_message}".strip()
-    db.commit()
+    await db.commit()
     return ok(deployment_to_dict(deployment), "部署已取消")
 
 
@@ -141,15 +141,15 @@ async def cancel_deployment(
 async def rollback_deployment(
     deployment_id: str,
     payload: RollbackDeploymentRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    deployment = db.get(Deployment, deployment_id)
+    deployment = await db.get(Deployment, deployment_id)
     if not deployment:
         raise NotFoundError("部署不存在")
-    artifact = _check_artifact_owner(db, user, deployment.artifact_id)
+    artifact = await _check_artifact_owner(db, user, deployment.artifact_id)
     target_id = payload.target_deployment_id
-    target = db.get(Deployment, target_id) if target_id else None
+    target = await db.get(Deployment, target_id) if target_id else None
     rollback = Deployment(
         artifact_id=artifact.id,
         artifact_version_id=(target or deployment).artifact_version_id,
@@ -167,21 +167,21 @@ async def rollback_deployment(
         extra={"is_rollback": True, "source_deployment_id": deployment.id},
     )
     deployment.status = "rolled_back"
-    db.add(rollback)
-    db.commit()
-    db.refresh(rollback)
+    await db.add(rollback)
+    await db.commit()
+    await db.refresh(rollback)
     return ok(deployment_to_dict(rollback), "部署已回滚")
 
 
 @router.get("/artifacts/{artifact_id}/deployments", response_model=ApiResponse[dict])
 async def list_artifact_deployments(
     artifact_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _check_artifact_owner(db, user, artifact_id)
-    deployments = (
-        db.query(Deployment)
+    await _check_artifact_owner(db, user, artifact_id)
+    deployments = await db.run_sync(
+        lambda s: s.query(Deployment)
         .filter(Deployment.artifact_id == artifact_id, Deployment.deleted_at.is_(None))
         .order_by(Deployment.created_at.desc())
         .all()
@@ -230,10 +230,10 @@ async def stream_deployment(deployment_id: str):
 @compat_router.post("/deployments", response_model=DeploymentOut)
 async def compat_create_deployment(
     payload: CreateDeploymentRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     try:
-        return deployment_to_dict(_create(db, user, payload.model_dump()))
+        return deployment_to_dict(await _create(db, user, payload.model_dump()))
     except NotFoundError:
         raise

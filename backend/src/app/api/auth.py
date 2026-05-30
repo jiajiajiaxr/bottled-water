@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -21,8 +21,8 @@ router = APIRouter(tags=["auth"])
 compat_router = APIRouter(tags=["auth-compat"])
 
 
-def _find_user(db: Session, username_or_email: str) -> User | None:
-    return db.scalar(
+async def _find_user(db: AsyncSession, username_or_email: str) -> User | None:
+    return await db.scalar(
         select(User).where(
             or_(User.email == username_or_email, User.username == username_or_email),
             User.deleted_at.is_(None),
@@ -35,13 +35,13 @@ def _login_response(user: User) -> dict:
     return {"access_token": token, "token": token, "user": user_to_dict(user)}
 
 
-def _register(db: Session, payload: dict) -> tuple[dict, int]:
+async def _register(db: AsyncSession, payload: dict) -> tuple[dict, int]:
     email = payload.get("email") or payload.get("username") or "demo@agenthub.local"
     username = payload.get("username") or payload.get("name") or email.split("@")[0]
     password = payload.get("password") or get_settings().demo_password
     if not email or not username or not password:
         raise ValidationAppError("邮箱、用户名和密码不能为空")
-    existing = _find_user(db, email) or _find_user(db, username)
+    existing = await _find_user(db, email) or await _find_user(db, username)
     if existing:
         return _login_response(existing), 409
     user = User(
@@ -51,53 +51,53 @@ def _register(db: Session, payload: dict) -> tuple[dict, int]:
         display_name=payload.get("display_name") or payload.get("name") or username,
     )
     db.add(user)
-    db.flush()
+    await db.flush()
     db.add(UserSettings(user_id=user.id, theme="light"))
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
     return _login_response(user), 201
 
 
-def _login(db: Session, payload: dict) -> dict:
+async def _login(db: AsyncSession, payload: dict) -> dict:
     settings = get_settings()
     if payload.get("demo") or payload.get("name") == "demo":
-        user = ensure_seed_data(db)
+        user = await ensure_seed_data(db)
         return _login_response(user)
     username = payload.get("username") or payload.get("email") or payload.get("name")
     password = payload.get("password") or settings.demo_password
     if not username:
-        user = ensure_seed_data(db)
+        user = await ensure_seed_data(db)
         return _login_response(user)
-    user = _find_user(db, username)
+    user = await _find_user(db, username)
     if not user or not verify_password(password, user.password_hash):
         raise UnauthorizedError("用户名或密码错误")
     user.last_login_at = utcnow()
     user.login_count += 1
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
     return _login_response(user)
 
 
 @router.post("/auth/register", response_model=ApiResponse[dict])
-async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
-    data, _ = _register(db, payload.model_dump())
+async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    data, _ = await _register(db, payload.model_dump())
     return ok(data, "注册成功")
 
 
 @router.post("/auth/signup", response_model=ApiResponse[dict])
-async def signup_alias(payload: RegisterRequest, db: Session = Depends(get_db)):
-    data, _ = _register(db, payload.model_dump())
+async def signup_alias(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    data, _ = await _register(db, payload.model_dump())
     return ok(data, "注册成功")
 
 
 @router.post("/auth/login", response_model=ApiResponse[dict])
-async def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    return ok(_login(db, payload.model_dump()), "登录成功")
+async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+    return ok(await _login(db, payload.model_dump()), "登录成功")
 
 
 @router.post("/auth/demo", response_model=ApiResponse[dict])
-async def demo_login(db: Session = Depends(get_db)):
-    return ok(_login_response(ensure_seed_data(db)), "演示用户已登录")
+async def demo_login(db: AsyncSession = Depends(get_db)):
+    return ok(_login_response(await ensure_seed_data(db)), "演示用户已登录")
 
 
 @router.get("/auth/me", response_model=UserResponse)
@@ -113,7 +113,7 @@ async def logout():
 @router.patch("/auth/me", response_model=UserResponse)
 async def update_me(
     payload: UpdateProfileRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     raw = payload.model_dump(exclude_unset=True)
@@ -128,17 +128,17 @@ async def update_me(
     if isinstance(raw.get("settings"), dict):
         if not user.settings:
             db.add(UserSettings(user_id=user.id, theme="light"))
-            db.flush()
+            await db.flush()
         user.extra = {**(user.extra or {}), "ui_settings": raw["settings"]}
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
     return ok(user_to_dict(user), "profile updated")
 
 
 @router.post("/auth/password", response_model=ApiResponse[dict])
 async def change_password(
     payload: ChangePasswordRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     raw = payload.model_dump(exclude_unset=True)
@@ -151,7 +151,7 @@ async def change_password(
     if not verify_password(current_password, user.password_hash):
         raise UnauthorizedError("current password is incorrect")
     user.password_hash = hash_password(new_password)
-    db.commit()
+    await db.commit()
     return ok({"changed": True}, "password updated")
 
 
@@ -163,14 +163,14 @@ async def _compat_payload(request: Request) -> dict:
 
 
 @compat_router.post("/auth/signup")
-async def compat_signup(request: Request, db: Session = Depends(get_db)):
-    data, status = _register(db, await _compat_payload(request))
+async def compat_signup(request: Request, db: AsyncSession = Depends(get_db)):
+    data, status = await _register(db, await _compat_payload(request))
     return data if status != 409 else data
 
 
 @compat_router.post("/auth/login")
-async def compat_login(request: Request, db: Session = Depends(get_db)):
-    return _login(db, await _compat_payload(request))
+async def compat_login(request: Request, db: AsyncSession = Depends(get_db)):
+    return await _login(db, await _compat_payload(request))
 
 
 @compat_router.get("/auth/me")

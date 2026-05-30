@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 import httpx
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, ValidationAppError
 from app.models import McpServer, McpToolInvocation, User, utcnow
@@ -97,7 +97,7 @@ async def call_stdio_mcp(server: McpServer, invocation: McpToolInvocation, timeo
 
 
 async def invoke_mcp_tool_recorded(
-    db: Session,
+    db: AsyncSession,
     *,
     server: McpServer,
     tool_name_value: str,
@@ -122,8 +122,8 @@ async def invoke_mcp_tool_recorded(
         status="running",
         started_at=utcnow(),
     )
-    db.add(invocation)
-    db.flush()
+    await db.add(invocation)
+    await db.flush()
     start = time.perf_counter()
     try:
         if server.transport in {"httpStream", "sse", "ws"}:
@@ -143,7 +143,7 @@ async def invoke_mcp_tool_recorded(
     server.last_checked_at = utcnow()
     server.health_status = "online" if invocation.status == "succeeded" else "offline"
     if user:
-        write_audit_log(
+        await write_audit_log(
             db,
             user=user,
             action="mcp.invoke",
@@ -152,5 +152,5 @@ async def invoke_mcp_tool_recorded(
             detail={"tool_name": tool_name_value, "status": invocation.status, "invocation_id": invocation.id},
             risk_score=0.35 if invocation.status == "succeeded" else 0.6,
         )
-    db.flush()
+    await db.flush()
     return mcp_invocation_to_dict(invocation)

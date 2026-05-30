@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditLog, User
 
@@ -53,8 +53,8 @@ def has_permission(user: User, permission: str) -> bool:
     return permission in permissions_for_user(user)
 
 
-def write_audit_log(
-    db: Session,
+async def write_audit_log(
+    db: AsyncSession,
     *,
     user: User | None,
     action: str,
@@ -74,5 +74,5 @@ def write_audit_log(
         risk_score=risk_score,
         detail=detail or {},
     )
-    db.add(log)
+    await db.add(log)
     return log

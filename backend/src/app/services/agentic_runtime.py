@@ -17,7 +17,7 @@ import re
 from typing import Any
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Agent, Conversation, McpServer, Skill, User
 from app.events import app_event_bus as event_bus
@@ -65,7 +65,7 @@ def _mcp_tool_args(prompt: str, name: str) -> dict[str, Any]:
     return args
 
 
-def select_skills(db: Session, conversation: Conversation, prompt: str, limit: int = 2) -> list[Skill]:
+async def select_skills(db: AsyncSession, conversation: Conversation, prompt: str, limit: int = 2) -> list[Skill]:
     workspace_id = _workspace_id(conversation)
     query = select(Skill).where(Skill.deleted_at.is_(None), Skill.status == "active")
     query = query.where(or_(Skill.owner_id == conversation.creator_id, Skill.owner_id.is_(None)))
@@ -74,7 +74,7 @@ def select_skills(db: Session, conversation: Conversation, prompt: str, limit: i
     else:
         query = query.where(Skill.workspace_id.is_(None))
     scored: list[tuple[int, Skill]] = []
-    for skill in db.scalars(query).all():
+    for skill in (await db.scalars(query)).all():
         score = _score_text(prompt, skill.name, skill.description, skill.category, skill.tags, skill.content)
         if score > 0 or (TOOL_INTENT_PATTERN.search(prompt) and skill.source in {"ai", "mcp"}):
             scored.append((score + (2 if skill.source in {"ai", "mcp"} else 0), skill))
@@ -82,7 +82,7 @@ def select_skills(db: Session, conversation: Conversation, prompt: str, limit: i
     return [skill for score, skill in scored if score > 0][:limit]
 
 
-def select_agent_skills(db: Session, conversation: Conversation, prompt: str, agent: Agent, limit: int = 2) -> list[Skill]:
+async def select_agent_skills(db: AsyncSession, conversation: Conversation, prompt: str, agent: Agent, limit: int = 2) -> list[Skill]:
     config = agent.config or {}
     allowed_ids = [str(item) for item in config.get("skill_ids") or [] if item]
     if not allowed_ids:
@@ -91,14 +91,14 @@ def select_agent_skills(db: Session, conversation: Conversation, prompt: str, ag
     query = select(Skill).where(Skill.id.in_(allowed_ids), Skill.deleted_at.is_(None), Skill.status == "active")
     if workspace_id:
         query = query.where(or_(Skill.workspace_id == workspace_id, Skill.workspace_id.is_(None)))
-    skills = db.scalars(query).all()
+    skills = (await db.scalars(query)).all()
     scored = [(_score_text(prompt, skill.name, skill.description, skill.category, skill.tags, skill.content), skill) for skill in skills]
     scored.sort(key=lambda item: (item[0], item[1].updated_at), reverse=True)
     ordered = [skill for _score, skill in scored]
     return ordered[:limit]
 
 
-def select_mcp_action(db: Session, conversation: Conversation, prompt: str) -> tuple[McpServer, str] | None:
+async def select_mcp_action(db: AsyncSession, conversation: Conversation, prompt: str) -> tuple[McpServer, str] | None:
     if not TOOL_INTENT_PATTERN.search(prompt):
         return None
     workspace_id = _workspace_id(conversation)
@@ -109,7 +109,7 @@ def select_mcp_action(db: Session, conversation: Conversation, prompt: str) -> t
     )
     if workspace_id:
         query = query.where(or_(McpServer.workspace_id == workspace_id, McpServer.workspace_id.is_(None)))
-    servers = db.scalars(query).all()
+    servers = (await db.scalars(query)).all()
     best: tuple[int, McpServer, str] | None = None
     for server in servers:
         tools = [item for item in (server.tools or []) if isinstance(item, dict) and item.get("enabled", True)]
@@ -129,7 +129,7 @@ def select_mcp_action(db: Session, conversation: Conversation, prompt: str) -> t
     return best[1], best[2]
 
 
-def select_agent_mcp_action(db: Session, conversation: Conversation, prompt: str, agent: Agent) -> tuple[McpServer, str] | None:
+async def select_agent_mcp_action(db: AsyncSession, conversation: Conversation, prompt: str, agent: Agent) -> tuple[McpServer, str] | None:
     config = agent.config or {}
     allowed_ids = [str(item) for item in config.get("mcp_server_ids") or [] if item]
     if not allowed_ids or not TOOL_INTENT_PATTERN.search(prompt):
@@ -143,7 +143,7 @@ def select_agent_mcp_action(db: Session, conversation: Conversation, prompt: str
     if workspace_id:
         query = query.where(or_(McpServer.workspace_id == workspace_id, McpServer.workspace_id.is_(None)))
     best: tuple[int, McpServer, str] | None = None
-    for server in db.scalars(query).all():
+    for server in (await db.scalars(query)).all():
         tools = [item for item in (server.tools or []) if isinstance(item, dict) and item.get("enabled", True)]
         if not tools:
             tools = [{"name": item, "description": "Allowed by tool_filter", "enabled": True} for item in (server.tool_filter or [])]
@@ -214,7 +214,7 @@ def _select_agent_builtin_tools(agent: Agent, prompt: str, limit: int) -> list[s
 
 
 async def execute_skill(
-    db: Session,
+    db: AsyncSession,
     *,
     skill: Skill,
     user: User | None,
@@ -226,7 +226,7 @@ async def execute_skill(
     mcp_refs = [item for item in _skill_tool_refs(skill) if item.get("type") == "mcp" and item.get("server_id") and item.get("name")]
     if mcp_refs:
         ref = mcp_refs[0]
-        server = db.get(McpServer, str(ref["server_id"]))
+        server = await db.get(McpServer, str(ref["server_id"]))
         if server:
             invocation = await invoke_mcp_tool_recorded(
                 db,
@@ -278,7 +278,7 @@ async def execute_skill(
 
 
 async def execute_mcp_action(
-    db: Session,
+    db: AsyncSession,
     *,
     server: McpServer,
     name: str,
@@ -311,7 +311,7 @@ async def execute_mcp_action(
 
 
 async def execute_builtin_tool_action(
-    db: Session,
+    db: AsyncSession,
     *,
     agent: Agent,
     user: User | None,
@@ -322,9 +322,9 @@ async def execute_builtin_tool_action(
     channel = f"conversation:{conversation.id}"
     await event_bus.publish(channel, "tool:started", {"type": "tool", "agent_id": agent.id, "tool_name": name})
     if not user:
-        user = db.get(User, conversation.creator_id)
+        user = await db.get(User, conversation.creator_id)
     try:
-        payload = invoke_tool(db, user, name, _builtin_tool_args(conversation, prompt, name))
+        payload = await invoke_tool(db, user, name, _builtin_tool_args(conversation, prompt, name))
         result = {
             "type": "tool",
             "agent_id": agent.id,
@@ -347,7 +347,7 @@ async def execute_builtin_tool_action(
 
 
 async def run_agentic_tool_loop(
-    db: Session,
+    db: AsyncSession,
     conversation: Conversation,
     prompt: str,
     *,
@@ -360,7 +360,7 @@ async def run_agentic_tool_loop(
         仅保留用于兼容旧编排器的 workflow 模式。
         新代码请使用 `agent_runtime.Session` + `OrchestratorV2`。
     """
-    user = db.get(User, conversation.creator_id)
+    user = await db.get(User, conversation.creator_id)
     if agent:
         loop_cfg = (agent.config or {}).get("agentic_loop") or {}
         allowed_tools = normalize_tool_names((agent.config or {}).get("tools") or [])
@@ -380,30 +380,30 @@ async def run_agentic_tool_loop(
         max_steps = min(int(loop_cfg.get("max_steps") or max_steps or 2), 4)
 
     selected_skills = (
-        select_agent_skills(db, conversation, prompt, agent, limit=max_steps)
+        await select_agent_skills(db, conversation, prompt, agent, limit=max_steps)
         if agent
-        else select_skills(db, conversation, prompt, limit=max_steps)
+        else await select_skills(db, conversation, prompt, limit=max_steps)
     )
     results: list[dict[str, Any]] = []
     for skill in selected_skills:
         if len(results) >= max_steps:
             break
         results.append(await execute_skill(db, skill=skill, user=user, conversation=conversation, prompt=prompt))
-        db.commit()
+        await db.commit()
 
     if agent and len(results) < max_steps:
         for name in _select_agent_builtin_tools(agent, prompt, max_steps - len(results)):
             results.append(await execute_builtin_tool_action(db, agent=agent, user=user, conversation=conversation, name=name, prompt=prompt))
-            db.commit()
+            await db.commit()
             if len(results) >= max_steps:
                 break
 
     if len(results) < max_steps:
-        action = select_agent_mcp_action(db, conversation, prompt, agent) if agent else select_mcp_action(db, conversation, prompt)
+        action = await select_agent_mcp_action(db, conversation, prompt, agent) if agent else await select_mcp_action(db, conversation, prompt)
         if action:
             server, name = action
             results.append(await execute_mcp_action(db, server=server, name=name, user=user, conversation=conversation, prompt=prompt))
-            db.commit()
+            await db.commit()
 
     return {
         "mode": "agent_short_loop" if agent else "short_agentic_loop",
@@ -418,7 +418,7 @@ async def run_agentic_tool_loop(
     }
 
 
-def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
+async def build_tools_for_agent(db: AsyncSession, agent: Agent) -> list[dict[str, Any]]:
     """将 Agent 配置的 tools/skills/mcp 转为 OpenAI Function Calling 格式。"""
     from app.services.tool_registry import BUILTIN_TOOLS
 
@@ -448,7 +448,7 @@ def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
             Skill.deleted_at.is_(None),
             Skill.status == "active",
         )
-        for skill in db.scalars(skill_query).all():
+        for skill in (await db.scalars(skill_query)).all():
             tools.append({
                 "type": "function",
                 "function": {
@@ -470,7 +470,7 @@ def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
             McpServer.deleted_at.is_(None),
             McpServer.enabled.is_(True),
         )
-        for server in db.scalars(mcp_query).all():
+        for server in (await db.scalars(mcp_query)).all():
             server_tools = [item for item in (server.tools or []) if isinstance(item, dict) and item.get("enabled", True)]
             if not server_tools:
                 server_tools = [{"name": item, "description": "Allowed by tool_filter", "enabled": True} for item in (server.tool_filter or [])]
@@ -491,7 +491,7 @@ def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
 
 
 async def execute_tool_by_name(
-    db: Session,
+    db: AsyncSession,
     *,
     agent: Agent,
     user: User | None,
@@ -504,12 +504,12 @@ async def execute_tool_by_name(
 
     # 内置工具
     if tool_name in BUILTIN_TOOLS:
-        return invoke_builtin_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
+        return await invoke_builtin_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
 
     # Skill
     if tool_name.startswith("skill."):
         skill_id = tool_name.removeprefix("skill.")
-        skill = db.get(Skill, skill_id)
+        skill = await db.get(Skill, skill_id)
         if not skill or skill.deleted_at is not None or skill.status != "active":
             return {"type": "skill", "skill_id": skill_id, "status": "failed", "output": "Skill 不存在或未启用"}
         return await execute_skill(db, skill=skill, user=user, conversation=conversation, prompt=arguments.get("prompt", ""))
@@ -520,7 +520,7 @@ async def execute_tool_by_name(
         if len(parts) >= 3:
             server_id = parts[1]
             actual_tool_name = ".".join(parts[2:])
-            server = db.get(McpServer, server_id)
+            server = await db.get(McpServer, server_id)
             if not server or server.deleted_at is not None or not server.enabled:
                 return {"type": "mcp", "server_id": server_id, "tool_name": actual_tool_name, "status": "failed", "output": "MCP server 不存在或未启用"}
             return await execute_mcp_action(db, server=server, name=actual_tool_name, user=user, conversation=conversation, prompt=arguments.get("prompt", ""))

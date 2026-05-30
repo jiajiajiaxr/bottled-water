@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
@@ -96,7 +96,7 @@ async def list_agents(
     sort_by: str = "default",
     sort_order: str = "desc",
     search: str | None = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     query = select(Agent).where(Agent.deleted_at.is_(None))
@@ -105,7 +105,7 @@ async def list_agents(
     if status != "all":
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         query = query.where(Agent.status.in_(statuses))
-    agents = db.scalars(query).all()
+    agents = await db.scalars(query).all()
     items = [agent_to_dict(agent) for agent in agents]
     if provider != "all":
         items = [it for it in items if it.get("provider") == provider]
@@ -140,19 +140,19 @@ async def list_agents(
 
 @router.get("/agents/status", response_model=ApiResponse[dict])
 async def agent_status(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    agents = db.scalars(select(Agent).where(Agent.deleted_at.is_(None))).all()
+    agents = await db.scalars(select(Agent).where(Agent.deleted_at.is_(None))).all()
     return ok({agent.id: {"status": agent.status, "name": agent.name} for agent in agents})
 
 
 @router.get("/agents/capabilities", response_model=ApiResponse[dict])
 async def list_capabilities(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    agents = db.scalars(select(Agent).where(Agent.deleted_at.is_(None))).all()
+    agents = await db.scalars(select(Agent).where(Agent.deleted_at.is_(None))).all()
     capabilities: dict = {}
     for agent in agents:
         for cap in agent_to_dict(agent).get("capabilities", []):
@@ -209,21 +209,21 @@ async def generate_agent(payload: GenerateAgentRequest, _user: User = Depends(ge
     return ok(normalized, "Agent 配置已生成")
 
 
-def _get_agent(db: Session, agent_id: str) -> Agent:
-    agent = db.scalar(select(Agent).where(Agent.id == agent_id, Agent.deleted_at.is_(None)))
+async def _get_agent(db: AsyncSession, agent_id: str) -> Agent:
+    agent = await db.scalar(select(Agent).where(Agent.id == agent_id, Agent.deleted_at.is_(None)))
     if not agent:
         raise NotFoundError("Agent不存在")
     return agent
 
 
 @router.get("/agents/{agent_id}", response_model=ApiResponse[AgentOut])
-async def get_agent(agent_id: str, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
-    return ok(agent_to_dict(_get_agent(db, agent_id)))
+async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db), _user: User = Depends(get_current_user)):
+    return ok(agent_to_dict(await _get_agent(db, agent_id)))
 
 
 @router.post("/agents", response_model=ApiResponse[AgentOut])
-async def create_agent(payload: CreateAgentRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    duplicate = db.scalar(select(Agent).where(Agent.name == payload.name, Agent.deleted_at.is_(None)))
+async def create_agent(payload: CreateAgentRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    duplicate = await db.scalar(select(Agent).where(Agent.name == payload.name, Agent.deleted_at.is_(None)))
     if duplicate:
         raise ValidationAppError("Agent名称已存在")
     agent = Agent(
@@ -248,15 +248,15 @@ async def create_agent(payload: CreateAgentRequest, db: Session = Depends(get_db
             "success_rate": 0.99,
         },
     )
-    db.add(agent)
-    db.commit()
-    db.refresh(agent)
+    await db.add(agent)
+    await db.commit()
+    await db.refresh(agent)
     return ok(agent_to_dict(agent), "Agent 创建成功")
 
 
 @router.patch("/agents/{agent_id}", response_model=ApiResponse[AgentOut])
-async def update_agent(agent_id: str, payload: UpdateAgentRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    agent = _get_agent(db, agent_id)
+async def update_agent(agent_id: str, payload: UpdateAgentRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    agent = await _get_agent(db, agent_id)
     if agent.type == "custom" and agent.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("只能修改自己创建的Agent")
     data = payload.model_dump(exclude_unset=True)
@@ -275,27 +275,27 @@ async def update_agent(agent_id: str, payload: UpdateAgentRequest, db: Session =
     if "tools" in data:
         config["tools"] = normalize_tool_names(data["tools"])
     agent.config = config
-    db.commit()
-    db.refresh(agent)
+    await db.commit()
+    await db.refresh(agent)
     return ok(agent_to_dict(agent), "Agent已更新")
 
 
 @router.delete("/agents/{agent_id}", response_model=ApiResponse[dict])
-async def delete_agent(agent_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    agent = _get_agent(db, agent_id)
+async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    agent = await _get_agent(db, agent_id)
     if agent.type != "custom":
         raise ForbiddenError("官方Agent不可删除")
     if agent.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("只能删除自己创建的Agent")
     agent.deleted_at = utcnow()
     agent.status = "offline"
-    db.commit()
+    await db.commit()
     return ok({"id": agent.id, "deleted": True})
 
 
 @router.post("/agents/{agent_id}/test", response_model=ApiResponse[dict])
-async def test_agent(agent_id: str, payload: TestAgentRequest, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
-    agent = _get_agent(db, agent_id)
+async def test_agent(agent_id: str, payload: TestAgentRequest, db: AsyncSession = Depends(get_db), _user: User = Depends(get_current_user)):
+    agent = await _get_agent(db, agent_id)
     provider = _model_provider()
     system_prompt = (agent.config or {}).get("system_prompt") or agent.description or f"你是 {agent.name}"
     if not provider:

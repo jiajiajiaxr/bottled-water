@@ -5,7 +5,7 @@ import html as html_lib
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import NotFoundError
@@ -136,8 +136,8 @@ def build_demo_html(prompt: str, review: str = "", artifact_type: str = "web_app
 </style>"""
 
 
-def create_artifact(
-    db: Session,
+async def create_artifact(
+    db: AsyncSession,
     conversation: Conversation,
     *,
     task: Task | None,
@@ -166,7 +166,7 @@ def create_artifact(
         mime_type="text/html",
     )
     db.add(artifact)
-    db.flush()
+    await db.flush()
     artifact.storage_url = f"{get_settings().artifact_base_url}/api/v1/artifacts/{artifact.id}/preview"
     db.add(
         ArtifactVersion(
@@ -176,11 +176,11 @@ def create_artifact(
             change_summary="初始 Agent 产物",
         )
     )
-    db.flush()
+    await db.flush()
     return artifact
 
 
-def create_preview_message(db: Session, conversation: Conversation, artifact: Artifact) -> Message:
+async def create_preview_message(db: AsyncSession, conversation: Conversation, artifact: Artifact) -> Message:
     message = Message(
         conversation_id=conversation.id,
         sender_type="agent",
@@ -222,8 +222,8 @@ def compute_artifact_diff(old: str, new: str) -> list[dict[str, Any]]:
     return entries
 
 
-def update_artifact_files(db: Session, artifact_id: str, files: dict[str, str], summary: str) -> Artifact:
-    artifact = db.get(Artifact, artifact_id)
+async def update_artifact_files(db: AsyncSession, artifact_id: str, files: dict[str, str], summary: str) -> Artifact:
+    artifact = await db.get(Artifact, artifact_id)
     if not artifact:
         raise NotFoundError("产物不存在")
     current_files = artifact.content.get("files") or {}
@@ -244,18 +244,18 @@ def update_artifact_files(db: Session, artifact_id: str, files: dict[str, str], 
             change_summary=summary,
         )
     )
-    db.commit()
-    db.refresh(artifact)
+    await db.commit()
+    await db.refresh(artifact)
     return artifact
 
 
-def create_deployment(db: Session, artifact_id: str, mode: str = "preview_link") -> Deployment:
-    artifact = db.get(Artifact, artifact_id)
+async def create_deployment(db: AsyncSession, artifact_id: str, mode: str = "preview_link") -> Deployment:
+    artifact = await db.get(Artifact, artifact_id)
     if not artifact:
         raise NotFoundError("产物不存在")
     deployment = Deployment(
         artifact_id=artifact.id,
-        artifact_version_id=db.scalar(
+        artifact_version_id=await db.scalar(
             select(ArtifactVersion.id)
             .where(ArtifactVersion.artifact_id == artifact.id)
             .order_by(ArtifactVersion.version.desc())
@@ -277,7 +277,7 @@ def create_deployment(db: Session, artifact_id: str, mode: str = "preview_link")
         deployed_at=utcnow(),
     )
     db.add(deployment)
-    db.flush()
+    await db.flush()
     db.add(
         Message(
             conversation_id=artifact.conversation_id,
@@ -296,6 +296,6 @@ def create_deployment(db: Session, artifact_id: str, mode: str = "preview_link")
             status="completed",
         )
     )
-    db.commit()
-    db.refresh(deployment)
+    await db.commit()
+    await db.refresh(deployment)
     return deployment

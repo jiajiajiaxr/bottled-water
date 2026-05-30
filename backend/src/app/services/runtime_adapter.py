@@ -9,7 +9,7 @@ agent_runtime 适配器层
 
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.logger import get_logger
 from agent_runtime.core.interfaces import ToolExecutor
@@ -29,7 +29,7 @@ class ToolExecutorAdapter(ToolExecutor):
 
     def __init__(
         self,
-        db: Session,
+        db: AsyncSession,
         agent: Agent,
         user: Any,
         conversation: Conversation,
@@ -40,12 +40,12 @@ class ToolExecutorAdapter(ToolExecutor):
         self.conversation = conversation
         self._tools_cache: Optional[List[Dict]] = None
 
-    def list_tools(self) -> List[Dict]:
+    async def list_tools(self) -> List[Dict]:
         """列出可用工具（OpenAI Function Calling 格式）"""
         if self._tools_cache is None:
             from app.services.agentic_runtime import build_tools_for_agent
 
-            self._tools_cache = build_tools_for_agent(self.db, self.agent)
+            self._tools_cache = await build_tools_for_agent(self.db, self.agent)
         return self._tools_cache
 
     async def execute(self, tool_name: str, parameters: Dict[str, Any]) -> Any:

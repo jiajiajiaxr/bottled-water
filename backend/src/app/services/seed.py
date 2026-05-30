@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.security import hash_password
@@ -205,9 +205,9 @@ DEFAULT_ROLE_MAP = {
 }
 
 
-def ensure_seed_data(db: Session) -> User:
+async def ensure_seed_data(db: AsyncSession) -> User:
     settings = get_settings()
-    user = db.scalar(select(User).where(User.email == settings.demo_email))
+    user = await db.scalar(select(User).where(User.email == settings.demo_email))
     if not user:
         user = User(
             email=settings.demo_email,
@@ -218,12 +218,12 @@ def ensure_seed_data(db: Session) -> User:
             status="active",
         )
         db.add(user)
-        db.flush()
+        await db.flush()
         db.add(UserSettings(user_id=user.id, theme="light"))
 
-    ensure_tool_tables(db)
+    await ensure_tool_tables(db)
 
-    agents = db.scalars(select(Agent)).all()
+    agents = (await db.scalars(select(Agent))).all()
     if not agents:
         for spec in DEFAULT_AGENTS:
             db.add(
@@ -252,8 +252,8 @@ def ensure_seed_data(db: Session) -> User:
                     },
                 )
             )
-        db.flush()
-        agents = db.scalars(select(Agent)).all()
+        await db.flush()
+        agents = (await db.scalars(select(Agent))).all()
     else:
         existing_names = {agent.name for agent in agents}
         for spec in DEFAULT_AGENTS:
@@ -284,8 +284,8 @@ def ensure_seed_data(db: Session) -> User:
                         },
                     )
                 )
-        db.flush()
-        agents = db.scalars(select(Agent)).all()
+        await db.flush()
+        agents = (await db.scalars(select(Agent))).all()
         spec_by_type = {spec["type"]: spec for spec in DEFAULT_AGENTS}
         spec_by_name = {spec["name"]: spec for spec in DEFAULT_AGENTS}
         for agent in agents:
@@ -314,7 +314,7 @@ def ensure_seed_data(db: Session) -> User:
             }
 
     Skill.__table__.create(bind=db.get_bind(), checkfirst=True)
-    existing_skill_names = {item.name for item in db.scalars(select(Skill).where(Skill.source == "system")).all()}
+    existing_skill_names = {item.name for item in (await db.scalars(select(Skill).where(Skill.source == "system"))).all()}
     for spec in DEFAULT_SKILLS:
         if spec["name"] in existing_skill_names:
             continue
@@ -336,10 +336,10 @@ def ensure_seed_data(db: Session) -> User:
             )
         )
 
-    roles = {item.code: item for item in db.scalars(select(Role)).all()}
+    roles = {item.code: item for item in (await db.scalars(select(Role))).all()}
     if not roles:
         for code in DEFAULT_ROLE_MAP:
-            role = Role(code=code, name=code.replace("ROLE_", "").title(), description=f"{code} 默认角色")
+            role = Role(code=code, name=code.replace("ROLE_", "").Title(), description=f"{code} 默认角色")
             db.add(role)
             roles[code] = role
         permissions = {}
@@ -348,13 +348,13 @@ def ensure_seed_data(db: Session) -> User:
             permission = Permission(code=code, resource=resource, action=action, description=code)
             db.add(permission)
             permissions[code] = permission
-        db.flush()
+        await db.flush()
         for role_code, permission_codes in DEFAULT_ROLE_MAP.items():
             for permission_code in permission_codes:
                 db.add(RolePermission(role_id=roles[role_code].id, permission_id=permissions[permission_code].id))
         db.add(UserRole(user_id=user.id, role_id=roles["ROLE_USER"].id, assigned_by=user.id))
 
-    workspace = db.scalar(select(Workspace).where(Workspace.owner_id == user.id, Workspace.name == "默认全栈工作区"))
+    workspace = await db.scalar(select(Workspace).where(Workspace.owner_id == user.id, Workspace.name == "默认全栈工作区"))
     if not workspace:
         workspace = Workspace(
             owner_id=user.id,
@@ -372,11 +372,11 @@ def ensure_seed_data(db: Session) -> User:
             last_active_at=utcnow(),
         )
         db.add(workspace)
-        db.flush()
+        await db.flush()
         db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role="owner", permissions=["*"]))
 
     settings = get_settings()
-    provider = db.scalar(select(ModelProvider).where(ModelProvider.name == "火山方舟 OpenAI 兼容"))
+    provider = await db.scalar(select(ModelProvider).where(ModelProvider.name == "火山方舟 OpenAI 兼容"))
     if not provider:
         provider = ModelProvider(
             owner_id=None,
@@ -390,7 +390,7 @@ def ensure_seed_data(db: Session) -> User:
             config={"source": "env", "api_key_env": "ARK_API_KEY"},
         )
         db.add(provider)
-        db.flush()
+        await db.flush()
         db.add(
             ModelConfig(
                 provider_id=provider.id,
@@ -407,14 +407,14 @@ def ensure_seed_data(db: Session) -> User:
         provider.default_model = settings.ark_endpoint_id or settings.ark_model or provider.default_model
         if not settings.use_mock_llm:
             provider.api_key_ref = "env:ARK_API_KEY"
-        default_config = db.scalar(
+        default_config = await db.scalar(
             select(ModelConfig).where(ModelConfig.provider_id == provider.id, ModelConfig.purpose == "chat")
         )
         if default_config:
             default_config.name = "默认豆包对话模型"
             default_config.model_id = provider.default_model
 
-    if workspace and not db.scalar(select(McpServer).where(McpServer.workspace_id == workspace.id)):
+    if workspace and not await db.scalar(select(McpServer).where(McpServer.workspace_id == workspace.id)):
         db.add(
             McpServer(
                 owner_id=user.id,
@@ -430,7 +430,7 @@ def ensure_seed_data(db: Session) -> User:
                 ],
             )
         )
-    if workspace and not db.scalar(select(SandboxSession).where(SandboxSession.workspace_id == workspace.id)):
+    if workspace and not await db.scalar(select(SandboxSession).where(SandboxSession.workspace_id == workspace.id)):
         db.add(
             SandboxSession(
                 owner_id=user.id,
@@ -442,10 +442,12 @@ def ensure_seed_data(db: Session) -> User:
             )
         )
 
-    has_conversation = db.scalar(select(Conversation).where(Conversation.creator_id == user.id))
+    has_conversation = await db.scalar(select(Conversation).where(Conversation.creator_id == user.id))
     if workspace:
-        legacy_conversations = db.scalars(
-            select(Conversation).where(Conversation.creator_id == user.id, Conversation.deleted_at.is_(None))
+        legacy_conversations = (
+            await db.scalars(
+                select(Conversation).where(Conversation.creator_id == user.id, Conversation.deleted_at.is_(None))
+            )
         ).all()
         for conversation in legacy_conversations:
             extra = dict(conversation.extra or {})
@@ -474,7 +476,7 @@ def ensure_seed_data(db: Session) -> User:
             message_count=1,
         )
         db.add(conv)
-        db.flush()
+        await db.flush()
         for agent in agents[:4]:
             db.add(
                 ConversationParticipant(
@@ -494,6 +496,6 @@ def ensure_seed_data(db: Session) -> User:
                 status="completed",
             )
         )
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
     return user

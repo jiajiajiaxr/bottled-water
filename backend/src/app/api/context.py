@@ -7,8 +7,8 @@ Context API
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.response import ok
@@ -33,10 +33,10 @@ def _model_provider():
 @router.get("/conversations/{conversation_id}/context", response_model=dict)
 async def get_context(
     conversation_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    messages = db.scalars(select(Message).where(Message.conversation_id == conversation_id)).all()
+    messages = (await db.scalars(select(Message).where(Message.conversation_id == conversation_id))).all()
     chars = sum(len(str(m.content)) for m in messages)
     return ok({"message_count": len(messages), "estimated_tokens": chars // 3, "compression": "available"})
 
@@ -44,12 +44,12 @@ async def get_context(
 @router.post("/conversations/{conversation_id}/context/compress", response_model=dict)
 async def compress_context(
     conversation_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    messages = db.scalars(
+    messages = (await db.scalars(
         select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.desc()).limit(20)
-    ).all()
+    )).all()
     text = "\n".join(str(m.content.get("text", "")) for m in messages)
     provider = _model_provider()
     if not provider:

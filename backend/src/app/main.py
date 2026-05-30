@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.api import agents, artifacts, auth, context, conversations, deployments, files, knowledge, logs, mcp, messages, models, sandbox, security_ops, skills, tasks, tools, websocket, workspaces
 from app.core.config import get_settings
-from app.core.database import SessionLocal
+from app.core.database import AsyncSessionLocal
 from app.core.errors import AppError
 from app.core.logging_config import configure_logging
 from app.core.response import fail, ok
@@ -22,15 +22,12 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    db = SessionLocal()
-    try:
+    async with AsyncSessionLocal() as db:
         try:
-            ensure_seed_data(db)
+            await ensure_seed_data(db)
         except Exception:
-            db.rollback()
+            await db.rollback()
         yield
-    finally:
-        db.close()
 
 
 app = FastAPI(title="AgentHub API", version="0.1.0", lifespan=lifespan)

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError
@@ -18,14 +19,14 @@ from app.services.serialization import model_config_to_dict, model_provider_to_d
 router = APIRouter(tags=["model-management"])
 
 
-def ensure_model_tables(db: Session) -> None:
+async def ensure_model_tables(db: AsyncSession) -> None:
     for table in (ModelProvider.__table__, ModelConfig.__table__):
-        table.create(bind=db.get_bind(), checkfirst=True)
+        await db.run_sync(lambda sess: table.create(bind=sess.get_bind(), checkfirst=True))
 
 
-def _get_provider(db: Session, user: User, provider_id: str) -> ModelProvider:
-    ensure_model_tables(db)
-    provider = db.scalar(
+async def _get_provider(db: AsyncSession, user: User, provider_id: str) -> ModelProvider:
+    await ensure_model_tables(db)
+    provider = await db.scalar(
         select(ModelProvider)
         .options(selectinload(ModelProvider.models))
         .where(ModelProvider.id == provider_id, ModelProvider.deleted_at.is_(None))
@@ -38,9 +39,9 @@ def _get_provider(db: Session, user: User, provider_id: str) -> ModelProvider:
 
 
 @router.get("/model-providers", response_model=ApiResponse[dict])
-async def list_model_providers(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    ensure_model_tables(db)
-    providers = db.scalars(
+async def list_model_providers(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await ensure_model_tables(db)
+    providers = await db.scalars(
         select(ModelProvider)
         .options(selectinload(ModelProvider.models))
         .where(ModelProvider.deleted_at.is_(None))
@@ -53,10 +54,10 @@ async def list_model_providers(db: Session = Depends(get_db), user: User = Depen
 @router.post("/model-providers", response_model=ApiResponse[ModelProviderOut])
 async def create_model_provider(
     payload: CreateModelProviderRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    ensure_model_tables(db)
+    await ensure_model_tables(db)
     provider = ModelProvider(
         owner_id=user.id,
         name=payload.name,
@@ -70,7 +71,7 @@ async def create_model_provider(
         status="active",
     )
     db.add(provider)
-    db.flush()
+    await db.flush()
     model = ModelConfig(
         provider_id=provider.id,
         name=payload.default_model,
@@ -79,19 +80,19 @@ async def create_model_provider(
         config={"created_from_provider": True},
     )
     db.add(model)
-    db.commit()
-    db.refresh(provider)
-    return ok(model_provider_to_dict(_get_provider(db, user, provider.id)), "模型供应商已创建")
+    await db.commit()
+    await db.refresh(provider)
+    return ok(model_provider_to_dict(await _get_provider(db, user, provider.id)), "模型供应商已创建")
 
 
 @router.patch("/model-providers/{provider_id}", response_model=ApiResponse[ModelProviderOut])
 async def update_model_provider(
     provider_id: str,
     payload: CreateModelProviderRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    provider = _get_provider(db, user, provider_id)
+    provider = await _get_provider(db, user, provider_id)
     if provider.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("只有创建者可修改模型供应商")
     provider.name = payload.name
@@ -103,32 +104,32 @@ async def update_model_provider(
     provider.supports_streaming = payload.supports_streaming
     provider.supports_embeddings = payload.supports_embeddings
     provider.config = payload.config
-    db.commit()
+    await db.commit()
     return ok(model_provider_to_dict(provider), "模型供应商已更新")
 
 
 @router.delete("/model-providers/{provider_id}", response_model=ApiResponse[dict])
 async def delete_model_provider(
     provider_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    provider = _get_provider(db, user, provider_id)
+    provider = await _get_provider(db, user, provider_id)
     if provider.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("只有创建者可删除模型供应商")
     provider.deleted_at = utcnow()
     provider.status = "deleted"
-    db.commit()
+    await db.commit()
     return ok({"id": provider.id, "deleted": True})
 
 
 @router.get("/model-configs", response_model=ApiResponse[dict])
 async def list_model_configs(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    ensure_model_tables(db)
-    configs = db.scalars(
+    await ensure_model_tables(db)
+    configs = await db.scalars(
         select(ModelConfig)
         .options(selectinload(ModelConfig.provider))
         .join(ModelProvider)
@@ -142,10 +143,10 @@ async def list_model_configs(
 @router.post("/model-configs", response_model=ApiResponse[ModelConfigOut])
 async def create_model_config(
     payload: CreateModelConfigRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    provider = _get_provider(db, user, payload.provider_id)
+    provider = await _get_provider(db, user, payload.provider_id)
     config = ModelConfig(
         provider_id=provider.id,
         name=payload.name,
@@ -157,21 +158,21 @@ async def create_model_config(
         config=payload.config,
     )
     db.add(config)
-    db.commit()
-    db.refresh(config)
+    await db.commit()
+    await db.refresh(config)
     return ok(model_config_to_dict(config), "模型配置已创建")
 
 
 @router.post("/model-configs/test", response_model=ApiResponse[dict])
 async def test_model(
     payload: TestModelRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    ensure_model_tables(db)
+    await ensure_model_tables(db)
     model_id = payload.model_config_id
     if not model_id:
-        model = db.scalar(
+        model = await db.scalar(
             select(ModelConfig)
             .join(ModelProvider)
             .where(ModelConfig.deleted_at.is_(None), ModelProvider.deleted_at.is_(None))

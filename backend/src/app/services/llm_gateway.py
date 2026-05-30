@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import NotFoundError, ValidationAppError
@@ -33,8 +33,8 @@ def _mock_result(model: ModelConfig, prompt: str, reason: str = "mock") -> LLMRe
     )
 
 
-async def test_model_config(db: Session, model_config_id: str, prompt: str) -> LLMResult:
-    model = db.get(ModelConfig, model_config_id)
+async def test_model_config(db: AsyncSession, model_config_id: str, prompt: str) -> LLMResult:
+    model = await db.get(ModelConfig, model_config_id)
     if not model or model.deleted_at is not None:
         raise NotFoundError("模型配置不存在")
     provider = model.provider
@@ -75,7 +75,7 @@ async def test_model_config(db: Session, model_config_id: str, prompt: str) -> L
 
 
 async def stream_model_config(
-    db: Session,
+    db: AsyncSession,
     model_config_id: str,
     prompt: str,
 ) -> AsyncIterator[dict[str, Any]]:
@@ -89,7 +89,7 @@ async def stream_model_config(
     Yields:
         包含生成文本片段的字典，如 {"text": "Hello"}。
     """
-    model = db.get(ModelConfig, model_config_id)
+    model = await db.get(ModelConfig, model_config_id)
     if not model or model.deleted_at is not None:
         raise NotFoundError("模型配置不存在")
     provider = model.provider
