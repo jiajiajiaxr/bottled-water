@@ -482,7 +482,7 @@ class TestAgentFunctionCallLoop:
                         mode="unit-test",
                     )
 
-        assert result.text == "I will test the API.API test passed."
+        assert result.text == "API test passed."
         execute.assert_awaited_once()
         assert len(calls) == 2
         assert any(message.get("role") == "tool" for message in calls[1])
@@ -669,6 +669,100 @@ class TestAgentFunctionCallLoop:
         assert event_names.count("artifact:created") == 2
         assert event_names.count("message:new") == 2
         assert published_preview_ids == artifact_ids
+
+    @pytest.mark.asyncio
+    async def test_artifact_request_forces_html_tool_when_model_streams_fragment(self) -> None:
+        db = _memory_session()
+        user, conversation, user_message = _user_conversation_message(db, "生成示例html")
+        agent = Agent(
+            owner_id=user.id,
+            name="Writing Agent",
+            type="document",
+            description="Writes artifacts",
+            config={"tools": ["artifact.create_html"]},
+            capabilities=[],
+        )
+        db.add(agent)
+        db.commit()
+
+        calls: list[list[dict[str, Any]]] = []
+
+        async def fake_stream_chat(messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
+            calls.append(messages)
+            if not any(message.get("role") == "tool" for message in messages):
+                yield LLMStreamEvent(type="delta", text="li")
+                yield LLMStreamEvent(type="delta", text=">")
+                yield LLMStreamEvent(type="done", usage={})
+                return
+            yield LLMStreamEvent(type="delta", text="HTML 产物已生成。")
+            yield LLMStreamEvent(type="done", usage={})
+
+        with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream_chat):
+            with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock):
+                result = await run_agent_function_call_loop(
+                    db,
+                    conversation=conversation,
+                    user_message=user_message,
+                    agent=agent,
+                    prompt="生成示例html",
+                    channel=f"conversation:{conversation.id}",
+                    mode="unit-test",
+                )
+
+        artifact = db.scalar(select(Artifact).where(Artifact.conversation_id == conversation.id))
+        preview = db.scalar(select(Message).where(Message.content_type == "preview_card"))
+        tool_output = result.tool_results[0]["result"]["output"]
+
+        assert len(calls) == 2
+        assert artifact is not None
+        assert preview is not None
+        assert preview.content["artifact_id"] == artifact.id
+        assert tool_output["artifact_id"] == artifact.id
+        assert tool_output["format"] == "html"
+        assert result.text == "HTML 产物已生成。"
+        assert result.assistant is not None
+        assert result.assistant.content["text"] != "li>"
+
+    @pytest.mark.asyncio
+    async def test_artifact_request_without_permission_does_not_create_fake_card(self) -> None:
+        db = _memory_session()
+        user, conversation, user_message = _user_conversation_message(db, "生成示例html")
+        agent = Agent(
+            owner_id=user.id,
+            name="Chat Agent",
+            type="chat",
+            description="No artifact tools",
+            config={"tools": []},
+            capabilities=[],
+        )
+        db.add(agent)
+        db.commit()
+
+        stream_called = False
+
+        async def fake_stream_chat(messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
+            nonlocal stream_called
+            stream_called = True
+            yield LLMStreamEvent(type="delta", text="已生成 HTML。")
+            yield LLMStreamEvent(type="done", usage={})
+
+        with patch("app.services.agents.function_loop.ark_client.stream_chat", fake_stream_chat):
+            with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock):
+                result = await run_agent_function_call_loop(
+                    db,
+                    conversation=conversation,
+                    user_message=user_message,
+                    agent=agent,
+                    prompt="生成示例html",
+                    channel=f"conversation:{conversation.id}",
+                    mode="unit-test",
+                )
+
+        assert stream_called is False
+        assert db.scalar(select(Artifact)) is None
+        assert db.scalar(select(Message).where(Message.content_type == "preview_card")) is None
+        assert result.tool_results[0]["status"] == "failed"
+        assert "没有 artifact.create_html 产物工具权限" in result.text
 
     @pytest.mark.parametrize(
         ("tool_name", "prompt", "expected_format", "expected_media_type", "extension"),

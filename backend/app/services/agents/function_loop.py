@@ -17,7 +17,7 @@ from app.services.ark import ark_client
 from app.services.context.attachments import attachment_preflight_reply
 from app.services.context.builder import ContextBuilder
 from app.services.context.state import update_conversation_state_after_turn
-from app.services.llm.tool_calls import detect_artifact_tool
+from app.services.llm.tool_calls import artifact_arguments, detect_artifact_tool
 from app.services.llm_gateway import stream_model_config_chat
 from app.services.output_filter import strip_internal_agent_output
 from app.services.realtime.event_bus import event_bus
@@ -402,6 +402,7 @@ async def run_agent_function_call_loop(
     for round_num in range(max_tool_rounds + 1):
         current_text = ""
         current_tool_calls: list[dict[str, Any]] | None = None
+        buffer_text_delta = bool(tools) and round_num == 0
         try:
             if model_config_id:
                 event_stream = stream_model_config_chat(
@@ -420,15 +421,16 @@ async def run_agent_function_call_loop(
             async for event in event_stream:
                 if event.type == "delta":
                     if event.text:
-                        stream_text += event.text
                         current_text += event.text
-                        await _publish_text_delta(
-                            channel=channel,
-                            assistant=assistant,
-                            agent=agent,
-                            text=event.text,
-                            emit_message=emit_message,
-                        )
+                        if not buffer_text_delta:
+                            stream_text += event.text
+                            await _publish_text_delta(
+                                channel=channel,
+                                assistant=assistant,
+                                agent=agent,
+                                text=event.text,
+                                emit_message=emit_message,
+                            )
                     if event.reasoning:
                         reasoning_text += event.reasoning
                         await _publish_text_delta(
@@ -479,6 +481,32 @@ async def run_agent_function_call_loop(
                     emit_message=emit_message,
                 )
             break
+
+        if (
+            round_num == 0
+            and requested_artifact_tool
+            and requested_artifact_tool in allowed_tool_names
+            and not current_tool_calls
+        ):
+            logger.warning(
+                "[agent_function_loop] forcing_artifact_tool agent=%s tool=%s buffered_text=%r",
+                agent.id,
+                requested_artifact_tool,
+                current_text[:120],
+            )
+            current_tool_calls = [_forced_artifact_tool_call(requested_artifact_tool, prompt)]
+            current_text = ""
+
+        if not current_tool_calls:
+            if buffer_text_delta and current_text and not _looks_like_tool_argument_fragment(current_text):
+                stream_text += current_text
+                await _publish_text_delta(
+                    channel=channel,
+                    assistant=assistant,
+                    agent=agent,
+                    text=current_text,
+                    emit_message=emit_message,
+                )
 
         if not current_tool_calls or round_num >= max_tool_rounds:
             if round_num == 0 and not current_tool_calls:
@@ -641,7 +669,29 @@ async def run_agent_function_call_loop(
             db.commit()
             await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
 
-    final_text = strip_internal_agent_output(stream_text) or f"{agent.name} 已完成本次处理。"
+    if requested_artifact_tool and requested_artifact_tool in allowed_tool_names:
+        artifact_success = _artifact_tool_succeeded(tool_results, requested_artifact_tool)
+        if not artifact_success:
+            return await _fail_agent_loop(
+                db,
+                conversation=conversation,
+                assistant=assistant,
+                agent=agent,
+                channel=channel,
+                workflow_run=workflow_run,
+                workflow_node_id=workflow_node_id,
+                error_text=(
+                    f"{agent.name} 未能生成真实产物：模型没有返回有效工具调用，"
+                    "且产物工具未成功返回 artifact_id。"
+                ),
+                tool_results=tool_results,
+            )
+
+    final_text = strip_internal_agent_output(stream_text)
+    if requested_artifact_tool and _looks_like_tool_argument_fragment(final_text):
+        final_text = ""
+    if not final_text:
+        final_text = _artifact_success_text(requested_artifact_tool, tool_results) or f"{agent.name} 已完成本次处理。"
     thinking_text = strip_internal_agent_output(reasoning_text) if reasoning_text else ""
     assistant_message_id = assistant.id if assistant else None
     tool_events = [tool_event_from_record(db, item) for item in tool_results]
@@ -705,6 +755,54 @@ async def run_agent_function_call_loop(
             ),
         },
     )
+
+
+def _forced_artifact_tool_call(tool_name: str, prompt: str) -> dict[str, Any]:
+    return {
+        "id": f"call_forced_{tool_name.replace('.', '_')}",
+        "type": "function",
+        "function": {
+            "name": tool_name,
+            "arguments": json.dumps(artifact_arguments(tool_name, prompt), ensure_ascii=False),
+        },
+    }
+
+
+def _looks_like_tool_argument_fragment(text: str) -> bool:
+    normalized = (text or "").strip()
+    if not normalized:
+        return False
+    lower = normalized.lower()
+    if lower in {"0", "1", ">", "<", "/>", "li", "/li", "<li", "</li>", "ul", "/ul"}:
+        return True
+    if len(lower) <= 3 and all(ch.isalnum() or ch in "<>/{}[],:;\"'" for ch in lower):
+        return True
+    return False
+
+
+def _artifact_tool_succeeded(tool_results: list[dict[str, Any]], requested_tool: str) -> bool:
+    for item in tool_results:
+        if item.get("tool_name") != requested_tool or item.get("status") != "succeeded":
+            continue
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        output = result.get("output") if isinstance(result, dict) else None
+        if isinstance(output, dict) and output.get("artifact_id"):
+            return True
+    return False
+
+
+def _artifact_success_text(requested_tool: str | None, tool_results: list[dict[str, Any]]) -> str:
+    if not requested_tool:
+        return ""
+    for item in tool_results:
+        if item.get("tool_name") != requested_tool or item.get("status") != "succeeded":
+            continue
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        output = result.get("output") if isinstance(result, dict) else {}
+        if isinstance(output, dict) and output.get("artifact_id"):
+            fmt = str(output.get("format") or requested_tool.rsplit("_", 1)[-1]).upper()
+            return f"已生成真实 {fmt} 产物，可点击产物卡片预览和下载。"
+    return ""
 
 
 def _tool_arguments_with_context(
