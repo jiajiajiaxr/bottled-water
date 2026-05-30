@@ -25,8 +25,8 @@ compat_router = APIRouter(tags=["messages-compat"])
 ORCHESTRATION_TASKS: dict[str, asyncio.Task] = {}
 
 
-def _get_conversation(db: AsyncSession, user: User, conversation_id: str) -> Conversation:
-    conversation = db.scalar(
+async def _get_conversation(db: AsyncSession, user: User, conversation_id: str) -> Conversation:
+    conversation = await db.scalar(
         select(Conversation).where(
             Conversation.id == conversation_id,
             Conversation.creator_id == user.id,
@@ -47,20 +47,20 @@ def _message_text(payload: dict) -> str:
     return str(payload.get("prompt") or "")
 
 
-def _list_messages(db: AsyncSession, user: User, conversation_id: str) -> list[dict]:
-    _get_conversation(db, user, conversation_id)
-    messages = db.scalars(
+async def _list_messages(db: AsyncSession, user: User, conversation_id: str) -> list[dict]:
+    await _get_conversation(db, user, conversation_id)
+    messages = (await db.scalars(
         select(Message)
         .where(Message.conversation_id == conversation_id, Message.deleted_at.is_(None))
         .order_by(Message.created_at.asc())
-    ).all()
+    )).all()
     return [message_to_dict(message) for message in messages]
 
 
-def _send(
+async def _send(
     db: AsyncSession, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True
 ) -> Message:
-    conversation = _get_conversation(db, user, conversation_id)
+    conversation = await _get_conversation(db, user, conversation_id)
     text = _message_text(payload).strip()
 
     if not text:
@@ -76,7 +76,7 @@ def _send(
         if not file_id:
             continue
 
-        file_asset = db.scalar(
+        file_asset = await db.scalar(
             select(FileAsset).where(
                 FileAsset.id == file_id,
                 FileAsset.owner_id == user.id,
@@ -128,8 +128,8 @@ def _send(
     conversation.message_count += 1
 
     db.add(message)
-    db.commit()
-    db.refresh(message)
+    await db.commit()
+    await db.refresh(message)
 
     if trigger_agent:
         previous = ORCHESTRATION_TASKS.get(conversation.id)
@@ -138,7 +138,7 @@ def _send(
             previous.cancel()
         task = asyncio.create_task(OrchestratorService.run(db, conversation, message, scheduling_strategy))
         ORCHESTRATION_TASKS[conversation.id] = task
-        
+
         task.add_done_callback(
             lambda done, cid=conversation.id: (
                 ORCHESTRATION_TASKS.pop(cid, None) if ORCHESTRATION_TASKS.get(cid) is done else None
@@ -155,7 +155,7 @@ async def list_messages(
     user: User = Depends(get_current_user),
 ):
     return ok(
-        {"items": _list_messages(db, user, conversation_id), "next_cursor": None, "has_more": False}
+        {"items": await _list_messages(db, user, conversation_id), "next_cursor": None, "has_more": False}
     )
 
 
@@ -198,7 +198,7 @@ async def stream_conversation(
         message_payload = payload.model_dump()
 
     # 保存用户消息并触发编排
-    message = _send(db, user, conversation_id, message_payload, trigger_agent=True)
+    message = await _send(db, user, conversation_id, message_payload, trigger_agent=True)
 
     # 先推送用户消息事件
     await event_bus.publish(channel, "message:new", message_to_dict(message))
@@ -272,4 +272,4 @@ async def compat_list_messages(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return _list_messages(db, user, conversation_id)
+    return await _list_messages(db, user, conversation_id)
