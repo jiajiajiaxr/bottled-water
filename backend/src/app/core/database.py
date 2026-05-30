@@ -18,9 +18,14 @@ database_url = settings.resolved_database_url
 is_sqlite = database_url.startswith("sqlite")
 async_connect_args = {"check_same_thread": False, "timeout": 30} if is_sqlite else {}
 
-# 替换为异步引擎
-async_database_url = database_url.replace("sqlite:///", "sqlite+aiosqlite:///").replace("postgresql://", "postgresql+asyncpg://")
-if async_database_url == database_url and not is_sqlite:
+# 替换为异步引擎 URL
+# sqlite:/// → sqlite+aiosqlite:///
+# postgresql:// → postgresql+asyncpg://
+if database_url.startswith("sqlite"):
+    async_database_url = database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
+elif database_url.startswith("postgresql"):
+    async_database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+else:
     async_database_url = database_url
 
 async_engine = create_async_engine(
