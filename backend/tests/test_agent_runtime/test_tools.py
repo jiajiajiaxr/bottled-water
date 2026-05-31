@@ -112,8 +112,9 @@ class TestToolExecutorImpl:
         assert result.success is False
         assert "出错了" in result.error
 
-    def test_list_tools(self, executor):
-        tools = executor.list_tools()
+    @pytest.mark.asyncio
+    async def test_list_tools(self, executor):
+        tools = await executor.list_tools()
         assert len(tools) == 2  # add, async_add
 
 

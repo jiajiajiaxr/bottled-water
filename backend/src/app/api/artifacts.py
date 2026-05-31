@@ -113,7 +113,7 @@ async def _create_from_payload(db: AsyncSession, user: User, payload: CreateArti
     html = content.get("html") or (content.get("files") or {}).get("index.html")
     if not html:
         html = build_demo_html(payload.title or "Acceptance Preview")
-    artifact = create_artifact(
+    artifact = await create_artifact(
         db,
         conversation,
         task=None,
@@ -417,7 +417,7 @@ async def import_knowledge_text(
     user: User = Depends(get_current_user),
 ):
     kb = await _owned_kb(db, user, knowledge_base_id)
-    document = index_document(
+    document = await index_document(
         db,
         kb,
         title=payload.title,
@@ -441,7 +441,7 @@ async def upload_knowledge_document(
     kb = await _owned_kb(db, user, knowledge_base_id)
     file_asset = await save_upload(db, user=user, upload=file, purpose="knowledge")
     content = file_asset.extracted_text or f"{file_asset.original_filename} ({file_asset.content_type})"
-    document = index_document(
+    document = await index_document(
         db,
         kb,
         title=file_asset.original_filename,
@@ -477,7 +477,7 @@ async def retrieve_knowledge(
     user: User = Depends(get_current_user),
 ):
     kb = await _owned_kb(db, user, knowledge_base_id)
-    results = retrieve(
+    results = await retrieve(
         db,
         kb,
         query=payload.query,

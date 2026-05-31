@@ -1616,7 +1616,7 @@ async def run_orchestration(message_id: str) -> None:
                 "code": "AgentHub 代码产物预览",
                 "web_app": "AgentHub Web 产物预览",
             }.get(artifact_type, "AgentHub 协作产物预览")
-            artifact = create_artifact(
+            artifact = await create_artifact(
                 db,
                 conversation,
                 task=task,
@@ -1628,7 +1628,7 @@ async def run_orchestration(message_id: str) -> None:
                 ),
                 artifact_type=artifact_type,
             )
-            preview_message = create_preview_message(db, conversation, artifact)
+            preview_message = await create_preview_message(db, conversation, artifact)
             conversation.last_message_preview = "已生成产物卡片，可点击后在右侧预览、编辑和部署。"
             conversation.last_message_sender = "Artifact Agent"
             conversation.last_message_at = utcnow()
@@ -1753,7 +1753,7 @@ async def run_orchestration(message_id: str) -> None:
                 "code": "AgentHub 代码产物预览",
                 "web_app": "AgentHub Web 产物预览",
             }.get(artifact_type, "AgentHub 协作产物预览")
-            artifact = create_artifact(
+            artifact = await create_artifact(
                 db,
                 conversation,
                 task=task,
@@ -1763,7 +1763,7 @@ async def run_orchestration(message_id: str) -> None:
                 ),
                 artifact_type=artifact_type,
             )
-            preview_message = create_preview_message(db, conversation, artifact)
+            preview_message = await create_preview_message(db, conversation, artifact)
             conversation.last_message_preview = "已生成产物卡片，可点击后在右侧预览、编辑和部署。"
             created_preview_after_stream = True
         else:

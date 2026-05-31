@@ -167,7 +167,7 @@ class MockToolExecutor(ToolExecutor):
             result={"tool": tool_call.tool_name, "params": tool_call.parameters, "result": "mock_result"},
         )
 
-    def list_tools(self) -> List[Dict]:
+    async def list_tools(self) -> List[Dict]:
         return self._tools
 
 

@@ -487,7 +487,7 @@ async def _make_artifact_from_content(
     if format_name in {"pdf", "docx", "xlsx", "pptx", "html"}:
         generated = generate_file("html" if format_name == "web_app" else format_name, title=title, body=body)
     html_preview = html_content or build_demo_html(title, body[:500], artifact_type=artifact_type)
-    artifact = create_artifact(
+    artifact = await create_artifact(
         db,
         conversation,
         task=None,
@@ -505,7 +505,7 @@ async def _make_artifact_from_content(
         "size": len(generated.content) if generated else len(html_preview),
     }
     artifact.content = content
-    preview = create_preview_message(db, conversation, artifact)
+    preview = await create_preview_message(db, conversation, artifact)
     conversation.last_message_preview = "工具已生成产物卡片，可点击预览。"
     conversation.last_message_sender = "Artifact Tool"
     conversation.last_message_at = utcnow()

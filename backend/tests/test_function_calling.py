@@ -83,7 +83,8 @@ class TestArkClientToolCalls:
 class TestBuildToolsForAgent:
     """测试 build_tools_for_agent 将 Agent 配置转为 Function Calling 格式。"""
 
-    def test_build_tools_with_builtin_tools(self) -> None:
+    @pytest.mark.asyncio
+    async def test_build_tools_with_builtin_tools(self) -> None:
         """测试内置工具转换。"""
         db = MagicMock()
         agent = MagicMock()
@@ -93,14 +94,15 @@ class TestBuildToolsForAgent:
         agent.id = "agent-1"
         db.scalars.return_value.all.return_value = []
 
-        tools = build_tools_for_agent(db, agent)
+        tools = await build_tools_for_agent(db, agent)
 
         names = [t["function"]["name"] for t in tools]
         assert "file.extract_text" in names
         assert "sandbox.run" in names
         assert all(t["type"] == "function" for t in tools)
 
-    def test_build_tools_with_skills(self) -> None:
+    @pytest.mark.asyncio
+    async def test_build_tools_with_skills(self) -> None:
         """测试 Skill 转换为 function 格式。"""
         db = MagicMock()
         agent = MagicMock()
@@ -115,16 +117,20 @@ class TestBuildToolsForAgent:
         skill.deleted_at = None
         skill.status = "active"
 
-        db.scalars.return_value.all.return_value = [skill]
+        # 配置 mock 以支持 await db.scalars()
+        async def mock_scalars(query):
+            return MagicMock(all=MagicMock(return_value=[skill]))
+        db.scalars = mock_scalars
 
-        tools = build_tools_for_agent(db, agent)
+        tools = await build_tools_for_agent(db, agent)
 
         names = [t["function"]["name"] for t in tools]
         assert "skill.skill-1" in names
         skill_tool = next(t for t in tools if t["function"]["name"] == "skill.skill-1")
         assert skill_tool["function"]["description"] == "A test skill"
 
-    def test_build_tools_empty_config(self) -> None:
+    @pytest.mark.asyncio
+    async def test_build_tools_empty_config(self) -> None:
         """测试空配置返回空列表。"""
         db = MagicMock()
         agent = MagicMock()
@@ -132,7 +138,7 @@ class TestBuildToolsForAgent:
         agent.id = "agent-1"
         db.scalars.return_value.all.return_value = []
 
-        tools = build_tools_for_agent(db, agent)
+        tools = await build_tools_for_agent(db, agent)
         assert tools == []
 
 

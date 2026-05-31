@@ -119,6 +119,6 @@ class ToolExecutorImpl:
                 error=str(e),
             )
 
-    def list_tools(self) -> list:
+    async def list_tools(self) -> list:
         """列出可用工具"""
         return self.registry.list_tools()
