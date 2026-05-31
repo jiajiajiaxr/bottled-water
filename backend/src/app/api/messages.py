@@ -49,11 +49,13 @@ def _message_text(payload: dict) -> str:
 
 async def _list_messages(db: AsyncSession, user: User, conversation_id: str) -> list[dict]:
     await _get_conversation(db, user, conversation_id)
-    messages = (await db.scalars(
-        select(Message)
-        .where(Message.conversation_id == conversation_id, Message.deleted_at.is_(None))
-        .order_by(Message.created_at.asc())
-    )).all()
+    messages = (
+        await db.scalars(
+            select(Message)
+            .where(Message.conversation_id == conversation_id, Message.deleted_at.is_(None))
+            .order_by(Message.created_at.asc())
+        )
+    ).all()
     return [message_to_dict(message) for message in messages]
 
 
@@ -99,11 +101,19 @@ async def _send(
     scheduling_strategy = payload.get("scheduling_strategy", "")
     if not scheduling_strategy and conversation.extra:
         scheduling_strategy = (conversation.extra or {}).get("scheduling_strategy", "tech_lead")
-    scheduling_strategy = scheduling_strategy if scheduling_strategy in ("tech_lead",) else "tech_lead"
+    scheduling_strategy = (
+        scheduling_strategy if scheduling_strategy in ("tech_lead",) else "tech_lead"
+    )
 
     # 如果消息指定了新策略，持久化到会话
-    if payload.get("scheduling_strategy") and conversation.extra != {**(conversation.extra or {}), "scheduling_strategy": scheduling_strategy}:
-        conversation.extra = {**(conversation.extra or {}), "scheduling_strategy": scheduling_strategy}
+    if payload.get("scheduling_strategy") and conversation.extra != {
+        **(conversation.extra or {}),
+        "scheduling_strategy": scheduling_strategy,
+    }:
+        conversation.extra = {
+            **(conversation.extra or {}),
+            "scheduling_strategy": scheduling_strategy,
+        }
 
     message = Message(
         client_message_id=payload.get("client_message_id") or str(uuid.uuid4()),
@@ -137,7 +147,9 @@ async def _send(
         if previous and not previous.done():
             previous.cancel()
         model_config_id = payload.get("model_config_id")
-        task = asyncio.create_task(OrchestratorService.run(db, conversation, message, scheduling_strategy, model_config_id))
+        task = asyncio.create_task(
+            OrchestratorService.run(db, conversation, message, scheduling_strategy, model_config_id)
+        )
         ORCHESTRATION_TASKS[conversation.id] = task
 
         task.add_done_callback(
@@ -156,7 +168,11 @@ async def list_messages(
     user: User = Depends(get_current_user),
 ):
     return ok(
-        {"items": await _list_messages(db, user, conversation_id), "next_cursor": None, "has_more": False}
+        {
+            "items": await _list_messages(db, user, conversation_id),
+            "next_cursor": None,
+            "has_more": False,
+        }
     )
 
 
@@ -218,6 +234,7 @@ async def stream_conversation(
             # 优先处理 SseSink 队列中的运行时事件
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                await asyncio.sleep(0.05)
                 yield {
                     "event": event.type,
                     "data": json.dumps(event.payload, ensure_ascii=False),

@@ -28,10 +28,12 @@ export function useStreamingMessages(conversationId?: string) {
     onMessageStart: (payload) => {
       const agentId = String(payload.agent_id || "");
       const author = String(payload.agent_name || "Agent");
+
       if (!agentId) return;
 
       setStreamingMessages((prev) => {
         if (prev.has(agentId)) return prev;
+
         const next = new Map(prev);
         const msg = makeMessage({
           conversationId: conversationId || "",
@@ -42,8 +44,10 @@ export function useStreamingMessages(conversationId?: string) {
           streamState: "streaming",
           state: "active",
         });
+
         msg.id = agentId;
         next.set(agentId, msg);
+
         return next;
       });
 
@@ -54,9 +58,11 @@ export function useStreamingMessages(conversationId?: string) {
 
     onMessageEnd: (payload) => {
       const agentId = String(payload.agent_id || "");
+
       if (!agentId) return;
 
       const msg = streamingMessages.get(agentId);
+
       if (!msg) return;
 
       setStreamingMessages((prev) => {
@@ -69,37 +75,51 @@ export function useStreamingMessages(conversationId?: string) {
       setDisplayOrder((prev) => prev.filter((id) => id !== agentId));
 
       // 2. 提交到历史消息
-      useMessageStore.getState().updateMessages((prev) => {
+      updateMessages((prev) => {
         const existingIds = new Set(prev.map((item) => item.id));
         if (existingIds.has(msg.id)) return prev;
         return [...prev, { ...msg, streamState: "done" as const }];
+      });
+
+      updateMessageVersions((prev) => {
+        return new Map();
       });
     },
 
     onToken: (agentId, token) => {
       setStreamingMessages((prev) => {
         const existing = prev.get(agentId);
+
         if (!existing) return prev;
+
         const next = new Map(prev);
+
         next.set(agentId, {
           ...existing,
           content: (existing.content || "") + token,
         });
+
+        return next;
+      });
+
+      updateMessageVersions((prev) => {
+        const next = new Map(prev);
+        next.set(agentId, (prev.get(agentId) ?? 0) + 1);
         return next;
       });
     },
 
     onThinking: (agentId, thinking) => {
-      setStreamingMessages((prev) => {
-        const existing = prev.get(agentId);
-        if (!existing) return prev;
-        const next = new Map(prev);
-        next.set(agentId, {
-          ...existing,
-          thinking: (existing.thinking || "") + thinking,
-        });
-        return next;
-      });
+      // setStreamingMessages((prev) => {
+      //   const existing = prev.get(agentId);
+      //   if (!existing) return prev;
+      //   const next = new Map(prev);
+      //   next.set(agentId, {
+      //     ...existing,
+      //     thinking: (existing.thinking || "") + thinking,
+      //   });
+      //   return next;
+      // });
     },
 
     onDone: () => {

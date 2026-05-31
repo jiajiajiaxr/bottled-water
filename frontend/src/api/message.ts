@@ -134,12 +134,11 @@ export async function sendMessage(
   const reader = response.body.getReader();
 
   for await (const { event, data } of parseSSEStream(reader)) {
-    console.log(event, data);
-
     switch (event) {
       // 运行时事件：Session 生命周期
       case "system.session_started":
       case "system.session_completed":
+        break;
       case "system.session_error":
         window.clearTimeout(timeout);
         handlers.onDone?.(data as Record<string, unknown>);
@@ -147,6 +146,7 @@ export async function sendMessage(
 
       // 运行时事件：Round / Agent 生命周期
       case "system.round_started":
+        break;
       case "system.agent_started":
         handlers.onMessageStart?.(data as Record<string, unknown>);
         break;
@@ -185,9 +185,11 @@ export async function sendMessage(
 
       // 流式 token 和思考过程（增量追加）
       case "agent.thinking":
+        break;
       case "agent.token": {
         const p = data as Record<string, unknown>;
         const agentId = String(p.agent_id || "");
+
         if (!agentId) break;
         if (event === "agent.token") {
           const token = String(p.token || "");

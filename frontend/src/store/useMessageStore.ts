@@ -50,6 +50,5 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   setMessageVersions: (versions) => set({ messageVersions: versions }),
 
-  clearMessages: () =>
-    set({ historyMessages: [], messageVersions: new Map() }),
+  clearMessages: () => set({ historyMessages: [], messageVersions: new Map() }),
 }));

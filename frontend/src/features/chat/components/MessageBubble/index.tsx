@@ -333,6 +333,7 @@ function MessageBubbleComponent({
 
 export const MessageBubble = React.memo(
   MessageBubbleComponent,
-  (prev, next) =>
-    prev.version === next.version && prev.quoted?.id === next.quoted?.id,
+  (prev, next) => {
+    return prev.version === next.version;
+  },
 );

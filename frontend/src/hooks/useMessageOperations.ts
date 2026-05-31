@@ -22,16 +22,7 @@ import type { ChatMessage, UploadedFile, MessageAttachment } from "@/types";
  */
 export function useMessageOperations() {
   const { message } = AntApp.useApp();
-  const {
-    activeId,
-    activeConversation,
-    updateConversations,
-    updateActiveConversation,
-  } = useConversationStore();
-  const { historyMessages, setMessages, updateMessages } = useMessageStore();
-  const { setArtifact } = useArtifactStore();
-  const { updateLocalRunningConversationIds } = useConversationStore();
-
+  const { activeId } = useConversationStore();
   // === 流式状态子模块 ===
   const streaming = useStreamingMessages(activeId);
 

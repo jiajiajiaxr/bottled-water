@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CloudUploadOutlined,
   BulbOutlined,
-  ReloadOutlined,
   SendOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
@@ -46,7 +45,6 @@ export function ChatPanel({
   const [selectedModelConfigId, setSelectedModelConfigId] = useState<string>();
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const { message } = AntApp.useApp();
-
   const { send, streamingMessages, displayOrder } = useMessageOperations();
 
   // 加载可用模型列表
@@ -163,8 +161,6 @@ export function ChatPanel({
             {historyMessages.map(renderMessageBubble)}
             {displayOrder.map((agentId) => {
               const msg = streamingMessages.get(agentId);
-
-              console.log(msg);
 
               return msg ? renderMessageBubble(msg) : null;
             })}
