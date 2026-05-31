@@ -36,15 +36,9 @@ const { Text } = Typography;
 export function ChatPanel({
   active,
   loading,
-  currentUserName,
-  onUploadFile,
-  onOpenPreview,
 }: {
   active?: Conversation;
   loading: boolean;
-  currentUserName: string;
-  onUploadFile: (file: File) => Promise<UploadedFile>;
-  onOpenPreview: (message: ChatMessage) => void;
 }) {
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
@@ -53,12 +47,21 @@ export function ChatPanel({
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const { message } = AntApp.useApp();
 
-  const { send, regenerate, stopStreaming, streamingMessages, streamState } =
-    useMessageOperations(currentUserName);
+  const {
+    send,
+    regenerate,
+    stopStreaming,
+    streamingMessages,
+    streamState,
+    displayOrder,
+  } = useMessageOperations(currentUserName);
 
   // 加载可用模型列表
   useEffect(() => {
-    api.availableModels().then(setAvailableModels).catch(() => {});
+    api
+      .availableModels()
+      .then(setAvailableModels)
+      .catch(() => {});
   }, []);
 
   // 从 Conversation Store 读取当前会话的思考模式状态（持久化）
@@ -78,16 +81,10 @@ export function ChatPanel({
   const historyMessages = useMessageStore((s) => s.historyMessages);
   const messageVersions = useMessageStore((s) => s.messageVersions);
 
-  // 流式消息列表
-  const streamingList = useMemo(() => {
-    console.log("streamingList render", streamingMessages.size);
-    return Array.from<ChatMessage>(streamingMessages.values());
-  }, [streamingMessages]);
-
   // 合并所有消息用于 quoted 查找
   const allMessages = useMemo(
-    () => [...historyMessages, ...streamingList],
-    [historyMessages, streamingList],
+    () => [...historyMessages, ...streamingMessages.values()],
+    [historyMessages, streamingMessages],
   );
 
   const submit = () => {
@@ -159,22 +156,26 @@ export function ChatPanel({
     const el = messageListRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [historyMessages, streamingList, streamState]);
+  }, [historyMessages, displayOrder, streamState]);
 
-  const renderMessageBubble = (item: ChatMessage) => (
-    <MessageBubble
-      key={item.id}
-      message={item}
-      version={messageVersions.get(item.id) ?? 0}
-      quoted={
-        item.quotedMessageId ? messageById.get(item.quotedMessageId) : undefined
-      }
-      onQuote={handleQuote}
-      onRegenerate={handleRegenerate}
-      onCopy={handleCopy}
-      onPreview={handlePreview}
-    />
-  );
+  const renderMessageBubble = (item: ChatMessage) => {
+    return (
+      <MessageBubble
+        key={item.id}
+        message={item}
+        version={messageVersions.get(item.id) ?? 0}
+        quoted={
+          item.quotedMessageId
+            ? messageById.get(item.quotedMessageId)
+            : undefined
+        }
+        onQuote={handleQuote}
+        onRegenerate={handleRegenerate}
+        onCopy={handleCopy}
+        onPreview={handlePreview}
+      />
+    );
+  };
 
   return (
     <Content className="chat-panel">
@@ -184,7 +185,13 @@ export function ChatPanel({
         ) : allMessages.length ? (
           <>
             {historyMessages.map(renderMessageBubble)}
-            {streamingList.map(renderMessageBubble)}
+            {displayOrder.map((agentId) => {
+              const msg = streamingMessages.get(agentId);
+
+              console.log(msg);
+
+              return msg ? renderMessageBubble(msg) : null;
+            })}
           </>
         ) : (
           <Empty description="暂无消息" />
@@ -276,7 +283,10 @@ export function ChatPanel({
               <Button
                 icon={<SyncOutlined />}
                 onClick={() =>
-                  api.availableModels(true).then(setAvailableModels).catch(() => {})
+                  api
+                    .availableModels(true)
+                    .then(setAvailableModels)
+                    .catch(() => {})
                 }
                 disabled={!active}
               />

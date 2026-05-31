@@ -52,7 +52,10 @@ export interface WorkbenchLayoutProps {
   selectConversation: (conversationId?: string, replace?: boolean) => void;
   setCreateOpen: (value: { open: boolean; group: boolean }) => void;
   addConversationCategory: (name: string) => void;
-  patchConversation: (item: Conversation, patch: Partial<Conversation>) => Promise<void>;
+  patchConversation: (
+    item: Conversation,
+    patch: Partial<Conversation>,
+  ) => Promise<void>;
   updateConversations: (
     updater: (current: Conversation[]) => Conversation[],
   ) => void;
@@ -253,13 +256,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             <Button onClick={onLogout}>退出</Button>
           </Space>
         </div>
-        <ChatPanel
-          active={active}
-          loading={loadingMessages}
-          currentUserName={currentUser.name}
-          onUploadFile={uploadFile}
-          onOpenPreview={openArtifactPreview}
-        />
+        <ChatPanel active={active} loading={loadingMessages} />
       </Layout>
       {artifactPanelOpen && artifact && (
         <PreviewPanel

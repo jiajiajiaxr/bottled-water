@@ -14,55 +14,86 @@ export async function messages(conversationId: string): Promise<ChatMessage[]> {
  * 解析 SSE 流，逐条产出 {event, data}。
  * SSE 格式：event: xxx\ndata: {...}\n\n
  */
+interface SSEEvent {
+  id?: string;
+  event: string;
+  data: unknown;
+  retry?: number;
+}
+
 async function* parseSSEStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-) {
+): AsyncGenerator<SSEEvent> {
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      buffer += decoder.decode(); // flush remaining bytes
-      break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+
+      // ✅ 修复：兼容 \r\n\r\n 和 \n\n 两种分隔符
+      const events = buffer.split(/\r?\n\r?\n/);
+      buffer = events.pop() || "";
+
+      for (const raw of events) {
+        if (!raw.trim()) continue;
+        const event = parseEvent(raw);
+        if (event) yield event;
+      }
     }
-    buffer += decoder.decode(value, { stream: true });
 
-    const events = buffer.split("\n\n");
-    buffer = events.pop() || "";
-
-    for (const chunk of events) {
-      if (!chunk.trim()) continue;
-      yield* parseEvent(chunk);
+    if (buffer.trim()) {
+      const event = parseEvent(buffer);
+      if (event) yield event;
     }
-  }
-
-  if (buffer.trim()) {
-    yield* parseEvent(buffer);
+  } finally {
+    reader.releaseLock();
   }
 }
 
-function* parseEvent(chunk: string) {
-  const lines = chunk.split("\n");
-  let eventName = "message";
+// ✅ 修复：行分割也兼容 \r\n 和 \n
+function parseEvent(raw: string): SSEEvent | null {
+  const lines = raw.split(/\r?\n/);
+  let event = "message";
+  let id: string | undefined;
   const dataLines: string[] = [];
 
   for (const line of lines) {
-    if (line.startsWith("event: ")) {
-      eventName = line.slice(7).trim();
-    } else if (line.startsWith("data: ")) {
-      dataLines.push(line.slice(6).trim());
+    if (line === "" || line.startsWith(":")) continue;
+
+    const colonIdx = line.indexOf(":");
+    if (colonIdx === -1) continue;
+
+    const field = line.slice(0, colonIdx);
+    const value = line.slice(colonIdx + 1).startsWith(" ")
+      ? line.slice(colonIdx + 2)
+      : line.slice(colonIdx + 1);
+
+    switch (field) {
+      case "event":
+        event = value.replace(/\r$/, "");
+        break; // 去掉尾部 \r
+      case "data":
+        dataLines.push(value.replace(/\r$/, ""));
+        break;
+      case "id":
+        id = value.replace(/\r$/, "");
+        break;
     }
   }
 
-  if (dataLines.length === 0) return;
+  if (dataLines.length === 0) return null;
 
-  const dataStr = dataLines.join("\n"); // ✅ 多行 data 用 \n 连接
-
+  const dataStr = dataLines.join("\n");
   try {
-    yield { event: eventName, data: JSON.parse(dataStr) };
+    return { id, event, data: JSON.parse(dataStr) };
   } catch {
-    yield { event: eventName, data: dataStr };
+    return { id, event, data: dataStr };
   }
 }
 
@@ -90,7 +121,7 @@ export async function sendMessage(
     handlers.onDone?.();
   }, 120000);
 
-  const response = await sse<Response>(
+  const response = await sse(
     `/conversations/${conversationId}/stream`,
     {
       client_message_id: `client-${Date.now()}`,
@@ -162,8 +193,14 @@ export async function sendMessage(
                 "",
             );
             if (toolCallId && toolName) {
-              handlers.onToolCallStart?.({ tool_call_id: toolCallId, tool_name: toolName });
-              handlers.onToolCallDone?.({ tool_call_id: toolCallId, tool_name: toolName });
+              handlers.onToolCallStart?.({
+                tool_call_id: toolCallId,
+                tool_name: toolName,
+              });
+              handlers.onToolCallDone?.({
+                tool_call_id: toolCallId,
+                tool_name: toolName,
+              });
             }
           }
         }

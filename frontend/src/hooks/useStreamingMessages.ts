@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useMessageStore } from "@/store";
 import type { ChatMessage } from "@/types";
 
@@ -36,12 +36,6 @@ export function useStreamingMessages() {
   /** 当前流式传输的整体状态 */
   const [streamState, setStreamState] = useState<StreamState>("idle");
 
-  /** Ref 追踪最新的 streamingMessages，供异步闭包读取 */
-  const streamingMessagesRef = useRef(streamingMessages);
-  useEffect(() => {
-    streamingMessagesRef.current = streamingMessages;
-  }, [streamingMessages]);
-
   // === 基础操作：只修改 streamingMessages，不涉及历史消息 ===
 
   /** 将一条新消息加入流式消息池，并标记为 streaming */
@@ -59,10 +53,13 @@ export function useStreamingMessages() {
 
   /** 更新指定流式消息的内容字段（支持增量追加）。 */
   const updateStreamingContent = useCallback(
-    (messageId: string, updater: string | ((prev: string) => string)) => {
-      const msg = streamingMessagesRef.current.get(messageId);
+    (messageId: string, updater: (prev: string) => string) => {
+      const msg = streamingMessages.get(messageId);
       if (!msg) return;
-      const newContent = typeof updater === "function" ? updater(msg.content || "") : updater;
+      const newContent = updater(msg.content || "");
+
+      console.log(msg);
+
       if (msg.content === newContent) return;
       setStreamingMessages((prev) => {
         const existing = prev.get(messageId);
@@ -73,15 +70,16 @@ export function useStreamingMessages() {
       });
       updateMessageVersions((prev) => bumpVersion(prev, messageId));
     },
-    [updateMessageVersions],
+    [streamingMessages, updateMessageVersions],
   );
 
   /** 更新指定流式消息的 thinking 字段（支持增量追加）。 */
   const updateStreamingThinking = useCallback(
     (messageId: string, updater: string | ((prev: string) => string)) => {
-      const msg = streamingMessagesRef.current.get(messageId);
+      const msg = streamingMessages.get(messageId);
       if (!msg) return;
-      const newThinking = typeof updater === "function" ? updater(msg.thinking || "") : updater;
+      const newThinking =
+        typeof updater === "function" ? updater(msg.thinking || "") : updater;
       if (msg.thinking === newThinking) return;
       setStreamingMessages((prev) => {
         const existing = prev.get(messageId);
@@ -92,13 +90,13 @@ export function useStreamingMessages() {
       });
       updateMessageVersions((prev) => bumpVersion(prev, messageId));
     },
-    [updateMessageVersions],
+    [streamingMessages, updateMessageVersions],
   );
 
   /** 对指定流式消息应用 patch（任意字段） */
   const updateStreamingState = useCallback(
     (messageId: string, patch: Partial<ChatMessage>) => {
-      const msg = streamingMessagesRef.current.get(messageId);
+      const msg = streamingMessages.get(messageId);
       if (!msg) return;
       setStreamingMessages((prev) => {
         const existing = prev.get(messageId);
@@ -109,7 +107,7 @@ export function useStreamingMessages() {
       });
       updateMessageVersions((prev) => bumpVersion(prev, messageId));
     },
-    [updateMessageVersions],
+    [streamingMessages, updateMessageVersions],
   );
 
   /** 从流式消息池中移除指定消息 */
@@ -150,6 +148,22 @@ export function useStreamingMessages() {
     [streamingMessages, updateMessages, updateMessageVersions],
   );
 
+  // === 显示顺序管理 ===
+
+  /** 本轮次中 Agent 消息的显示顺序（按 agent_started 到达顺序） */
+  const [displayOrder, setDisplayOrder] = useState<string[]>([]);
+
+  const addToDisplayOrder = useCallback((agentId: string) => {
+    setDisplayOrder((prev) => {
+      if (prev.includes(agentId)) return prev;
+      return [...prev, agentId];
+    });
+  }, []);
+
+  const resetDisplayOrder = useCallback(() => {
+    setDisplayOrder([]);
+  }, []);
+
   /**
    * 将流式消息池中所有消息批量归档到历史消息，并清空池子。
    * 用于 SSE onDone 时的批量收尾。
@@ -181,6 +195,7 @@ export function useStreamingMessages() {
         return next;
       });
       setStreamingMessages(new Map());
+      setDisplayOrder([]);
     },
     [streamingMessages, updateMessages, updateMessageVersions],
   );
@@ -189,6 +204,9 @@ export function useStreamingMessages() {
     streamingMessages,
     streamState,
     setStreamState,
+    displayOrder,
+    addToDisplayOrder,
+    resetDisplayOrder,
     startStreamingMessage,
     updateStreamingContent,
     updateStreamingThinking,
@@ -196,6 +214,6 @@ export function useStreamingMessages() {
     removeStreamingMessage,
     finishStreamingMessage,
     finishAllStreamingMessages,
-    getStreamingMessages: () => streamingMessagesRef.current,
+    getStreamingMessages: () => streamingMessages,
   };
 }

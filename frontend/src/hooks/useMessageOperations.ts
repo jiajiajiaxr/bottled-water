@@ -12,7 +12,6 @@ import {
   makeMessage,
   stripInternalAgentOutput,
   isLikelyArtifactRequest,
-  participantName,
 } from "@/lib/message";
 
 /**
@@ -30,7 +29,6 @@ import {
 export function useMessageOperations(currentUserName: string) {
   const { message } = AntApp.useApp();
   const {
-    conversations,
     activeId,
     activeConversation,
     updateConversations,
@@ -45,8 +43,6 @@ export function useMessageOperations(currentUserName: string) {
 
   // SSE 停止回调引用
   const stopStreamRef = useRef<(() => void) | undefined>();
-
-  const active = conversations.find((item) => item.id === activeId);
 
   // ============================================================
   // 流式传输核心
@@ -65,164 +61,49 @@ export function useMessageOperations(currentUserName: string) {
     conversationId: string,
     body?: Record<string, unknown>,
   ) => {
-    const agentParticipants =
-      activeConversation?.participants.filter(
-        (item) => item.participant_type === "agent" && item.agent_id,
-      ) ?? [];
-    const tempIdsByAgentId = new Map<string, string>();
-    const tempIdsByAuthor = new Map<string, string>();
-
-    /** 规范化后端推送的消息，补全缺失字段 */
-    const normalizeIncomingMessage = (incoming: ChatMessage): ChatMessage => ({
-      ...incoming,
-      conversationId:
-        incoming.conversationId ??
-        (incoming as ChatMessage & { conversation_id?: string })
-          .conversation_id ??
-        conversationId,
-      role: incoming.role ?? "assistant",
-      kind: incoming.kind ?? "text",
-      author:
-        incoming.author ||
-        (incoming as ChatMessage & { sender_name?: string }).sender_name ||
-        "Agent",
-      content:
-        incoming.role === "assistant" && incoming.kind === "text"
-          ? stripInternalAgentOutput(incoming.content)
-          : incoming.content,
-      createdAt:
-        incoming.createdAt ??
-        (incoming as ChatMessage & { created_at?: string }).created_at ??
-        new Date().toISOString(),
-      streamState:
-        incoming.role === "assistant" && incoming.kind === "text"
-          ? "done"
-          : incoming.streamState,
-    });
-
-    /** 确保指定 messageId 的流式消息已存在于池中 */
-    const ensureStreamingMessage = (
-      messageId: string,
-      author: string,
-      agentId?: string,
-    ) => {
-      // 通过 ref 读取最新的 streamingMessages，避免闭包陈旧
-      const currentStreaming = streaming.getStreamingMessages();
-      if (currentStreaming.has(messageId)) return;
-
-      const tempId =
-        (agentId && tempIdsByAgentId.get(agentId)) ||
-        tempIdsByAuthor.get(author);
-      if (tempId && currentStreaming.has(tempId)) {
-        const tempMsg = currentStreaming.get(tempId)!;
-        if (agentId) tempIdsByAgentId.set(agentId, messageId);
-        tempIdsByAuthor.set(author, messageId);
-
-        streaming.removeStreamingMessage(tempId);
-        streaming.startStreamingMessage({
-          ...tempMsg,
-          id: messageId,
-          sender_id: agentId,
-          author,
-          rawContent: { ...(tempMsg.rawContent ?? {}), agent_id: agentId },
-          streamState: "streaming",
-        });
-        return;
-      }
-
-      streaming.startStreamingMessage({
-        id: messageId,
-        conversationId,
-        role: "assistant",
-        kind: "text",
-        author,
-        content: "",
-        rawContent: agentId ? { agent_id: agentId } : {},
-        streamState: "streaming",
-        createdAt: new Date().toISOString(),
-        state: "active",
-      });
-    };
-
     /** 插入或更新最终消息（后端推送的完整消息） */
     const upsertFinalMessage = (incoming: ChatMessage) => {
-      let normalized = normalizeIncomingMessage(incoming);
-      const agentId =
-        normalized.sender_id ||
-        (normalized.rawContent?.agent_id as string | undefined);
+      const agentId = String(
+        incoming.sender_id ||
+          (incoming.rawContent?.agent_id as string | undefined) ||
+          incoming.id,
+      );
 
       // 优先检查 streamingMessages：保留流式传输过程中已累积的内容
       const currentStreaming = streaming.getStreamingMessages();
-      if (currentStreaming.has(normalized.id)) {
-        const existing = currentStreaming.get(normalized.id)!;
-        if (!normalized.content && existing.content) {
-          normalized = { ...normalized, content: existing.content };
+      if (currentStreaming.has(agentId)) {
+        const existing = currentStreaming.get(agentId)!;
+        const merged = { ...incoming };
+        if (!merged.content && existing.content) {
+          merged.content = existing.content;
         }
-        if (!normalized.thinking && existing.thinking) {
-          normalized = { ...normalized, thinking: existing.thinking };
+        if (!merged.thinking && existing.thinking) {
+          merged.thinking = existing.thinking;
         }
-        streaming.updateStreamingState(normalized.id, normalized);
+        streaming.finishStreamingMessage(agentId, {
+          ...merged,
+          streamState: "done",
+        });
         return;
       }
 
       // 检查 historyMessages（通过 getState 读取最新值，避免闭包陈旧）
       const latestHistory = useMessageStore.getState().historyMessages;
-      const inHistory = latestHistory.some((item) => item.id === normalized.id);
+      const inHistory = latestHistory.some((item) => item.id === agentId);
       if (inHistory) {
         updateMessages((prev) =>
           prev.map((item) =>
-            item.id === normalized.id ? { ...item, ...normalized } : item,
+            item.id === agentId ? { ...item, ...incoming } : item,
           ),
         );
         return;
       }
 
-      // 检查是否有临时消息需要替换
-      const tempId =
-        (agentId && tempIdsByAgentId.get(agentId)) ||
-        tempIdsByAuthor.get(normalized.author);
-      if (tempId && streaming.getStreamingMessages().has(tempId)) {
-        if (agentId) tempIdsByAgentId.set(agentId, normalized.id);
-        tempIdsByAuthor.set(normalized.author, normalized.id);
-
-        const tempMsg = streaming.streamingMessages.get(tempId)!;
-        streaming.removeStreamingMessage(tempId);
-        streaming.startStreamingMessage({
-          ...normalized,
-          content: normalized.content || tempMsg.content,
-          thinking: normalized.thinking || tempMsg.thinking,
-          streamState: "streaming",
-        });
-        return;
-      }
-
       // 直接添加为历史消息
-      updateMessages((prev) => [...prev, normalized]);
+      updateMessages((prev) => [...prev, incoming]);
     };
 
-    // 单 Agent 模式：预创建占位消息
-    if (agentParticipants.length === 1) {
-      const participant = agentParticipants[0];
-      const author = participantName(participant);
-      const agentId = participant.agent_id ?? participant.id ?? author;
-      const placeholder = makeMessage({
-        conversationId,
-        role: "assistant",
-        kind: "text",
-        author,
-        content: "",
-        state: "active",
-        rawContent: {
-          agent_id: participant.agent_id,
-          participant_id: participant.id,
-        },
-        streamState: "streaming",
-      });
-      tempIdsByAgentId.set(agentId, placeholder.id);
-      tempIdsByAuthor.set(author, placeholder.id);
-      streaming.startStreamingMessage(placeholder);
-    }
-
+    streaming.resetDisplayOrder();
     streaming.setStreamState("streaming");
     updateLocalRunningConversationIds((current) => {
       const next = new Set(current);
@@ -243,52 +124,40 @@ export function useMessageOperations(currentUserName: string) {
       string,
       { toolName: string; toolCallId: string }
     >();
-    let currentMessageId = "";
-
-    const updateActiveToolCalls = (messageId: string) => {
-      if (!messageId) return;
-      const msg = streaming.getStreamingMessages().get(messageId);
-      if (!msg) return;
-      streaming.updateStreamingState(messageId, {
-        rawContent: {
-          ...msg.rawContent,
-          _activeToolCalls: Array.from(activeToolCalls.values()),
-        },
-      });
-    };
 
     try {
       await api.sendMessage(
         conversationId,
-        (body.content as { text?: string }).text || "",
+        (body?.content as { text?: string })?.text || "",
         {
           onMessageStart: (payload) => {
-            // system.session_started / system.round_started / system.agent_started
             const agentId = String(payload.agent_id || "");
             const author = String(payload.agent_name || "Agent");
-            currentMessageId = agentId || `stream-${Date.now()}`;
-            ensureStreamingMessage(currentMessageId, author, agentId);
-            activeToolCalls.clear();
-          },
-          onMessageUpdated: (payload) => {
-            // system.agent_completed / system.agent_failed：提取 work_product
-            const p = payload as unknown as Record<string, unknown>;
-            const workProduct = String(p.work_product ?? "");
-            const agentId = String(p.agent_id || "");
-            if (workProduct && currentMessageId) {
-              streaming.updateStreamingContent(currentMessageId, workProduct);
-            }
-            rawBuffer += workProduct;
-            upsertFinalMessage({
-              id: currentMessageId || "",
+            streaming.addToDisplayOrder(agentId);
+            streaming.startStreamingMessage({
+              id: agentId,
               conversationId,
               role: "assistant",
               kind: "text",
-              author: String(p.agent_name || "Agent"),
-              content: workProduct,
-              state: "active",
+              author,
+              content: "",
               rawContent: { agent_id: agentId },
+              streamState: "streaming",
               createdAt: new Date().toISOString(),
+              state: "active",
+            });
+            activeToolCalls.clear();
+          },
+          onMessageUpdated: (payload) => {
+            const p = payload as unknown as Record<string, unknown>;
+            const workProduct = String(p.work_product ?? "");
+            const agentId = String(p.agent_id || "");
+            if (workProduct) {
+              streaming.updateStreamingContent(agentId, (_) => workProduct);
+            }
+            rawBuffer += workProduct;
+            streaming.finishStreamingMessage(agentId, {
+              content: workProduct,
               streamState: "done",
             });
           },
@@ -300,14 +169,12 @@ export function useMessageOperations(currentUserName: string) {
             const toolCallId = String(payload.tool_call_id || "");
             if (toolName && toolCallId) {
               activeToolCalls.set(toolCallId, { toolName, toolCallId });
-              updateActiveToolCalls(currentMessageId);
             }
           },
           onToolCallDone: (payload) => {
             const toolCallId = String(payload.tool_call_id || "");
             if (toolCallId) {
               activeToolCalls.delete(toolCallId);
-              updateActiveToolCalls(currentMessageId);
             }
           },
           onDone: () => {
@@ -327,17 +194,19 @@ export function useMessageOperations(currentUserName: string) {
             stopStreamRef.current = stop;
           },
           onToken: (agentId, token) => {
-            console.log("onToken", agentId, token);
-            // 确保流式消息已存在（可能在 agent_started 之前就收到 token）
-            ensureStreamingMessage(agentId, "Agent", agentId);
+            console.log(agentId, token);
             streaming.updateStreamingContent(agentId, (prev) => prev + token);
           },
           onThinking: (agentId, thinking) => {
-            streaming.updateStreamingThinking(agentId, (prev) => prev + thinking);
+            streaming.updateStreamingThinking(
+              agentId,
+              (prev) => prev + thinking,
+            );
           },
         },
         (body as { reply_to_message_id?: string })?.reply_to_message_id,
-        (body as { content?: { attachments: UploadedFile[] } })?.content?.attachments ?? [],
+        (body as { content?: { attachments: UploadedFile[] } })?.content
+          ?.attachments ?? [],
         (body as { thinking_enabled?: boolean })?.thinking_enabled,
         (body as { model_config_id?: string })?.model_config_id,
       );
@@ -397,6 +266,8 @@ export function useMessageOperations(currentUserName: string) {
 
       if (freshArtifact) setArtifact(freshArtifact);
     } catch (error) {
+      console.log(error);
+
       activeToolCalls.clear();
       const fallbackPreview =
         stripInternalAgentOutput(rawBuffer).slice(0, 120) || "reply failed";
@@ -620,6 +491,7 @@ export function useMessageOperations(currentUserName: string) {
     stopStreaming,
     streamingMessages: streaming.streamingMessages,
     streamState: streaming.streamState,
+    displayOrder: streaming.displayOrder,
     getMessageVersion: useMessageStore.getState().getMessageVersion,
   };
 }

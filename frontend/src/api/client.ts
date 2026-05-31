@@ -149,12 +149,30 @@ export const patch = <T>(path: string, body: unknown) =>
 export const del = <T>(path: string) => request<T>(path, { method: "DELETE" });
 
 /** SSE协议。 */
-export const sse = <T>(
+export async function sse(
   path: string,
   body: unknown,
   controller?: AbortController,
-) =>
-  request<T>(path, { method: "POST", body: JSON.stringify(body) }, controller);
+) {
+  if (!controller) {
+    controller = new AbortController();
+  }
+
+  const token = getAuthToken();
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    signal: controller?.signal,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "Content-Type": "application/json", // ← 你发送的 body 格式
+      Accept: "text/event-stream", // ← 告诉后端：我要 SSE 流
+    },
+  });
+
+  return response;
+}
 
 export async function requestWithTimeout<T>(
   path: string,
