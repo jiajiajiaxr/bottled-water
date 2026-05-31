@@ -101,11 +101,11 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
         last_message_preview="会话已创建，可以发送任务开始协作。", last_message_sender="System", last_message_at=utcnow(),
         activity_score=50, message_count=1,
     )
-    await db.add(conversation)
+    db.add(conversation)
     await db.flush()
     for agent in selected:
-        await db.add(ConversationParticipant(conversation_id=conversation.id, participant_type="agent", agent_id=agent.id, role="member"))
-    await db.add(Message(conversation_id=conversation.id, sender_type="system", sender_name="System", content_type="event", content={"text": f"会话已创建，已加入 {len(selected)} 个 Agent。"}, status="completed"))
+        db.add(ConversationParticipant(conversation_id=conversation.id, participant_type="agent", agent_id=agent.id, role="member"))
+    db.add(Message(conversation_id=conversation.id, sender_type="system", sender_name="System", content_type="event", content={"text": f"会话已创建，已加入 {len(selected)} 个 Agent。"}, status="completed"))
     await db.commit()
     return (await db.scalars(_conversation_query(user.id).where(Conversation.id == conversation.id))).one()
 
@@ -422,7 +422,7 @@ async def start_workflow_run(conversation_id: str, payload: WorkflowRunStartPayl
         edge_states=[{"from": edge[0], "to": edge[1], "status": "waiting"} for edge in workflow.get("edges", []) if isinstance(edge, list) and len(edge) == 2],
         events=[{"type": "run.started", "at": utcnow().isoformat(), "actor_id": user.id}], progress=5, started_at=utcnow(),
     )
-    await db.add(run)
+    db.add(run)
     await db.flush()
     _sync_workflow_runtime(conversation, run)
     await write_audit_log(db, user=user, action="workflow.run.start", target_type="conversation", target_id=conversation.id, detail={"run_id": run.id, "mode": run.mode}, request=None, risk_score=0.15)
@@ -542,14 +542,14 @@ async def add_participants(conversation_id: str, payload: AddParticipantRequest,
         if missing:
             raise NotFoundError(f"Agent不存在：{', '.join(sorted(missing))}")
         for agent in agents:
-            await db.add(ConversationParticipant(conversation_id=conversation.id, participant_type="agent", agent_id=agent.id, role=payload.role))
+            db.add(ConversationParticipant(conversation_id=conversation.id, participant_type="agent", agent_id=agent.id, role=payload.role))
             added.append(ConversationParticipant(conversation_id=conversation.id, participant_type="agent", agent_id=agent.id, role=payload.role))
     add_users = [uid for uid in payload.user_ids if uid not in existing_user_ids]
     if add_users:
         users = (await db.scalars(select(User).where(User.id.in_(add_users), User.deleted_at.is_(None)))).all()
         for member in users:
             participant = ConversationParticipant(conversation_id=conversation.id, participant_type="user", user_id=member.id, nickname=member.display_name, role=payload.role)
-            await db.add(participant)
+            db.add(participant)
             added.append(participant)
     if added:
         await db.flush()
@@ -560,7 +560,7 @@ async def add_participants(conversation_id: str, payload: AddParticipantRequest,
         conversation.last_message_preview = f"已加入 {len(added)} 位新成员"
         conversation.last_message_at = utcnow()
         conversation.activity_score += 3
-        await db.add(Message(conversation_id=conversation.id, sender_type="system", sender_name="System", content_type="event", content={"text": conversation.last_message_preview}, status="completed"))
+        db.add(Message(conversation_id=conversation.id, sender_type="system", sender_name="System", content_type="event", content={"text": conversation.last_message_preview}, status="completed"))
     await db.commit()
     await db.expire_all()
     return ok(conversation_to_dict(_get(db, user, conversation.id)), "成员已加入")
@@ -603,7 +603,7 @@ async def remove_participant(conversation_id: str, participant_id: str, db: Asyn
         conversation.extra = extra
     conversation.last_message_preview = "群成员已移除"
     conversation.last_message_at = utcnow()
-    await db.add(Message(conversation_id=conversation.id, sender_type="system", sender_name="System", content_type="event", content={"text": conversation.last_message_preview}, status="completed"))
+    db.add(Message(conversation_id=conversation.id, sender_type="system", sender_name="System", content_type="event", content={"text": conversation.last_message_preview}, status="completed"))
     await db.commit()
     await db.expire_all()
     return ok(conversation_to_dict(_get(db, user, conversation.id)), "成员已移除")
@@ -645,7 +645,7 @@ async def compat_add_participants(conversation_id: str, payload: AddParticipantR
     existing = {it.agent_id for it in _active_participants(conversation) if it.agent_id}
     agents = (await db.scalars(select(Agent).where(Agent.id.in_([aid for aid in payload.agent_ids if aid not in existing])))).all()
     for agent in agents:
-        await db.add(ConversationParticipant(conversation_id=conversation.id, participant_type="agent", agent_id=agent.id, role=payload.role))
+        db.add(ConversationParticipant(conversation_id=conversation.id, participant_type="agent", agent_id=agent.id, role=payload.role))
     await db.commit()
     await db.expire_all()
     return conversation_to_dict(_get(db, user, conversation.id))
