@@ -80,7 +80,7 @@ async def save_upload(
         extracted_text=extracted,
         extra=metadata,
     )
-    await db.add(asset)
+    db.add(asset)
     await db.commit()
     await db.refresh(asset)
     return asset

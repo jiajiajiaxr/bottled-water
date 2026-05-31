@@ -248,7 +248,7 @@ async def create_agent(payload: CreateAgentRequest, db: AsyncSession = Depends(g
             "success_rate": 0.99,
         },
     )
-    await db.add(agent)
+    db.add(agent)
     await db.commit()
     await db.refresh(agent)
     return ok(agent_to_dict(agent), "Agent 创建成功")

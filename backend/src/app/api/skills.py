@@ -212,7 +212,7 @@ async def create_skill(payload: CreateSkillRequest, db: AsyncSession = Depends(g
         input_schema=payload.input_schema, output_schema=payload.output_schema,
         tools=redact_sensitive(payload.tools), tags=payload.tags, config=redact_sensitive(payload.config),
     )
-    await db.add(skill)
+    db.add(skill)
     await db.commit()
     await db.refresh(skill)
     return ok(skill_to_dict(skill), "Skill created")
@@ -238,7 +238,7 @@ async def import_mcp_skill(payload: ImportMcpSkillRequest, db: AsyncSession = De
         tools=tool_refs, tags=list(dict.fromkeys([*payload.tags, "mcp", server.name])),
         config=redact_sensitive({**(payload.config or {}), "mcp": {"server_id": server.id, "server_name": server.name, "transport": server.transport, "tool_count": len(tool_refs)}}),
     )
-    await db.add(skill)
+    db.add(skill)
     await db.commit()
     await db.refresh(skill)
     return ok(skill_to_dict(skill), "Skill imported from MCP tools")
@@ -257,7 +257,7 @@ async def generate_skill(payload: GenerateSkillRequest, db: AsyncSession = Depen
         output_schema=spec["output_schema"], tools=redact_sensitive(spec["tools"]),
         tags=spec["tags"], config=redact_sensitive(spec["config"]),
     )
-    await db.add(skill)
+    db.add(skill)
     await db.commit()
     await db.refresh(skill)
     return ok(skill_to_dict(skill), "Skill generated")

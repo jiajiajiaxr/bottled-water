@@ -170,7 +170,7 @@ async def rollback_deployment(
         extra={"is_rollback": True, "source_deployment_id": deployment.id},
     )
     deployment.status = "rolled_back"
-    await db.add(rollback)
+    db.add(rollback)
     await db.commit()
     await db.refresh(rollback)
     return ok(deployment_to_dict(rollback), "部署已回滚")

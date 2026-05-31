@@ -122,7 +122,7 @@ async def invoke_mcp_tool_recorded(
         status="running",
         started_at=utcnow(),
     )
-    await db.add(invocation)
+    db.add(invocation)
     await db.flush()
     start = time.perf_counter()
     try:

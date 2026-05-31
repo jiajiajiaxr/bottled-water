@@ -88,7 +88,7 @@ async def index_document(
         chunk_count=len(chunks),
         index_status="indexed",
     )
-    await db.add(document)
+    db.add(document)
     kb.document_count += 1
     kb.chunk_count += len(chunks)
     kb.total_tokens += document.token_count

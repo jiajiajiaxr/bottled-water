@@ -115,7 +115,7 @@ async def create_role(
         description=str(payload.description or ""),
         is_system=False,
     )
-    await db.add(role)
+    db.add(role)
     await db.flush()
     write_audit_log(db, user=user, action="security.role.create", target_type="role", target_id=role.id, detail={"code": code}, risk_score=0.3)
     await db.commit()
@@ -144,7 +144,7 @@ async def update_role_permissions(
         await db.delete(row)
     await db.flush()
     for permission in permissions:
-        await db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+        db.add(RolePermission(role_id=role.id, permission_id=permission.id))
     write_audit_log(
         db,
         user=user,

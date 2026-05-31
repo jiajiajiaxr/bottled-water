@@ -248,10 +248,10 @@ async def create_task_for_prompt(
         plan=plan,
         input={"prompt": prompt},
     )
-    await db.add(task)
+    db.add(task)
     await db.flush()
     for index, spec in enumerate(plan["subtasks"]):
-        await db.add(
+        db.add(
             Subtask(
                 parent_task_id=task.id,
                 title=spec["title"],

@@ -74,5 +74,5 @@ async def write_audit_log(
         risk_score=risk_score,
         detail=detail or {},
     )
-    await db.add(log)
+    db.add(log)
     return log

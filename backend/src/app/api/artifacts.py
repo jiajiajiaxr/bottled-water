@@ -394,7 +394,7 @@ async def create_knowledge_base(
         visibility=payload.visibility,
         config=payload.config,
     )
-    await db.add(kb)
+    db.add(kb)
     await db.commit()
     await db.refresh(kb)
     return ok(knowledge_base_to_dict(kb), "知识库已创建")
@@ -585,7 +585,7 @@ async def compat_create_knowledge_base(
         visibility=payload.visibility,
         config=payload.config,
     )
-    await db.add(kb)
+    db.add(kb)
     await db.commit()
     await db.refresh(kb)
     return ok(knowledge_base_to_dict(kb))

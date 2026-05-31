@@ -669,7 +669,7 @@ async def invoke_builtin_tool(db: AsyncSession, user: User, name: str, arguments
             steps=[{"name": "preview", "status": "completed", "duration_ms": 120}],
             deployed_at=utcnow(),
         )
-        await db.add(deployment)
+        db.add(deployment)
         await db.commit()
         return {"status": "succeeded", "deployment": {"id": deployment.id, "url": deployment.access_url, "status": deployment.status}}
     if name == "deploy.rollback":
