@@ -1,6 +1,6 @@
 import { StreamAssistantHandlers } from "@/types/messages";
 import { get, post, sse } from "./client";
-import type { ChatMessage, UploadedFile } from "@/types";
+import type { ChatMessage } from "@/types";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
   const result = await get<{ items: ChatMessage[] } | ChatMessage[]>(
@@ -100,12 +100,8 @@ function parseEvent(raw: string): SSEEvent | null {
 /** 标准 SSE fetch 客户端（POST + ReadableStream）。 */
 export async function sendMessage(
   conversationId: string,
-  content: string,
+  body: Record<string, unknown>,
   handlers: StreamAssistantHandlers,
-  quotedMessageId?: string,
-  attachments: UploadedFile[] = [],
-  thinkingEnabled?: boolean,
-  modelConfigId?: string,
 ): Promise<string> {
   const abortController = new AbortController();
   const stop = () => {
@@ -123,22 +119,7 @@ export async function sendMessage(
 
   const response = await sse(
     `/conversations/${conversationId}/stream`,
-    {
-      client_message_id: `client-${Date.now()}`,
-      content_type: "text",
-      content: {
-        text: content,
-        attachments: attachments.map((file) => ({
-          file_id: file.file_id ?? file.id,
-          filename: file.original_filename,
-          content_type: file.content_type,
-          size: file.size,
-        })),
-      },
-      reply_to_message_id: quotedMessageId,
-      thinking_enabled: thinkingEnabled,
-      model_config_id: modelConfigId,
-    },
+    body,
     abortController,
   );
 
@@ -153,16 +134,11 @@ export async function sendMessage(
   const reader = response.body.getReader();
 
   for await (const { event, data } of parseSSEStream(reader)) {
-    switch (event) {
-      // 业务层事件：用户消息已保存
-      case "message:new":
-        handlers.onMessageNew?.(data as unknown as ChatMessage);
-        break;
+    console.log(event, data);
 
+    switch (event) {
       // 运行时事件：Session 生命周期
       case "system.session_started":
-        handlers.onMessageStart?.(data as Record<string, unknown>);
-        break;
       case "system.session_completed":
       case "system.session_error":
         window.clearTimeout(timeout);
@@ -176,7 +152,7 @@ export async function sendMessage(
         break;
       case "system.agent_completed":
       case "system.agent_failed":
-        handlers.onMessageUpdated?.(data as unknown as ChatMessage);
+        handlers.onMessageEnd?.(data as Record<string, unknown>);
         break;
 
       // 运行时事件：工具调用
@@ -247,12 +223,4 @@ export async function cancelAssistantReply(
     `/conversations/${conversationId}/stream/cancel`,
     {},
   );
-}
-
-/** 流式发送消息（统一走 sendMessage）。 */
-export async function streamAssistantReply(
-  conversationId: string,
-  options: StreamAssistantHandlers,
-): Promise<string> {
-  return sendMessage(conversationId, "", options);
 }

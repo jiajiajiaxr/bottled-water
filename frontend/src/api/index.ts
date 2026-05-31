@@ -34,12 +34,7 @@ export {
   removeParticipant,
 } from "./conversation";
 
-export {
-  messages,
-  sendMessage,
-  streamAssistantReply,
-  cancelAssistantReply,
-} from "./message";
+export { messages, sendMessage, cancelAssistantReply } from "./message";
 
 export { tasks, createBackgroundTask, cancelTask } from "./task";
 

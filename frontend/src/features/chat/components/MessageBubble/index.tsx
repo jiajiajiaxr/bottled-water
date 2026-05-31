@@ -6,7 +6,6 @@ import {
   EyeOutlined,
   LoadingOutlined,
   MessageOutlined,
-  ReloadOutlined,
 } from "@ant-design/icons";
 import {
   Avatar,
@@ -39,7 +38,6 @@ interface MessageBubbleProps {
   version: number;
   quoted?: ChatMessage;
   onQuote: (message: ChatMessage) => void;
-  onRegenerate: (message: ChatMessage) => void;
   onCopy: (text: string) => void;
   onPreview: (message: ChatMessage) => void;
 }
@@ -49,10 +47,10 @@ function MessageBubbleComponent({
   version: _version,
   quoted,
   onQuote,
-  onRegenerate,
   onCopy,
   onPreview,
 }: MessageBubbleProps) {
+  const author = message.author || "未知";
   const isUser = message.role === "user";
   const isEvent =
     message.kind === "event" ||
@@ -122,7 +120,7 @@ function MessageBubbleComponent({
   if (isEvent) {
     return (
       <div className="event-message">
-        <Tag icon={<BranchesOutlined />}>{message.author}</Tag>
+        <Tag icon={<BranchesOutlined />}>{author}</Tag>
         <Text type="secondary">{message.content}</Text>
       </div>
     );
@@ -131,7 +129,7 @@ function MessageBubbleComponent({
   if (message.kind === "preview_card") {
     return (
       <div className="message-row from-agent">
-        <Avatar className="message-avatar">{message.author.slice(0, 1)}</Avatar>
+        <Avatar className="message-avatar">{author.slice(0, 1)}</Avatar>
         <button
           className="message-card preview-message-card preview-card-button"
           data-testid="preview-card"
@@ -162,11 +160,11 @@ function MessageBubbleComponent({
   return (
     <>
       <div className={`message-row ${isUser ? "from-user" : "from-agent"}`}>
-        <Avatar className="message-avatar">{message.author.slice(0, 1)}</Avatar>
+        <Avatar className="message-avatar">{author.slice(0, 1)}</Avatar>
         <div className="message-card">
           <Flex justify="space-between" align="center" gap={12}>
             <Space>
-              <Text strong>{message.author}</Text>
+              <Text strong>{author}</Text>
               <Tag>{message.kind}</Tag>
               {message.streamState === "streaming" && (
                 <Tag color="processing">流式生成中</Tag>
@@ -249,15 +247,6 @@ function MessageBubbleComponent({
                 }
               />
             </Tooltip>
-            {!isUser && (
-              <Tooltip title="重新生成">
-                <Button
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  onClick={() => onRegenerate(message)}
-                />
-              </Tooltip>
-            )}
           </Space>
         </div>
       </div>

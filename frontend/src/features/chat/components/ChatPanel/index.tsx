@@ -47,14 +47,7 @@ export function ChatPanel({
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const { message } = AntApp.useApp();
 
-  const {
-    send,
-    regenerate,
-    stopStreaming,
-    streamingMessages,
-    streamState,
-    displayOrder,
-  } = useMessageOperations(currentUserName);
+  const { send, streamingMessages, displayOrder } = useMessageOperations();
 
   // 加载可用模型列表
   useEffect(() => {
@@ -115,27 +108,11 @@ export function ChatPanel({
   }, [allMessages]);
 
   const handleQuote = useCallback((msg: ChatMessage) => setQuoted(msg), []);
-  const handleRegenerate = useCallback(
-    (msg: ChatMessage) => regenerate(msg),
-    [regenerate],
-  );
   const handleCopy = useCallback((value: string) => copy(value), [copy]);
-  const handlePreview = useCallback(
-    (msg: ChatMessage) => onOpenPreview(msg),
-    [onOpenPreview],
-  );
-
   const messageListRef = useRef<HTMLDivElement>(null);
   const isAtBottom = useRef(true);
 
-  const uploadProps: UploadProps = {
-    showUploadList: false,
-    customRequest: async (options) => {
-      const uploaded = await onUploadFile(options.file as File);
-      setPendingFiles((current) => [uploaded, ...current]);
-      options.onSuccess?.("ok");
-    },
-  };
+  const uploadProps: UploadProps = {};
 
   useEffect(() => {
     const el = messageListRef.current;
@@ -156,7 +133,7 @@ export function ChatPanel({
     const el = messageListRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [historyMessages, displayOrder, streamState]);
+  }, [historyMessages, displayOrder]);
 
   const renderMessageBubble = (item: ChatMessage) => {
     return (
@@ -170,9 +147,8 @@ export function ChatPanel({
             : undefined
         }
         onQuote={handleQuote}
-        onRegenerate={handleRegenerate}
         onCopy={handleCopy}
-        onPreview={handlePreview}
+        onPreview={() => {}}
       />
     );
   };
@@ -291,21 +267,15 @@ export function ChatPanel({
                 disabled={!active}
               />
             </Tooltip>
-            {streamState === "streaming" ? (
-              <Button danger icon={<ReloadOutlined />} onClick={stopStreaming}>
-                Stop
-              </Button>
-            ) : (
-              <Button
-                type="primary"
-                icon={<SendOutlined />}
-                onClick={submit}
-                disabled={!active}
-                data-testid="send-message"
-              >
-                发送
-              </Button>
-            )}
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              onClick={submit}
+              disabled={!active}
+              data-testid="send-message"
+            >
+              发送
+            </Button>
           </Space>
         </Flex>
       </div>
