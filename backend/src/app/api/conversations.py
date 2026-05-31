@@ -340,7 +340,7 @@ async def create_conversation(payload: CreateConversationRequest, db: AsyncSessi
 
 @router.get("/conversations/{conversation_id}", response_model=ApiResponse[dict])
 async def get_conversation(conversation_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    return ok(conversation_to_dict(_get(db, user, conversation_id)))
+    return ok(conversation_to_dict(await _get(db, user, conversation_id)))
 
 
 @router.get("/conversations/{conversation_id}/workflow", response_model=ApiResponse[dict])
@@ -563,7 +563,7 @@ async def add_participants(conversation_id: str, payload: AddParticipantRequest,
         db.add(Message(conversation_id=conversation.id, sender_type="system", sender_name="System", content_type="event", content={"text": conversation.last_message_preview}, status="completed"))
     await db.commit()
     await db.expire_all()
-    return ok(conversation_to_dict(_get(db, user, conversation.id)), "成员已加入")
+    return ok(conversation_to_dict(await _get(db, user, conversation.id)), "成员已加入")
 
 
 @router.patch("/conversations/{conversation_id}/participants/{participant_id}", response_model=ApiResponse[dict])
@@ -606,7 +606,7 @@ async def remove_participant(conversation_id: str, participant_id: str, db: Asyn
     db.add(Message(conversation_id=conversation.id, sender_type="system", sender_name="System", content_type="event", content={"text": conversation.last_message_preview}, status="completed"))
     await db.commit()
     await db.expire_all()
-    return ok(conversation_to_dict(_get(db, user, conversation.id)), "成员已移除")
+    return ok(conversation_to_dict(await _get(db, user, conversation.id)), "成员已移除")
 
 
 @router.post("/conversations/{conversation_id}/invites", response_model=ApiResponse[dict])
@@ -622,7 +622,7 @@ async def invite_participants(conversation_id: str, payload: InviteParticipantRe
 # compat routes
 @compat_router.get("/conversations", response_model=dict)
 async def compat_list_conversations(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    return {"items": _list(db, user)}
+    return {"items": await _list(db, user)}
 
 
 @compat_router.post("/conversations", response_model=dict)
@@ -648,4 +648,4 @@ async def compat_add_participants(conversation_id: str, payload: AddParticipantR
         db.add(ConversationParticipant(conversation_id=conversation.id, participant_type="agent", agent_id=agent.id, role=payload.role))
     await db.commit()
     await db.expire_all()
-    return conversation_to_dict(_get(db, user, conversation.id))
+    return conversation_to_dict(await _get(db, user, conversation.id))

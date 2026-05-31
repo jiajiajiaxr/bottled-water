@@ -235,7 +235,7 @@ async def build_plan_with_llm(prompt: str, agents: list[Agent]) -> dict[str, Any
 async def create_task_for_prompt(
     db: AsyncSession, conversation: Conversation, prompt: str, plan: dict[str, Any] | None = None
 ) -> Task:
-    agents = _conversation_agents(db, conversation)
+    agents = await _conversation_agents(db, conversation)
     plan = plan or build_plan(prompt, agents)
     task = Task(
         conversation_id=conversation.id,
@@ -1348,7 +1348,7 @@ async def run_orchestration(message_id: str) -> None:
             )
             return
 
-        agents = _conversation_agents(db, conversation)
+        agents = await _conversation_agents(db, conversation)
         workflow = _workflow_for_conversation(conversation, agents)
         workflow = await _maybe_replan_workflow(
             db,
