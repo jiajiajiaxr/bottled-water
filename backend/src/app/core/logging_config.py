@@ -5,12 +5,14 @@ import logging.handlers
 import sys
 from pathlib import Path
 
-from app.core.config import ROOT_DIR
-
 
 def _make_log_dir() -> Path:
-    """返回并确保日志目录存在。"""
-    log_dir = ROOT_DIR / "backend" / "logs"
+    """返回并确保日志目录存在。
+
+    基于当前文件位置计算，不依赖 ROOT_DIR，避免路径漂移。
+    """
+    # logging_config.py 位于 src/app/core/，向上 3 层到达 backend/
+    log_dir = Path(__file__).resolve().parents[3] / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir
 
