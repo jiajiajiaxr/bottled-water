@@ -168,7 +168,7 @@ class AgentLoop:
         # 获取可用工具（按 AgentConfig.tools 过滤）
         tools = []
         if tool_executor:
-            all_tools = await tool_executor.list_tools()
+            all_tools = tool_executor.list_tools()
             if self.agent.tools:
                 allowed = set(self.agent.tools)
                 tools = [t for t in all_tools if t.get("function", {}).get("name") in allowed]
