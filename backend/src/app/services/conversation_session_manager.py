@@ -17,6 +17,8 @@ from typing import ClassVar, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_runtime import Session as AgentSession
+from agent_runtime.core.types import Event as RuntimeEvent
+from app.events import WebSocketSink
 from app.models import Conversation
 from app.services.runtime_service import OrchestratorService
 from common.logger import get_logger
@@ -169,12 +171,21 @@ class ConversationSessionManager:
     async def cancel_generation(self, conversation_id: str) -> bool:
         """取消当前 generation。
 
-        取消运行中的 asyncio.Task，Orchestrator 收到 CancelledError 后结束调度循环。
+        取消运行中的 asyncio.Task，通过 WebSocketSink 推送 control.cancel 事件。
         """
         task = self._running_tasks.get(conversation_id)
         if task and not task.done():
             task.cancel()
             logger.info("Generation 取消", conversation_id=conversation_id)
+
+            # 通过 WebSocketSink 推送 control.cancel 事件
+            cancel_event = RuntimeEvent(
+                type="control.cancel",
+                payload={"conversation_id": conversation_id, "reason": "user_cancelled"},
+            )
+            ws_sink = WebSocketSink(conversation_id)
+            await ws_sink.emit(cancel_event)
+
             return True
         return False
 
