@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import redis.asyncio as redis
+from fastapi import WebSocket
 
 from agent_runtime.core.interfaces import EventSink
 from agent_runtime.core.types import Event as RuntimeEvent
@@ -163,6 +164,77 @@ class SseSink(EventSink):
     @classmethod
     def get_queue_for(cls, conversation_id: str) -> asyncio.Queue[RuntimeEvent] | None:
         return cls._queues.get(conversation_id)
+
+
+# --------------------------------------------------------------------
+# WebSocket Sink：将运行时事件推送到 WebSocket 连接
+# --------------------------------------------------------------------
+
+class WebSocketSink(EventSink):
+    """将运行时事件推送到 WebSocket 连接。
+
+    支持多客户端同时连接同一 conversation（Web + 移动端同时在线）。
+    客户端断开连接后自动清理，不影响 Session 继续运行。
+    """
+
+    _connections: dict[str, list[WebSocket]] = {}
+
+    def __init__(self, conversation_id: str):
+        self.conversation_id = conversation_id
+
+    def register(self, websocket: WebSocket) -> None:
+        """注册 WebSocket 连接。"""
+        self._connections.setdefault(self.conversation_id, []).append(websocket)
+
+    def unregister(self, websocket: WebSocket) -> None:
+        """注销 WebSocket 连接。"""
+        websockets = self._connections.get(self.conversation_id, [])
+        if websocket in websockets:
+            websockets.remove(websocket)
+
+    @classmethod
+    def register_for(cls, conversation_id: str, websocket: WebSocket) -> None:
+        """类方法：为指定 conversation 注册连接（方便外部调用）。"""
+        cls._connections.setdefault(conversation_id, []).append(websocket)
+
+    @classmethod
+    def unregister_for(cls, conversation_id: str, websocket: WebSocket) -> None:
+        """类方法：为指定 conversation 注销连接。"""
+        websockets = cls._connections.get(conversation_id, [])
+        if websocket in websockets:
+            websockets.remove(websocket)
+
+    @classmethod
+    def get_connections(cls, conversation_id: str) -> list[WebSocket]:
+        """获取指定 conversation 的所有活跃连接。"""
+        return cls._connections.get(conversation_id, [])
+
+    async def emit(self, event: RuntimeEvent) -> None:
+        """将事件推送到该 conversation 的所有 WebSocket 连接。"""
+        websockets = self._connections.get(self.conversation_id, [])
+        if not websockets:
+            return
+
+        payload = {
+            "event": event.type,
+            "data": event.payload,
+        }
+        if event.correlation_id:
+            payload["request_id"] = event.correlation_id
+
+        dead: list[WebSocket] = []
+        for ws in websockets:
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                dead.append(ws)
+
+        for ws in dead:
+            websockets.remove(ws)
+
+    async def emit_batch(self, events: list[RuntimeEvent]) -> None:
+        for event in events:
+            await self.emit(event)
 
 
 # --------------------------------------------------------------------

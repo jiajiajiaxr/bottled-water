@@ -14,19 +14,15 @@ from sqlalchemy.orm import selectinload
 
 from agent_runtime import AgentConfig, Session as AgentSession
 from agent_runtime.core.interfaces import ToolExecutor
-from agent_runtime.core.types import Event
 from agent_runtime.strategies.tech_lead import TechLeadScheduler
 from agent_runtime.strategies.single_agent import SingleAgentScheduler
 from model_provider import create_provider
-from model_provider.core.config import ModelConfig
 from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
 
 from app.core.config import get_settings
 from app.models import Agent, Conversation, Message, User
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink
-from app.events import app_event_bus as event_bus
-from app.services.serialization import message_meta_to_dict
 from common.logger import get_logger
 
 logger = get_logger("app.services.runtime_service")
@@ -159,8 +155,76 @@ class OrchestratorService:
         ))
 
     @staticmethod
+    async def create_session(
+        db: AsyncSession,
+        conversation: Conversation,
+        agents: list[Agent],
+        model_config_id: str | None = None,
+        event_sink=None,
+    ) -> AgentSession:
+        """创建 AgentSession（不运行）。
+
+        提取自 SingleAgentOrchestrator / TechLeadOrchestrator 的 Session 创建逻辑，
+        供 ConversationSessionManager 复用。
+        """
+        user = await db.get(User, conversation.creator_id)
+        agent_count = len(agents)
+
+        if agent_count == 1:
+            agent = agents[0]
+            agent_config = AgentConfig(
+                id=agent.id,
+                name=agent.name,
+                system_prompt=(agent.config or {}).get("system_prompt", "") or agent.description or f"你是 {agent.name}。",
+                role=agent.type or "worker",
+                tools=(agent.config or {}).get("tools", []),
+            )
+            if model_config_id:
+                model_provider = await OrchestratorService.create_provider_from_config(db, model_config_id)
+            else:
+                model_provider = OrchestratorService._create_model_provider(agent)
+            scheduler = SingleAgentScheduler(agents={agent.id: agent_config})
+            tool_executor = _ToolExecutorAdapter(db, agent, user, conversation)
+
+            return AgentSession.create(
+                agents=[agent_config],
+                scheduler=scheduler,
+                model_provider=model_provider,
+                persistence=SQLAlchemyBackend(db),
+                event_sink=event_sink,
+                tool_executor=tool_executor,
+            )
+
+        agent_configs = [
+            AgentConfig(
+                id=agent.id,
+                name=agent.name,
+                system_prompt=(agent.config or {}).get("system_prompt", "") or agent.description or f"你是 {agent.name}。",
+                role=agent.type or "worker",
+                tools=(agent.config or {}).get("tools", []),
+            )
+            for agent in agents
+        ]
+        if model_config_id:
+            model_provider = await OrchestratorService.create_provider_from_config(db, model_config_id)
+        else:
+            model_provider = OrchestratorService._create_model_provider(agents[0] if agents else None)
+        scheduler = TechLeadScheduler(agents={a.id: a for a in agent_configs})
+        primary_agent = agents[0]
+        tool_executor = _ToolExecutorAdapter(db, primary_agent, user, conversation)
+
+        return AgentSession.create(
+            agents=agent_configs,
+            scheduler=scheduler,
+            model_provider=model_provider,
+            persistence=SQLAlchemyBackend(db),
+            event_sink=event_sink,
+            tool_executor=tool_executor,
+        )
+
+    @staticmethod
     async def run(db: AsyncSession, conversation: Conversation, message: Message, strategy: str, model_config_id: str | None = None) -> None:
-        """运行编排
+        """运行编排（SSE 兼容路径，deprecated）。
 
         Args:
             model_config_id: 用户选择的模型配置ID，优先于 agent 配置
@@ -204,7 +268,10 @@ class _ToolExecutorAdapter(ToolExecutor):
 
 
 class SingleAgentOrchestrator:
-    """单 Agent 编排器，使用 SingleAgentScheduler（纯代码，无 LLM 开销）"""
+    """单 Agent 编排器，使用 SingleAgentScheduler（纯代码，无 LLM 开销）。
+
+    保留用于 SSE 兼容路径，新代码应使用 ConversationSessionManager。
+    """
 
     def __init__(self, db: AsyncSession, conversation: Conversation, message: Message, channel: str, agents: list[Agent], model_config_id: str | None = None):
         self.db = db
@@ -215,33 +282,15 @@ class SingleAgentOrchestrator:
         self.model_config_id = model_config_id
 
     async def run(self) -> None:
-        agent = self.agents[0]
-        user = await self.db.get(User, self.conversation.creator_id)
-        agent_config = AgentConfig(
-            id=agent.id,
-            name=agent.name,
-            system_prompt=(agent.config or {}).get("system_prompt", "") or agent.description or f"你是 {agent.name}。",
-            role=agent.type or "worker",
-            tools=(agent.config or {}).get("tools", []),
-        )
-
-        if self.model_config_id:
-            model_provider = await OrchestratorService.create_provider_from_config(self.db, self.model_config_id)
-        else:
-            model_provider = OrchestratorService._create_model_provider(agent)
-        scheduler = SingleAgentScheduler(agents={agent.id: agent_config})
-        tool_executor = _ToolExecutorAdapter(self.db, agent, user, self.conversation)
-
-        session = AgentSession.create(
-            agents=[agent_config],
-            scheduler=scheduler,
-            model_provider=model_provider,
-            persistence=SQLAlchemyBackend(self.db),
+        session = await OrchestratorService.create_session(
+            self.db,
+            self.conversation,
+            self.agents,
+            self.model_config_id,
             event_sink=SseSink(conversation_id=str(self.conversation.id)),
-            tool_executor=tool_executor,
         )
 
-        logger.info(f"SingleAgentOrchestrator 启动 session_id={session.session_id} agent_id={agent.id}")
+        logger.info(f"SingleAgentOrchestrator 启动 session_id={session.session_id} agent_id={self.agents[0].id}")
 
         prompt = (
             self.message.content.get("text", "")
@@ -249,20 +298,17 @@ class SingleAgentOrchestrator:
             else str(self.message.content)
         )
 
-        try:
-            async for event in session.run(prompt):
-                logger.debug(f"SingleAgentOrchestrator 事件 type={event.type}")
-                await event_bus.publish(self.channel, event.type, event.payload)
-        except Exception as e:
-            logger.error(f"SingleAgentOrchestrator 运行失败 error={str(e)}")
-            await event_bus.publish(self.channel, "orchestrator:error", {"error": str(e), "error_type": type(e).__name__})
-            raise
-
-        await event_bus.publish(self.channel, "orchestrator:complete", {"session_id": session.session_id})
+        async for event in session.run(prompt):
+            logger.debug(f"SingleAgentOrchestrator 事件 type={event.type}")
+            # 运行时事件通过 EventDispatcher -> SseSink 自动推送，
+            # 不再手动 event_bus.publish
 
 
 class TechLeadOrchestrator:
-    """多 Agent 编排器，使用 TechLeadScheduler（LLM 驱动协调）"""
+    """多 Agent 编排器，使用 TechLeadScheduler（LLM 驱动协调）。
+
+    保留用于 SSE 兼容路径，新代码应使用 ConversationSessionManager。
+    """
 
     def __init__(self, db: AsyncSession, conversation: Conversation, message: Message, channel: str, agents: list[Agent], model_config_id: str | None = None):
         self.db = db
@@ -273,37 +319,15 @@ class TechLeadOrchestrator:
         self.model_config_id = model_config_id
 
     async def run(self) -> None:
-        agents = self.agents
-        user = await self.db.get(User, self.conversation.creator_id)
-        agent_configs = [
-            AgentConfig(
-                id=agent.id,
-                name=agent.name,
-                system_prompt=(agent.config or {}).get("system_prompt", "") or agent.description or f"你是 {agent.name}。",
-                role=agent.type or "worker",
-                tools=(agent.config or {}).get("tools", []),
-            )
-            for agent in agents
-        ]
-
-        if self.model_config_id:
-            model_provider = await OrchestratorService.create_provider_from_config(self.db, self.model_config_id)
-        else:
-            model_provider = OrchestratorService._create_model_provider(agents[0] if agents else None)
-        scheduler = TechLeadScheduler(agents={a.id: a for a in agent_configs})
-        primary_agent = agents[0]
-        tool_executor = _ToolExecutorAdapter(self.db, primary_agent, user, self.conversation)
-
-        session = AgentSession.create(
-            agents=agent_configs,
-            scheduler=scheduler,
-            model_provider=model_provider,
-            persistence=SQLAlchemyBackend(self.db),
+        session = await OrchestratorService.create_session(
+            self.db,
+            self.conversation,
+            self.agents,
+            self.model_config_id,
             event_sink=SseSink(conversation_id=str(self.conversation.id)),
-            tool_executor=tool_executor,
         )
 
-        logger.info(f"TechLeadOrchestrator 启动 session_id={session.session_id} agent_count={len(agent_configs)}")
+        logger.info(f"TechLeadOrchestrator 启动 session_id={session.session_id} agent_count={len(self.agents)}")
 
         prompt = (
             self.message.content.get("text", "")
@@ -311,13 +335,7 @@ class TechLeadOrchestrator:
             else str(self.message.content)
         )
 
-        try:
-            async for event in session.run(prompt):
-                logger.debug(f"TechLeadOrchestrator 事件 type={event.type}")
-                await event_bus.publish(self.channel, event.type, event.payload)
-        except Exception as e:
-            logger.error(f"TechLeadOrchestrator 运行失败 error={str(e)}")
-            await event_bus.publish(self.channel, "orchestrator:error", {"error": str(e), "error_type": type(e).__name__})
-            raise
-
-        await event_bus.publish(self.channel, "orchestrator:complete", {"session_id": session.session_id})
+        async for event in session.run(prompt):
+            logger.debug(f"TechLeadOrchestrator 事件 type={event.type}")
+            # 运行时事件通过 EventDispatcher -> SseSink 自动推送，
+            # 不再手动 event_bus.publish

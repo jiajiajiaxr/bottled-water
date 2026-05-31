@@ -224,6 +224,9 @@ class TestOrchestratorUserInput:
         events = []
         async for event in orch.handle_user_input("新消息"):
             events.append(event)
+            if event.type == "user.input_queued":
+                # 在调度循环消费队列前检查
+                assert orch._user_input_queue.qsize() == 1
+                assert orch._user_input_queue.get_nowait() == "新消息"
 
         assert events[0].type == "user.input_queued"
-        assert orch._user_input_queue == ["新消息"]

@@ -7,17 +7,20 @@ def test_send_message_to_conversation(
     auth_headers: dict[str, str],
     conversation_id: str,
 ) -> None:
-    path = api_paths["messages"].format(conversation_id=conversation_id)
+    """测试 SSE 流式端点（deprecated，保留兼容）。
+
+    注意：/stream 返回 SSE EventSourceResponse，流式响应由 WebSocket 端点完整覆盖。
+    此处仅验证端点可达且认证正常。
+    """
+    path = f"/api/v1/conversations/{conversation_id}/stream"
     response = client.post(
         path,
         json={
-            "conversation_id": conversation_id,
-            "content": "Create a simple dashboard preview.",
-            "role": "user",
+            "content": {"text": "Create a simple dashboard preview."},
         },
         headers=auth_headers,
     )
 
-    assert response.status_code in {200, 201, 202}, response.text
-    body = response.json()
-    assert body.get("id") or body.get("message_id")
+    # SSE 流式端点返回 200（EventSourceResponse 会持续推送直到 session 完成）
+    # 注意：流式响应非 JSON，直接检查状态码即可
+    assert response.status_code == 200, response.text

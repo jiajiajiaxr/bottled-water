@@ -17,7 +17,7 @@ from app.schemas.requests import SendMessagePayload
 from app.events import SseSink
 from app.events import app_event_bus as event_bus
 from app.services.runtime_service import OrchestratorService
-from app.services.serialization import artifact_to_dict, message_to_dict
+from app.services.serialization import message_to_dict
 
 
 router = APIRouter(tags=["messages"])
@@ -183,19 +183,9 @@ async def stream_conversation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """标准 SSE 流式接口：POST 发送消息，返回 text/event-stream。
+    """标准 SSE 流式接口（deprecated，请使用 WebSocket /ws/conversations/{id}）。
 
-    Args:
-        conversation_id (str): 对话ID。
-        payload (SendMessagePayload): 发送消息请求体。
-        db (Session, optional): Defaults to Depends(get_db).
-        user (User, optional): Defaults to Depends(get_current_user).
-
-    Returns:
-        EventSourceResponse: SSE 流响应。
-
-    Yields:
-        str: SSE 事件字符串。
+    保留用于向后兼容，内部事件仅通过 SseSink 推送。
     """
     await _get_conversation(db, user, conversation_id)
 
@@ -217,21 +207,16 @@ async def stream_conversation(
     # 保存用户消息并触发编排
     message = await _send(db, user, conversation_id, message_payload, trigger_agent=True)
 
-    # 先推送用户消息事件
+    # 先推送用户消息事件（保留用于兼容）
     await event_bus.publish(channel, "message:new", message_to_dict(message))
 
-    # 返回 SSE 流：从 SseSink 读取运行时事件
+    # 返回 SSE 流：仅监听 SseSink
     async def generator():
         queue = SseSink.get_queue_for(conversation_id)
         if queue is None:
             return
 
-        # 同时监听 event_bus 的业务层事件（如取消信号）
-        bus_iterator = event_bus.subscribe(channel, replay=False)
-        bus_has_next = True
-
         while True:
-            # 优先处理 SseSink 队列中的运行时事件
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=0.5)
                 await asyncio.sleep(0.05)
@@ -239,27 +224,12 @@ async def stream_conversation(
                     "event": event.type,
                     "data": json.dumps(event.payload, ensure_ascii=False),
                 }
-                # session_completed 是终止信号
                 if event.type in ("system.session_completed", "system.session_error"):
                     break
             except asyncio.TimeoutError:
                 pass
             except asyncio.CancelledError:
-                # 客户端断开连接
                 break
-
-            # 检查 event_bus 是否有业务层事件（如取消信号）
-            if bus_has_next:
-                try:
-                    bus_event = await asyncio.wait_for(bus_iterator.__anext__(), timeout=0.05)
-                    yield bus_event.as_sse()
-                    # generation:cancelled 是终止信号
-                    if bus_event.event == "generation:cancelled":
-                        break
-                except asyncio.TimeoutError:
-                    pass
-                except StopAsyncIteration:
-                    bus_has_next = False
 
     return EventSourceResponse(generator())
 
@@ -270,12 +240,24 @@ async def cancel_stream(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """取消 generation（兼容 SSE 路径，同时影响 WebSocket 路径的 Session）。"""
+    from app.services.conversation_session_manager import ConversationSessionManager
+
     conversation = await _get_conversation(db, user, conversation_id)
+
+    # 1. 取消旧 SSE 路径的 task
     task = ORCHESTRATION_TASKS.get(conversation.id)
     cancelled = False
     if task and not task.done():
         task.cancel()
         cancelled = True
+
+    # 2. 取消新 WebSocket 路径的 Session generation
+    session_manager = ConversationSessionManager.get_instance()
+    if session_manager.is_generation_running(conversation.id):
+        await session_manager.cancel_generation(conversation.id)
+        cancelled = True
+
     await event_bus.publish(
         f"conversation:{conversation.id}",
         "generation:cancelled",

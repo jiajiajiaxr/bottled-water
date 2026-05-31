@@ -63,7 +63,7 @@ class Orchestrator:
         # 状态
         self.status = "idle"  # idle | running | paused | completed | failed
         self.round_num = 0
-        self._user_input_queue: List[str] = []
+        self._user_input_queue: asyncio.Queue[str] = asyncio.Queue()
         self._agent_loops: Dict[str, AgentLoop] = {}
         self._pending_agent_reports: Dict[str, AgentReport] = {}
 
@@ -167,11 +167,13 @@ class Orchestrator:
             logger.info("调度轮开始", session_id=self.session_id, round=self.round_num)
 
             # --- 0. 检查用户中途输入 ---
-            if self._user_input_queue:
-                user_input = self._user_input_queue.pop(0)
+            try:
+                user_input = self._user_input_queue.get_nowait()
                 await self._handle_user_input_to_blackboard(user_input)
                 current_task = user_input  # 用户输入成为新任务
                 yield Event(type="user.input_received", payload={"content": user_input})
+            except asyncio.QueueEmpty:
+                pass
 
             # --- 1. 获取 Blackboard 视图 ---
             blackboard = await self.blackboard_mgr.get(self.session_id) or {}
@@ -285,7 +287,7 @@ class Orchestrator:
 
         if decision_type == "wait":
             logger.info("调度器决策等待", session_id=self.session_id)
-            if not self._user_input_queue:
+            if self._user_input_queue.empty():
                 return False, events
             return True, events
 
@@ -565,14 +567,16 @@ class Orchestrator:
             )
 
     async def handle_user_input(self, content: str) -> AsyncIterator[Event]:
-        """处理用户中途输入"""
-        self._user_input_queue.append(content)
+        """处理用户中途输入。
+
+        如果会话正在运行，输入放入队列等待下一轮调度处理。
+        如果会话已完成，重新激活并启动调度循环。
+        """
+        await self._user_input_queue.put(content)
         yield Event(type="user.input_queued", payload={"content": content})
 
-        # 如果会话正在运行，输入已经放入队列会被下一轮处理
-        # 如果会话已完成，需要重新启动调度循环
         if self.status != "running":
-            # 重启调度循环（简化版：直接处理）
+            self.status = "running"
             async for event in self._scheduling_loop(content):
                 yield event
 
@@ -584,5 +588,5 @@ class Orchestrator:
             "round": self.round_num,
             "agents": [{"id": a.id, "name": a.name, "role": a.role} for a in self.agents.values()],
             "watchdog": self.watchdog.get_status(),
-            "user_input_queue": len(self._user_input_queue),
+            "user_input_queue": self._user_input_queue.qsize(),
         }

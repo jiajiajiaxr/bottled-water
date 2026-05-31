@@ -64,22 +64,22 @@ export interface MessageAttachment {
 }
 
 export interface ChatMessage {
-  id: string;
-  conversationId: string;
-  sender_id?: string;
-  sender_type?: string;
-  role: MessageRole;
-  kind: MessageKind;
-  author: string;
-  content: string;
-  thinking?: string;
-  rawContent?: Record<string, unknown>;
-  attachments?: MessageAttachment[];
-  createdAt: string;
-  streamState?: StreamState;
-  quotedMessageId?: string;
-  status?: string;
-  state: "active" | "inactive";
+  id: string; // 消息 ID，目前使用agent_id
+  conversationId: string; // 对话 ID，不清楚来源
+  sender_id?: string; // 不清楚作用
+  sender_type?: string; // 不清楚作用
+  role: MessageRole; // 不清楚作用
+  kind: MessageKind; // 不清楚作用
+  author: string; // 不清楚作用
+  content: string; // 消息内容
+  thinking?: string; // LLM思考内容
+  rawContent?: Record<string, unknown>; // 不清楚作用
+  attachments?: MessageAttachment[]; // 消息附件
+  createdAt: string; // 不清楚作用
+  streamState?: StreamState; // 流式状态，根据其情况确定组件是否需要更新
+  quotedMessageId?: string; // 引用的消息 ID，不清楚来源
+  status?: string; // 不清楚作用
+  state: "active" | "inactive"; // 旧的流式状态，之后会移除
 }
 
 export interface WorkspaceArtifact {
