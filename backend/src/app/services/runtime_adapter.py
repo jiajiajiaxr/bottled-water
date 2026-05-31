@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.logger import get_logger
 from agent_runtime.core.interfaces import ToolExecutor
-from agent_runtime.core.types import Event
+from agent_runtime.core.types import Event, ToolCall
 
 from app.models import Agent, Conversation
 
@@ -48,17 +48,17 @@ class ToolExecutorAdapter(ToolExecutor):
             self._tools_cache = await build_tools_for_agent(self.db, self.agent)
         return self._tools_cache
 
-    async def execute(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
+    async def execute(self, tool_call: ToolCall) -> Any:
         """执行工具调用"""
         from app.services.agentic_runtime import execute_tool_by_name
 
-        logger.info(f"适配器执行工具 tool={tool_name} agent={self.agent.name}")
+        logger.info(f"适配器执行工具 tool={tool_call.tool_name} agent={self.agent.name}")
         result = await execute_tool_by_name(
             self.db,
             agent=self.agent,
             user=self.user,
             conversation=self.conversation,
-            tool_name=tool_name,
-            arguments=parameters,
+            tool_name=tool_call.tool_name,
+            arguments=tool_call.parameters,
         )
         return result

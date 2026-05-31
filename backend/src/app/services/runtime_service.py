@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from agent_runtime import AgentConfig, Session as AgentSession
+from agent_runtime import AgentConfig, Session as AgentSession, ToolCall
 from agent_runtime.core.interfaces import ToolExecutor
 from agent_runtime.strategies.tech_lead import TechLeadScheduler
 from agent_runtime.strategies.single_agent import SingleAgentScheduler
@@ -255,15 +255,15 @@ class _ToolExecutorAdapter(ToolExecutor):
         from app.services.agentic_runtime import build_tools_for_agent
         return await build_tools_for_agent(self.db, self.agent)
 
-    async def execute(self, tool_name: str, parameters: dict) -> Any:
+    async def execute(self, tool_call: ToolCall) -> Any:
         from app.services.agentic_runtime import execute_tool_by_name
         return await execute_tool_by_name(
             self.db,
             agent=self.agent,
             user=self.user,
             conversation=self.conversation,
-            tool_name=tool_name,
-            arguments=parameters,
+            tool_name=tool_call.tool_name,
+            arguments=tool_call.parameters,
         )
 
 
