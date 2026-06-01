@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  # Nginx 反向代理 + 前端静态文件
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - agenthub
+
+  # 后端 API 服务
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.backend
+    environment:
+      - DATABASE_URL=postgresql://agenthub:agenthub_secret@postgres:5432/agenthub
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - agenthub
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8888/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=agenthub
+      - POSTGRES_PASSWORD=agenthub_secret
+      - POSTGRES_DB=agenthub
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - agenthub
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenthub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - agenthub
+
+networks:
+  agenthub:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,17 @@
+# 前端构建
+frontend/node_modules
+frontend/dist
+frontend/.git
+frontend/.env*
+
+# 后端构建
+backend/.venv
+backend/__pycache__
+backend/.git
+backend/*.log
+
+# 其他
+.git
+docker-compose.*.yml
+*.md
+.env*
