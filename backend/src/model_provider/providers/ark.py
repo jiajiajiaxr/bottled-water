@@ -121,10 +121,12 @@ class ArkProvider(BaseModelProvider):
                         }
 
                 content = delta.content or ""
+                reasoning = delta.reasoning_content or "" if hasattr(delta, "reasoning_content") else ""
                 total_chars += len(content)
 
                 yield StreamChunk(
                     content=content,
+                    reasoning=reasoning,
                     tool_call=tool_call,
                     finish_reason=chunk.choices[0].finish_reason if chunk.choices else None,
                 )

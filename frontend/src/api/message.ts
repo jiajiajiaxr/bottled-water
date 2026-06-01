@@ -156,8 +156,13 @@ function dispatchStreamEvent(
     }
 
     // 流式 token 和思考过程（增量追加）
-    case "agent.thinking":
+    case "agent.thinking": {
+      const pt = data as Record<string, unknown>;
+      const agentId = String(pt.agent_id || "");
+      const thinking = String(pt.thinking || "");
+      if (agentId && thinking) handlers.onThinking?.(agentId, thinking);
       break;
+    }
     case "agent.token": {
       const p = data as Record<string, unknown>;
       const agentId = String(p.agent_id || "");

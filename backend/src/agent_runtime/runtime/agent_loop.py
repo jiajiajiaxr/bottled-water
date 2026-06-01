@@ -396,6 +396,16 @@ class AgentLoop:
                     },
                 )
 
+            # 1.5 思考过程
+            if chunk.reasoning:
+                await _emit(
+                    "agent.thinking",
+                    {
+                        "agent_id": self.agent.id,
+                        "thinking": chunk.reasoning,
+                    },
+                )
+
             # 2. tool_call 增量（可能跨多个 chunk）
             if chunk.tool_call:
                 tc = chunk.tool_call

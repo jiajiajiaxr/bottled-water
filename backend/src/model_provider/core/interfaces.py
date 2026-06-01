@@ -32,6 +32,7 @@ class ChatResponse:
 class StreamChunk:
     """流式响应块"""
     content: str = ""
+    reasoning: str = ""
     tool_call: Optional[Dict] = None
     finish_reason: Optional[str] = None
 

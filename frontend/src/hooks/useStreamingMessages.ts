@@ -123,16 +123,26 @@ export function useStreamingMessages(conversationId?: string) {
     },
 
     onThinking: (agentId, thinking) => {
-      // setStreamingMessages((prev) => {
-      //   const existing = prev.get(agentId);
-      //   if (!existing) return prev;
-      //   const next = new Map(prev);
-      //   next.set(agentId, {
-      //     ...existing,
-      //     thinking: (existing.thinking || "") + thinking,
-      //   });
-      //   return next;
-      // });
+      setStreamingMessages((prev) => {
+        const existing = prev.get(agentId);
+        if (!existing) return prev;
+        const next = new Map(prev);
+        next.set(agentId, {
+          ...existing,
+          thinking: (existing.thinking || "") + thinking,
+        });
+        return next;
+      });
+
+      // 同步更新 version，触发 MessageBubble 重新渲染
+      const msg = streamingMessagesRef.current.get(agentId);
+      if (msg) {
+        updateMessageVersions((prev) => {
+          const next = new Map(prev);
+          next.set(msg.id, (prev.get(msg.id) ?? 0) + 1);
+          return next;
+        });
+      }
     },
 
     onDone: () => {
