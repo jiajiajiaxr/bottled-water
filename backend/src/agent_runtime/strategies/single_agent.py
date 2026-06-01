@@ -33,6 +33,12 @@ class SingleAgentScheduler(Scheduler):
     def is_completed(self) -> bool:
         return self._completed
 
+    def reset(self) -> None:
+        """重置调度器状态。"""
+        super().reset()
+        self._round = 0
+        self._completed = False
+
     async def make_decision(
         self,
         blackboard: dict[str, Any],

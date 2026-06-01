@@ -18,6 +18,10 @@ class Scheduler(ABC):
         self.agents = agents or {}
         self.decision_history: List[SchedulingDecision] = []
 
+    def reset(self) -> None:
+        """重置调度器状态，在 Session 重新启动时调用。"""
+        self.decision_history.clear()
+
     @abstractmethod
     async def make_decision(
         self,

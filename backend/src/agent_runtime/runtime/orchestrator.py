@@ -116,6 +116,15 @@ class Orchestrator:
 
     async def _initialize(self, user_message: str):
         """初始化 Blackboard 和 Agent 上下文"""
+        # 重置调度器状态（支持 Session 复用场景）
+        self.scheduler.reset()
+
+        # 重置本地状态
+        self.round_num = 0
+        self._pending_agent_reports.clear()
+        self._agent_loops.clear()
+        self._user_input_queue = asyncio.Queue()
+
         # 创建/加载 Blackboard
         blackboard = await self.blackboard_mgr.create(self.session_id)
         if self.persistence:

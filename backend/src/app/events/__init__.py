@@ -232,6 +232,9 @@ class WebSocketSink(EventSink):
         for ws in dead:
             websockets.remove(ws)
 
+        # 每发一个事件停 50ms，缓解前端渲染压力
+        await asyncio.sleep(0.05)
+
     async def emit_batch(self, events: list[RuntimeEvent]) -> None:
         for event in events:
             await self.emit(event)
