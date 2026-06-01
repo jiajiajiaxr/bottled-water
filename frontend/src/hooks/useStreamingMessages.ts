@@ -52,7 +52,8 @@ export function useStreamingMessages(conversationId?: string) {
           state: "active",
         });
 
-        msg.id = agentId;
+        // 使用唯一 ID，避免同一 Agent 多次回复时 ID 冲突导致无法归档
+        msg.id = `${agentId}-${Date.now()}`;
         next.set(agentId, msg);
 
         return next;
@@ -110,11 +111,15 @@ export function useStreamingMessages(conversationId?: string) {
         return next;
       });
 
-      updateMessageVersions((prev) => {
-        const next = new Map(prev);
-        next.set(agentId, (prev.get(agentId) ?? 0) + 1);
-        return next;
-      });
+      // 使用消息实际 id 作为版本号键，与 MessageBubble 读取的 key 保持一致
+      const msg = streamingMessagesRef.current.get(agentId);
+      if (msg) {
+        updateMessageVersions((prev) => {
+          const next = new Map(prev);
+          next.set(msg.id, (prev.get(msg.id) ?? 0) + 1);
+          return next;
+        });
+      }
     },
 
     onThinking: (agentId, thinking) => {
