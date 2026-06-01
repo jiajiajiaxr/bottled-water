@@ -225,9 +225,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
               onCancel={async (task) => {
                 await api.cancelTask(task.id);
                 if (task.conversation_id) {
-                  await api
-                    .cancelAssistantReply(task.conversation_id)
-                    .catch(() => undefined);
+                  api.cancelAssistantReplyWs(task.conversation_id);
                   updateLocalRunningConversationIds((current) => {
                     const next = new Set(current);
                     if (task.conversation_id) next.delete(task.conversation_id);

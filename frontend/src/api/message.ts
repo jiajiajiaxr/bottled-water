@@ -1,5 +1,6 @@
 import { StreamAssistantHandlers } from "@/types/messages";
 import { get, post, sse } from "./client";
+import { getConversationWS } from "./websocket";
 import type { ChatMessage } from "@/types";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
@@ -97,6 +98,87 @@ function parseEvent(raw: string): SSEEvent | null {
   }
 }
 
+/**
+ * 分发流式事件到对应的 handlers。
+ * SSE 与 WebSocket 共用的事件处理逻辑。
+ */
+function dispatchStreamEvent(
+  event: string,
+  data: unknown,
+  handlers: StreamAssistantHandlers,
+): void {
+  switch (event) {
+    // 运行时事件：Session 生命周期
+    case "system.session_started":
+    case "system.session_completed":
+      break;
+    case "system.session_error":
+      handlers.onDone?.(data as Record<string, unknown>);
+      break;
+
+    // 运行时事件：Round / Agent 生命周期
+    case "system.round_started":
+      break;
+    case "system.agent_started":
+      handlers.onMessageStart?.(data as Record<string, unknown>);
+      break;
+    case "system.agent_completed":
+    case "system.agent_failed":
+      handlers.onMessageEnd?.(data as Record<string, unknown>);
+      break;
+
+    // 运行时事件：工具调用
+    case "agent.tool_calls_executed": {
+      const payload = data as Record<string, unknown>;
+      const toolEvents = payload.tool_events as Record<string, unknown>[];
+      if (Array.isArray(toolEvents)) {
+        for (const te of toolEvents) {
+          const teRecord = te as Record<string, unknown>;
+          const toolCallId = String(teRecord.call_id ?? "");
+          const toolName = String(
+            teRecord.tool_name ??
+              (teRecord.function as Record<string, unknown>)?.name ??
+              "",
+          );
+          if (toolCallId && toolName) {
+            handlers.onToolCallStart?.({
+              tool_call_id: toolCallId,
+              tool_name: toolName,
+            });
+            handlers.onToolCallDone?.({
+              tool_call_id: toolCallId,
+              tool_name: toolName,
+            });
+          }
+        }
+      }
+      break;
+    }
+
+    // 流式 token 和思考过程（增量追加）
+    case "agent.thinking":
+      break;
+    case "agent.token": {
+      const p = data as Record<string, unknown>;
+      const agentId = String(p.agent_id || "");
+
+      if (!agentId) break;
+      const token = String(p.token || "");
+      if (token) handlers.onToken?.(agentId, token);
+      break;
+    }
+
+    // 控制类 / 用户事件：前端暂不直接展示
+    case "control.watchdog_triggered":
+    case "control.scheduling_decision":
+    case "control.escalation":
+    case "user.waiting_for_input":
+    case "user.input_received":
+    case "user.input_queued":
+      break;
+  }
+}
+
 /** 标准 SSE fetch 客户端（POST + ReadableStream）。 */
 export async function sendMessage(
   conversationId: string,
@@ -134,82 +216,10 @@ export async function sendMessage(
   const reader = response.body.getReader();
 
   for await (const { event, data } of parseSSEStream(reader)) {
-    switch (event) {
-      // 运行时事件：Session 生命周期
-      case "system.session_started":
-      case "system.session_completed":
-        break;
-      case "system.session_error":
-        window.clearTimeout(timeout);
-        handlers.onDone?.(data as Record<string, unknown>);
-        break;
-
-      // 运行时事件：Round / Agent 生命周期
-      case "system.round_started":
-        break;
-      case "system.agent_started":
-        handlers.onMessageStart?.(data as Record<string, unknown>);
-        break;
-      case "system.agent_completed":
-      case "system.agent_failed":
-        handlers.onMessageEnd?.(data as Record<string, unknown>);
-        break;
-
-      // 运行时事件：工具调用
-      case "agent.tool_calls_executed": {
-        const payload = data as Record<string, unknown>;
-        const toolEvents = payload.tool_events as Record<string, unknown>[];
-        if (Array.isArray(toolEvents)) {
-          for (const te of toolEvents) {
-            const teRecord = te as Record<string, unknown>;
-            const toolCallId = String(teRecord.call_id ?? "");
-            const toolName = String(
-              teRecord.tool_name ??
-                (teRecord.function as Record<string, unknown>)?.name ??
-                "",
-            );
-            if (toolCallId && toolName) {
-              handlers.onToolCallStart?.({
-                tool_call_id: toolCallId,
-                tool_name: toolName,
-              });
-              handlers.onToolCallDone?.({
-                tool_call_id: toolCallId,
-                tool_name: toolName,
-              });
-            }
-          }
-        }
-        break;
-      }
-
-      // 流式 token 和思考过程（增量追加）
-      case "agent.thinking":
-        break;
-      case "agent.token": {
-        const p = data as Record<string, unknown>;
-        const agentId = String(p.agent_id || "");
-
-        if (!agentId) break;
-        if (event === "agent.token") {
-          const token = String(p.token || "");
-          if (token) handlers.onToken?.(agentId, token);
-        } else {
-          const thinking = String(p.thinking || p.task || "");
-          if (thinking) handlers.onThinking?.(agentId, thinking);
-        }
-        break;
-      }
-
-      // 控制类 / 用户事件：前端暂不直接展示
-      case "control.watchdog_triggered":
-      case "control.scheduling_decision":
-      case "control.escalation":
-      case "user.waiting_for_input":
-      case "user.input_received":
-      case "user.input_queued":
-        break;
+    if (event === "system.session_error") {
+      window.clearTimeout(timeout);
     }
+    dispatchStreamEvent(event, data, handlers);
   }
 
   window.clearTimeout(timeout);
@@ -225,4 +235,77 @@ export async function cancelAssistantReply(
     `/conversations/${conversationId}/stream/cancel`,
     {},
   );
+}
+
+/**
+ * WebSocket 版本的消息发送。
+ *
+ * 保持与 sendMessage 相同的接口，内部通过 WebSocket 长连接传输。
+ */
+export async function sendMessageWs(
+  conversationId: string,
+  body: Record<string, unknown>,
+  handlers: StreamAssistantHandlers,
+): Promise<string> {
+  const ws = getConversationWS(conversationId);
+  if (ws.readyState !== WebSocket.OPEN) {
+    await ws.connect();
+  }
+
+  const requestId = `req-${Date.now()}`;
+  let resolved = false;
+
+  return new Promise((resolve) => {
+    const stop = () => {
+      ws.send("chat.cancel", {}, requestId);
+      handlers.onDone?.();
+    };
+    handlers.onControl?.(stop);
+
+    const timeout = window.setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        handlers.onDone?.();
+        resolve("timeout");
+      }
+    }, 120000);
+
+    const unsubscribe = ws.onMessage((event, data) => {
+      switch (event) {
+        case "system.session_completed":
+          window.clearTimeout(timeout);
+          if (!resolved) {
+            resolved = true;
+            unsubscribe();
+            handlers.onDone?.();
+            resolve("ok");
+          }
+          break;
+        case "system.session_error":
+          window.clearTimeout(timeout);
+          if (!resolved) {
+            resolved = true;
+            unsubscribe();
+            dispatchStreamEvent(event, data, handlers);
+            resolve("error");
+          }
+          break;
+        default:
+          dispatchStreamEvent(event, data, handlers);
+          break;
+      }
+    });
+
+    ws.send("chat.send", body, requestId);
+  });
+}
+
+/**
+ * WebSocket 版本的取消助手回复。
+ */
+export function cancelAssistantReplyWs(conversationId: string): void {
+  const ws = getConversationWS(conversationId);
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send("chat.cancel", {});
+  }
 }

@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { App as AntApp } from "antd";
 import { api } from "@/api";
+import { disconnectConversationWS } from "@/api/websocket";
 import {
   useConversationStore,
   useMessageStore,
@@ -25,6 +27,15 @@ export function useMessageOperations() {
   const { activeId } = useConversationStore();
   // === 流式状态子模块 ===
   const streaming = useStreamingMessages(activeId);
+
+  // 切换会话时清理旧连接的 WebSocket
+  useEffect(() => {
+    return () => {
+      if (activeId) {
+        disconnectConversationWS(activeId);
+      }
+    };
+  }, [activeId]);
 
   // ============================================================
   // 发送消息
@@ -70,7 +81,7 @@ export function useMessageOperations() {
     };
 
     try {
-      await api.sendMessage(conversationId, body, streaming.streamHandlers);
+      await api.sendMessageWs(conversationId, body, streaming.streamHandlers);
     } catch (error) {
       // 处理错误
     } finally {

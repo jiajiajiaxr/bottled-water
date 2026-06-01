@@ -34,7 +34,13 @@ export {
   removeParticipant,
 } from "./conversation";
 
-export { messages, sendMessage, cancelAssistantReply } from "./message";
+export {
+  messages,
+  sendMessage,
+  sendMessageWs,
+  cancelAssistantReply,
+  cancelAssistantReplyWs,
+} from "./message";
 
 export { tasks, createBackgroundTask, cancelTask } from "./task";
 
@@ -160,6 +166,8 @@ export const api = {
   ...auth,
   ...conversation,
   ...message,
+  sendMessageWs: message.sendMessageWs,
+  cancelAssistantReplyWs: message.cancelAssistantReplyWs,
   ...task,
   ...artifact,
   ...workflow,
