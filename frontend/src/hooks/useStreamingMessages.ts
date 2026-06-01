@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMessageStore } from "@/store";
 import type { ChatMessage } from "@/types";
 import { StreamAssistantHandlers } from "@/types/messages";
@@ -23,6 +23,13 @@ export function useStreamingMessages(conversationId?: string) {
   >(new Map());
   const [streamState, setStreamState] = useState<StreamState>("idle");
   const [displayOrder, setDisplayOrder] = useState<string[]>([]);
+
+  /**
+   * 用 ref 穿透闭包，确保异步事件回调中读取到最新的 streamingMessages。
+   * 否则 React 闭包陷阱会导致 onMessageEnd 读到旧值，无法正确归档。
+   */
+  const streamingMessagesRef = useRef(streamingMessages);
+  streamingMessagesRef.current = streamingMessages;
 
   const streamHandlers: StreamAssistantHandlers = {
     onMessageStart: (payload) => {
@@ -61,7 +68,8 @@ export function useStreamingMessages(conversationId?: string) {
 
       if (!agentId) return;
 
-      const msg = streamingMessages.get(agentId);
+      // 使用 ref 读取最新值，避免闭包陷阱导致 msg 为 undefined
+      const msg = streamingMessagesRef.current.get(agentId);
 
       if (!msg) return;
 
@@ -74,7 +82,7 @@ export function useStreamingMessages(conversationId?: string) {
 
       setDisplayOrder((prev) => prev.filter((id) => id !== agentId));
 
-      // 2. 提交到历史消息
+      // 提交到历史消息
       updateMessages((prev) => {
         const existingIds = new Set(prev.map((item) => item.id));
         if (existingIds.has(msg.id)) return prev;

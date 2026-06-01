@@ -8,6 +8,7 @@ import {
   useArtifactStore,
 } from "@/store";
 import { useStreamingMessages } from "./useStreamingMessages";
+import { makeMessage } from "@/lib";
 import type { ChatMessage, UploadedFile, MessageAttachment } from "@/types";
 
 /**
@@ -25,6 +26,7 @@ import type { ChatMessage, UploadedFile, MessageAttachment } from "@/types";
 export function useMessageOperations() {
   const { message } = AntApp.useApp();
   const { activeId } = useConversationStore();
+  const { updateMessages } = useMessageStore();
   // === 流式状态子模块 ===
   const streaming = useStreamingMessages(activeId);
 
@@ -62,7 +64,21 @@ export function useMessageOperations() {
       public_url: file.public_url,
     }));
 
-    // 2. 标准模式：POST 发送消息并接收流式响应
+    // 2. 乐观添加用户消息到历史记录，确保发送后立即展示
+    const userMessage = makeMessage({
+      conversationId,
+      role: "user",
+      kind: "text",
+      author: "我",
+      content,
+      streamState: "done",
+      state: "active",
+      attachments: localAttachments,
+      quotedMessageId: quoted?.id,
+    });
+    updateMessages((prev) => [...prev, userMessage]);
+
+    // 3. 通过 WebSocket 发送消息并接收流式响应
     const body = {
       content_type: "text",
       content: {
