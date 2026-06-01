@@ -208,6 +208,11 @@ class Watchdog:
 
     # --- 状态查询 ---
 
+    def reset(self) -> None:
+        """重置看门狗状态，支持 Session 复用场景。"""
+        self.state = WatchdogState()
+        self.started_at = datetime.utcnow()
+
     def get_status(self) -> dict:
         """获取看门狗状态"""
         return {

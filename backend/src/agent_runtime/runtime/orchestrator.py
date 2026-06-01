@@ -116,8 +116,9 @@ class Orchestrator:
 
     async def _initialize(self, user_message: str):
         """初始化 Blackboard 和 Agent 上下文"""
-        # 重置调度器状态（支持 Session 复用场景）
+        # 重置调度器与看门狗状态（支持 Session 复用场景）
         self.scheduler.reset()
+        self.watchdog.reset()
 
         # 重置本地状态
         self.round_num = 0
