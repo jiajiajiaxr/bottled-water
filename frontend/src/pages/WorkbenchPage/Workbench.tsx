@@ -291,8 +291,8 @@ export function Workbench({
     setLoadingMessages(true);
     Promise.all([
       api.messages(activeId),
-      api.artifact(activeId),
-      api.files(activeId),
+      api.artifact(activeId).catch(() => undefined),
+      api.files(activeId).catch(() => []),
     ])
       .then(([nextMessages, nextArtifact, nextFiles]) => {
         setMessages(nextMessages);
