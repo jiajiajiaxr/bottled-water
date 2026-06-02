@@ -1,4 +1,4 @@
-﻿# 开发维护手册
+# 开发维护手册
 
 本文说明如何在本地开发、验证和修改 AgentHub。
 
@@ -123,20 +123,20 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 4. 修改 `frontend/src/types.ts` 的 `Agent` / `AgentConfig`。
 5. 修改 Agent 创建、编辑表单。
 6. 修改 `backend/app/api/agents.py` 的创建和更新逻辑。
-7. 如果影响执行，修改 `backend/app/services/agents/function_loop.py`、`backend/app/services/agents/tool_loop.py` 或 `backend/app/services/chat/orchestrator.py`。
+7. 如果影响执行，修改 `agentic_runtime.py` 或 `orchestrator.py`。
 
 ### 新增一个工作流节点类型
 
 1. 修改 `frontend/src/types.ts` 的 `WorkflowNode` 约定。
 2. 修改 `frontend/src/App.tsx` 的节点类型选项、创建默认配置、编辑表单。
 3. 修改 `backend/app/api/conversations.py` 的 normalize 逻辑，确保 `type/config` 不丢失。
-4. 修改 `backend/app/services/chat/orchestrator.py` 的执行逻辑。
+4. 修改 `backend/app/services/orchestrator.py` 的执行逻辑。
 5. 修改 `WorkflowRun.node_states` 输出。
 6. 增加 `tests/test_conversation.py` 和 `tests/test_orchestrator.py`。
 
 ### 新增一个内置工具
 
-1. 在 `backend/app/services/tools/registry.py` 增加工具定义。
+1. 在 `backend/app/services/tool_registry.py` 增加工具定义。
 2. 在 `invoke_builtin_tool` 中实现真实执行。
 3. 给官方 Agent 工具箱加权限。
 4. 如果需要文件能力，优先复用 `file_tools.py`。
@@ -167,7 +167,7 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 
 - 后端过滤：`backend/app/services/output_filter.py`
 - 前端过滤：`frontend/src/App.tsx` 中的 `stripInternalAgentOutput`
-- 编排生成：`backend/app/services/chat/orchestrator.py`
+- 编排生成：`backend/app/services/orchestrator.py`
 
 ## 7. 数据流速查
 
@@ -199,28 +199,12 @@ frontend uploadFile
 
 ```text
 Agent / tool
-  -> tools.registry.invoke_builtin_tool
+  -> tool_registry.invoke_builtin_tool
   -> artifacts.create_artifact
   -> Message preview_card
   -> 用户点击卡片
   -> PreviewPanel 加载 artifact
 ```
-
-工作区文件预览：
-
-```text
-WorkspaceFilesContent
-  -> /workspaces/{workspace_id}/files/preview
-  -> PDF/Image/HTML/Text 直接预览
-  -> DOCX/PPTX/XLSX 经 OfficePreviewService 调用 LibreOffice headless 转 preview.pdf
-  -> 缓存到 backend/var/workspaces/{workspace_id}/previews/{cache_key}/preview.pdf
-  -> 前端复用 PDF iframe 预览，下载仍返回原始 Office 文件
-```
-
-Office 转 PDF 预览依赖本机或容器安装 LibreOffice。Windows 可安装 LibreOffice 后把 `soffice.exe`
-加入 `PATH`，或设置 `LIBREOFFICE_PATH` / `SOFFICE_PATH` 指向可执行文件；Linux/Docker 环境需要安装
-`libreoffice`。未检测到 LibreOffice 或转换失败时，后端会把可抽取文本生成一份降级 PDF 预览；
-如果旧文件为空或损坏，也会生成带错误说明的 PDF 页面，不影响原文件下载。
 
 群聊工作流：
 
