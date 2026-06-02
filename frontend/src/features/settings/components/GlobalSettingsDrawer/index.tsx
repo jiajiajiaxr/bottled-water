@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { ApiOutlined, DeleteOutlined, EditOutlined } from "@ant-design/icons";
+import {
+  ApiOutlined,
+  ArrowLeftOutlined,
+  DeleteOutlined,
+  EditOutlined,
+} from "@ant-design/icons";
 import {
   App as AntApp,
   Avatar,
@@ -25,11 +30,13 @@ const { Text } = Typography;
 
 export function GlobalSettingsDrawer({
   open,
+  asPage,
   user,
   onClose,
   onUserUpdated,
 }: {
-  open: boolean;
+  open?: boolean;
+  asPage?: boolean;
   user: User;
   onClose: () => void;
   onUserUpdated: (user: User) => void;
@@ -61,9 +68,8 @@ export function GlobalSettingsDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, user.id]);
 
-  return (
-    <Drawer title="全局设置" width={920} open={open} onClose={onClose}>
-      <Tabs
+  const content = (
+    <Tabs
         items={[
           {
             key: "account",
@@ -451,6 +457,23 @@ export function GlobalSettingsDrawer({
           },
         ]}
       />
-    </Drawer>
+  );
+
+  return (
+    <>
+      {asPage ? (
+        <div className="page-view">
+          <div className="page-header">
+            <Button icon={<ArrowLeftOutlined />} onClick={onClose}>返回</Button>
+            <Text strong>全局设置</Text>
+          </div>
+          <div className="page-content">{content}</div>
+        </div>
+      ) : (
+        <Drawer title="全局设置" width={920} open={open} onClose={onClose}>
+          {content}
+        </Drawer>
+      )}
+    </>
   );
 }

@@ -15,6 +15,7 @@ import {
   UserAddOutlined,
 } from "@ant-design/icons";
 import {
+  Avatar,
   Badge,
   Button,
   Empty,
@@ -33,13 +34,14 @@ import {
 } from "antd";
 import { mergeConversationCategories } from "@/lib/conversation";
 import { formatTime } from "@/lib/format";
-import type { Conversation } from "@/types";
+import type { Conversation, User } from "@/types";
 
 const { Sider } = Layout;
 const { Text, Title } = Typography;
 const { TextArea } = Input;
 
 export function ConversationSidebar({
+  currentUser,
   conversations,
   activeId,
   runningConversationIds,
@@ -52,6 +54,7 @@ export function ConversationSidebar({
   onDelete,
   onEdit,
 }: {
+  currentUser: User;
   conversations: Conversation[];
   activeId?: string;
   runningConversationIds: Set<string>;
@@ -159,6 +162,19 @@ export function ConversationSidebar({
         </div>
       ) : (
         <>
+          <div className="sidebar-user">
+            <Avatar size="large">
+              {currentUser.avatar ?? currentUser.name.slice(0, 1)}
+            </Avatar>
+            <div className="sidebar-user-info">
+              <Text strong ellipsis>
+                {currentUser.name}
+              </Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {currentUser.role === "demo" ? "演示用户" : "成员"}
+              </Text>
+            </div>
+          </div>
           <div className="sidebar-head">
             <div>
               <Text type="secondary">Workspace</Text>

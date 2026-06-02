@@ -1,12 +1,10 @@
 import {
   App as AntApp,
-  Avatar,
   Button,
   Layout,
   Modal,
   Select,
   Space,
-  Typography,
 } from "antd";
 import {
   AppstoreOutlined,
@@ -14,23 +12,12 @@ import {
   ToolOutlined,
 } from "@ant-design/icons";
 import { api } from "@/api";
-import { BackgroundTasksButton } from "./BackgroundTasksButton";
 import { ConversationSidebar } from "@/features/chat/components/ConversationSidebar";
-import { ChatPanel } from "@/features/chat/components/ChatPanel";
-import { PreviewPanel } from "@/features/preview/components/PreviewPanel";
 import type {
-  AgentTask,
-  ChatMessage,
   Conversation,
-  Deployment,
-  KnowledgeBase,
-  UploadedFile,
   User,
   Workspace,
-  WorkspaceArtifact,
 } from "@/types";
-
-const { Text } = Typography;
 
 export interface WorkbenchLayoutProps {
   // User
@@ -47,7 +34,6 @@ export interface WorkbenchLayoutProps {
   // Conversations
   conversations: Conversation[];
   activeId: string | undefined;
-  active: Conversation | undefined;
   conversationCategories: string[];
   selectConversation: (conversationId?: string, replace?: boolean) => void;
   setCreateOpen: (value: { open: boolean; group: boolean }) => void;
@@ -66,35 +52,11 @@ export interface WorkbenchLayoutProps {
     replace?: boolean,
   ) => void;
 
-  // Messages
-  loadingMessages: boolean;
-
-  // UI state setters
-  setMembersOpen: (open: boolean) => void;
-  setConversationSettingsOpen: (open: boolean) => void;
-
-  // File upload
-  uploadFile: (file: File) => Promise<UploadedFile>;
-
-  // Artifact / Preview
-  artifactPanelOpen: boolean;
-  artifact: WorkspaceArtifact | undefined;
-  deployment: Deployment | undefined;
-  files: UploadedFile[];
-  knowledgeBases: KnowledgeBase[];
-  setArtifactPanelOpen: (open: boolean) => void;
-  saveArtifact: (artifact: WorkspaceArtifact) => Promise<void>;
-  deploy: () => Promise<void>;
-  setKnowledgeBases: (kbs: KnowledgeBase[]) => void;
-  openArtifactPreview: (source?: ChatMessage) => Promise<void>;
-
-  // Background tasks
-  visibleBackgroundTasks: AgentTask[];
-  loadBackgroundTasks: () => Promise<void>;
-  updateLocalRunningConversationIds: (
-    updater: (current: Set<string>) => Set<string>,
-  ) => void;
   runningConversationIds: Set<string>;
+
+  // Main content
+  routeTab: string;
+  children: React.ReactNode;
 }
 
 export function WorkbenchLayout(props: WorkbenchLayoutProps) {
@@ -110,7 +72,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     openMainTab,
     conversations,
     activeId,
-    active,
     conversationCategories,
     selectConversation,
     setCreateOpen,
@@ -119,27 +80,14 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     updateConversations,
     setActiveId,
     navigateToConversation,
-    loadingMessages,
-    uploadFile,
-    artifactPanelOpen,
-    artifact,
-    deployment,
-    files,
-    knowledgeBases,
-    setArtifactPanelOpen,
-    saveArtifact,
-    deploy,
-    setKnowledgeBases,
-    openArtifactPreview,
-    visibleBackgroundTasks,
-    loadBackgroundTasks,
-    updateLocalRunningConversationIds,
     runningConversationIds,
+    children,
   } = props;
 
   return (
     <Layout className="workbench">
       <ConversationSidebar
+        currentUser={currentUser}
         conversations={conversations}
         activeId={activeId}
         runningConversationIds={runningConversationIds}
@@ -184,18 +132,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
       <Layout className="center-layout">
         <div className="topbar">
           <Space>
-            <Avatar>
-              {currentUser.avatar ?? currentUser.name.slice(0, 1)}
-            </Avatar>
-            <div>
-              <Text strong>{currentUser.name}</Text>
-              <br />
-              <Text type="secondary">
-                {currentUser.role === "demo" ? "演示用户" : "成员"}
-              </Text>
-            </div>
-          </Space>
-          <Space>
             <Select
               style={{ width: 220 }}
               value={activeWorkspace?.id}
@@ -213,30 +149,8 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             >
               工作区
             </Button>
-            <BackgroundTasksButton
-              tasks={visibleBackgroundTasks}
-              conversations={conversations}
-              activeConversationId={activeId}
-              currentUserName={currentUser.name}
-              onOpenConversation={selectConversation}
-              onAfterSend={async () => {
-                await loadBackgroundTasks().catch(() => undefined);
-              }}
-              onCancel={async (task) => {
-                await api.cancelTask(task.id);
-                if (task.conversation_id) {
-                  api.cancelAssistantReplyWs(task.conversation_id);
-                  updateLocalRunningConversationIds((current) => {
-                    const next = new Set(current);
-                    if (task.conversation_id) next.delete(task.conversation_id);
-                    return next;
-                  });
-                }
-                await loadBackgroundTasks();
-                message.info("后台任务已停止");
-              }}
-              onRefresh={loadBackgroundTasks}
-            />
+          </Space>
+          <Space>
             <Button
               icon={<ToolOutlined />}
               onClick={() => openMainTab("settings")}
@@ -254,33 +168,8 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             <Button onClick={onLogout}>退出</Button>
           </Space>
         </div>
-        <ChatPanel active={active} loading={loadingMessages} />
+        {children}
       </Layout>
-      {artifactPanelOpen && artifact && (
-        <PreviewPanel
-          artifact={artifact}
-          deployment={deployment}
-          files={files}
-          knowledgeBases={knowledgeBases}
-          onClose={() => setArtifactPanelOpen(false)}
-          onSave={saveArtifact}
-          onDeploy={deploy}
-          onCreateKb={async (payload) => {
-            const created = await api.createKnowledgeBase(payload);
-            setKnowledgeBases([created, ...knowledgeBases]);
-            message.success("知识库已创建");
-          }}
-          onImportText={async (kbId, payload) => {
-            await api.importKnowledgeText(kbId, payload);
-            setKnowledgeBases(await api.knowledgeBases());
-            message.success("文档已索引");
-          }}
-          onRetrieve={async (kbId, query) => {
-            const result = await api.retrieveKnowledge(kbId, query);
-            return result.context;
-          }}
-        />
-      )}
     </Layout>
   );
 }

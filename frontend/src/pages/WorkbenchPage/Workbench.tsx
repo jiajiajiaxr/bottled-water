@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { App as AntApp } from "antd";
 import { api } from "@/api";
 import {
   useUIStore,
@@ -11,6 +12,11 @@ import {
 } from "@/store";
 import { WorkbenchLayout } from "./WorkbenchLayout";
 import { WorkbenchDrawers } from "./WorkbenchDrawers";
+import { AgentDirectoryDrawer } from "@/features/agents/components/AgentDirectoryDrawer";
+import { GlobalSettingsDrawer } from "@/features/settings/components/GlobalSettingsDrawer";
+import { PlatformControlDrawer } from "@/features/platform/components/PlatformControlDrawer";
+import { ChatPanel } from "@/features/chat/components/ChatPanel";
+import { PreviewPanel } from "@/features/preview/components/PreviewPanel";
 import type { User } from "@/types";
 import {
   useConversationCategories,
@@ -43,11 +49,11 @@ export function Workbench({
     options?: { replace?: boolean },
   ) => void;
 }) {
+  const { message } = AntApp.useApp();
   const [currentUser, setCurrentUser] = useState(user);
   const { setMessages, clearMessages } = useMessageStore();
   const {
     localRunningConversationIds,
-    updateLocalRunningConversationIds,
   } = useConversationStore();
   const {
     workspaces,
@@ -82,9 +88,6 @@ export function Workbench({
   const { backgroundTasks } = useTaskStore();
   const { loadBackgroundTasks } = useBackgroundTaskPolling();
   const {
-    agentDrawerOpen,
-    workspacesOpen,
-    globalSettingsOpen,
     conversationSettingsOpen,
     membersOpen,
     createOpen,
@@ -101,19 +104,6 @@ export function Workbench({
   const activeWorkspace =
     workspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
     workspaces[0];
-  const currentConversationIds = useMemo(
-    () => new Set(conversations.map((item) => item.id)),
-    [conversations],
-  );
-  const visibleBackgroundTasks = useMemo(
-    () =>
-      backgroundTasks.filter(
-        (task) =>
-          !task.conversation_id ||
-          currentConversationIds.has(task.conversation_id),
-      ),
-    [backgroundTasks, currentConversationIds],
-  );
   const runningConversationIds = useMemo(() => {
     const next = new Set(localRunningConversationIds);
     backgroundTasks.forEach((task) => {
@@ -166,8 +156,6 @@ export function Workbench({
     createConversation,
     saveArtifact,
     deploy,
-    uploadFile,
-    openArtifactPreview,
   } = useWorkbenchActions(
     activeWorkspaceId,
     conversationCategories,
@@ -314,7 +302,6 @@ export function Workbench({
         openMainTab={openMainTab}
         conversations={conversations}
         activeId={activeId}
-        active={active}
         conversationCategories={conversationCategories}
         selectConversation={selectConversation}
         setCreateOpen={setCreateOpen}
@@ -323,39 +310,94 @@ export function Workbench({
         updateConversations={updateConversations}
         setActiveId={setActiveId}
         navigateToConversation={navigateToConversation}
-        loadingMessages={loadingMessages}
-        setMembersOpen={setMembersOpen}
-        setConversationSettingsOpen={setConversationSettingsOpen}
-        uploadFile={uploadFile}
-        artifactPanelOpen={artifactPanelOpen}
-        artifact={artifact}
-        deployment={deployment}
-        files={files}
-        knowledgeBases={knowledgeBases}
-        setArtifactPanelOpen={setArtifactPanelOpen}
-        saveArtifact={saveArtifact}
-        deploy={deploy}
-        setKnowledgeBases={setKnowledgeBases}
-        openArtifactPreview={openArtifactPreview}
-        visibleBackgroundTasks={visibleBackgroundTasks}
-        loadBackgroundTasks={loadBackgroundTasks}
-        updateLocalRunningConversationIds={updateLocalRunningConversationIds}
         runningConversationIds={runningConversationIds}
-      />
+        routeTab={routeTab}
+      >
+        {routeTab === "chat" ? (
+          <>
+            <ChatPanel active={active} loading={loadingMessages} />
+            {artifactPanelOpen && artifact && (
+              <PreviewPanel
+                artifact={artifact}
+                deployment={deployment}
+                files={files}
+                knowledgeBases={knowledgeBases}
+                onClose={() => setArtifactPanelOpen(false)}
+                onSave={saveArtifact}
+                onDeploy={deploy}
+                onCreateKb={async (payload) => {
+                  const created = await api.createKnowledgeBase(payload);
+                  setKnowledgeBases([created, ...knowledgeBases]);
+                  message.success("知识库已创建");
+                }}
+                onImportText={async (kbId, payload) => {
+                  await api.importKnowledgeText(kbId, payload);
+                  setKnowledgeBases(await api.knowledgeBases());
+                  message.success("文档已索引");
+                }}
+                onRetrieve={async (kbId, query) => {
+                  const result = await api.retrieveKnowledge(kbId, query);
+                  return result.context;
+                }}
+              />
+            )}
+          </>
+        ) : routeTab === "agents" ? (
+          <AgentDirectoryDrawer
+            asPage
+            agents={agents}
+            onClose={() => closeMainTab("agents")}
+            onRefresh={loadAgents}
+            onCreateAgent={addAgent}
+            onUpdateAgent={(agent) => updateAgent(agent.id, agent)}
+            onDeleteAgent={async (agent) => {
+              await api.deleteAgent(agent.id);
+              removeAgent(agent.id);
+            }}
+            onTestAgent={async (agentId, text) =>
+              (await api.testAgent(agentId, text)).response
+            }
+          />
+        ) : routeTab === "settings" ? (
+          <GlobalSettingsDrawer
+            asPage
+            user={currentUser}
+            onClose={() => closeMainTab("settings")}
+            onUserUpdated={(nextUser) => setCurrentUser(nextUser)}
+          />
+        ) : routeTab === "workspace" ? (
+          <PlatformControlDrawer
+            asPage
+            workspaces={workspaces}
+            activeConversation={active}
+            onClose={() => closeMainTab("workspace")}
+            onCreateWorkspace={async (payload) => {
+              const created = await api.createWorkspace(payload);
+              addWorkspace(created);
+              setActiveWorkspaceId(created.id);
+              navigateToConversation(created.id);
+              message.success("工作区已创建");
+            }}
+            onCreateProject={async (workspaceId, payload) => {
+              const project = await api.createProject(workspaceId, payload);
+              const workspace = workspaces.find((w) => w.id === workspaceId);
+              if (workspace) {
+                updateWorkspace(workspaceId, {
+                  project_count: workspace.project_count + 1,
+                });
+              }
+              message.success("项目已创建");
+              return project;
+            }}
+            onLoadProjects={api.projects}
+            onSaveProjectFile={async (projectId, payload) => {
+              await api.saveProjectFile(projectId, payload);
+              message.success("项目文件版本已保存");
+            }}
+          />
+        ) : null}
+      </WorkbenchLayout>
       <WorkbenchDrawers
-        agentDrawerOpen={agentDrawerOpen}
-        agents={agents}
-        onCloseAgentDrawer={() => closeMainTab('agents')}
-        onRefreshAgents={loadAgents}
-        onCreateAgent={addAgent}
-        onUpdateAgent={(agent) => updateAgent(agent.id, agent)}
-        onDeleteAgent={async (agent) => {
-          await api.deleteAgent(agent.id);
-          removeAgent(agent.id);
-        }}
-        onTestAgent={async (agentId, text) =>
-          (await api.testAgent(agentId, text)).response
-        }
         membersOpen={membersOpen}
         activeConversation={active}
         activeConversationId={activeId}
@@ -368,18 +410,7 @@ export function Workbench({
         createOpen={createOpen}
         onCancelCreate={() => setCreateOpen({ open: false, group: false })}
         onCreateConversation={createConversation}
-        globalSettingsOpen={globalSettingsOpen}
-        currentUser={currentUser}
-        onCloseGlobalSettings={() => closeMainTab('settings')}
-        onUserUpdated={(nextUser) => setCurrentUser(nextUser)}
-        workspacesOpen={workspacesOpen}
-        workspaces={workspaces}
-        onCloseWorkspaces={() => closeMainTab('workspace')}
-        onLoadProjects={api.projects}
-        onSetActiveWorkspaceId={setActiveWorkspaceId}
-        onNavigateToConversation={navigateToConversation}
-        onAddWorkspace={addWorkspace}
-        onUpdateWorkspace={updateWorkspace}
+        agents={agents}
       />
     </>
   );

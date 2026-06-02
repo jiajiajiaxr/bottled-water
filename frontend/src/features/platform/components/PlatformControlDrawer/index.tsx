@@ -20,9 +20,11 @@ import {
   Table,
   Tabs,
   Tag,
+  Typography,
 } from "antd";
 import {
   ApiOutlined,
+  ArrowLeftOutlined,
   BranchesOutlined,
   CheckCircleOutlined,
   CloudUploadOutlined,
@@ -58,9 +60,11 @@ import type {
 import { formatTime } from "@/lib/format";
 
 const { TextArea } = Input;
+const { Text } = Typography;
 
 interface PlatformControlDrawerProps {
-  open: boolean;
+  open?: boolean;
+  asPage?: boolean;
   workspaces: Workspace[];
   activeConversation?: Conversation;
   onClose: () => void;
@@ -84,6 +88,7 @@ interface PlatformControlDrawerProps {
 
 export function PlatformControlDrawer({
   open,
+  asPage,
   workspaces,
   activeConversation,
   onClose,
@@ -272,13 +277,8 @@ export function PlatformControlDrawer({
     setWorkflowDraft({ ...conversationWorkflow, nodes, edges });
   };
 
-  return (
-    <Drawer
-      title="工作区与平台控制面"
-      width={1040}
-      open={open}
-      onClose={onClose}
-    >
+  const content = (
+    <>
       <Flex justify="space-between" align="center" className="drawer-toolbar">
         <Space wrap>
           <Select
@@ -1998,6 +1998,29 @@ export function PlatformControlDrawer({
           },
         ].filter((item) => !["workflow", "models"].includes(String(item.key)))}
       />
-    </Drawer>
+    </>
+  );
+
+  return (
+    <>
+      {asPage ? (
+        <div className="page-view">
+          <div className="page-header">
+            <Button icon={<ArrowLeftOutlined />} onClick={onClose}>返回</Button>
+            <Text strong>工作区与平台控制面</Text>
+          </div>
+          <div className="page-content">{content}</div>
+        </div>
+      ) : (
+        <Drawer
+          title="工作区与平台控制面"
+          width={1040}
+          open={open}
+          onClose={onClose}
+        >
+          {content}
+        </Drawer>
+      )}
+    </>
   );
 }

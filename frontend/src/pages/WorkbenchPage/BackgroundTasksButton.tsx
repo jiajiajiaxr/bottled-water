@@ -25,7 +25,7 @@ export function BackgroundTasksButton({
   tasks,
   conversations,
   activeConversationId,
-  currentUserName,
+  currentUserName: _currentUserName,
   onOpenConversation,
   onAfterSend,
   onCancel,

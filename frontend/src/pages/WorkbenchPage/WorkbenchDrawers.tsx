@@ -3,22 +3,9 @@ import { api } from "@/api";
 import { CreateConversationModal } from "@/features/chat/components/CreateConversationModal";
 import { MembersDrawer } from "@/features/chat/components/drawers/MembersDrawer";
 import { ConversationSettingsDrawer } from "@/features/chat/components/drawers/ConversationSettingsDrawer";
-import { AgentDirectoryDrawer } from "@/features/agents/components/AgentDirectoryDrawer";
-import { GlobalSettingsDrawer } from "@/features/settings/components/GlobalSettingsDrawer";
-import { PlatformControlDrawer } from "@/features/platform/components/PlatformControlDrawer";
-import type { Agent, Conversation, Project, User, Workspace } from "@/types";
+import type { Agent, Conversation } from "@/types";
 
 export interface WorkbenchDrawersProps {
-  // AgentDirectoryDrawer
-  agentDrawerOpen: boolean;
-  agents: Agent[];
-  onCloseAgentDrawer: () => void;
-  onRefreshAgents: () => void;
-  onCreateAgent: (agent: Agent) => void;
-  onUpdateAgent: (agent: Agent) => void;
-  onDeleteAgent: (agent: Agent) => Promise<void>;
-  onTestAgent: (agentId: string, text: string) => Promise<string>;
-
   // MembersDrawer
   membersOpen: boolean;
   activeConversation: Conversation | undefined;
@@ -48,36 +35,14 @@ export interface WorkbenchDrawersProps {
     folder: string;
   }) => Promise<void>;
 
-  // GlobalSettingsDrawer
-  globalSettingsOpen: boolean;
-  currentUser: User;
-  onCloseGlobalSettings: () => void;
-  onUserUpdated: (user: User) => void;
-
-  // PlatformControlDrawer
-  workspacesOpen: boolean;
-  workspaces: Workspace[];
-  onCloseWorkspaces: () => void;
-  onLoadProjects: (workspaceId: string) => Promise<Project[]>;
-  onSetActiveWorkspaceId: (id: string) => void;
-  onNavigateToConversation: (workspaceId?: string, conversationId?: string, replace?: boolean) => void;
-  onAddWorkspace: (workspace: Workspace) => void;
-  onUpdateWorkspace: (id: string, patch: Partial<Workspace>) => void;
+  // Agents (for MembersDrawer)
+  agents?: Agent[];
 }
 
 export function WorkbenchDrawers(props: WorkbenchDrawersProps) {
   const { message } = AntApp.useApp();
 
   const {
-    agentDrawerOpen,
-    agents,
-    onCloseAgentDrawer,
-    onRefreshAgents,
-    onCreateAgent,
-    onUpdateAgent,
-    onDeleteAgent,
-    onTestAgent,
-
     membersOpen,
     activeConversation,
     activeConversationId,
@@ -93,33 +58,11 @@ export function WorkbenchDrawers(props: WorkbenchDrawersProps) {
     onCancelCreate,
     onCreateConversation,
 
-    globalSettingsOpen,
-    currentUser,
-    onCloseGlobalSettings,
-    onUserUpdated,
-
-    workspacesOpen,
-    workspaces,
-    onCloseWorkspaces,
-    onLoadProjects,
-    onSetActiveWorkspaceId,
-    onNavigateToConversation,
-    onAddWorkspace,
-    onUpdateWorkspace,
+    agents = [],
   } = props;
 
   return (
     <>
-      <AgentDirectoryDrawer
-        open={agentDrawerOpen}
-        agents={agents}
-        onClose={onCloseAgentDrawer}
-        onRefresh={onRefreshAgents}
-        onCreateAgent={onCreateAgent}
-        onUpdateAgent={(agent) => onUpdateAgent(agent)}
-        onDeleteAgent={onDeleteAgent}
-        onTestAgent={onTestAgent}
-      />
       <MembersDrawer
         open={membersOpen}
         active={activeConversation}
@@ -163,43 +106,6 @@ export function WorkbenchDrawers(props: WorkbenchDrawersProps) {
         categoryOptions={conversationCategories}
         onCancel={onCancelCreate}
         onCreate={onCreateConversation}
-      />
-      <GlobalSettingsDrawer
-        open={globalSettingsOpen}
-        user={currentUser}
-        onClose={onCloseGlobalSettings}
-        onUserUpdated={(nextUser) => {
-          onUserUpdated(nextUser);
-        }}
-      />
-      <PlatformControlDrawer
-        open={workspacesOpen}
-        workspaces={workspaces}
-        activeConversation={activeConversation}
-        onClose={onCloseWorkspaces}
-        onCreateWorkspace={async (payload) => {
-          const created = await api.createWorkspace(payload);
-          onAddWorkspace(created);
-          onSetActiveWorkspaceId(created.id);
-          onNavigateToConversation(created.id);
-          message.success("工作区已创建");
-        }}
-        onCreateProject={async (workspaceId, payload) => {
-          const project = await api.createProject(workspaceId, payload);
-          const workspace = workspaces.find((w) => w.id === workspaceId);
-          if (workspace) {
-            onUpdateWorkspace(workspaceId, {
-              project_count: workspace.project_count + 1,
-            });
-          }
-          message.success("项目已创建");
-          return project;
-        }}
-        onLoadProjects={onLoadProjects}
-        onSaveProjectFile={async (projectId, payload) => {
-          await api.saveProjectFile(projectId, payload);
-          message.success("项目文件版本已保存");
-        }}
       />
     </>
   );
