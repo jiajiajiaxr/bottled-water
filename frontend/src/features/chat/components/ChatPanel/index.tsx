@@ -1,22 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import {
-  BranchesOutlined,
   CloudUploadOutlined,
   BulbOutlined,
-  ReloadOutlined,
   SendOutlined,
-  SettingOutlined,
-  UserAddOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
 import {
   App as AntApp,
-  Avatar,
   Button,
   Empty,
   Flex,
   Input,
   Layout,
+  Select,
   Space,
   Spin,
   Tag,
@@ -25,79 +21,68 @@ import {
   Upload,
 } from "antd";
 import type { UploadProps } from "antd";
-import { participantName } from "../../../../lib/message";
-import { MessageBubble } from "../MessageBubble";
-import type {
-  ChatMessage,
-  Conversation,
-  UploadedFile,
-  User,
-} from "../../../../types";
+import { MessageBubble } from "@/features/chat/components/MessageBubble";
+import { useMessageStore, useConversationStore } from "@/store";
+import { useMessageOperations } from "@/hooks";
+import { api } from "@/api";
+import type { AvailableModel } from "@/api/model";
+import type { ChatMessage, Conversation, UploadedFile } from "@/types";
 
-const { Content, Header } = Layout;
+const { Content } = Layout;
 const { TextArea } = Input;
-const { Title, Text } = Typography;
-type UploadRequestOption = Parameters<NonNullable<UploadProps["customRequest"]>>[0];
+const { Text } = Typography;
 
 export function ChatPanel({
-  user,
   active,
-  messages,
   loading,
-  streamState,
-  onSend,
-  onRegenerate,
-  onOpenMembers,
-  onOpenSettings,
-  onOpenWorkflow,
-  workflowMode = false,
-  workflowContent,
-  onUploadFile,
-  onOpenPreview,
-  onStopStreaming,
-  draftSnippet,
-  onDraftSnippetConsumed,
 }: {
-  user: User;
   active?: Conversation;
-  messages: ChatMessage[];
   loading: boolean;
-  streamState: "idle" | "streaming" | "done" | "error";
-  onSend: (
-    text: string,
-    quoted?: ChatMessage,
-    attachments?: UploadedFile[],
-    thinkingEnabled?: boolean,
-  ) => void;
-  onRegenerate: (message: ChatMessage) => void;
-  onOpenMembers: () => void;
-  onOpenSettings: () => void;
-  onOpenWorkflow: () => void;
-  workflowMode?: boolean;
-  workflowContent?: ReactNode;
-  onUploadFile: (file: File) => Promise<UploadedFile>;
-  onOpenPreview: (message: ChatMessage) => void;
-  onStopStreaming: () => void;
-  draftSnippet?: string;
-  onDraftSnippetConsumed?: () => void;
 }) {
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
-  const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [selectedModelConfigId, setSelectedModelConfigId] = useState<string>();
+  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const { message } = AntApp.useApp();
+  const { send, streamingMessages, displayOrder } = useMessageOperations();
 
+  // 加载可用模型列表
   useEffect(() => {
-    if (!draftSnippet) return;
-    setText((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${draftSnippet}`);
-    onDraftSnippetConsumed?.();
-  }, [draftSnippet, onDraftSnippetConsumed]);
+    api
+      .availableModels()
+      .then(setAvailableModels)
+      .catch(() => {});
+  }, []);
+
+  // 从 Conversation Store 读取当前会话的思考模式状态（持久化）
+  const thinkingEnabled = useConversationStore((s) =>
+    active ? s.getThinkingEnabled(active.id) : false,
+  );
+  const setThinkingEnabled = useCallback(
+    (enabled: boolean) => {
+      if (active) {
+        useConversationStore.getState().setThinkingEnabled(active.id, enabled);
+      }
+    },
+    [active],
+  );
+
+  // 历史消息从 Store 读取
+  const historyMessages = useMessageStore((s) => s.historyMessages);
+  const messageVersions = useMessageStore((s) => s.messageVersions);
+
+  // 合并所有消息用于 quoted 查找
+  const allMessages = useMemo(
+    () => [...historyMessages, ...streamingMessages.values()],
+    [historyMessages, streamingMessages],
+  );
 
   const submit = () => {
     const value =
       text.trim() || (pendingFiles.length ? "请结合上传附件继续处理。" : "");
     if (!value || !active) return;
-    onSend(value, quoted, pendingFiles, thinkingEnabled);
+    send(value, quoted, pendingFiles, thinkingEnabled, selectedModelConfigId);
     setText("");
     setQuoted(undefined);
     setPendingFiles([]);
@@ -111,30 +96,21 @@ export function ChatPanel({
     [message],
   );
 
-  const participantAvatars = active?.participants.slice(0, 8) ?? [];
-
   // 用 Map 缓存 quoted 查找，避免每条消息渲染时都做 O(n) 遍历
   const messageById = useMemo(() => {
     const map = new Map<string, ChatMessage>();
-    for (const item of messages) {
+    for (const item of allMessages) {
       map.set(item.id, item);
     }
     return map;
-  }, [messages]);
+  }, [allMessages]);
 
   const handleQuote = useCallback((msg: ChatMessage) => setQuoted(msg), []);
-  const handleRegenerate = useCallback(
-    (msg: ChatMessage) => onRegenerate(msg),
-    [onRegenerate],
-  );
   const handleCopy = useCallback((value: string) => copy(value), [copy]);
-  const handlePreview = useCallback(
-    (msg: ChatMessage) => onOpenPreview(msg),
-    [onOpenPreview],
-  );
-
   const messageListRef = useRef<HTMLDivElement>(null);
   const isAtBottom = useRef(true);
+
+  const uploadProps: UploadProps = {};
 
   useEffect(() => {
     const el = messageListRef.current;
@@ -155,107 +131,50 @@ export function ChatPanel({
     const el = messageListRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, streamState]);
+  }, [historyMessages, displayOrder]);
+
+  const renderMessageBubble = (item: ChatMessage) => {
+    return (
+      <MessageBubble
+        key={item.id}
+        message={item}
+        version={messageVersions.get(item.id) ?? 0}
+        quoted={
+          item.quotedMessageId
+            ? messageById.get(item.quotedMessageId)
+            : undefined
+        }
+        onQuote={handleQuote}
+        onCopy={handleCopy}
+        onPreview={() => {}}
+      />
+    );
+  };
 
   return (
-    <Content className={`chat-panel${workflowMode ? " workflow-mode" : ""}`}>
-      <Header className="chat-header">
-        <div>
-          <Space align="center" wrap>
-            <Title level={3}>{active?.title ?? "选择会话"}</Title>
-            {active?.chat_type === "group" && (
-              <Tag color="blue">
-                {active.agent_count ?? active.participants.length}/8 Agent
-              </Tag>
-            )}
-            {active?.master_enabled && <Tag color="green">主控调度</Tag>}
-          </Space>
-          <Space size={4} wrap className="participant-strip">
-            {participantAvatars.map((item) => (
-              <Tooltip
-                title={`${participantName(item)} · ${item.role ?? "member"}`}
-                key={item.id ?? item.agent_id}
-              >
-                <Avatar
-                  size="small"
-                  style={{
-                    background:
-                      item.agent_status === "offline" ? "#9ca3af" : "#1677ff",
-                  }}
-                >
-                  {participantName(item).slice(0, 1)}
-                </Avatar>
-              </Tooltip>
-            ))}
-            {active?.chat_type === "group" && (
-              <>
-                <Button
-                  size="small"
-                  icon={<UserAddOutlined />}
-                  onClick={onOpenMembers}
-                  data-testid="conversation-members"
-                >
-                  成员
-                </Button>
-                <Button
-                  size="small"
-                  icon={<BranchesOutlined />}
-                  onClick={onOpenWorkflow}
-                  data-testid="conversation-workflow"
-                >
-                  工作流画布
-                </Button>
-                <Button
-                  size="small"
-                  icon={<SettingOutlined />}
-                  onClick={onOpenSettings}
-                  data-testid="conversation-settings"
-                >
-                  群聊设置
-                </Button>
-              </>
-            )}
-          </Space>
-        </div>
-        <Space>
-          {streamState === "streaming" && <Spin size="small" />}
-          <Avatar>{user.avatar ?? user.name.slice(0, 1)}</Avatar>
-        </Space>
-      </Header>
-      {workflowMode && workflowContent ? (
-        <div className="workflow-chat-host">{workflowContent}</div>
-      ) : (
-        <div ref={messageListRef} className="message-list">
-          {loading ? (
-            <Spin />
-          ) : messages.length ? (
-            messages.map((item) => (
-              <MessageBubble
-                key={item.id}
-                message={item}
-                quoted={
-                  item.quotedMessageId
-                    ? messageById.get(item.quotedMessageId)
-                    : undefined
-                }
-                onQuote={handleQuote}
-                onRegenerate={handleRegenerate}
-                onCopy={handleCopy}
-                onPreview={handlePreview}
-              />
-            ))
-          ) : (
-            <Empty description="暂无消息" />
-          )}
-        </div>
-      )}
-      {!workflowMode && (
+    <Content className="chat-panel">
+      <div ref={messageListRef} className="message-list">
+        {loading ? (
+          <Spin />
+        ) : allMessages.length ? (
+          <>
+            {historyMessages.map(renderMessageBubble)}
+            {displayOrder.map((agentId) => {
+              const msg = streamingMessages.get(agentId);
+
+              return msg ? renderMessageBubble(msg) : null;
+            })}
+          </>
+        ) : (
+          <Empty description="暂无消息" />
+        )}
+      </div>
       <div className="composer">
         {quoted && (
           <div className="composer-quote">
-            <Text type="secondary" ellipsis>
-              引用：{quoted.content}
-            </Text>
+            <div className="composer-quote-text">
+              <Text type="secondary">引用：{quoted.content}</Text>
+            </div>
             <Button
               type="text"
               size="small"
@@ -300,14 +219,7 @@ export function ChatPanel({
         />
         <Flex justify="space-between" align="center">
           <Space>
-            <Upload
-              showUploadList={false}
-              customRequest={async (options: UploadRequestOption) => {
-                const uploaded = await onUploadFile(options.file as File);
-                setPendingFiles((current) => [uploaded, ...current]);
-                options.onSuccess?.("ok");
-              }}
-            >
+            <Upload {...uploadProps}>
               <Button icon={<CloudUploadOutlined />} data-testid="file-upload">
                 上传文件
               </Button>
@@ -319,32 +231,50 @@ export function ChatPanel({
                 type={thinkingEnabled ? "primary" : "default"}
                 ghost={thinkingEnabled}
                 icon={<BulbOutlined />}
-                onClick={() => setThinkingEnabled((v) => !v)}
+                onClick={() => setThinkingEnabled(!thinkingEnabled)}
                 disabled={!active}
                 data-testid="thinking-toggle"
               >
                 思考
               </Button>
             </Tooltip>
-            {streamState === "streaming" ? (
-              <Button danger icon={<ReloadOutlined />} onClick={onStopStreaming}>
-                Stop
-              </Button>
-            ) : (
+            <Select
+              placeholder="选择模型"
+              value={selectedModelConfigId}
+              onChange={setSelectedModelConfigId}
+              allowClear
+              style={{ minWidth: 160 }}
+              options={availableModels.map((m) => ({
+                value: m.config_id,
+                label: `${m.name} (${m.model_id})`,
+              }))}
+              onClear={() => setSelectedModelConfigId(undefined)}
+              disabled={!active}
+            />
+            <Tooltip title="刷新模型列表">
               <Button
-                type="primary"
-                icon={<SendOutlined />}
-                onClick={submit}
+                icon={<SyncOutlined />}
+                onClick={() =>
+                  api
+                    .availableModels(true)
+                    .then(setAvailableModels)
+                    .catch(() => {})
+                }
                 disabled={!active}
-                data-testid="send-message"
-              >
-                发送
-              </Button>
-            )}
+              />
+            </Tooltip>
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              onClick={submit}
+              disabled={!active}
+              data-testid="send-message"
+            >
+              发送
+            </Button>
           </Space>
         </Flex>
       </div>
-      )}
     </Content>
   );
 }

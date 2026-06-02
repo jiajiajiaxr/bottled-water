@@ -1,225 +1,316 @@
-import {
-  eventPayload,
-  request,
-  type StreamAssistantHandlers,
-  wait,
-} from "./client";
-import { demoMessages, demoUser } from "../mock";
-import { isVisibleChatMessage } from "../lib/message";
-import type { AgentTask, ChatMessage, UploadedFile, WorkflowRun } from "../types";
+import { StreamAssistantHandlers } from "@/types/messages";
+import { get, post, sse } from "./client";
+import { getConversationWS } from "./websocket";
+import type { ChatMessage } from "@/types";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
+  const result = await get<{ items: ChatMessage[] } | ChatMessage[]>(
+    `/conversations/${conversationId}/messages`,
+  );
+
+  return Array.isArray(result) ? result : result.items;
+}
+
+/**
+ * 解析 SSE 流，逐条产出 {event, data}。
+ * SSE 格式：event: xxx\ndata: {...}\n\n
+ */
+interface SSEEvent {
+  id?: string;
+  event: string;
+  data: unknown;
+  retry?: number;
+}
+
+async function* parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): AsyncGenerator<SSEEvent> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+
   try {
-    const result = await request<{ items: ChatMessage[] } | ChatMessage[]>(
-      `/conversations/${conversationId}/messages`,
-    );
-    const items = Array.isArray(result) ? result : result.items;
-    return items.filter(isVisibleChatMessage);
-  } catch {
-    return demoMessages[conversationId] ?? [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+
+      // ✅ 修复：兼容 \r\n\r\n 和 \n\n 两种分隔符
+      const events = buffer.split(/\r?\n\r?\n/);
+      buffer = events.pop() || "";
+
+      for (const raw of events) {
+        if (!raw.trim()) continue;
+        const event = parseEvent(raw);
+        if (event) yield event;
+      }
+    }
+
+    if (buffer.trim()) {
+      const event = parseEvent(buffer);
+      if (event) yield event;
+    }
+  } finally {
+    reader.releaseLock();
   }
 }
 
+// ✅ 修复：行分割也兼容 \r\n 和 \n
+function parseEvent(raw: string): SSEEvent | null {
+  const lines = raw.split(/\r?\n/);
+  let event = "message";
+  let id: string | undefined;
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (line === "" || line.startsWith(":")) continue;
+
+    const colonIdx = line.indexOf(":");
+    if (colonIdx === -1) continue;
+
+    const field = line.slice(0, colonIdx);
+    const value = line.slice(colonIdx + 1).startsWith(" ")
+      ? line.slice(colonIdx + 2)
+      : line.slice(colonIdx + 1);
+
+    switch (field) {
+      case "event":
+        event = value.replace(/\r$/, "");
+        break; // 去掉尾部 \r
+      case "data":
+        dataLines.push(value.replace(/\r$/, ""));
+        break;
+      case "id":
+        id = value.replace(/\r$/, "");
+        break;
+    }
+  }
+
+  if (dataLines.length === 0) return null;
+
+  const dataStr = dataLines.join("\n");
+  try {
+    return { id, event, data: JSON.parse(dataStr) };
+  } catch {
+    return { id, event, data: dataStr };
+  }
+}
+
+/**
+ * 分发流式事件到对应的 handlers。
+ * SSE 与 WebSocket 共用的事件处理逻辑。
+ */
+function dispatchStreamEvent(
+  event: string,
+  data: unknown,
+  handlers: StreamAssistantHandlers,
+): void {
+  switch (event) {
+    // 运行时事件：Session 生命周期
+    case "system.session_started":
+    case "system.session_completed":
+      break;
+    case "system.session_error":
+      handlers.onDone?.(data as Record<string, unknown>);
+      break;
+
+    // 运行时事件：Round / Agent 生命周期
+    case "system.round_started":
+      break;
+    case "system.agent_started":
+      handlers.onMessageStart?.(data as Record<string, unknown>);
+      break;
+    case "system.agent_completed":
+    case "system.agent_failed":
+      handlers.onMessageEnd?.(data as Record<string, unknown>);
+      break;
+
+    // 运行时事件：工具调用
+    case "agent.tool_calls_executed": {
+      const payload = data as Record<string, unknown>;
+      const toolEvents = payload.tool_events as Record<string, unknown>[];
+      if (Array.isArray(toolEvents)) {
+        for (const te of toolEvents) {
+          const teRecord = te as Record<string, unknown>;
+          const toolCallId = String(teRecord.call_id ?? "");
+          const toolName = String(
+            teRecord.tool_name ??
+              (teRecord.function as Record<string, unknown>)?.name ??
+              "",
+          );
+          if (toolCallId && toolName) {
+            handlers.onToolCallStart?.({
+              tool_call_id: toolCallId,
+              tool_name: toolName,
+            });
+            handlers.onToolCallDone?.({
+              tool_call_id: toolCallId,
+              tool_name: toolName,
+            });
+          }
+        }
+      }
+      break;
+    }
+
+    // 流式 token 和思考过程（增量追加）
+    case "agent.thinking": {
+      const pt = data as Record<string, unknown>;
+      const agentId = String(pt.agent_id || "");
+      const thinking = String(pt.thinking || "");
+      if (agentId && thinking) handlers.onThinking?.(agentId, thinking);
+      break;
+    }
+    case "agent.token": {
+      const p = data as Record<string, unknown>;
+      const agentId = String(p.agent_id || "");
+
+      if (!agentId) break;
+      const token = String(p.token || "");
+      if (token) handlers.onToken?.(agentId, token);
+      break;
+    }
+
+    // 控制类 / 用户事件：前端暂不直接展示
+    case "control.watchdog_triggered":
+    case "control.scheduling_decision":
+    case "control.escalation":
+    case "user.waiting_for_input":
+    case "user.input_received":
+    case "user.input_queued":
+      break;
+  }
+}
+
+/** 标准 SSE fetch 客户端（POST + ReadableStream）。 */
 export async function sendMessage(
   conversationId: string,
-  content: string,
-  quotedMessageId?: string,
-  attachments: UploadedFile[] = [],
-  thinkingEnabled?: boolean,
-): Promise<ChatMessage> {
-  try {
-    return await request<ChatMessage>(
-      `/conversations/${conversationId}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          client_message_id: `client-${Date.now()}`,
-          content_type: "text",
-          content: {
-            text: content,
-            attachments: attachments.map((file) => ({
-              file_id: file.file_id ?? file.id,
-              filename: file.original_filename,
-              content_type: file.content_type,
-              size: file.size,
-            })),
-          },
-          reply_to_message_id: quotedMessageId,
-          thinking_enabled: thinkingEnabled,
-        }),
-      },
-    );
-  } catch {
-    const normalizedAttachments = attachments.map((file) => ({
-      file_id: file.file_id ?? file.id,
-      filename: file.original_filename,
-      original_filename: file.original_filename,
-      content_type: file.content_type,
-      size: file.size,
-      parse_status: file.parse_status,
-      public_url: file.public_url,
-    }));
-    return {
-      id: `msg-${Date.now()}`,
-      conversationId,
-      role: "user",
-      kind: "text",
-      author: demoUser.name,
-      content,
-      rawContent: { text: content, attachments: normalizedAttachments },
-      attachments: normalizedAttachments,
-      quotedMessageId,
-      createdAt: new Date().toISOString(),
-    };
-  }
-}
-
-export async function streamAssistantReply(
-  conversationId: string,
-  handlersOrDelta: StreamAssistantHandlers | ((delta: string) => void),
-  onDone?: () => void,
-  onControl?: (stop: () => void) => void,
+  body: Record<string, unknown>,
+  handlers: StreamAssistantHandlers,
 ): Promise<string> {
-  const handlers: StreamAssistantHandlers =
-    typeof handlersOrDelta === "function"
-      ? { onDelta: (delta) => handlersOrDelta(delta), onDone, onControl }
-      : handlersOrDelta;
-  try {
-    const token = window.localStorage.getItem("agenthub_token");
-    return await new Promise<string>((resolve, reject) => {
-      let buffer = "";
-      let settled = false;
-      const source = new EventSource(
-        `${"/api/v1"}/conversations/${conversationId}/stream?replay=false${token ? `&token=${encodeURIComponent(token)}` : ""}`,
-      );
-      let timeout = 0;
-      const close = (payload?: Record<string, unknown>, fallback = "任务已完成。") => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timeout);
-        source.close();
-        handlers.onDone?.(payload);
-        resolve(buffer || fallback);
-      };
-      const stop = () => close(undefined, buffer);
-      handlers.onControl?.(stop);
-      timeout = window.setTimeout(() => {
-        close(undefined, "任务正在后台执行，稍后刷新可查看完整结果。");
-      }, 120000);
-
-      source.addEventListener("message_start", (event) => {
-        handlers.onMessageStart?.(eventPayload(event));
-      });
-      source.addEventListener("content_block_delta", (event) => {
-        const payload = eventPayload(event);
-        const deltaPayload = payload.delta;
-        const deltaType =
-          deltaPayload && typeof deltaPayload === "object"
-            ? String((deltaPayload as { type?: unknown }).type ?? "text_delta")
-            : "text_delta";
-        const deltaText =
-          deltaPayload &&
-          typeof deltaPayload === "object" &&
-          "text" in deltaPayload
-            ? String((deltaPayload as { text?: unknown }).text ?? "")
-            : "";
-        if (deltaType === "reasoning_delta" && deltaText) {
-          handlers.onReasoningDelta?.(deltaText, payload);
-        } else if (deltaText) {
-          buffer += deltaText;
-          handlers.onDelta?.(deltaText, payload);
-        }
-      });
-      source.addEventListener("message:updated", (event) => {
-        handlers.onMessageUpdated?.(
-          eventPayload(event) as unknown as ChatMessage,
-        );
-      });
-      source.addEventListener("message:new", (event) => {
-        handlers.onMessageNew?.(
-          eventPayload(event) as unknown as ChatMessage,
-        );
-      });
-      source.addEventListener("tool_call_start", (event) => {
-        handlers.onToolCallStart?.(eventPayload(event));
-      });
-      source.addEventListener("tool_call_done", (event) => {
-        handlers.onToolCallDone?.(eventPayload(event));
-      });
-      source.addEventListener("task:status_changed", (event) => {
-        handlers.onTaskStatusChanged?.(
-          eventPayload(event) as unknown as AgentTask,
-        );
-      });
-      source.addEventListener("workflow:run_updated", (event) => {
-        handlers.onWorkflowRunUpdated?.(
-          eventPayload(event) as unknown as Partial<WorkflowRun> & Record<string, unknown>,
-        );
-      });
-      source.addEventListener("message_stop", (event) => {
-        const payload = eventPayload(event);
-        handlers.onMessageStop?.(payload);
-        const stopReason = String(payload.stop_reason || "");
-        if (
-          ["workflow_completed", "generation_finished", "cancelled"].includes(
-            stopReason,
-          )
-        ) {
-          close(payload);
-        }
-      });
-      source.addEventListener("workflow:completed", () => {
-        // 工作流完成事件可能早于 Task 状态落库，等待 generation_finished 统一收尾。
-      });
-      source.addEventListener("workflow:failed", () => {
-        // 失败路径后端也会发送 generation_finished，避免提前刷新到旧任务状态。
-      });
-      source.addEventListener("workflow:cancelled", () => {
-        // 取消同样等待全局结束事件，保持单一收尾语义。
-      });
-      source.addEventListener("generation_finished", (event) => {
-        close(eventPayload(event));
-      });
-      source.addEventListener("generation:cancelled", (event) => {
-        close(eventPayload(event), "本次响应已停止。");
-      });
-      source.addEventListener("error", () => {
-        if (settled) return;
-        window.clearTimeout(timeout);
-        source.close();
-        if (buffer) {
-          handlers.onDone?.();
-          resolve(buffer);
-        } else {
-          reject(new Error("stream failed"));
-        }
-      });
-    });
-  } catch {
-    await wait(350);
-    const fallback =
-      "模型流式连接暂不可用，任务已进入后台处理，可稍后刷新查看完整结果。";
-    handlers.onDelta?.(fallback, {});
+  const abortController = new AbortController();
+  const stop = () => {
+    abortController.abort();
     handlers.onDone?.();
-    return fallback;
-  }
-}
+  };
 
-export async function assistantReply(
-  conversationId: string,
-  prompt: string,
-): Promise<string> {
-  let text = "";
-  return await streamAssistantReply(conversationId, (delta) => {
-    text += delta;
-  }).then((result) => result || text || `收到：${prompt}`);
+  handlers.onControl?.(stop);
+
+  // 120s 兜底超时
+  const timeout = window.setTimeout(() => {
+    abortController.abort();
+    handlers.onDone?.();
+  }, 120000);
+
+  const response = await sse(
+    `/conversations/${conversationId}/stream`,
+    body,
+    abortController,
+  );
+
+  if (!response.ok) {
+    return `${response.status} ${response.statusText}`;
+  }
+
+  if (!response.body) {
+    return `no body in response: ${response.status} ${response.statusText}`;
+  }
+
+  const reader = response.body.getReader();
+
+  for await (const { event, data } of parseSSEStream(reader)) {
+    if (event === "system.session_error") {
+      window.clearTimeout(timeout);
+    }
+    dispatchStreamEvent(event, data, handlers);
+  }
+
+  window.clearTimeout(timeout);
+  handlers.onDone?.();
+
+  return "ok";
 }
 
 export async function cancelAssistantReply(
   conversationId: string,
 ): Promise<{ cancelled: boolean }> {
-  return await request<{ cancelled: boolean }>(
+  return await post<{ cancelled: boolean }>(
     `/conversations/${conversationId}/stream/cancel`,
-    { method: "POST" },
+    {},
   );
+}
+
+/**
+ * WebSocket 版本的消息发送。
+ *
+ * 保持与 sendMessage 相同的接口，内部通过 WebSocket 长连接传输。
+ */
+export async function sendMessageWs(
+  conversationId: string,
+  body: Record<string, unknown>,
+  handlers: StreamAssistantHandlers,
+): Promise<string> {
+  const ws = getConversationWS(conversationId);
+  if (ws.readyState !== WebSocket.OPEN) {
+    await ws.connect();
+  }
+
+  const requestId = `req-${Date.now()}`;
+  let resolved = false;
+
+  return new Promise((resolve) => {
+    const stop = () => {
+      ws.send("chat.cancel", {}, requestId);
+      handlers.onDone?.();
+    };
+    handlers.onControl?.(stop);
+
+    const timeout = window.setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        handlers.onDone?.();
+        resolve("timeout");
+      }
+    }, 120000);
+
+    const unsubscribe = ws.onMessage((event, data) => {
+      switch (event) {
+        case "system.session_completed":
+          window.clearTimeout(timeout);
+          if (!resolved) {
+            resolved = true;
+            unsubscribe();
+            handlers.onDone?.();
+            resolve("ok");
+          }
+          break;
+        case "system.session_error":
+          window.clearTimeout(timeout);
+          if (!resolved) {
+            resolved = true;
+            unsubscribe();
+            dispatchStreamEvent(event, data, handlers);
+            resolve("error");
+          }
+          break;
+        default:
+          dispatchStreamEvent(event, data, handlers);
+          break;
+      }
+    });
+
+    ws.send("chat.send", body, requestId);
+  });
+}
+
+/**
+ * WebSocket 版本的取消助手回复。
+ */
+export function cancelAssistantReplyWs(conversationId: string): void {
+  const ws = getConversationWS(conversationId);
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send("chat.cancel", {});
+  }
 }

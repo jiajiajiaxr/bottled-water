@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AgentTask } from "../types";
+import type { AgentTask } from "@/types";
 
 interface TaskState {
   backgroundTasks: AgentTask[];

@@ -14,8 +14,8 @@ import {
   Modal,
 } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
-import { participantName } from "../../../../lib/message";
-import type { Agent, Conversation } from "../../../../types";
+import { participantName } from "@/lib/message";
+import type { Agent, Conversation } from "@/types";
 
 const { Text } = Typography;
 

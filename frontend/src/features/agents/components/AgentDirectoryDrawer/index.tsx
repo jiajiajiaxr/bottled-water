@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  ArrowLeftOutlined,
   DeleteOutlined,
   EditOutlined,
   RobotOutlined,
@@ -26,7 +27,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { api } from "../../../../api";
+import { api } from "@/api";
 import type {
   Agent,
   AgentCapability,
@@ -34,13 +35,14 @@ import type {
   ModelConfig,
   Skill,
   ToolDefinition,
-} from "../../../../types";
+} from "@/types";
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
 
 export function AgentDirectoryDrawer({
   open,
+  asPage,
   agents,
   onClose,
   onRefresh,
@@ -49,7 +51,8 @@ export function AgentDirectoryDrawer({
   onDeleteAgent,
   onTestAgent,
 }: {
-  open: boolean;
+  open?: boolean;
+  asPage?: boolean;
   agents: Agent[];
   onClose: () => void;
   onRefresh: () => void;
@@ -272,156 +275,177 @@ export function AgentDirectoryDrawer({
     message.success("自定义 Agent 已发布");
   };
 
+  const mainContent = (
+    <>
+      <Flex justify="space-between" align="center" className="drawer-toolbar">
+        <Input
+          prefix={<SearchOutlined />}
+          placeholder="搜索名称、能力、描述"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <Space>
+          <Button onClick={onRefresh}>刷新状态</Button>
+          <Button
+            type="primary"
+            icon={<RobotOutlined />}
+            onClick={() => setCreatorOpen(true)}
+            data-testid="create-agent"
+          >
+            创建自定义 Agent
+          </Button>
+        </Space>
+      </Flex>
+      <List
+        grid={{ gutter: 12, column: 1 }}
+        dataSource={visible}
+        renderItem={(agent) => (
+          <List.Item>
+            <Card className="agent-card">
+              <Flex justify="space-between" align="start">
+                <Space align="start">
+                  <Badge
+                    status={
+                      agent.status === "online"
+                        ? "success"
+                        : agent.status === "degraded"
+                          ? "warning"
+                          : "default"
+                    }
+                    dot
+                  >
+                    <Avatar
+                      style={{ background: agent.avatar_color ?? "#1677ff" }}
+                    >
+                      {agent.name.slice(0, 1)}
+                    </Avatar>
+                  </Badge>
+                  <div>
+                    <Space>
+                      <Text strong>{agent.display_name ?? agent.name}</Text>
+                      {agent.is_official && <Tag color="blue">官方</Tag>}
+                      <Tag>{agent.type}</Tag>
+                    </Space>
+                    <Paragraph type="secondary" ellipsis={{ rows: 2 }}>
+                      {agent.description}
+                    </Paragraph>
+                  </div>
+                </Space>
+                <Tag
+                  color={agent.status === "online" ? "success" : "default"}
+                >
+                  {agent.status}
+                </Tag>
+              </Flex>
+              <Space size={[4, 4]} wrap>
+                {agent.capabilities.slice(0, 4).map((cap) => (
+                  <Tag key={cap.label}>
+                    {cap.label}·{cap.proficiency}
+                  </Tag>
+                ))}
+              </Space>
+              <Space size={[4, 4]} wrap className="mt-8">
+                {(agent.config.tools ?? []).slice(0, 5).map((tool) => (
+                  <Tag key={tool} color="geekblue">
+                    {tool}
+                  </Tag>
+                ))}
+                {(agent.config.skill_ids ?? []).length > 0 && (
+                  <Tag color="cyan">
+                    {agent.config.skill_ids?.length} Skills
+                  </Tag>
+                )}
+                {(agent.config.mcp_server_ids ?? []).length > 0 && (
+                  <Tag color="gold">
+                    {agent.config.mcp_server_ids?.length} MCP
+                  </Tag>
+                )}
+                {agent.config.agentic_loop?.enabled === false && (
+                  <Tag>纯对话</Tag>
+                )}
+                <Tag color="purple">
+                  模型：{modelLabel(agent.config.model_config_id)}
+                </Tag>
+              </Space>
+              <Divider />
+              <Flex justify="space-between">
+                <Text type="secondary">
+                  {agent.response_latency_ms}ms · {agent.provider}
+                </Text>
+                <Space>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setTestAgent(agent);
+                      setTestResult("");
+                      setTestError("");
+                    }}
+                  >
+                    测试
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<EditOutlined />}
+                    onClick={() => openEditAgent(agent)}
+                    data-testid={`edit-agent-${agent.id}`}
+                  >
+                    编辑
+                  </Button>
+                  {!agent.is_official && (
+                    <Button
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      data-testid={`delete-agent-${agent.id}`}
+                      onClick={() => {
+                        Modal.confirm({
+                          title: `删除 Agent：${agent.name}`,
+                          content:
+                            "删除后不会再出现在 Agent 广场，也不能加入新会话。",
+                          okText: "删除",
+                          okButtonProps: { danger: true },
+                          onOk: async () => {
+                            await onDeleteAgent(agent);
+                            message.success("Agent 已删除");
+                          },
+                        });
+                      }}
+                    />
+                  )}
+                </Space>
+              </Flex>
+            </Card>
+          </List.Item>
+        )}
+      />
+    </>
+  );
+
   return (
     <>
-      <Drawer
-        width={720}
-        title="Agent 广场与通讯录"
-        open={open}
-        onClose={onClose}
-      >
-        <Flex justify="space-between" align="center" className="drawer-toolbar">
-          <Input
-            prefix={<SearchOutlined />}
-            placeholder="搜索名称、能力、描述"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <Space>
-            <Button onClick={onRefresh}>刷新状态</Button>
+      {asPage ? (
+        <div className="page-view">
+          <div className="page-header">
             <Button
-              type="primary"
-              icon={<RobotOutlined />}
-              onClick={() => setCreatorOpen(true)}
-              data-testid="create-agent"
+              icon={<ArrowLeftOutlined />}
+              onClick={onClose}
             >
-              创建自定义 Agent
+              返回
             </Button>
-          </Space>
-        </Flex>
-        <List
-          grid={{ gutter: 12, column: 1 }}
-          dataSource={visible}
-          renderItem={(agent) => (
-            <List.Item>
-              <Card className="agent-card">
-                <Flex justify="space-between" align="start">
-                  <Space align="start">
-                    <Badge
-                      status={
-                        agent.status === "online"
-                          ? "success"
-                          : agent.status === "degraded"
-                            ? "warning"
-                            : "default"
-                      }
-                      dot
-                    >
-                      <Avatar
-                        style={{ background: agent.avatar_color ?? "#1677ff" }}
-                      >
-                        {agent.name.slice(0, 1)}
-                      </Avatar>
-                    </Badge>
-                    <div>
-                      <Space>
-                        <Text strong>{agent.display_name ?? agent.name}</Text>
-                        {agent.is_official && <Tag color="blue">官方</Tag>}
-                        <Tag>{agent.type}</Tag>
-                      </Space>
-                      <Paragraph type="secondary" ellipsis={{ rows: 2 }}>
-                        {agent.description}
-                      </Paragraph>
-                    </div>
-                  </Space>
-                  <Tag
-                    color={agent.status === "online" ? "success" : "default"}
-                  >
-                    {agent.status}
-                  </Tag>
-                </Flex>
-                <Space size={[4, 4]} wrap>
-                  {agent.capabilities.slice(0, 4).map((cap) => (
-                    <Tag key={cap.label}>
-                      {cap.label}·{cap.proficiency}
-                    </Tag>
-                  ))}
-                </Space>
-                <Space size={[4, 4]} wrap className="mt-8">
-                  {(agent.config.tools ?? []).slice(0, 5).map((tool) => (
-                    <Tag key={tool} color="geekblue">
-                      {tool}
-                    </Tag>
-                  ))}
-                  {(agent.config.skill_ids ?? []).length > 0 && (
-                    <Tag color="cyan">
-                      {agent.config.skill_ids?.length} Skills
-                    </Tag>
-                  )}
-                  {(agent.config.mcp_server_ids ?? []).length > 0 && (
-                    <Tag color="gold">
-                      {agent.config.mcp_server_ids?.length} MCP
-                    </Tag>
-                  )}
-                  {agent.config.agentic_loop?.enabled === false && (
-                    <Tag>纯对话</Tag>
-                  )}
-                  <Tag color="purple">
-                    模型：{modelLabel(agent.config.model_config_id)}
-                  </Tag>
-                </Space>
-                <Divider />
-                <Flex justify="space-between">
-                  <Text type="secondary">
-                    {agent.response_latency_ms}ms · {agent.provider}
-                  </Text>
-                  <Space>
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        setTestAgent(agent);
-                        setTestResult("");
-                        setTestError("");
-                      }}
-                    >
-                      测试
-                    </Button>
-                    <Button
-                      size="small"
-                      icon={<EditOutlined />}
-                      onClick={() => openEditAgent(agent)}
-                      data-testid={`edit-agent-${agent.id}`}
-                    >
-                      编辑
-                    </Button>
-                    {!agent.is_official && (
-                      <Button
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                        data-testid={`delete-agent-${agent.id}`}
-                        onClick={() => {
-                          Modal.confirm({
-                            title: `删除 Agent：${agent.name}`,
-                            content:
-                              "删除后不会再出现在 Agent 广场，也不能加入新会话。",
-                            okText: "删除",
-                            okButtonProps: { danger: true },
-                            onOk: async () => {
-                              await onDeleteAgent(agent);
-                              message.success("Agent 已删除");
-                            },
-                          });
-                        }}
-                      />
-                    )}
-                  </Space>
-                </Flex>
-              </Card>
-            </List.Item>
-          )}
-        />
-      </Drawer>
+            <Text strong>Agent 广场与通讯录</Text>
+          </div>
+          <div className="page-content">{mainContent}</div>
+        </div>
+      ) : (
+        <Drawer
+          width={720}
+          title="Agent 广场与通讯录"
+          open={open}
+          onClose={onClose}
+        >
+          {mainContent}
+        </Drawer>
+      )}
 
       <Modal
         title="创建自定义 Agent"

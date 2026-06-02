@@ -1,87 +1,54 @@
 import { create } from "zustand";
-import type { ChatMessage } from "../types";
-
-export type StreamState = "idle" | "streaming" | "done" | "error";
+import type { ChatMessage } from "@/types";
 
 interface MessageState {
-  messages: ChatMessage[];
-  streamState: StreamState;
-  localRunningConversationIds: Set<string>;
+  /** 当前对话的历史消息 */
+  historyMessages: ChatMessage[];
+
+  /** 消息版本号，用于 MessageBubble memo 优化 */
+  messageVersions: Map<string, number>;
+
+  // === 基础 setter ===
   setMessages: (messages: ChatMessage[]) => void;
-  appendMessage: (message: ChatMessage) => void;
-  updateMessage: (messageId: string, patch: Partial<ChatMessage>) => void;
-  updateMessageContent: (messageId: string, content: string) => void;
-  updateMessageThinking: (messageId: string, thinking: string) => void;
-  setStreamState: (state: StreamState) => void;
-  addRunningConversationId: (id: string) => void;
-  removeRunningConversationId: (id: string) => void;
-  clearMessages: () => void;
-  updateMessages: (updater: (current: ChatMessage[]) => ChatMessage[]) => void;
-  setLocalRunningConversationIds: (ids: Set<string>) => void;
-  updateLocalRunningConversationIds: (
-    updater: (current: Set<string>) => Set<string>,
+  setMessageVersions: (versions: Map<string, number>) => void;
+
+  // === 基于前状态的 updater ===
+  updateMessages: (updater: (prev: ChatMessage[]) => ChatMessage[]) => void;
+  updateMessageVersions: (
+    updater: (prev: Map<string, number>) => Map<string, number>,
   ) => void;
+
+  // === 查询 ===
+  getMessageVersion: (messageId: string) => number;
+
+  // === 清理 ===
+  clearMessages: () => void;
 }
 
-export const useMessageStore = create<MessageState>((set) => ({
-  messages: [],
-  streamState: "idle",
-  localRunningConversationIds: new Set(),
-  setMessages: (messages) => set({ messages }),
-  appendMessage: (message) =>
-    set((state) => ({
-      messages: [...state.messages, message],
-    })),
-  updateMessage: (messageId, patch) =>
+export const useMessageStore = create<MessageState>((set, get) => ({
+  historyMessages: [],
+  messageVersions: new Map(),
+
+  setMessages: (messages) =>
     set((state) => {
-      const index = state.messages.findIndex((m) => m.id === messageId);
-      if (index === -1) return state;
-      const next = [...state.messages];
-      next[index] = { ...next[index], ...patch };
-      return { messages: next };
+      const nextVersions = new Map(state.messageVersions);
+      for (const msg of messages) {
+        if (!nextVersions.has(msg.id)) {
+          nextVersions.set(msg.id, 0);
+        }
+      }
+      return { historyMessages: messages, messageVersions: nextVersions };
     }),
-  updateMessageContent: (messageId, content) =>
-    set((state) => {
-      const index = state.messages.findIndex((m) => m.id === messageId);
-      if (index === -1) return state;
-      const target = state.messages[index];
-      if (target.content === content) return state;
-      const next = [...state.messages];
-      next[index] = { ...target, content };
-      return { messages: next };
-    }),
-  updateMessageThinking: (messageId, thinking) =>
-    set((state) => {
-      const index = state.messages.findIndex((m) => m.id === messageId);
-      if (index === -1) return state;
-      const target = state.messages[index];
-      if (target.thinking === thinking) return state;
-      const next = [...state.messages];
-      next[index] = { ...target, thinking };
-      return { messages: next };
-    }),
-  setStreamState: (streamState) => set({ streamState }),
-  addRunningConversationId: (id) =>
-    set((state) => {
-      const next = new Set(state.localRunningConversationIds);
-      next.add(id);
-      return { localRunningConversationIds: next };
-    }),
-  removeRunningConversationId: (id) =>
-    set((state) => {
-      const next = new Set(state.localRunningConversationIds);
-      next.delete(id);
-      return { localRunningConversationIds: next };
-    }),
-  clearMessages: () => set({ messages: [] }),
+
   updateMessages: (updater) =>
-    set((state) => ({ messages: updater(state.messages) })),
-  setLocalRunningConversationIds: (localRunningConversationIds) =>
-    set({ localRunningConversationIds }),
-  updateLocalRunningConversationIds: (updater) =>
-    set((state) => ({
-      localRunningConversationIds: updater(
-        state.localRunningConversationIds,
-      ),
-    })),
+    set((state) => ({ historyMessages: updater(state.historyMessages) })),
+
+  updateMessageVersions: (updater) =>
+    set((state) => ({ messageVersions: updater(state.messageVersions) })),
+
+  getMessageVersion: (messageId) => get().messageVersions.get(messageId) ?? 0,
+
+  setMessageVersions: (versions) => set({ messageVersions: versions }),
+
+  clearMessages: () => set({ historyMessages: [], messageVersions: new Map() }),
 }));

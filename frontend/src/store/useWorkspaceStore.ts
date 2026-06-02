@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Workspace } from "../types";
+import type { Workspace } from "@/types";
 
 interface WorkspaceState {
   workspaces: Workspace[];

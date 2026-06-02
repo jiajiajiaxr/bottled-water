@@ -2,7 +2,7 @@ import type {
   ChatMessage,
   Conversation,
   MessageAttachment,
-} from "../types";
+} from "@/types";
 
 export function makeMessage(
   partial: Omit<ChatMessage, "id" | "createdAt">,
@@ -121,27 +121,6 @@ export function stripInternalAgentOutput(raw: string) {
 
 export function isTaskRunning(status?: string) {
   return RUNNING_TASK_STATUSES.has(String(status || "").toUpperCase());
-}
-
-export function isSuccessfulToolRunnerMessage(message: ChatMessage) {
-  if (message.author !== "Tool Runner") return false;
-  const raw = message.rawContent ?? {};
-  const output = raw.output;
-  const outputRecord = output && typeof output === "object" ? (output as Record<string, unknown>) : {};
-  const nestedResult =
-    outputRecord.result && typeof outputRecord.result === "object"
-      ? (outputRecord.result as Record<string, unknown>)
-      : {};
-  const outputStatus = String(outputRecord.status ?? nestedResult.status ?? "");
-  const status = String(raw.status ?? outputStatus ?? message.status ?? "").toLowerCase();
-  const hasError =
-    Boolean(raw.error || raw.error_message) ||
-    Boolean(outputRecord.error || outputRecord.error_message || nestedResult.error || nestedResult.error_message);
-  return !hasError && !["failed", "error", "cancelled", "timeout"].includes(status);
-}
-
-export function isVisibleChatMessage(message: ChatMessage) {
-  return !isSuccessfulToolRunnerMessage(message);
 }
 
 export function isLikelyArtifactRequest(text: string) {

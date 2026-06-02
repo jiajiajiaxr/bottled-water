@@ -84,7 +84,8 @@ export const demoMessages: Record<string, ChatMessage[]> = {
       kind: "event",
       author: "AgentHub",
       content: "会话已创建，已邀请 Design Agent 与 Deploy Agent。",
-      createdAt: new Date(Date.now() - 1000 * 60 * 28).toISOString()
+      createdAt: new Date(Date.now() - 1000 * 60 * 28).toISOString(),
+      state: "active"
     },
     {
       id: "m2",
@@ -93,7 +94,8 @@ export const demoMessages: Record<string, ChatMessage[]> = {
       kind: "text",
       author: "演示用户",
       content: "帮我做一个能展示 AgentHub 能力的 IM 工作台。",
-      createdAt: new Date(Date.now() - 1000 * 60 * 25).toISOString()
+      createdAt: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
+      state: "active"
     },
     {
       id: "m3",
@@ -103,7 +105,8 @@ export const demoMessages: Record<string, ChatMessage[]> = {
       author: "Design Agent",
       content: "已搭建三栏工作区：左侧会话、中间消息流、右侧预览与部署。",
       createdAt: new Date(Date.now() - 1000 * 60 * 23).toISOString(),
-      streamState: "done"
+      streamState: "done",
+      state: "active"
     }
   ],
   "conv-api": [
@@ -114,7 +117,8 @@ export const demoMessages: Record<string, ChatMessage[]> = {
       kind: "text",
       author: "Backend Agent",
       content: "当前前端会请求 /api/v1，并在本地开发时由 Vite 代理到 localhost:8000。",
-      createdAt: new Date(Date.now() - 1000 * 60 * 44).toISOString()
+      createdAt: new Date(Date.now() - 1000 * 60 * 44).toISOString(),
+      state: "active"
     }
   ],
   "conv-archive": [
@@ -125,7 +129,8 @@ export const demoMessages: Record<string, ChatMessage[]> = {
       kind: "event",
       author: "Migration Agent",
       content: "迁移任务已完成并归档。",
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString()
+      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(),
+      state: "active"
     }
   ]
 };
@@ -359,21 +364,14 @@ export const demoSandboxes: SandboxSession[] = [
     resource_limits: { cpu: "2", memory: "2Gi", timeout_seconds: 300 },
     command_history: [
       {
-        status: "succeeded",
-        capability_level: "fallback",
-        sandbox_id: "sandbox-demo",
         command: "pytest -q",
         argv: ["pytest", "-q"],
-        cwd: "backend/var/workspaces/workspace-demo/sandbox",
         exit_code: 0,
         stdout: "[mock-sandbox] 11 passed",
         stderr: "",
         duration_ms: 840,
         created_at: new Date().toISOString()
       }
-    ],
-    mounted_files: [
-      { path: "README.md", size: 128, updated_at: Date.now() }
     ],
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()

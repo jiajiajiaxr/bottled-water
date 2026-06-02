@@ -1,47 +1,23 @@
 import {
-  useCallback,
-  useState,
-} from "react";
-import type { PointerEvent } from "react";
-import { useNavigate } from "react-router-dom";
-import {
   App as AntApp,
   Button,
   Layout,
   Modal,
   Select,
   Space,
-  Typography,
 } from "antd";
 import {
   AppstoreOutlined,
-  BookOutlined,
-  FileOutlined,
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
-import { api } from "../../api";
-import { ConversationSidebar } from "../../features/chat/components/ConversationSidebar";
-import { ChatPanel } from "../../features/chat/components/ChatPanel";
-import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
-import { WorkflowStudioContent } from "../../features/workflow/WorkflowStudioContent";
-import { WorkspaceFilesContent } from "../../features/workspaceFiles/WorkspaceFilesContent";
+import { api } from "@/api";
+import { ConversationSidebar } from "@/features/chat/components/ConversationSidebar";
 import type {
-  AgentTask,
-  ChatMessage,
   Conversation,
-  Deployment,
-  KnowledgeBase,
-  UploadedFile,
   User,
   Workspace,
-  WorkspaceArtifact,
-} from "../../types";
-import type { StreamState } from "../../store/useMessageStore";
-
-const { Text } = Typography;
-const PREVIEW_MIN_WIDTH = 360;
-const PREVIEW_DEFAULT_WIDTH = 680;
+} from "@/types";
 
 export interface WorkbenchLayoutProps {
   // User
@@ -58,12 +34,14 @@ export interface WorkbenchLayoutProps {
   // Conversations
   conversations: Conversation[];
   activeId: string | undefined;
-  active: Conversation | undefined;
   conversationCategories: string[];
   selectConversation: (conversationId?: string, replace?: boolean) => void;
   setCreateOpen: (value: { open: boolean; group: boolean }) => void;
   addConversationCategory: (name: string) => void;
-  patchConversation: (item: Conversation, patch: Partial<Conversation>) => Promise<void>;
+  patchConversation: (
+    item: Conversation,
+    patch: Partial<Conversation>,
+  ) => Promise<void>;
   updateConversations: (
     updater: (current: Conversation[]) => Conversation[],
   ) => void;
@@ -74,58 +52,15 @@ export interface WorkbenchLayoutProps {
     replace?: boolean,
   ) => void;
 
-  // Messages
-  messages: ChatMessage[];
-  loadingMessages: boolean;
-  streamState: StreamState;
-  send: (text: string, quoted?: ChatMessage, attachments?: UploadedFile[], thinkingEnabled?: boolean) => Promise<void>;
-  regenerate: (source: ChatMessage) => void;
-  stopStreaming: () => void;
-
-  // UI state setters
-  setMembersOpen: (open: boolean) => void;
-  setConversationSettingsOpen: (open: boolean) => void;
-  openWorkflowPage: () => void;
-  closeWorkflowPage: () => void;
-  workflowMode: boolean;
-  workspaceFilesMode: boolean;
-  openWorkspaceFilesPage: () => void;
-  closeWorkspaceFilesPage: () => void;
-
-  // File upload
-  uploadFile: (file: File) => Promise<UploadedFile>;
-
-  // Artifact / Preview
-  artifactPanelOpen: boolean;
-  artifact: WorkspaceArtifact | undefined;
-  deployment: Deployment | undefined;
-  files: UploadedFile[];
-  knowledgeBases: KnowledgeBase[];
-  setArtifactPanelOpen: (open: boolean) => void;
-  saveArtifact: (artifact: WorkspaceArtifact) => Promise<void>;
-  deploy: () => Promise<void>;
-  setKnowledgeBases: (kbs: KnowledgeBase[]) => void;
-  openArtifactPreview: (source?: ChatMessage) => Promise<void>;
-
-  // Background tasks
-  visibleBackgroundTasks: AgentTask[];
-  loadBackgroundTasks: () => Promise<void>;
-  updateLocalRunningConversationIds: (
-    updater: (current: Set<string>) => Set<string>,
-  ) => void;
   runningConversationIds: Set<string>;
+
+  // Main content
+  routeTab: string;
+  children: React.ReactNode;
 }
 
 export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const { message } = AntApp.useApp();
-  const navigate = useNavigate();
-  const [previewWidth, setPreviewWidth] = useState(() => {
-    const value = Number(window.localStorage.getItem("agenthub_preview_width"));
-    return Number.isFinite(value) && value >= PREVIEW_MIN_WIDTH
-      ? value
-      : PREVIEW_DEFAULT_WIDTH;
-  });
-  const [draftSnippet, setDraftSnippet] = useState("");
 
   const {
     currentUser,
@@ -137,7 +72,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     openMainTab,
     conversations,
     activeId,
-    active,
     conversationCategories,
     selectConversation,
     setCreateOpen,
@@ -146,66 +80,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     updateConversations,
     setActiveId,
     navigateToConversation,
-    messages,
-    loadingMessages,
-    streamState,
-    send,
-    regenerate,
-    stopStreaming,
-    setMembersOpen,
-    setConversationSettingsOpen,
-    openWorkflowPage,
-    closeWorkflowPage,
-    workflowMode,
-    workspaceFilesMode,
-    openWorkspaceFilesPage,
-    closeWorkspaceFilesPage,
-    uploadFile,
-    artifactPanelOpen,
-    artifact,
-    deployment,
-    files,
-    knowledgeBases,
-    setArtifactPanelOpen,
-    saveArtifact,
-    deploy,
-    setKnowledgeBases,
-    openArtifactPreview,
-    visibleBackgroundTasks,
-    loadBackgroundTasks,
-    updateLocalRunningConversationIds,
     runningConversationIds,
+    children,
   } = props;
-  const workflowWorkspaceId = active?.workspace_id || activeWorkspaceId;
-  const startPreviewResize = useCallback(
-    (event: PointerEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-      const clampWidth = (width: number) => {
-        const maxWidth = Math.max(
-          PREVIEW_MIN_WIDTH,
-          Math.floor(window.innerWidth * 0.78),
-        );
-        return Math.min(maxWidth, Math.max(PREVIEW_MIN_WIDTH, width));
-      };
-      let latestWidth = clampWidth(window.innerWidth - event.clientX);
-      const handleMove = (moveEvent: globalThis.PointerEvent) => {
-        const nextWidth = clampWidth(window.innerWidth - moveEvent.clientX);
-        latestWidth = nextWidth;
-        setPreviewWidth(nextWidth);
-      };
-      const handleUp = () => {
-        window.localStorage.setItem("agenthub_preview_width", String(latestWidth));
-        window.removeEventListener("pointermove", handleMove);
-        window.removeEventListener("pointerup", handleUp);
-        document.body.classList.remove("is-resizing-preview");
-      };
-      document.body.classList.add("is-resizing-preview");
-      window.addEventListener("pointermove", handleMove);
-      window.addEventListener("pointerup", handleUp, { once: true });
-    },
-    [],
-  );
 
   return (
     <Layout className="workbench">
@@ -272,27 +149,14 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             >
               工作区
             </Button>
-            <Button
-              icon={<FileOutlined />}
-              onClick={openWorkspaceFilesPage}
-              disabled={!activeWorkspaceId}
-              data-testid="workspace-files"
-            >
-              工作区文件
-            </Button>
+          </Space>
+          <Space>
             <Button
               icon={<ToolOutlined />}
               onClick={() => openMainTab("settings")}
               data-testid="global-settings"
             >
               设置
-            </Button>
-            <Button
-              icon={<BookOutlined />}
-              onClick={() => navigate("/docs")}
-              data-testid="docs-link"
-            >
-              文档
             </Button>
             <Button
               icon={<RobotOutlined />}
@@ -304,70 +168,8 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             <Button onClick={onLogout}>退出</Button>
           </Space>
         </div>
-        <ChatPanel
-          user={currentUser}
-          active={active}
-          messages={messages}
-          loading={loadingMessages}
-          streamState={streamState}
-          onSend={send}
-          onRegenerate={regenerate}
-          onOpenMembers={() => setMembersOpen(true)}
-          onOpenSettings={() => setConversationSettingsOpen(true)}
-          onOpenWorkflow={openWorkflowPage}
-          workflowMode={workflowMode || workspaceFilesMode}
-          workflowContent={
-            workflowMode && activeId && workflowWorkspaceId ? (
-              <WorkflowStudioContent
-                workspaceId={workflowWorkspaceId}
-                conversationId={activeId}
-                embedded
-                onBack={closeWorkflowPage}
-                onError={(value) => message.error(value)}
-                onSuccess={(value) => message.success(value)}
-              />
-            ) : workspaceFilesMode ? (
-              <WorkspaceFilesContent
-                workspaceId={activeWorkspaceId}
-                onBack={closeWorkspaceFilesPage}
-                onAttachReference={(snippet) => setDraftSnippet(snippet)}
-              />
-            ) : undefined
-          }
-          onUploadFile={uploadFile}
-          onOpenPreview={openArtifactPreview}
-          onStopStreaming={stopStreaming}
-          draftSnippet={draftSnippet}
-          onDraftSnippetConsumed={() => setDraftSnippet("")}
-        />
+        {children}
       </Layout>
-      {artifactPanelOpen && artifact && (
-        <PreviewPanel
-          artifact={artifact}
-          width={previewWidth}
-          onResizeStart={startPreviewResize}
-          deployment={deployment}
-          files={files}
-          knowledgeBases={knowledgeBases}
-          onClose={() => setArtifactPanelOpen(false)}
-          onSave={saveArtifact}
-          onDeploy={deploy}
-          onCreateKb={async (payload) => {
-            const created = await api.createKnowledgeBase(payload);
-            setKnowledgeBases([created, ...knowledgeBases]);
-            message.success("知识库已创建");
-          }}
-          onImportText={async (kbId, payload) => {
-            await api.importKnowledgeText(kbId, payload);
-            setKnowledgeBases(await api.knowledgeBases());
-            message.success("文档已索引");
-          }}
-          onRetrieve={async (kbId, query) => {
-            const result = await api.retrieveKnowledge(kbId, query);
-            return result.context;
-          }}
-        />
-      )}
     </Layout>
   );
 }

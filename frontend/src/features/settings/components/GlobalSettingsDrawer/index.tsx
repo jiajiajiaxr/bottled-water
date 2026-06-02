@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { ApiOutlined } from "@ant-design/icons";
+import {
+  ApiOutlined,
+  ArrowLeftOutlined,
+  DeleteOutlined,
+  EditOutlined,
+} from "@ant-design/icons";
 import {
   App as AntApp,
   Avatar,
@@ -11,24 +16,27 @@ import {
   Form,
   Input,
   List,
+  Modal,
   Select,
   Space,
   Tabs,
   Tag,
   Typography,
 } from "antd";
-import { api } from "../../../../api";
-import type { ModelConfig, ModelProvider, User } from "../../../../types";
+import { api } from "@/api";
+import type { ModelConfig, ModelProvider, User } from "@/types";
 
 const { Text } = Typography;
 
 export function GlobalSettingsDrawer({
   open,
+  asPage,
   user,
   onClose,
   onUserUpdated,
 }: {
-  open: boolean;
+  open?: boolean;
+  asPage?: boolean;
   user: User;
   onClose: () => void;
   onUserUpdated: (user: User) => void;
@@ -41,6 +49,7 @@ export function GlobalSettingsDrawer({
   const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
   const [modelTestResult, setModelTestResult] = useState("");
   const [modelTesting, setModelTesting] = useState(false);
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const { message } = AntApp.useApp();
 
   const loadModels = async () => {
@@ -59,9 +68,8 @@ export function GlobalSettingsDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, user.id]);
 
-  return (
-    <Drawer title="全局设置" width={920} open={open} onClose={onClose}>
-      <Tabs
+  const content = (
+    <Tabs
         items={[
           {
             key: "account",
@@ -141,17 +149,32 @@ export function GlobalSettingsDrawer({
                       supports_streaming: true,
                     }}
                     onFinish={async (values) => {
-                      const provider = await api.createModelProvider({
+                      const payload = {
                         ...values,
                         supports_streaming: Boolean(values.supports_streaming),
                         supports_embeddings: Boolean(
                           values.supports_embeddings,
                         ),
-                      });
-                      setModelProviders((current) => [provider, ...current]);
-                      providerForm.resetFields(["name", "api_key"]);
-                      await loadModels();
-                      message.success("模型供应商已保存");
+                      };
+                      if (editingProviderId) {
+                        await api.updateModelProvider(editingProviderId, payload);
+                        setEditingProviderId(null);
+                        providerForm.resetFields();
+                        providerForm.setFieldsValue({
+                          provider_type: "openai-compatible",
+                          base_url: "https://ark.cn-beijing.volces.com/api/v3",
+                          default_model: "doubao-seed-2-0-lite",
+                          supports_streaming: true,
+                        });
+                        await loadModels();
+                        message.success("模型供应商已更新");
+                      } else {
+                        const provider = await api.createModelProvider(payload);
+                        setModelProviders((current) => [provider, ...current]);
+                        providerForm.resetFields(["name", "api_key"]);
+                        await loadModels();
+                        message.success("模型供应商已保存");
+                      }
                     }}
                   >
                     <Form.Item
@@ -180,7 +203,7 @@ export function GlobalSettingsDrawer({
                       <Input />
                     </Form.Item>
                     <Form.Item name="api_key" label="API Key">
-                      <Input.Password placeholder="只提交到后端，不在前端回显" />
+                      <Input.Password placeholder={editingProviderId ? "留空则保持原密钥" : "只提交到后端，不在前端回显"} />
                     </Form.Item>
                     <Form.Item
                       name="default_model"
@@ -203,10 +226,101 @@ export function GlobalSettingsDrawer({
                         <Checkbox>Embedding</Checkbox>
                       </Form.Item>
                     </Space>
-                    <Button type="primary" htmlType="submit">
-                      保存供应商
-                    </Button>
+                    <Space>
+                      <Button type="primary" htmlType="submit">
+                        {editingProviderId ? "更新供应商" : "保存供应商"}
+                      </Button>
+                      {editingProviderId && (
+                        <Button
+                          onClick={() => {
+                            setEditingProviderId(null);
+                            providerForm.resetFields();
+                            providerForm.setFieldsValue({
+                              provider_type: "openai-compatible",
+                              base_url: "https://ark.cn-beijing.volces.com/api/v3",
+                              default_model: "doubao-seed-2-0-lite",
+                              supports_streaming: true,
+                            });
+                          }}
+                        >
+                          取消
+                        </Button>
+                      )}
+                    </Space>
                   </Form>
+                  <Divider />
+                  <List
+                    size="small"
+                    dataSource={modelProviders}
+                    renderItem={(provider) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            key="edit"
+                            type="text"
+                            icon={<EditOutlined />}
+                            onClick={() => {
+                              setEditingProviderId(provider.id);
+                              providerForm.setFieldsValue({
+                                name: provider.name,
+                                provider_type: provider.provider_type,
+                                base_url: provider.base_url,
+                                default_model: provider.default_model,
+                                supports_streaming: provider.supports_streaming,
+                                supports_embeddings: provider.supports_embeddings,
+                              });
+                            }}
+                          >
+                            编辑
+                          </Button>,
+                          <Button
+                            key="delete"
+                            type="text"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => {
+                              Modal.confirm({
+                                title: "删除供应商",
+                                content: `确定删除供应商 "${provider.name}" 吗？关联的模型配置也会被清理。`,
+                                okText: "删除",
+                                okType: "danger",
+                                cancelText: "取消",
+                                onOk: async () => {
+                                  await api.deleteModelProvider(provider.id);
+                                  await loadModels();
+                                  if (editingProviderId === provider.id) {
+                                    setEditingProviderId(null);
+                                    providerForm.resetFields();
+                                    providerForm.setFieldsValue({
+                                      provider_type: "openai-compatible",
+                                      base_url: "https://ark.cn-beijing.volces.com/api/v3",
+                                      default_model: "doubao-seed-2-0-lite",
+                                      supports_streaming: true,
+                                    });
+                                  }
+                                  message.success("供应商已删除");
+                                },
+                              });
+                            }}
+                          >
+                            删除
+                          </Button>,
+                        ]}
+                      >
+                        <List.Item.Meta
+                          avatar={<Avatar icon={<ApiOutlined />} />}
+                          title={
+                            <Space>
+                              <Text strong>{provider.name}</Text>
+                              <Tag>{provider.provider_type}</Tag>
+                              <Tag color={provider.status === "active" ? "green" : "red"}>{provider.status}</Tag>
+                            </Space>
+                          }
+                          description={`${provider.base_url} / 默认: ${provider.default_model}`}
+                        />
+                      </List.Item>
+                    )}
+                  />
                 </Card>
                 <Card title="模型配置与真实测试">
                   <Form
@@ -343,6 +457,23 @@ export function GlobalSettingsDrawer({
           },
         ]}
       />
-    </Drawer>
+  );
+
+  return (
+    <>
+      {asPage ? (
+        <div className="page-view">
+          <div className="page-header">
+            <Button icon={<ArrowLeftOutlined />} onClick={onClose}>返回</Button>
+            <Text strong>全局设置</Text>
+          </div>
+          <div className="page-content">{content}</div>
+        </div>
+      ) : (
+        <Drawer title="全局设置" width={920} open={open} onClose={onClose}>
+          {content}
+        </Drawer>
+      )}
+    </>
   );
 }

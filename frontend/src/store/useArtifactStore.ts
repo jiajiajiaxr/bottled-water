@@ -4,7 +4,7 @@ import type {
   KnowledgeBase,
   UploadedFile,
   WorkspaceArtifact,
-} from "../types";
+} from "@/types";
 
 interface ArtifactState {
   artifact: WorkspaceArtifact | undefined;

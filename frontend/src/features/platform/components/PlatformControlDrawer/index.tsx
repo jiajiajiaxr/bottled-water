@@ -20,9 +20,11 @@ import {
   Table,
   Tabs,
   Tag,
+  Typography,
 } from "antd";
 import {
   ApiOutlined,
+  ArrowLeftOutlined,
   BranchesOutlined,
   CheckCircleOutlined,
   CloudUploadOutlined,
@@ -35,7 +37,7 @@ import {
   ToolOutlined,
 } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../../../../api";
+import { api } from "@/api";
 import type {
   AuditLog,
   Conversation,
@@ -54,13 +56,15 @@ import type {
   ToolDefinition,
   WorkflowRun,
   Workspace,
-} from "../../../../types";
-import { formatTime } from "../../../../lib/format";
+} from "@/types";
+import { formatTime } from "@/lib/format";
 
 const { TextArea } = Input;
+const { Text } = Typography;
 
 interface PlatformControlDrawerProps {
-  open: boolean;
+  open?: boolean;
+  asPage?: boolean;
   workspaces: Workspace[];
   activeConversation?: Conversation;
   onClose: () => void;
@@ -84,6 +88,7 @@ interface PlatformControlDrawerProps {
 
 export function PlatformControlDrawer({
   open,
+  asPage,
   workspaces,
   activeConversation,
   onClose,
@@ -145,10 +150,6 @@ export function PlatformControlDrawer({
 
   const activeWorkspace =
     workspaces.find((item) => item.id === selectedWorkspace) ?? workspaces[0];
-  const selectedSandboxSession = useMemo(
-    () => sandboxes.find((item) => item.id === selectedSandbox),
-    [sandboxes, selectedSandbox],
-  );
   const filteredSkills = useMemo(() => {
     const keyword = skillSearch.trim().toLowerCase();
     if (!keyword) return skills;
@@ -255,7 +256,7 @@ export function PlatformControlDrawer({
     return <RobotOutlined />;
   };
   const workflowNodes = conversationWorkflow?.nodes ?? [];
-  const workflowEdges = (conversationWorkflow?.edges ?? []) as Array<[string, string]>;
+  const workflowEdges = conversationWorkflow?.edges ?? [];
 
   const setWorkflowDraft = (next: ConversationWorkflow) => {
     setConversationWorkflow(next);
@@ -276,13 +277,8 @@ export function PlatformControlDrawer({
     setWorkflowDraft({ ...conversationWorkflow, nodes, edges });
   };
 
-  return (
-    <Drawer
-      title="工作区与平台控制面"
-      width={1040}
-      open={open}
-      onClose={onClose}
-    >
+  const content = (
+    <>
       <Flex justify="space-between" align="center" className="drawer-toolbar">
         <Space wrap>
           <Select
@@ -715,7 +711,7 @@ export function PlatformControlDrawer({
                   <Card title="依赖连线" className="mt-8">
                     <List
                       size="small"
-                      dataSource={workflowEdges}
+                      dataSource={workflowEdges.filter((edge): edge is string[] => Array.isArray(edge))}
                       renderItem={([from, to]) => (
                         <List.Item>
                           <Tag>{from}</Tag>
@@ -1848,22 +1844,6 @@ export function PlatformControlDrawer({
                       value: sandbox.id,
                     }))}
                   />
-                  {selectedSandboxSession && (
-                    <div className="mt-8">
-                      <Space wrap size={[4, 4]}>
-                        <Tag>{selectedSandboxSession.status}</Tag>
-                        {selectedSandboxSession.workspace_id && (
-                          <Tag>workspace: {selectedSandboxSession.workspace_id}</Tag>
-                        )}
-                        {selectedSandboxSession.project_id && (
-                          <Tag>project: {selectedSandboxSession.project_id}</Tag>
-                        )}
-                        {selectedSandboxSession.last_command_at && (
-                          <Tag>last: {formatTime(selectedSandboxSession.last_command_at)}</Tag>
-                        )}
-                      </Space>
-                    </div>
-                  )}
                   <Form
                     className="mt-8"
                     form={commandForm}
@@ -1906,61 +1886,10 @@ export function PlatformControlDrawer({
                   </Form>
                   {sandboxResult && (
                     <div className="terminal-box">
-                      <Space wrap size={[4, 4]}>
-                        <Tag>{sandboxResult.status || "completed"}</Tag>
-                        <Tag>exit {sandboxResult.exit_code}</Tag>
-                        <Tag>{sandboxResult.duration_ms}ms</Tag>
-                      </Space>
-                      <div>{sandboxResult.command}</div>
-                      {sandboxResult.cwd && <small>{sandboxResult.cwd}</small>}
-                      <pre>
-                        {[sandboxResult.stdout, sandboxResult.stderr]
-                          .filter(Boolean)
-                          .join("\n")}
-                      </pre>
+                      <span>{sandboxResult.command}</span>
+                      <pre>{sandboxResult.stdout || sandboxResult.stderr}</pre>
                     </div>
                   )}
-                  {selectedSandboxSession?.mounted_files?.length ? (
-                    <>
-                      <Divider />
-                      <List
-                        size="small"
-                        header="工作目录文件"
-                        dataSource={selectedSandboxSession.mounted_files.slice(0, 8)}
-                        renderItem={(file) => (
-                          <List.Item>
-                            <List.Item.Meta
-                              title={file.path}
-                              description={`${file.size} bytes`}
-                            />
-                          </List.Item>
-                        )}
-                      />
-                    </>
-                  ) : null}
-                  {selectedSandboxSession?.command_history?.length ? (
-                    <>
-                      <Divider />
-                      <List
-                        size="small"
-                        header="最近运行记录"
-                        dataSource={selectedSandboxSession.command_history.slice(0, 6)}
-                        renderItem={(item) => (
-                          <List.Item>
-                            <List.Item.Meta
-                              title={
-                                <Space>
-                                  <span>{item.command}</span>
-                                  <Tag>{item.status || item.exit_code}</Tag>
-                                </Space>
-                              }
-                              description={item.cwd || item.created_at}
-                            />
-                          </List.Item>
-                        )}
-                      />
-                    </>
-                  ) : null}
                 </Card>
                 <Card title="远程连接">
                   <Form
@@ -2069,6 +1998,29 @@ export function PlatformControlDrawer({
           },
         ].filter((item) => !["workflow", "models"].includes(String(item.key)))}
       />
-    </Drawer>
+    </>
+  );
+
+  return (
+    <>
+      {asPage ? (
+        <div className="page-view">
+          <div className="page-header">
+            <Button icon={<ArrowLeftOutlined />} onClick={onClose}>返回</Button>
+            <Text strong>工作区与平台控制面</Text>
+          </div>
+          <div className="page-content">{content}</div>
+        </div>
+      ) : (
+        <Drawer
+          title="工作区与平台控制面"
+          width={1040}
+          open={open}
+          onClose={onClose}
+        >
+          {content}
+        </Drawer>
+      )}
+    </>
   );
 }

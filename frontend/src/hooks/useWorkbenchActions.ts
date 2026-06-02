@@ -1,16 +1,16 @@
 import { App as AntApp } from "antd";
-import { api } from "../api";
+import { api } from "@/api";
 import {
   useConversationStore,
   useMessageStore,
   useArtifactStore,
   useUIStore,
-} from "../store";
+} from "@/store";
 import type {
   ChatMessage,
   Conversation,
   WorkspaceArtifact,
-} from "../types";
+} from "@/types";
 
 export function useWorkbenchActions(
   activeWorkspaceId: string | undefined,
@@ -28,15 +28,16 @@ export function useWorkbenchActions(
     setActiveId,
     updateConversations,
   } = useConversationStore();
-  const { setMessages } = useMessageStore();
+  const { clearMessages } = useMessageStore();
   const {
     artifact,
     files,
     setArtifact,
     setFiles,
+    setArtifactPanelOpen,
     setDeployment,
   } = useArtifactStore();
-  const { setCreateOpen, setArtifactPanelOpen } = useUIStore();
+  const { setCreateOpen } = useUIStore();
 
   const patchConversation = async (
     item: Conversation,
@@ -79,7 +80,7 @@ export function useWorkbenchActions(
       created.workspace_id || activeWorkspaceId,
       created.id,
     );
-    setMessages([]);
+    clearMessages();
     setCreateOpen({ open: false, group: false });
     message.success(payload.group ? "群聊已创建" : "会话已创建");
   };
@@ -104,7 +105,7 @@ export function useWorkbenchActions(
   };
 
   const uploadFile = async (file: File) => {
-    const uploaded = await api.uploadFile(file, activeId, activeWorkspaceId);
+    const uploaded = await api.uploadFile(file, activeId);
     setFiles([uploaded, ...files]);
     message.success("文件已加入输入框，发送后会进入模型上下文");
     return uploaded;

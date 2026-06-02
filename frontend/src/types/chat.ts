@@ -1,7 +1,15 @@
 import type { ConversationWorkflow, WorkflowRun } from "./workflow";
 
 export type MessageRole = "user" | "assistant" | "system" | "tool";
-export type MessageKind = "text" | "code" | "file" | "event" | "error" | "preview_card" | "diff_panel" | "deploy_status_card";
+export type MessageKind =
+  | "text"
+  | "code"
+  | "file"
+  | "event"
+  | "error"
+  | "preview_card"
+  | "diff_panel"
+  | "deploy_status_card";
 export type StreamState = "idle" | "streaming" | "done" | "error";
 
 export interface Participant {
@@ -68,55 +76,63 @@ export interface ToolEventRecord {
 }
 
 export interface ChatMessage {
-  id: string;
-  conversationId: string;
-  sender_id?: string;
-  sender_type?: string;
-  role: MessageRole;
-  kind: MessageKind;
-  author: string;
-  content: string;
-  thinking?: string;
-  toolEvents?: ToolEventRecord[];
-  rawContent?: Record<string, unknown>;
-  attachments?: MessageAttachment[];
-  createdAt: string;
-  streamState?: StreamState;
-  quotedMessageId?: string;
-  status?: string;
+  id: string; // 消息 ID，目前使用agent_id
+  conversationId: string; // 对话 ID，不清楚来源
+  sender_id?: string; // 不清楚作用
+  sender_type?: string; // 不清楚作用
+  role: MessageRole; // 不清楚作用
+  kind: MessageKind; // 不清楚作用
+  author: string; // 不清楚作用
+  content: string; // 消息内容
+  thinking?: string; // LLM思考内容
+  rawContent?: Record<string, unknown>; // 不清楚作用
+  attachments?: MessageAttachment[]; // 消息附件
+  toolEvents?: ToolEventRecord[]; // 工具执行事件
+  createdAt: string; // 不清楚作用
+  streamState?: StreamState; // 流式状态，根据其情况确定组件是否需要更新
+  quotedMessageId?: string; // 引用的消息 ID，不清楚来源
+  status?: string; // 不清楚作用
+  state: "active" | "inactive"; // 旧的流式状态，之后会移除
 }
 
 export interface WorkspaceArtifact {
   id: string;
   conversationId: string;
-  type?: string;
-  format?: string;
-  media_type?: string;
-  filename?: string;
   title: string;
   language: string;
   code: string;
   previousCode: string;
   previewUrl?: string;
-  preview_url?: string;
+  updatedAt: string;
+  /** 扩展字段，用于支持多种格式的 artifact */
   content?: {
-    preview_html?: string;
     format?: string;
     media_type?: string;
     filename?: string;
+    preview_html?: string;
+    files?: Record<string, string>;
     tool_output?: {
       format?: string;
       media_type?: string;
       filename?: string;
     };
-    files?: Record<string, string>;
   };
-  updatedAt: string;
+  format?: string;
+  type?: "document" | "spreadsheet" | "slides" | string;
+  media_type?: string;
+  filename?: string;
 }
 
 export interface Deployment {
   id: string;
-  status: "idle" | "building" | "ready" | "failed" | "deployed" | "deploying" | "pending";
+  status:
+    | "idle"
+    | "building"
+    | "ready"
+    | "failed"
+    | "deployed"
+    | "deploying"
+    | "pending";
   url?: string;
   commit: string;
   updatedAt: string;

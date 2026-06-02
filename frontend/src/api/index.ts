@@ -1,5 +1,18 @@
-export { API_BASE, request, requestWithTimeout, requestFile, wait, eventPayload } from "./client";
-export type { StreamAssistantHandlers } from "./client";
+export {
+  API_BASE,
+  ApiError,
+  request,
+  get,
+  post,
+  patch,
+  del,
+  requestWithTimeout,
+  requestFile,
+  wait,
+  requestInterceptors,
+  responseInterceptors,
+  errorInterceptors,
+} from "./client";
 
 export {
   login,
@@ -24,9 +37,9 @@ export {
 export {
   messages,
   sendMessage,
-  streamAssistantReply,
-  assistantReply,
+  sendMessageWs,
   cancelAssistantReply,
+  cancelAssistantReplyWs,
 } from "./message";
 
 export { tasks, createBackgroundTask, cancelTask } from "./task";
@@ -82,6 +95,7 @@ export {
   workspaceFileTree,
   previewWorkspaceFile,
   downloadWorkspaceFile,
+  downloadWorkspaceFilePreviewPdf,
   deleteWorkspaceFile,
   renameWorkspaceFile,
   createWorkspaceFolder,
@@ -93,9 +107,12 @@ export {
 export {
   modelProviders,
   createModelProvider,
+  updateModelProvider,
+  deleteModelProvider,
   modelConfigs,
   createModelConfig,
   testModel,
+  availableModels,
 } from "./model";
 
 export {
@@ -125,11 +142,7 @@ export {
   deleteTool,
 } from "./tool";
 
-export {
-  sandboxes,
-  createSandbox,
-  runSandboxCommand,
-} from "./sandbox";
+export { sandboxes, createSandbox, runSandboxCommand } from "./sandbox";
 
 export {
   remoteConnections,
@@ -157,7 +170,6 @@ import * as agent from "./agent";
 import * as file from "./file";
 import * as knowledge from "./knowledge";
 import * as workspace from "./workspace";
-import * as workspaceFile from "./workspaceFile";
 import * as model from "./model";
 import * as mcp from "./mcp";
 import * as skill from "./skill";
@@ -165,11 +177,14 @@ import * as tool from "./tool";
 import * as sandbox from "./sandbox";
 import * as remote from "./remote";
 import * as security from "./security";
+import * as workspaceFile from "./workspaceFile";
 
 export const api = {
   ...auth,
   ...conversation,
   ...message,
+  sendMessageWs: message.sendMessageWs,
+  cancelAssistantReplyWs: message.cancelAssistantReplyWs,
   ...task,
   ...artifact,
   ...workflow,

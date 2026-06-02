@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import type { PointerEvent } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircleOutlined,
   CodeOutlined,
@@ -22,25 +21,16 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { api } from "../../../../api";
-import { diffLines } from "../../../../lib/diff";
-import { FilesKnowledgePanel } from "../../../chat/components/drawers/FilesKnowledgePanel";
-import { ArtifactPreviewFrame } from "./ArtifactPreviewFrame";
-import { ResizeHandle } from "./ResizeHandle";
-import {
-  artifactExportFormats,
-  downloadLabel,
-  isOfficeArtifact,
-  isPdfArtifact as checkPdfArtifact,
-  openOrDownloadExport,
-  preferredArtifactFormat,
-} from "./artifactPreview";
+import { api } from "@/api";
+import { diffLines } from "@/lib/diff";
+import { buildPreviewDocument } from "@/lib/preview";
+import { FilesKnowledgePanel } from "@/features/chat/components/drawers/FilesKnowledgePanel";
 import type {
   Deployment,
   KnowledgeBase,
   UploadedFile,
   WorkspaceArtifact,
-} from "../../../../types";
+} from "@/types";
 
 const { Sider } = Layout;
 const { TextArea } = Input;
@@ -48,8 +38,6 @@ const { Title, Text } = Typography;
 
 export function PreviewPanel({
   artifact,
-  width,
-  onResizeStart,
   deployment,
   files,
   knowledgeBases,
@@ -61,8 +49,6 @@ export function PreviewPanel({
   onRetrieve,
 }: {
   artifact?: WorkspaceArtifact;
-  width: number;
-  onResizeStart: (event: PointerEvent<HTMLDivElement>) => void;
   deployment?: Deployment;
   files: UploadedFile[];
   knowledgeBases: KnowledgeBase[];
@@ -80,7 +66,7 @@ export function PreviewPanel({
     payload: { title: string; content: string },
   ) => Promise<void>;
   onRetrieve: (kbId: string, query: string) => Promise<string>;
-  }) {
+}) {
   const [tab, setTab] = useState("preview");
   const [draft, setDraft] = useState("");
   const [exportResult, setExportResult] = useState<{
@@ -94,34 +80,26 @@ export function PreviewPanel({
     setDraft(artifact?.code ?? "");
   }, [artifact?.id, artifact?.code]);
 
-  const preferredFormat = useMemo(
-    () => preferredArtifactFormat(artifact),
-    [artifact],
-  );
-  const isPdfArtifact = checkPdfArtifact(artifact, preferredFormat);
-  const previewAsPdf = isPdfArtifact || isOfficeArtifact(artifact, preferredFormat);
-
   if (!artifact) {
     return (
       <Sider
-        width={width}
+        width={460}
         className="preview-panel"
         data-testid="artifact-preview-panel"
       >
-        <ResizeHandle onResizeStart={onResizeStart} />
         <Empty description="点击聊天流中的预览产物卡片后展开预览、编辑、Diff、部署和资产面板" />
       </Sider>
     );
   }
 
-  const exportFormats = artifactExportFormats(preferredFormat);
+  const previewDocument = buildPreviewDocument(draft);
+
   return (
     <Sider
-      width={width}
+      width={470}
       className="preview-panel"
       data-testid="artifact-preview-panel"
     >
-      <ResizeHandle onResizeStart={onResizeStart} />
       <Flex justify="space-between" align="center" className="preview-head">
         <div>
           <Text type="secondary">Artifact</Text>
@@ -140,19 +118,23 @@ export function PreviewPanel({
         </Space>
       </Flex>
       <Space wrap className="artifact-export-bar">
-        {exportFormats.map(
+        {["zip", "html", "markdown", "json", "docx", "xlsx", "pptx"].map(
           (format) => (
             <Button
               key={format}
               size="small"
-              type="primary"
               onClick={async () => {
                 const exported = await api.exportArtifact(artifact.id, format);
                 setExportResult(exported);
-                openOrDownloadExport(exported, format);
+                if (exported.previewUrl)
+                  window.open(
+                    exported.previewUrl,
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
               }}
             >
-              {downloadLabel(format)}
+              {format.toUpperCase()}
             </Button>
           ),
         )}
@@ -170,10 +152,10 @@ export function PreviewPanel({
             label: <EyeOutlined />,
             children: (
               <div className="preview-frame-wrap">
-                <ArtifactPreviewFrame
-                  artifact={artifact}
-                  draft={draft}
-                  previewAsPdf={previewAsPdf}
+                <iframe
+                  title="artifact preview"
+                  sandbox="allow-scripts"
+                  srcDoc={previewDocument}
                 />
               </div>
             ),

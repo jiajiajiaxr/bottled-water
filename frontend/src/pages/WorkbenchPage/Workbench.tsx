@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../../api";
+import { App as AntApp } from "antd";
+import { api } from "@/api";
 import {
   useUIStore,
   useAgentStore,
@@ -8,17 +9,21 @@ import {
   useArtifactStore,
   useConversationStore,
   useMessageStore,
-} from "../../store";
+} from "@/store";
 import { WorkbenchLayout } from "./WorkbenchLayout";
 import { WorkbenchDrawers } from "./WorkbenchDrawers";
-import type { User } from "../../types";
+import { AgentDirectoryDrawer } from "@/features/agents/components/AgentDirectoryDrawer";
+import { GlobalSettingsDrawer } from "@/features/settings/components/GlobalSettingsDrawer";
+import { PlatformControlDrawer } from "@/features/platform/components/PlatformControlDrawer";
+import { ChatPanel } from "@/features/chat/components/ChatPanel";
+import { PreviewPanel } from "@/features/preview/components/PreviewPanel";
+import type { User } from "@/types";
 import {
   useConversationCategories,
   useBackgroundTaskPolling,
-  useMessageOperations,
   useWorkbenchActions,
-} from "../../hooks";
-import { deriveRunningConversationIds } from "../../lib/runningConversations";
+} from "@/hooks";
+import { isTaskRunning } from "@/lib/message";
 
 export function Workbench({
   user,
@@ -26,20 +31,14 @@ export function Workbench({
   routeWorkspaceId,
   routeConversationId,
   routeTab = "chat",
-  routeView = "chat",
   onRouteChange,
   onRouteTabChange,
-  onOpenWorkflowPage,
-  onCloseWorkflowPage,
-  onOpenWorkspaceFilesPage,
-  onCloseWorkspaceFilesPage,
 }: {
   user: User;
   onLogout: () => void;
   routeWorkspaceId?: string;
   routeConversationId?: string;
   routeTab?: string;
-  routeView?: "chat" | "workflow" | "files";
   onRouteChange: (
     workspaceId?: string,
     conversationId?: string,
@@ -49,21 +48,13 @@ export function Workbench({
     tab: "chat" | "agents" | "workspace" | "settings",
     options?: { replace?: boolean },
   ) => void;
-  onOpenWorkflowPage?: (workspaceId: string, conversationId: string) => void;
-  onCloseWorkflowPage?: (workspaceId: string, conversationId: string) => void;
-  onOpenWorkspaceFilesPage?: (workspaceId: string) => void;
-  onCloseWorkspaceFilesPage?: (workspaceId: string, conversationId?: string) => void;
 }) {
+  const { message } = AntApp.useApp();
   const [currentUser, setCurrentUser] = useState(user);
-  const [loadingConversationsList, setLoadingConversationsList] =
-    useState(false);
+  const { setMessages, clearMessages } = useMessageStore();
   const {
-    messages,
-    setMessages,
-    streamState,
     localRunningConversationIds,
-    updateLocalRunningConversationIds,
-  } = useMessageStore();
+  } = useConversationStore();
   const {
     workspaces,
     setWorkspaces,
@@ -97,9 +88,6 @@ export function Workbench({
   const { backgroundTasks } = useTaskStore();
   const { loadBackgroundTasks } = useBackgroundTaskPolling();
   const {
-    agentDrawerOpen,
-    workspacesOpen,
-    globalSettingsOpen,
     conversationSettingsOpen,
     membersOpen,
     createOpen,
@@ -112,38 +100,18 @@ export function Workbench({
     setCreateOpen,
     setArtifactPanelOpen,
   } = useUIStore();
-  const { send, regenerate, stopStreaming } = useMessageOperations(
-    currentUser.name,
-  );
-
   const active = conversations.find((item) => item.id === activeId);
   const activeWorkspace =
     workspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
     workspaces[0];
-  const currentConversationIds = useMemo(
-    () => new Set(conversations.map((item) => item.id)),
-    [conversations],
-  );
-  const visibleBackgroundTasks = useMemo(
-    () =>
-      backgroundTasks.filter(
-        (task) =>
-          !task.conversation_id ||
-          currentConversationIds.has(task.conversation_id),
-      ),
-    [backgroundTasks, currentConversationIds],
-  );
-  const runningConversationIds = useMemo(
-    () =>
-      deriveRunningConversationIds({
-        conversations,
-        backgroundTasks,
-        localRunningConversationIds,
-        activeConversationId: activeId,
-        activeMessages: messages,
-      }),
-    [activeId, backgroundTasks, conversations, localRunningConversationIds, messages],
-  );
+  const runningConversationIds = useMemo(() => {
+    const next = new Set(localRunningConversationIds);
+    backgroundTasks.forEach((task) => {
+      if (task.conversation_id && isTaskRunning(task.status))
+        next.add(task.conversation_id);
+    });
+    return next;
+  }, [backgroundTasks, localRunningConversationIds]);
   const navigateToConversation = (
     workspaceId?: string,
     conversationId?: string,
@@ -175,34 +143,6 @@ export function Workbench({
     onRouteTabChange(tab);
   };
 
-  const openWorkflowPage = () => {
-    if (!active?.id || active.chat_type !== "group") return;
-    const workspaceId =
-      active.workspace_id || activeWorkspaceId || activeWorkspace?.id;
-    if (!workspaceId) return;
-    onOpenWorkflowPage?.(workspaceId, active.id);
-  };
-
-  const closeWorkflowPage = () => {
-    if (!active?.id) return;
-    const workspaceId =
-      active.workspace_id || activeWorkspaceId || activeWorkspace?.id;
-    if (!workspaceId) return;
-    onCloseWorkflowPage?.(workspaceId, active.id);
-  };
-
-  const openWorkspaceFilesPage = () => {
-    const workspaceId = active?.workspace_id || activeWorkspaceId || activeWorkspace?.id;
-    if (!workspaceId) return;
-    onOpenWorkspaceFilesPage?.(workspaceId);
-  };
-
-  const closeWorkspaceFilesPage = () => {
-    const workspaceId = active?.workspace_id || activeWorkspaceId || activeWorkspace?.id;
-    if (!workspaceId) return;
-    onCloseWorkspaceFilesPage?.(workspaceId, active?.id);
-  };
-
   const closeMainTab = (tab: "agents" | "workspace" | "settings") => {
     if (tab === "agents") setAgentDrawerOpen(false);
     if (tab === "workspace") setWorkspacesOpen(false);
@@ -216,8 +156,6 @@ export function Workbench({
     createConversation,
     saveArtifact,
     deploy,
-    uploadFile,
-    openArtifactPreview,
   } = useWorkbenchActions(
     activeWorkspaceId,
     conversationCategories,
@@ -283,29 +221,18 @@ export function Workbench({
   useEffect(() => {
     if (!activeWorkspaceId && workspaces.length) return;
     let cancelled = false;
-    setLoadingConversationsList(true);
     setConversations([]);
     setActiveId(undefined);
-    setMessages([]);
+    clearMessages();
     setArtifact(undefined);
     setArtifactPanelOpen(false);
     api.conversations(activeWorkspaceId).then((items) => {
       if (!cancelled) setConversations(items);
-    }).finally(() => {
-      if (!cancelled) setLoadingConversationsList(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [
-    activeWorkspaceId,
-    workspaces.length,
-    setArtifactPanelOpen,
-    setArtifact,
-    setActiveId,
-    setConversations,
-    setMessages,
-  ]);
+  }, [activeWorkspaceId, workspaces.length, setArtifactPanelOpen, setArtifact, setActiveId, setConversations, clearMessages]);
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
@@ -314,9 +241,7 @@ export function Workbench({
     );
     if (!scopedConversations.length) {
       setActiveId(undefined);
-      if (loadingConversationsList) return;
-      if (routeConversationId)
-        navigateToConversation(activeWorkspaceId, undefined, true);
+      // 不在此处清除 URL，等 conversations 加载完成后再恢复
       return;
     }
     const routeConversation = routeConversationId
@@ -334,9 +259,8 @@ export function Workbench({
     if (activeId !== nextConversation.id) setActiveId(nextConversation.id);
     const workspaceId = nextConversation.workspace_id || activeWorkspaceId;
     if (
-      routeView !== "files" &&
-      (routeWorkspaceId !== workspaceId ||
-        routeConversationId !== nextConversation.id)
+      routeWorkspaceId !== workspaceId ||
+      routeConversationId !== nextConversation.id
     ) {
       navigateToConversation(workspaceId, nextConversation.id, true);
     }
@@ -345,9 +269,7 @@ export function Workbench({
     activeWorkspaceId,
     activeId,
     conversations,
-    loadingConversationsList,
     routeConversationId,
-    routeView,
     routeWorkspaceId,
   ]);
 
@@ -357,8 +279,8 @@ export function Workbench({
     setLoadingMessages(true);
     Promise.all([
       api.messages(activeId),
-      api.artifact(activeId),
-      api.files(activeId),
+      api.artifact(activeId).catch(() => undefined),
+      api.files(activeId).catch(() => []),
     ])
       .then(([nextMessages, nextArtifact, nextFiles]) => {
         setMessages(nextMessages);
@@ -380,7 +302,6 @@ export function Workbench({
         openMainTab={openMainTab}
         conversations={conversations}
         activeId={activeId}
-        active={active}
         conversationCategories={conversationCategories}
         selectConversation={selectConversation}
         setCreateOpen={setCreateOpen}
@@ -389,50 +310,94 @@ export function Workbench({
         updateConversations={updateConversations}
         setActiveId={setActiveId}
         navigateToConversation={navigateToConversation}
-        messages={messages}
-        loadingMessages={loadingMessages}
-        streamState={streamState}
-        send={send}
-        regenerate={regenerate}
-        stopStreaming={stopStreaming}
-        setMembersOpen={setMembersOpen}
-        setConversationSettingsOpen={setConversationSettingsOpen}
-        openWorkflowPage={openWorkflowPage}
-        closeWorkflowPage={closeWorkflowPage}
-        workflowMode={routeView === "workflow" && active?.chat_type === "group"}
-        workspaceFilesMode={routeView === "files"}
-        openWorkspaceFilesPage={openWorkspaceFilesPage}
-        closeWorkspaceFilesPage={closeWorkspaceFilesPage}
-        uploadFile={uploadFile}
-        artifactPanelOpen={artifactPanelOpen}
-        artifact={artifact}
-        deployment={deployment}
-        files={files}
-        knowledgeBases={knowledgeBases}
-        setArtifactPanelOpen={setArtifactPanelOpen}
-        saveArtifact={saveArtifact}
-        deploy={deploy}
-        setKnowledgeBases={setKnowledgeBases}
-        openArtifactPreview={openArtifactPreview}
-        visibleBackgroundTasks={visibleBackgroundTasks}
-        loadBackgroundTasks={loadBackgroundTasks}
-        updateLocalRunningConversationIds={updateLocalRunningConversationIds}
         runningConversationIds={runningConversationIds}
-      />
+        routeTab={routeTab}
+      >
+        {routeTab === "chat" ? (
+          <>
+            <ChatPanel active={active} loading={loadingMessages} />
+            {artifactPanelOpen && artifact && (
+              <PreviewPanel
+                artifact={artifact}
+                deployment={deployment}
+                files={files}
+                knowledgeBases={knowledgeBases}
+                onClose={() => setArtifactPanelOpen(false)}
+                onSave={saveArtifact}
+                onDeploy={deploy}
+                onCreateKb={async (payload) => {
+                  const created = await api.createKnowledgeBase(payload);
+                  setKnowledgeBases([created, ...knowledgeBases]);
+                  message.success("知识库已创建");
+                }}
+                onImportText={async (kbId, payload) => {
+                  await api.importKnowledgeText(kbId, payload);
+                  setKnowledgeBases(await api.knowledgeBases());
+                  message.success("文档已索引");
+                }}
+                onRetrieve={async (kbId, query) => {
+                  const result = await api.retrieveKnowledge(kbId, query);
+                  return result.context;
+                }}
+              />
+            )}
+          </>
+        ) : routeTab === "agents" ? (
+          <AgentDirectoryDrawer
+            asPage
+            agents={agents}
+            onClose={() => closeMainTab("agents")}
+            onRefresh={loadAgents}
+            onCreateAgent={addAgent}
+            onUpdateAgent={(agent) => updateAgent(agent.id, agent)}
+            onDeleteAgent={async (agent) => {
+              await api.deleteAgent(agent.id);
+              removeAgent(agent.id);
+            }}
+            onTestAgent={async (agentId, text) =>
+              (await api.testAgent(agentId, text)).response
+            }
+          />
+        ) : routeTab === "settings" ? (
+          <GlobalSettingsDrawer
+            asPage
+            user={currentUser}
+            onClose={() => closeMainTab("settings")}
+            onUserUpdated={(nextUser) => setCurrentUser(nextUser)}
+          />
+        ) : routeTab === "workspace" ? (
+          <PlatformControlDrawer
+            asPage
+            workspaces={workspaces}
+            activeConversation={active}
+            onClose={() => closeMainTab("workspace")}
+            onCreateWorkspace={async (payload) => {
+              const created = await api.createWorkspace(payload);
+              addWorkspace(created);
+              setActiveWorkspaceId(created.id);
+              navigateToConversation(created.id);
+              message.success("工作区已创建");
+            }}
+            onCreateProject={async (workspaceId, payload) => {
+              const project = await api.createProject(workspaceId, payload);
+              const workspace = workspaces.find((w) => w.id === workspaceId);
+              if (workspace) {
+                updateWorkspace(workspaceId, {
+                  project_count: workspace.project_count + 1,
+                });
+              }
+              message.success("项目已创建");
+              return project;
+            }}
+            onLoadProjects={api.projects}
+            onSaveProjectFile={async (projectId, payload) => {
+              await api.saveProjectFile(projectId, payload);
+              message.success("项目文件版本已保存");
+            }}
+          />
+        ) : null}
+      </WorkbenchLayout>
       <WorkbenchDrawers
-        agentDrawerOpen={agentDrawerOpen}
-        agents={agents}
-        onCloseAgentDrawer={() => closeMainTab('agents')}
-        onRefreshAgents={loadAgents}
-        onCreateAgent={addAgent}
-        onUpdateAgent={(agent) => updateAgent(agent.id, agent)}
-        onDeleteAgent={async (agent) => {
-          await api.deleteAgent(agent.id);
-          removeAgent(agent.id);
-        }}
-        onTestAgent={async (agentId, text) =>
-          (await api.testAgent(agentId, text)).response
-        }
         membersOpen={membersOpen}
         activeConversation={active}
         activeConversationId={activeId}
@@ -442,22 +407,10 @@ export function Workbench({
         onCloseConversationSettings={() => setConversationSettingsOpen(false)}
         conversationCategories={conversationCategories}
         onPatchConversation={patchConversation}
-        onOpenWorkflow={openWorkflowPage}
         createOpen={createOpen}
         onCancelCreate={() => setCreateOpen({ open: false, group: false })}
         onCreateConversation={createConversation}
-        globalSettingsOpen={globalSettingsOpen}
-        currentUser={currentUser}
-        onCloseGlobalSettings={() => closeMainTab('settings')}
-        onUserUpdated={(nextUser) => setCurrentUser(nextUser)}
-        workspacesOpen={workspacesOpen}
-        workspaces={workspaces}
-        onCloseWorkspaces={() => closeMainTab('workspace')}
-        onLoadProjects={api.projects}
-        onSetActiveWorkspaceId={setActiveWorkspaceId}
-        onNavigateToConversation={navigateToConversation}
-        onAddWorkspace={addWorkspace}
-        onUpdateWorkspace={updateWorkspace}
+        agents={agents}
       />
     </>
   );

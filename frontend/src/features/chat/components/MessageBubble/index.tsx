@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from "react";
 import {
   BranchesOutlined,
-  BulbOutlined,
   CloudUploadOutlined,
   CopyOutlined,
   EyeOutlined,
+  LoadingOutlined,
   MessageOutlined,
-  ReloadOutlined,
 } from "@ant-design/icons";
 import {
   Avatar,
@@ -19,66 +18,47 @@ import {
   Tooltip,
   Typography,
 } from "antd";
-import { api } from "../../../../api";
-import { formatFileSize } from "../../../../lib/format";
-import { MarkdownContent } from "../../../../lib/markdown";
+import { api } from "@/api";
+import { formatFileSize } from "@/lib/format";
+import { MarkdownContent } from "@/lib/markdown";
 import {
   attachmentName,
   messageAttachments,
   stripInternalAgentOutput,
-} from "../../../../lib/message";
-import { toolEventsFromMessage } from "../../../../lib/toolEvents";
-import { formatTime } from "../../../../lib/format";
-import type { ChatMessage, MessageAttachment } from "../../../../types";
-import { ToolCallSummary } from "./ToolCallSummary";
+} from "@/lib/message";
+import { formatTime } from "@/lib/format";
+import { useConversationStore } from "@/store";
+import type { ChatMessage, MessageAttachment } from "@/types";
+import ThinkingBlock from "./ThinkingBlock";
 
 const { Text, Paragraph } = Typography;
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  version: number;
   quoted?: ChatMessage;
   onQuote: (message: ChatMessage) => void;
-  onRegenerate: (message: ChatMessage) => void;
   onCopy: (text: string) => void;
   onPreview: (message: ChatMessage) => void;
 }
 
-function ThinkingBlock({ thinking }: { thinking: string }) {
-  const [expanded, setExpanded] = useState(true);
-  if (!thinking.trim()) return null;
-  return (
-    <div className="thinking-block">
-      <button
-        type="button"
-        className="thinking-toggle"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <BulbOutlined />
-        <span>思考过程</span>
-        <span className="thinking-chevron">{expanded ? "▼" : "▶"}</span>
-      </button>
-      {expanded && (
-        <div className="thinking-content">
-          <MarkdownContent text={thinking} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MessageBubbleComponent({
   message,
+  version: _version,
   quoted,
   onQuote,
-  onRegenerate,
   onCopy,
   onPreview,
 }: MessageBubbleProps) {
+  const author = message.author || "未知";
   const isUser = message.role === "user";
   const isEvent =
     message.kind === "event" ||
     message.role === "system" ||
     message.role === "tool";
+  const thinkingEnabled = useConversationStore((s) =>
+    s.getThinkingEnabled(message.conversationId),
+  );
   const attachments = messageAttachments(message);
   const [previewAttachment, setPreviewAttachment] = useState<
     | (MessageAttachment & {
@@ -90,6 +70,8 @@ function MessageBubbleComponent({
     | undefined
   >();
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const onExpandedChange = (expanded: boolean) => setExpanded(expanded);
 
   useEffect(() => {
     return () => {
@@ -138,7 +120,7 @@ function MessageBubbleComponent({
   if (isEvent) {
     return (
       <div className="event-message">
-        <Tag icon={<BranchesOutlined />}>{message.author}</Tag>
+        <Tag icon={<BranchesOutlined />}>{author}</Tag>
         <Text type="secondary">{message.content}</Text>
       </div>
     );
@@ -147,7 +129,7 @@ function MessageBubbleComponent({
   if (message.kind === "preview_card") {
     return (
       <div className="message-row from-agent">
-        <Avatar className="message-avatar">{message.author.slice(0, 1)}</Avatar>
+        <Avatar className="message-avatar">{author.slice(0, 1)}</Avatar>
         <button
           className="message-card preview-message-card preview-card-button"
           data-testid="preview-card"
@@ -178,26 +160,50 @@ function MessageBubbleComponent({
   return (
     <>
       <div className={`message-row ${isUser ? "from-user" : "from-agent"}`}>
-        <Avatar className="message-avatar">{message.author.slice(0, 1)}</Avatar>
+        <Avatar className="message-avatar">{author.slice(0, 1)}</Avatar>
         <div className="message-card">
           <Flex justify="space-between" align="center" gap={12}>
             <Space>
-              <Text strong>{message.author}</Text>
+              <Text strong>{author}</Text>
               <Tag>{message.kind}</Tag>
               {message.streamState === "streaming" && (
                 <Tag color="processing">流式生成中</Tag>
               )}
+              {(
+                message.rawContent?._activeToolCalls as
+                  | Array<{ toolName: string }>
+                  | undefined
+              )?.length ? (
+                <Tag icon={<LoadingOutlined />} color="blue">
+                  正在使用{" "}
+                  {(
+                    message.rawContent?._activeToolCalls as Array<{
+                      toolName: string;
+                    }>
+                  )
+                    .map((t) => t.toolName)
+                    .join(", ")}
+                </Tag>
+              ) : null}
             </Space>
             <Text type="secondary" className="time">
               {formatTime(message.createdAt)}
             </Text>
           </Flex>
           {quoted && <div className="quote-block">{quoted.content}</div>}
-          {message.thinking && (
-            <ThinkingBlock thinking={message.thinking} />
+          {thinkingEnabled && !isUser && (
+            <ThinkingBlock
+              thinking={message.thinking ?? ""}
+              expanded={expanded}
+              onExpandedChange={onExpandedChange}
+            />
           )}
           <div className="message-content">
-            <MarkdownContent text={message.content} />
+            {message.streamState === "streaming" ? (
+              <div className="markdown-content">{message.content}</div>
+            ) : (
+              <MarkdownContent text={message.content} />
+            )}
           </div>
           {attachments.length > 0 && (
             <div
@@ -241,16 +247,6 @@ function MessageBubbleComponent({
                 }
               />
             </Tooltip>
-            {!isUser && (
-              <Tooltip title="重新生成">
-                <Button
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  onClick={() => onRegenerate(message)}
-                />
-              </Tooltip>
-            )}
-            {!isUser && <ToolCallSummary message={message} />}
           </Space>
         </div>
       </div>
@@ -335,14 +331,9 @@ function MessageBubbleComponent({
   );
 }
 
-export const MessageBubble = React.memo(MessageBubbleComponent, (prev, next) => {
-  if (prev.message.id !== next.message.id) return false;
-  if (prev.message.content !== next.message.content) return false;
-  if (prev.message.streamState !== next.message.streamState) return false;
-  if (prev.message.kind !== next.message.kind) return false;
-  if (prev.quoted?.id !== next.quoted?.id) return false;
-  const prevTools = JSON.stringify(toolEventsFromMessage(prev.message));
-  const nextTools = JSON.stringify(toolEventsFromMessage(next.message));
-  if (prevTools !== nextTools) return false;
-  return true;
-});
+export const MessageBubble = React.memo(
+  MessageBubbleComponent,
+  (prev, next) => {
+    return prev.version === next.version;
+  },
+);
