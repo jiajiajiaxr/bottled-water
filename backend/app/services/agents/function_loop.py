@@ -17,6 +17,7 @@ from app.services.ark import ark_client
 from app.services.context.attachments import attachment_preflight_reply
 from app.services.context.builder import ContextBuilder
 from app.services.context.state import update_conversation_state_after_turn
+from app.services.llm.document_artifacts import DOCUMENT_ARTIFACT_TOOLS, normalize_document_artifact_arguments
 from app.services.llm.tool_calls import artifact_arguments, detect_artifact_tool
 from app.services.llm.html_artifacts import HTML_ARTIFACT_TOOLS, normalize_html_artifact_arguments
 from app.services.llm_gateway import stream_model_config_chat
@@ -783,6 +784,8 @@ def _normalize_tool_arguments_for_request(
 ) -> dict[str, Any]:
     if tool_name in HTML_ARTIFACT_TOOLS:
         return normalize_html_artifact_arguments(prompt, arguments)
+    if tool_name in DOCUMENT_ARTIFACT_TOOLS:
+        return normalize_document_artifact_arguments(prompt, arguments)
     return arguments
 
 

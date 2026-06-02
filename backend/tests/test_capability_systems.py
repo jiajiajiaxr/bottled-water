@@ -35,6 +35,7 @@ from app.services.mcp.transports.common import tool_allowed
 from app.services.skills.context import activated_skill_context
 from app.services.skills.package import parse_skill_package
 from app.services.document_model import normalize_document_model, parse_markdown_blocks
+from app.services.llm.tool_calls import artifact_arguments
 from app.services.tools.executor import invoke_tool
 from app.services.tools.catalog import sync_builtin_tool_definitions
 
@@ -188,6 +189,66 @@ def test_document_model_drives_docx_and_pdf_renderers() -> None:
     assert "结构化项目方案" in pdf_text
     assert "实施范围" in pdf_text
     assert "阶段" in pdf_text
+
+
+def test_document_model_infers_templates_and_expands_required_sections() -> None:
+    weekly = normalize_document_model(None, title="本周研发周报", source_text="生成一份本周研发周报")
+    plan = normalize_document_model(None, title="项目计划书", source_text="帮我做一个项目计划")
+    lab_report = normalize_document_model(None, title="酸碱中和滴定实验报告", source_text="生成化学实验报告")
+
+    assert weekly["template"] == "weekly"
+    assert plan["template"] == "project_plan"
+    assert lab_report["template"] == "lab_report"
+    for model in (weekly, plan, lab_report):
+        titles = [section["title"] for section in model["sections"]]
+        assert "摘要" in titles
+        assert "风险项" in titles
+        assert "行动计划" in titles
+        assert "结论" in titles
+
+
+def test_weak_document_tool_arguments_expand_to_formal_docx_and_pdf() -> None:
+    db = _memory_session()
+    user = _user()
+    conversation = Conversation(creator_id=user.id, chat_type="single", title="Formal Documents")
+    db.add_all([user, conversation])
+    db.commit()
+    payload = {
+        "conversation_id": conversation.id,
+        "title": "项目计划",
+        "body": "生成一个项目计划，包含风险和行动计划。",
+    }
+
+    docx_result = invoke_tool(db, user, "artifact.create_docx", payload)
+    pdf_result = invoke_tool(db, user, "artifact.create_pdf", payload)
+    docx_artifact = db.get(Artifact, docx_result["result"]["artifact_id"])
+    pdf_artifact = db.get(Artifact, pdf_result["result"]["artifact_id"])
+    docx_export = export_artifact(docx_artifact)
+    pdf_export = export_artifact(pdf_artifact)
+    document = Document(io.BytesIO(docx_export.content))
+    docx_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+    assert docx_artifact.content["content_model"]["template"] == "project_plan"
+    assert "agenthub-word-preview" in docx_artifact.content["preview_html"]
+    assert "行动计划" in docx_artifact.content["preview_html"]
+    assert "风险项" in docx_artifact.content["preview_html"]
+    assert "行动计划" in docx_text
+    assert docx_export.filename.endswith(".docx")
+    assert pdf_artifact.content["content_model"]["template"] == "project_plan"
+    assert pdf_export.content.startswith(b"%PDF")
+    assert pdf_export.media_type == "application/pdf"
+
+
+def test_document_artifact_arguments_include_structured_content_model() -> None:
+    args = artifact_arguments("artifact.create_pdf", "生成一份酸碱中和滴定实验报告，包含结果数据和结论。")
+    model = args["content_model"]
+
+    assert args["template"] == "lab_report"
+    assert model["kind"] == "document"
+    assert model["template"] == "lab_report"
+    assert model["toc"]["enabled"] is True
+    assert {section["title"] for section in model["sections"]} >= {"摘要", "实验目的", "结果数据", "结论"}
+    assert any(block["type"] == "risk_item" for block in model["blocks"])
 
 
 def test_document_templates_have_distinct_default_sections() -> None:

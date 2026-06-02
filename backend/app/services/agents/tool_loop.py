@@ -7,6 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, McpServer, Skill, ToolDefinition, User
+from app.services.llm.document_artifacts import document_artifact_arguments
 from app.services.realtime.event_bus import event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
 from app.services.skills.runtime import SkillRuntime
@@ -147,28 +148,7 @@ def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> di
         template = _document_template_for_prompt(prompt)
         args.update({"title": _document_title_for_prompt(prompt), "body": prompt, "template": template})
         if name in {"artifact.create_pdf", "artifact.create_docx"}:
-            args["content_model"] = {
-                "title": args["title"],
-                "template": template,
-                "cover": {"issuer": "AgentHub", "confidentiality": "演示文档"},
-                "toc": {"enabled": True, "title": "目录"},
-                "sections": [
-                    {
-                        "title": "需求概述",
-                        "blocks": [
-                            {"type": "callout", "title": "用户需求", "text": prompt},
-                            {"type": "paragraph", "text": "以下内容基于当前对话需求生成，下载文件为真实二进制文档。"},
-                        ],
-                    },
-                    {
-                        "title": "正文内容",
-                        "blocks": [
-                            {"type": "paragraph", "text": prompt},
-                            {"type": "list", "ordered": True, "items": ["背景说明", "方案要点", "交付建议"]},
-                        ],
-                    },
-                ],
-            }
+            args.update(document_artifact_arguments(prompt))
         if name in {"artifact.create_html", "artifact.create_web_app"}:
             args["html"] = ""
     if name == "db.inspect":

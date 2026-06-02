@@ -6,7 +6,7 @@ from typing import Any
 
 from app.services.document_model.markdown import markdown_to_sections, parse_markdown_blocks
 from app.services.document_model.templates import DOCUMENT_TEMPLATES as TEMPLATE_REGISTRY
-from app.services.document_model.templates import get_template, normalize_template_name
+from app.services.document_model.templates import get_template, infer_template_name, normalize_template_name
 
 
 DOCUMENT_TEMPLATES = set(TEMPLATE_REGISTRY)
@@ -21,6 +21,10 @@ BLOCK_TYPES = {
     "divider",
     "page_break",
     "signatures",
+    "risk_item",
+    "action_plan",
+    "summary",
+    "conclusion",
 }
 
 
@@ -46,15 +50,17 @@ def _from_mapping(
     template: str | None,
 ) -> dict[str, Any]:
     model_title = _clean_text(value.get("title") or title or "AgentHub Document")
-    model_template = normalize_template_name(value.get("template") or template)
-    template_def = get_template(model_template)
     model_source = _clean_text(value.get("source_text") or value.get("body") or source_text or "")
+    template_hint = value.get("template") or template
+    model_template = normalize_template_name(template_hint or infer_template_name(model_title, model_source))
+    template_def = get_template(model_template)
     sections = _normalize_sections(value)
     if not sections and model_source:
         sections = markdown_to_sections(model_source)
     if not sections:
         sections = template_def.default_sections()
-    sections = _merge_source_into_template_sections(sections, model_source)
+    sections = _merge_source_into_template_sections(sections, model_source, model_template)
+    sections = _ensure_required_sections(sections, model_template)
     return _document(
         title=model_title,
         subtitle=_clean_text(value.get("subtitle") or template_def.subtitle),
@@ -73,11 +79,12 @@ def _from_mapping(
 
 
 def _from_source_text(title: str, source_text: str, template: str | None) -> dict[str, Any]:
-    model_template = normalize_template_name(template)
+    model_template = normalize_template_name(template or infer_template_name(title, source_text))
     template_def = get_template(model_template)
     sections = markdown_to_sections(source_text) if source_text else template_def.default_sections()
     if _looks_like_short_prompt(source_text):
-        sections = _merge_source_into_template_sections(template_def.default_sections(), source_text)
+        sections = _merge_source_into_template_sections(template_def.default_sections(), source_text, model_template)
+    sections = _ensure_required_sections(sections, model_template)
     return _document(
         title=title or "AgentHub Document",
         subtitle=template_def.subtitle,
@@ -148,6 +155,20 @@ def _block(value: dict[str, Any]) -> dict[str, Any]:
     if block_type == "signatures":
         items = value.get("items") if isinstance(value.get("items"), list) else []
         return {"type": "signatures", "items": [_clean_text(item) for item in items]}
+    if block_type == "risk_item":
+        return {
+            "type": "risk_item",
+            "items": _normalize_matrix_items(value, headers=("风险", "级别", "影响", "缓解措施")),
+        }
+    if block_type == "action_plan":
+        return {
+            "type": "action_plan",
+            "items": _normalize_matrix_items(value, headers=("事项", "负责人", "时间", "状态")),
+        }
+    if block_type == "summary":
+        return {"type": "summary", "text": _text(value)}
+    if block_type == "conclusion":
+        return {"type": "conclusion", "text": _text(value)}
     return {"type": "paragraph", "text": _text(value)}
 
 
@@ -161,6 +182,35 @@ def _table(value: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(row, dict):
             normalized_rows.append([_clean_text(row.get(header, "")) for header in headers[:12]])
     return {"type": "table", "headers": [_clean_text(item) for item in headers[:12]], "rows": normalized_rows}
+
+
+def _normalize_matrix_items(value: dict[str, Any], *, headers: tuple[str, ...]) -> list[list[str]]:
+    raw_items = value.get("items") if isinstance(value.get("items"), list) else value.get("rows")
+    if not isinstance(raw_items, list):
+        raw_items = []
+    key_map = {
+        "风险": ("risk", "name", "title", "issue"),
+        "级别": ("level", "severity", "priority"),
+        "影响": ("impact", "effect"),
+        "缓解措施": ("mitigation", "action", "measure"),
+        "事项": ("task", "item", "name", "title"),
+        "负责人": ("owner", "assignee", "responsible"),
+        "时间": ("due", "deadline", "time"),
+        "状态": ("status", "state"),
+    }
+    rows: list[list[str]] = []
+    for item in raw_items[:60]:
+        if isinstance(item, list):
+            rows.append([_clean_text(cell) for cell in item[: len(headers)]])
+        elif isinstance(item, dict):
+            row = []
+            for header in headers:
+                keys = key_map.get(header, ())
+                row.append(next((_clean_text(item.get(key)) for key in keys if _clean_text(item.get(key))), ""))
+            rows.append(row)
+        elif _clean_text(item):
+            rows.append([_clean_text(item), "", "", ""])
+    return rows
 
 
 def _normalize_cover(value: Any, defaults: dict[str, Any], title: str, subtitle: Any) -> dict[str, Any]:
@@ -208,13 +258,40 @@ def _normalize_appendix(value: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _merge_source_into_template_sections(sections: list[dict[str, Any]], source_text: str) -> list[dict[str, Any]]:
+def _merge_source_into_template_sections(
+    sections: list[dict[str, Any]],
+    source_text: str,
+    template: str,
+) -> list[dict[str, Any]]:
     if not source_text.strip() or not _looks_like_short_prompt(source_text):
         return sections
     merged = deepcopy(sections)
-    if merged:
-        merged[0].setdefault("blocks", [])
-        merged[0]["blocks"].insert(0, {"type": "callout", "title": "用户需求", "text": source_text.strip(), "variant": "info"})
+    if not merged:
+        return merged
+    merged[0].setdefault("blocks", [])
+    merged[0]["blocks"].insert(
+        0,
+        {"type": "callout", "title": "用户需求", "text": source_text.strip(), "variant": "info"},
+    )
+    merged[0]["blocks"].append({"type": "paragraph", "text": _requirement_summary(source_text, template)})
+    return merged
+
+
+def _ensure_required_sections(sections: list[dict[str, Any]], template: str) -> list[dict[str, Any]]:
+    merged = deepcopy(sections)
+    existing = {str(section.get("title") or "") for section in merged}
+    defaults: list[tuple[str, dict[str, Any]]] = [
+        ("摘要", {"type": "summary", "text": "概括文档背景、目标、核心内容和最终建议。"}),
+        ("风险项", {"type": "risk_item", "items": [["待识别风险", "中", "待评估", "制定缓解措施"]]}),
+        ("行动计划", {"type": "action_plan", "items": [["明确下一步行动", "负责人待定", "近期", "待启动"]]}),
+        ("结论", {"type": "conclusion", "text": "总结当前判断、适用范围和后续建议。"}),
+    ]
+    if template == "lab_report":
+        defaults.insert(1, ("实验目的", {"type": "paragraph", "text": "说明实验要验证的问题、假设和评价指标。"}))
+    for section_title, block in defaults:
+        if section_title not in existing:
+            merged.append({"title": section_title, "level": 1, "blocks": [block]})
+            existing.add(section_title)
     return merged
 
 
@@ -222,7 +299,15 @@ def _looks_like_short_prompt(source_text: str) -> bool:
     stripped = source_text.strip()
     if not stripped:
         return False
-    return len(stripped) <= 80 and "\n" not in stripped and not stripped.startswith("#")
+    return len(stripped) <= 100 and "\n" not in stripped and not stripped.startswith("#")
+
+
+def _requirement_summary(source_text: str, template: str) -> str:
+    label = get_template(template).label
+    return (
+        f"本文件将围绕“{source_text.strip()}”生成{label}，"
+        "并补齐摘要、目录、章节、风险项、行动计划和结论，便于直接用于演示或交付。"
+    )
 
 
 def _document(

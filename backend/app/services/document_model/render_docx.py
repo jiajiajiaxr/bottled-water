@@ -76,7 +76,7 @@ def _style_font(style, qn, name: str, size, color) -> None:
 def _header_footer(document, model: dict[str, Any], element_factory, qn) -> None:
     title = str(model.get("title") or "AgentHub 文档")
     header = str((model.get("template_spec") or {}).get("header") or f"AgentHub · {title}")
-    footer_text = str((model.get("template_spec") or {}).get("footer") or "第 ")
+    footer_text = str((model.get("template_spec") or {}).get("footer") or "第")
     for section in document.sections:
         section.header.paragraphs[0].text = f"{header} · {title}"
         footer = section.footer.paragraphs[0]
@@ -142,10 +142,12 @@ def _render_block(document, block: dict[str, Any]) -> None:
         _render_list(document, block)
     elif block_type == "table":
         _render_table(document, block)
-    elif block_type == "callout":
-        para = document.add_paragraph(style="Intense Quote")
-        para.add_run(f"{block.get('title') or '提示'}：").bold = True
-        para.add_run(str(block.get("text") or ""))
+    elif block_type == "risk_item":
+        _render_table(document, _matrix_table(block, ["风险", "级别", "影响", "缓解措施"]))
+    elif block_type == "action_plan":
+        _render_table(document, _matrix_table(block, ["事项", "负责人", "时间", "状态"]))
+    elif block_type in {"callout", "summary", "conclusion"}:
+        _render_callout(document, block)
     elif block_type == "quote":
         document.add_paragraph(str(block.get("text") or ""), style="Intense Quote")
     elif block_type == "image":
@@ -158,6 +160,13 @@ def _render_block(document, block: dict[str, Any]) -> None:
         _signatures(document, block.get("items") or [])
     else:
         document.add_paragraph(str(block.get("text") or ""))
+
+
+def _render_callout(document, block: dict[str, Any]) -> None:
+    default_title = {"summary": "摘要", "conclusion": "结论"}.get(str(block.get("type")), "提示")
+    para = document.add_paragraph(style="Intense Quote")
+    para.add_run(f"{block.get('title') or default_title}：").bold = True
+    para.add_run(str(block.get("text") or ""))
 
 
 def _render_list(document, block: dict[str, Any]) -> None:
@@ -184,6 +193,12 @@ def _render_table(document, block: dict[str, Any]) -> None:
         cells = table.add_row().cells
         for index, value in enumerate(row_values[:column_count]):
             cells[index].text = value
+    document.add_paragraph("")
+
+
+def _matrix_table(block: dict[str, Any], headers: list[str]) -> dict[str, Any]:
+    rows = block.get("items") if isinstance(block.get("items"), list) else []
+    return {"type": "table", "headers": headers, "rows": rows}
 
 
 def _signatures(document, items: list[str]) -> None:

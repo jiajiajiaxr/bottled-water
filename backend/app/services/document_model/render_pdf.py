@@ -100,11 +100,39 @@ def _story(
     if (model.get("toc") or {}).get("enabled", True):
         story.extend(_toc(model, styles, paragraph, page_break))
     for section in model.get("sections", []):
-        story.extend(_section_flowables(section, available_width, styles, paragraph, page_break, list_flowable, list_item, table, table_style, hr_flowable, colors))
+        story.extend(
+            _section_flowables(
+                section,
+                available_width,
+                styles,
+                paragraph,
+                page_break,
+                list_flowable,
+                list_item,
+                table,
+                table_style,
+                hr_flowable,
+                colors,
+            )
+        )
     if model.get("appendix"):
         story.extend([page_break(), paragraph("附录", styles["h1"])])
         for section in model["appendix"]:
-            story.extend(_section_flowables(section, available_width, styles, paragraph, page_break, list_flowable, list_item, table, table_style, hr_flowable, colors))
+            story.extend(
+                _section_flowables(
+                    section,
+                    available_width,
+                    styles,
+                    paragraph,
+                    page_break,
+                    list_flowable,
+                    list_item,
+                    table,
+                    table_style,
+                    hr_flowable,
+                    colors,
+                )
+            )
     if model.get("signatures"):
         story.extend(_signature_flowables(model["signatures"], available_width, paragraph, styles, table, table_style, colors))
     return story
@@ -157,11 +185,16 @@ def _block_flowables(block: dict[str, Any], available_width: float, styles, para
         return [list_flowable(items, bulletType=bullet_type, leftIndent=18)] if items else []
     if block_type == "table":
         return _table_flowable(block, available_width, paragraph, styles, table, table_style, colors)
-    if block_type == "callout":
-        title = _escape(str(block.get("title") or "提示"))
+    if block_type == "risk_item":
+        return _table_flowable(_matrix_table(block, ["风险", "级别", "影响", "缓解措施"]), available_width, paragraph, styles, table, table_style, colors)
+    if block_type == "action_plan":
+        return _table_flowable(_matrix_table(block, ["事项", "负责人", "时间", "状态"]), available_width, paragraph, styles, table, table_style, colors)
+    if block_type in {"callout", "summary", "conclusion"}:
+        title = _escape(str(block.get("title") or {"summary": "摘要", "conclusion": "结论"}.get(str(block_type), "提示")))
         text = _escape(str(block.get("text") or ""))
         cell = paragraph(f"<b>{title}：</b>{text}", styles["base"])
-        return _boxed_flowable(cell, available_width, table, table_style, colors, "#f0f7ff")
+        background = "#f0fdf4" if block_type == "conclusion" else "#f0f7ff"
+        return _boxed_flowable(cell, available_width, table, table_style, colors, background)
     if block_type == "quote":
         return [paragraph(f"“{_escape(str(block.get('text') or ''))}”", styles["quote"])]
     if block_type == "image":
@@ -201,6 +234,11 @@ def _table_flowable(block: dict[str, Any], available_width: float, paragraph, st
     return [flowable]
 
 
+def _matrix_table(block: dict[str, Any], headers: list[str]) -> dict[str, Any]:
+    rows = block.get("items") if isinstance(block.get("items"), list) else []
+    return {"type": "table", "headers": headers, "rows": rows}
+
+
 def _boxed_flowable(cell, available_width: float, table, table_style, colors, background: str) -> list[Any]:
     flowable = table([[cell]], colWidths=[available_width], hAlign="LEFT")
     flowable.setStyle(
@@ -219,7 +257,10 @@ def _boxed_flowable(cell, available_width: float, table, table_style, colors, ba
 def _signature_flowables(items: list[str], available_width: float, paragraph, styles, table, table_style, colors) -> list[Any]:
     names = [str(item) for item in items if str(item).strip()] or ["负责人", "确认人"]
     data = [["角色", "签字", "日期"], *[[name, "", ""] for name in names]]
-    flowable = table([[paragraph(_escape(cell), styles["base"]) for cell in row] for row in data], colWidths=[available_width * 0.25, available_width * 0.45, available_width * 0.3])
+    flowable = table(
+        [[paragraph(_escape(cell), styles["base"]) for cell in row] for row in data],
+        colWidths=[available_width * 0.25, available_width * 0.45, available_width * 0.3],
+    )
     flowable.setStyle(table_style([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f8fafc"))]))
     return [paragraph("签字确认", styles["h1"]), flowable]
 

@@ -3,6 +3,7 @@ from app.services.document_model.templates.registry import (
     DocumentTemplate,
     available_templates,
     get_template,
+    infer_template_name,
     normalize_template_name,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "DocumentTemplate",
     "available_templates",
     "get_template",
+    "infer_template_name",
     "normalize_template_name",
 ]

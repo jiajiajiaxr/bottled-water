@@ -23,8 +23,9 @@ def _cover_html(model: dict[str, Any], label: str) -> str:
         f"{cover.get('date_label') or '生成日期'}：{cover.get('date') or ''}",
     ]
     meta_html = "".join(f"<span>{escape(item)}</span>" for item in meta if item)
+    template = escape(str(model.get("template") or "report"))
     return f"""
-    <main class="page a4-page cover-page template-{escape(str(model.get("template") or "report"))}">
+    <main class="page a4-page cover-page template-{template}">
       <div class="label">HTML preview · 下载为真实 {escape(label)} 文件</div>
       <h1>{escape(str(cover.get("title") or model.get("title") or "AgentHub 文档"))}</h1>
       {subtitle_html}
@@ -85,10 +86,14 @@ def _block_html(block: dict[str, Any]) -> str:
         return f"<{tag}>{items}</{tag}>"
     if block_type == "table":
         return _table_html(block)
-    if block_type == "callout":
-        title = escape(str(block.get("title") or "提示"))
+    if block_type == "risk_item":
+        return _table_html({"headers": ["风险", "级别", "影响", "缓解措施"], "rows": block.get("items") or []})
+    if block_type == "action_plan":
+        return _table_html({"headers": ["事项", "负责人", "时间", "状态"], "rows": block.get("items") or []})
+    if block_type in {"callout", "summary", "conclusion"}:
+        title = escape(str(block.get("title") or {"summary": "摘要", "conclusion": "结论"}.get(str(block_type), "提示")))
         text = escape(str(block.get("text") or ""))
-        variant = escape(str(block.get("variant") or "info"))
+        variant = escape(str(block.get("variant") or ("success" if block_type == "conclusion" else "info")))
         return f"<aside class=\"callout {variant}\"><strong>{title}</strong><p>{text}</p></aside>"
     if block_type == "quote":
         return f"<blockquote>{escape(str(block.get('text') or ''))}</blockquote>"

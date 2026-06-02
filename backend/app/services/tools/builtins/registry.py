@@ -50,14 +50,15 @@ def _document_artifact_schema() -> dict[str, Any]:
             "body": {"type": "string"},
             "template": {
                 "type": "string",
-                "description": "正式文档模板：report/proposal/prd/meeting/lab_report",
+                "description": "正式文档模板：report/proposal/weekly/lab_report/project_plan/prd/meeting",
             },
             "content_model": {
                 "type": "object",
                 "description": (
                     "结构化 DocumentModel，含 cover/toc/metadata/sections/blocks/tables/"
                     "callouts/signatures/appendix；blocks 支持 paragraph/heading/list/"
-                    "table/callout/quote/image/divider/page_break。"
+                    "table/callout/quote/image/divider/page_break/risk_item/action_plan/"
+                    "summary/conclusion。生成 PDF/Word 时应优先传该字段。"
                 ),
             },
         },

@@ -3,26 +3,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.services.llm.document_artifacts import DOCUMENT_ARTIFACT_TOOLS, document_artifact_arguments
 from app.services.llm.html_artifacts import html_artifact_arguments
 
 
 ARTIFACT_TOOL_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "artifact.create_html",
-        (
-            "html",
-            "HTML",
-            "网页",
-            "页面",
-            "网页页面",
-            "web app",
-            "webapp",
-            "计算器",
-            "表单",
-            "看板",
-            "登录页",
-            "登陆页",
-        ),
+        ("html", "HTML", "网页", "页面", "web app", "webapp", "计算器", "表单", "看板", "登录页", "登陆页"),
     ),
     ("artifact.create_pdf", ("pdf", "PDF")),
     ("artifact.create_docx", ("word", "docx", "Word", "DOCX", "Word 文档", "文档")),
@@ -72,6 +60,15 @@ def select_mock_tool_call(messages: list[dict[str, Any]], tools: list[dict[str, 
     return None
 
 
+def artifact_arguments(tool_name: str, prompt: str) -> dict[str, Any]:
+    if tool_name in {"artifact.create_html", "artifact.create_web_app"}:
+        return html_artifact_arguments(prompt)
+    if tool_name in DOCUMENT_ARTIFACT_TOOLS:
+        return document_artifact_arguments(prompt)
+    title = prompt.strip().splitlines()[0][:60] or "AgentHub 产物"
+    return {"title": title, "body": prompt}
+
+
 def _last_user_text(messages: list[dict[str, Any]]) -> str:
     return next((str(message.get("content") or "") for message in reversed(messages) if message.get("role") == "user"), "")
 
@@ -83,14 +80,6 @@ def _tool_names(tools: list[dict[str, Any]]) -> set[str]:
         if isinstance(function, dict) and function.get("name"):
             names.add(str(function["name"]))
     return names
-
-
-def artifact_arguments(tool_name: str, prompt: str) -> dict[str, str]:
-    title = prompt.strip().splitlines()[0][:60] or "AgentHub 产物"
-    args = {"title": title, "body": prompt}
-    if tool_name in {"artifact.create_html", "artifact.create_web_app"}:
-        return html_artifact_arguments(prompt)
-    return args
 
 
 def _tool_call(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
