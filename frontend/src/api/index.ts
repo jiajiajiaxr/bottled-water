@@ -27,6 +27,7 @@ export {
   streamAssistantReply,
   assistantReply,
   cancelAssistantReply,
+  runMessageCodeBlock,
 } from "./message";
 
 export { tasks, createBackgroundTask, cancelTask } from "./task";

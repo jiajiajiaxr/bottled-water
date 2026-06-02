@@ -15,7 +15,17 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import Base
 from app.core.errors import ValidationAppError
-from app.models import Artifact, Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
+from app.models import (
+    Artifact,
+    Conversation,
+    FileAsset,
+    Message,
+    SandboxSession,
+    ToolInvocation,
+    User,
+    Workspace,
+    WorkspaceMember,
+)
 from app.api.artifacts import download_artifact_preview_pdf
 from app.api.messages import _send
 from app.api.workspace_files import download_workspace_file, download_workspace_file_preview_pdf, preview_workspace_file
@@ -30,6 +40,7 @@ from app.services.files.workspace_tree import (
 )
 from app.services.files.previewers import office as office_preview
 from app.services.tools.builtins.file.preview import preview_payload
+from app.services.chat.code_runner import run_chat_python_code_block
 from app.services.tools.executor import invoke_tool
 from app.services.workspaces.filesystem import scoped_dir, workspace_root
 
@@ -100,6 +111,56 @@ def test_file_write_then_sandbox_run_reads_same_workspace_scope(db: Session) -> 
         assert session is not None
         assert session.command_history[0]["cwd"] == result["result"]["cwd"]
         assert any(item["path"] == "hello.py" for item in session.mounted_files)
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_chat_code_block_runner_executes_python_and_records_tool_invocation(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    message = Message(
+        client_message_id="agent-code-message",
+        conversation_id=conversation.id,
+        sender_type="agent",
+        sender_id="agent-python",
+        sender_name="Python Agent",
+        content_type="text",
+        content={"text": "```python\nprint('hello from chat code')\n```"},
+        status="completed",
+    )
+    db.add(message)
+    db.commit()
+
+    try:
+        result = run_chat_python_code_block(
+            db,
+            user=user,
+            conversation=conversation,
+            message_id=message.id,
+            block_index=0,
+            code="print('hello from chat code')",
+            language="python",
+            timeout_seconds=5,
+        )
+        invocation = db.scalar(
+            select(ToolInvocation)
+            .where(
+                ToolInvocation.conversation_id == conversation.id,
+                ToolInvocation.tool_name == "sandbox.run",
+            )
+            .order_by(ToolInvocation.created_at.desc())
+        )
+        code_path = scoped_dir(workspace.id, "sandbox", conversation_id=conversation.id) / result["filename"]
+
+        assert result["status"] == "succeeded"
+        assert "hello from chat code" in result["stdout"]
+        assert result["exit_code"] == 0
+        assert code_path.exists()
+        assert invocation is not None
+        assert invocation.status == "succeeded"
+        assert invocation.arguments["source"] == "chat_code_block"
+        assert invocation.arguments["message_id"] == message.id
+        assert invocation.arguments["code_block_index"] == 0
+        assert message.content["code_block_runs"]["0"]["stdout"].strip() == "hello from chat code"
     finally:
         _cleanup(workspace.id)
 

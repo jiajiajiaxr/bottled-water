@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   BranchesOutlined,
   BulbOutlined,
@@ -20,8 +20,13 @@ import {
   Typography,
 } from "antd";
 import { api } from "../../../../api";
+import type { ChatCodeRunResult } from "../../../../api/message";
 import { formatFileSize } from "../../../../lib/format";
-import { MarkdownContent } from "../../../../lib/markdown";
+import {
+  MarkdownContent,
+  type MarkdownCodeBlock,
+  type MarkdownCodeRunResult,
+} from "../../../../lib/markdown";
 import {
   attachmentName,
   messageAttachments,
@@ -41,6 +46,33 @@ interface MessageBubbleProps {
   onRegenerate: (message: ChatMessage) => void;
   onCopy: (text: string) => void;
   onPreview: (message: ChatMessage) => void;
+}
+
+function codeRunResultsFromMessage(
+  message: ChatMessage,
+): Record<number, MarkdownCodeRunResult> {
+  const runs = message.rawContent?.code_block_runs;
+  if (!runs || typeof runs !== "object" || Array.isArray(runs)) return {};
+  return Object.fromEntries(
+    Object.entries(runs).map(([key, value]) => {
+      const item = value && typeof value === "object" ? value : {};
+      const record = item as Record<string, unknown>;
+      return [
+        Number(key),
+        {
+          status: String(record.status ?? ""),
+          stdout: String(record.stdout ?? ""),
+          stderr: String(record.stderr ?? ""),
+          exit_code:
+            typeof record.exit_code === "number" ? record.exit_code : null,
+          duration_ms:
+            typeof record.duration_ms === "number"
+              ? record.duration_ms
+              : null,
+        },
+      ];
+    }),
+  );
 }
 
 function ThinkingBlock({ thinking }: { thinking: string }) {
@@ -90,6 +122,12 @@ function MessageBubbleComponent({
     | undefined
   >();
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [codeRunResults, setCodeRunResults] = useState<
+    Record<number, MarkdownCodeRunResult>
+  >(() => codeRunResultsFromMessage(message));
+  const [codeBlockRunning, setCodeBlockRunning] = useState<
+    Record<number, boolean>
+  >({});
 
   useEffect(() => {
     return () => {
@@ -97,6 +135,10 @@ function MessageBubbleComponent({
         URL.revokeObjectURL(previewAttachment.previewUrl);
     };
   }, [previewAttachment?.previewUrl]);
+
+  useEffect(() => {
+    setCodeRunResults(codeRunResultsFromMessage(message));
+  }, [message.id, message.rawContent]);
 
   const openAttachment = async (attachment: MessageAttachment) => {
     const next = {
@@ -134,6 +176,49 @@ function MessageBubbleComponent({
       setPreviewLoading(false);
     }
   };
+
+  const runCodeBlock = useCallback(
+    async (block: MarkdownCodeBlock) => {
+      if (!message.conversationId || codeBlockRunning[block.index]) return;
+      setCodeBlockRunning((current) => ({ ...current, [block.index]: true }));
+      try {
+        const result: ChatCodeRunResult = await api.runMessageCodeBlock(
+          message.conversationId,
+          message.id,
+          block.index,
+          {
+            code: block.code,
+            language: block.language || "python",
+            timeout_seconds: 15,
+          },
+        );
+        setCodeRunResults((current) => ({
+          ...current,
+          [block.index]: {
+            status: result.status,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exit_code: result.exit_code,
+            duration_ms: result.duration_ms,
+          },
+        }));
+      } catch (error) {
+        setCodeRunResults((current) => ({
+          ...current,
+          [block.index]: {
+            status: "failed",
+            stderr: error instanceof Error ? error.message : "代码运行失败",
+          },
+        }));
+      } finally {
+        setCodeBlockRunning((current) => ({
+          ...current,
+          [block.index]: false,
+        }));
+      }
+    },
+    [codeBlockRunning, message.conversationId, message.id],
+  );
 
   if (isEvent) {
     return (
@@ -197,7 +282,12 @@ function MessageBubbleComponent({
             <ThinkingBlock thinking={message.thinking} />
           )}
           <div className="message-content">
-            <MarkdownContent text={message.content} />
+            <MarkdownContent
+              text={message.content}
+              codeBlockResults={codeRunResults}
+              codeBlockRunning={codeBlockRunning}
+              onRunCodeBlock={!isUser ? runCodeBlock : undefined}
+            />
           </div>
           {attachments.length > 0 && (
             <div

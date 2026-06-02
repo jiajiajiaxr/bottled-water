@@ -8,6 +8,23 @@ import { demoMessages, demoUser } from "../mock";
 import { isVisibleChatMessage } from "../lib/message";
 import type { AgentTask, ChatMessage, UploadedFile, WorkflowRun } from "../types";
 
+export interface ChatCodeRunResult {
+  message_id: string;
+  code_block_index: number;
+  language: string;
+  filename: string;
+  sandbox_path: string;
+  invocation_id?: string;
+  status: string;
+  stdout: string;
+  stderr: string;
+  exit_code?: number | null;
+  duration_ms?: number | null;
+  sandbox_id?: string;
+  cwd?: string;
+  created_at?: string;
+}
+
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
   try {
     const result = await request<{ items: ChatMessage[] } | ChatMessage[]>(
@@ -221,5 +238,20 @@ export async function cancelAssistantReply(
   return await request<{ cancelled: boolean }>(
     `/conversations/${conversationId}/stream/cancel`,
     { method: "POST" },
+  );
+}
+
+export async function runMessageCodeBlock(
+  conversationId: string,
+  messageId: string,
+  blockIndex: number,
+  payload: { code: string; language?: string; timeout_seconds?: number },
+): Promise<ChatCodeRunResult> {
+  return await request<ChatCodeRunResult>(
+    `/conversations/${conversationId}/messages/${messageId}/code-blocks/${blockIndex}/run`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
   );
 }

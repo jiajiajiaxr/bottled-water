@@ -13,7 +13,9 @@ from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Conversation, FileAsset, Message, User, utcnow
+from app.schemas.requests import RunMessageCodeBlockRequest
 from app.services.chat.cancellation import cancel_conversation_generation
+from app.services.chat.code_runner import run_chat_python_code_block
 from app.services.chat.orchestrator import run_orchestration
 from app.services.context.attachments import readable_attachment_text
 from app.services.files.references import resolve_file_reference_attachments
@@ -227,6 +229,30 @@ async def reply_message(
     payload["reply_to_message_id"] = message_id
     message = _send(db, user, conversation_id, payload, trigger_agent=True)
     return ok(message_to_dict(message), "回复成功")
+
+
+@router.post("/conversations/{conversation_id}/messages/{message_id}/code-blocks/{block_index}/run")
+async def run_message_code_block(
+    conversation_id: str,
+    message_id: str,
+    block_index: int,
+    payload: RunMessageCodeBlockRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conversation = _get_conversation(db, user, conversation_id)
+    result = run_chat_python_code_block(
+        db,
+        user=user,
+        conversation=conversation,
+        message_id=message_id,
+        block_index=block_index,
+        code=payload.code,
+        language=payload.language,
+        timeout_seconds=payload.timeout_seconds,
+    )
+    db.commit()
+    return ok(result, "代码运行完成")
 
 
 @router.get("/conversations/{conversation_id}/stream")

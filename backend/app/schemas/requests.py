@@ -36,6 +36,12 @@ class SendMessageRequest(BaseModel):
     reply_to_message_id: str | None = None
 
 
+class RunMessageCodeBlockRequest(BaseModel):
+    code: str
+    language: str = "python"
+    timeout_seconds: int = Field(default=10, ge=1, le=30)
+
+
 class CreateAgentRequest(BaseModel):
     name: str
     type: str = "custom"
