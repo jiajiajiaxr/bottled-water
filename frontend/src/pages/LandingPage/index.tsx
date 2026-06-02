@@ -26,11 +26,11 @@ export function LandingPage() {
       <LandingNav />
       <section className="landing-hero">
         <div className="landing-hero-copy">
-          <span className="landing-eyebrow">Multi-Agent Collaboration Platform</span>
+          <span className="landing-eyebrow">AI Infrastructure for Agent Teams</span>
           <h1>AgentHub 多智能体协作工作台</h1>
           <p>
-            用 IM 群聊组织 Agent，用工作流画布编排任务，用 Tool / Skill / MCP
-            生成真实产物。
+            用 IM 群聊组织多 Agent，用工作流画布编排任务，用 Tool / Skill / MCP
+            调用真实能力，并把 PDF、HTML、Office、沙箱运行结果交付成可预览产物。
           </p>
           <div className="landing-cta-row">
             <Button type="primary" size="large" icon={<PlayCircleOutlined />}>
@@ -44,9 +44,9 @@ export function LandingPage() {
             </Button>
           </div>
           <div className="landing-hero-proof">
-            <span>真实 Function Call</span>
-            <span>会话级工作流</span>
-            <span>沙箱与审计</span>
+            <span>Agent Function Call</span>
+            <span>会话级 Workflow</span>
+            <span>真实产物交付</span>
           </div>
         </div>
         <ProductShowcase />

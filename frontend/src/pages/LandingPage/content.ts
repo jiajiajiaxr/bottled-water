@@ -1,41 +1,47 @@
 export const githubUrl = "https://github.com/jiajiajiaxr/bottled-water";
 
-export const capabilityCards = [
+export const capabilities = [
   {
-    title: "多 Agent 群聊协作",
-    kicker: "IM Workspace",
-    body: "用会话组织任务、成员、附件和上下文，Agent 像团队成员一样独立发言、协作和审查。",
-    points: ["单聊 / 群聊", "@Agent 指定", "历史可恢复"],
+    title: "会话协作",
+    eyebrow: "IM Workspace",
+    problem: "多 Agent 项目最容易散在一堆任务、文件和日志里，答辩时很难讲清楚谁做了什么。",
+    demo: "左侧会话、群聊成员、@Agent 指定回复、附件和历史消息会保持在一个可恢复的 IM 工作台里。",
+    signals: ["单聊 / 群聊", "成员管理", "历史恢复"],
   },
   {
-    title: "Agent Function Call Loop",
-    kicker: "Agent Runtime",
-    body: "每个 Worker 使用自己的模型、工具、Skill 和 MCP 权限，按工具结果继续推理，而不是文字假装完成。",
-    points: ["多轮工具回填", "权限校验", "产物卡片映射"],
-  },
-  {
-    title: "Tool / Skill / MCP 扩展",
-    kicker: "Capability Layer",
-    body: "内置工具、自定义工具、Skill 包和外部 MCP Server 分层管理，支持测试、审计和授权。",
-    points: ["工具目录", "Skill 包", "MCP 调用记录"],
+    title: "Agent Loop",
+    eyebrow: "Function Call",
+    problem: "如果 Agent 只是文字回复，工具、文件和产物都容易变成口头承诺。",
+    demo: "每个 Worker 独立拿到授权工具，模型返回 tool_calls 后真实执行，再把结果回填生成最终回复。",
+    signals: ["工具自主选择", "结果回填", "权限拒绝"],
   },
   {
     title: "工作流画布",
-    kicker: "Workflow Engine",
-    body: "以会话 workflow 为事实来源，支持节点、连线、运行态、输入输出映射和并行 Agent 回复。",
-    points: ["DAG 执行", "节点状态", "AI 生成画布"],
+    eyebrow: "Canvas",
+    problem: "群聊协作需要既能默认并行，也能被人工编排成项目流程。",
+    demo: "会话绑定独立 workflow，支持节点、连线、运行态、AI 生成和 Agent 按画布执行。",
+    signals: ["DAG 调度", "节点状态", "并行 Agent"],
   },
   {
-    title: "文件系统与产物预览",
-    kicker: "Artifact Studio",
-    body: "上传、沙箱、产物和导出文件汇总到工作区文件树，PDF / Office / HTML 可预览和下载。",
-    points: ["真实文件", "在线预览", "@file 引用"],
+    title: "工具执行",
+    eyebrow: "Tool / Skill / MCP",
+    problem: "本地工具、能力包和外部服务如果混在一起，后续会很难扩展和审计。",
+    demo: "Tool、Skill、MCP 分层管理，执行层做参数校验、授权检查、调用记录和错误回传。",
+    signals: ["工具目录", "Skill 包", "MCP Server"],
   },
   {
-    title: "沙箱运行与审计",
-    kicker: "Safe Execution",
-    body: "代码块、工具命令和测试都在工作区会话沙箱内执行，保留 stdout、stderr、exit_code 和耗时。",
-    points: ["会话隔离", "安全策略", "ToolInvocation"],
+    title: "文件与产物",
+    eyebrow: "Artifact Studio",
+    problem: "用户需要看到真实文件，而不是 AI 在消息里说“已经生成”。",
+    demo: "PDF、Word、PPT、Excel、HTML 产物进入聊天卡片和工作区文件树，可预览、下载和继续引用。",
+    signals: ["真实二进制", "在线预览", "@file 引用"],
+  },
+  {
+    title: "沙箱审计",
+    eyebrow: "Safe Runtime",
+    problem: "代码运行必须可控、可复现、可追踪，否则演示时一旦失败就没有解释路径。",
+    demo: "sandbox.run、test.run 和聊天代码块都在会话沙箱执行，记录 stdout、stderr、exit_code 和耗时。",
+    signals: ["工作区隔离", "运行记录", "安全策略"],
   },
 ];
 
@@ -48,57 +54,85 @@ export const metrics = [
 ];
 
 export const productFlow = [
-  "用户发起任务",
-  "Master / Worker 协作",
-  "调用 Tool / Skill / MCP",
-  "生成文件与产物",
-  "Reviewer 审查",
-  "预览 / 导出 / 部署",
+  { title: "用户发起任务", detail: "消息、附件、@Agent 和 @file 引用进入上下文。" },
+  { title: "Agent 协作", detail: "单聊走 Worker Loop，群聊按会话 workflow 执行。" },
+  { title: "调用能力", detail: "Tool / Skill / MCP 被模型选择并真实执行。" },
+  { title: "生成产物", detail: "文件、产物卡片、预览和导出链接来自工具结果。" },
+  { title: "审查交付", detail: "Reviewer 汇总风险，运行态和审计记录可追溯。" },
 ];
 
 export const architectureModules = [
+  ["LLM Gateway", "火山方舟与 OpenAI-compatible 统一入口，保留 tools / tool_choice / stream 语义。"],
+  ["Agent Function Loop", "构建上下文、暴露授权 tools、执行 tool_calls、回填工具结果。"],
+  ["Workflow Engine", "会话画布为事实来源，调度 Agent、Tool、Skill、MCP、Artifact 节点。"],
+  ["Tool Runtime", "内置工具、自定义工具、Skill Runtime、MCP Adapter 分层执行。"],
+  ["Artifact / File / Sandbox", "工作区文件树、真实产物生成、Office 转 PDF 预览、会话沙箱运行。"],
+  ["Realtime Events", "SSE / WebSocket 推送消息 delta、节点状态、工具调用和全局结束事件。"],
+];
+
+export const scenarios = [
   {
-    title: "LLM Gateway",
-    body: "统一火山方舟和 OpenAI-compatible 接入，工具参数与流式事件按协议转换。",
+    title: "生成 PDF 项目方案",
+    prompt: "请生成一份 AgentHub 项目发布方案 PDF。",
+    result: "Writing Agent 调用 artifact.create_pdf，聊天里出现真实 PDF 产物卡片。",
+    tool: "artifact.create_pdf",
   },
   {
-    title: "Agent Loop",
-    body: "构建上下文、暴露授权 tools、执行 tool_calls、回填结果并生成最终回复。",
+    title: "生成 HTML 应用",
+    prompt: "做一个带交互逻辑的计算器 HTML 页面。",
+    result: "Agent 生成完整 HTML / CSS / JS，右侧预览可直接运行。",
+    tool: "artifact.create_html",
   },
   {
-    title: "Workflow Engine",
-    body: "编译会话画布，调度串行、并行、条件、产物和审查节点。",
+    title: "上传文件总结",
+    prompt: "总结这个文件，并提取关键风险。",
+    result: "file.extract_text 与 file.summarize 进入上下文，回复引用附件摘要。",
+    tool: "file.extract_text",
   },
   {
-    title: "Tool Runtime",
-    body: "内置工具、自定义 Python、Skill、MCP 分发执行，记录调用和权限结果。",
+    title: "多 Agent 审查",
+    prompt: "Frontend、Backend、Reviewer 分别审查这个方案。",
+    result: "群聊 workflow 并行执行多个 Agent，生成独立气泡和节点状态。",
+    tool: "workflow.agent",
   },
   {
-    title: "Artifact / File / Sandbox",
-    body: "工作区目录隔离，真实生成 PDF / Office / HTML，沙箱可运行代码和测试。",
-  },
-  {
-    title: "Realtime SSE / WebSocket",
-    body: "推送 message delta、node state、tool event、workflow completed 和取消事件。",
+    title: "沙箱运行 Python",
+    prompt: "运行这段 Python 代码并展示 stdout。",
+    result: "聊天代码块按钮直接调用 sandbox.run，结果附着在代码块下方。",
+    tool: "sandbox.run",
   },
 ];
 
-export const scenarioCards = [
-  "生成 PDF 项目方案",
-  "构建 HTML 页面",
-  "上传文件并总结",
-  "多 Agent 审查代码",
-  "工作流自动编排",
+export const stackItems = [
+  "React 18",
+  "TypeScript",
+  "Vite",
+  "Ant Design",
+  "FastAPI",
+  "SQLAlchemy",
+  "PostgreSQL",
+  "Redis",
+  "uv",
+  "Docker",
 ];
 
-export const codeExample = `{
-  "node": "artifact-report",
-  "type": "agent",
-  "agent_id": "writing-agent",
-  "config": {
-    "input": "{{input}}\\n{{upstream.text}}",
-    "tools": ["artifact.create_pdf", "file.summarize"],
-    "output_mode": "preview_card"
-  }
+export const workflowCode = `{
+  "settings": {
+    "output_mode": "independent_messages"
+  },
+  "nodes": [
+    { "id": "start", "type": "start" },
+    {
+      "id": "writing-agent",
+      "type": "agent",
+      "config": {
+        "agent_id": "writing-worker",
+        "input": "{{input}}\\n{{upstream.text}}",
+        "tools": ["artifact.create_pdf", "file.summarize"]
+      }
+    },
+    { "id": "review", "type": "review" },
+    { "id": "end", "type": "end" }
+  ]
 }`;
 

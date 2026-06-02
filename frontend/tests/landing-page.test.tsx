@@ -15,10 +15,10 @@ describe("LandingPage", () => {
     );
 
     expect(screen.getByRole("heading", { name: "AgentHub 多智能体协作工作台" })).toBeTruthy();
-    expect(screen.getByText("多 Agent 群聊协作")).toBeTruthy();
-    expect(screen.getByText("从一句需求到真实产物的协作闭环")).toBeTruthy();
-    expect(screen.getByText("面向多 Agent Function Call 工作流的模块化后端")).toBeTruthy();
+    expect(screen.getByText("会话协作")).toBeTruthy();
+    expect(screen.getByText("从一句需求到真实产物的闭环")).toBeTruthy();
+    expect(screen.getByText("为多 Agent Function Call 工作流准备的分层架构")).toBeTruthy();
+    expect(screen.getByText("沙箱运行 Python")).toBeTruthy();
     expect(screen.getAllByText("查看 GitHub").length).toBeGreaterThan(0);
   });
 });
-

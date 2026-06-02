@@ -3,30 +3,17 @@ import {
   AuditOutlined,
   BranchesOutlined,
   CheckCircleOutlined,
-  CloudUploadOutlined,
   CodeOutlined,
   FileTextOutlined,
   FunctionOutlined,
   MessageOutlined,
-  PlayCircleOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 
-const chatMessages = [
-  {
-    author: "演示用户",
-    text: "生成一份 AgentHub 发布方案，并给出可下载 PDF。",
-    side: "user",
-  },
-  {
-    author: "Writing Agent",
-    text: "已整理章节、风险项和行动计划，正在调用 artifact.create_pdf。",
-    side: "agent",
-  },
-  {
-    author: "Reviewer",
-    text: "审查通过：结构完整、产物可预览、导出入口可用。",
-    side: "agent",
-  },
+const agentMessages = [
+  ["演示用户", "生成一份项目发布方案，输出 PDF，并让 Reviewer 审查。", "user"],
+  ["Writing Agent", "已读取需求，准备结构化 content_model 并调用 artifact.create_pdf。", "agent"],
+  ["Reviewer", "审查通过：章节完整，风险项和交付步骤清晰。", "agent"],
 ];
 
 const workflowNodes = [
@@ -34,65 +21,78 @@ const workflowNodes = [
   ["Agent", "Writing Worker"],
   ["Tool", "artifact.create_pdf"],
   ["Review", "Reviewer"],
-  ["End", "产物交付"],
+  ["End", "交付"],
 ];
 
 export function ProductShowcase() {
   return (
-    <div className="landing-product-stack" aria-label="AgentHub 产品界面预览">
-      <ChatPreview />
-      <WorkflowPreview />
-      <ArtifactPreview />
+    <div className="landing-product-stage" aria-label="AgentHub 产品界面叠层预览">
+      <WorkbenchMock />
+      <WorkflowLayer />
+      <ArtifactLayer />
+      <ToolRunLayer />
     </div>
   );
 }
 
-function ChatPreview() {
+function WorkbenchMock() {
   return (
-    <section className="landing-product-panel landing-chat-preview">
-      <div className="landing-panel-top">
-        <span className="landing-dot blue" />
-        <span className="landing-panel-title">多 Agent 协作群</span>
-        <span className="landing-panel-pill">
-          <MessageOutlined /> 3 Agent
-        </span>
+    <section className="landing-workbench-window">
+      <div className="landing-window-top">
+        <span className="landing-brand-dot">AH</span>
+        <strong>AgentHub Workbench</strong>
+        <span>默认全栈工作区</span>
       </div>
-      <div className="landing-chat-body">
-        <aside className="landing-chat-sidebar">
-          {["发布方案", "文件总结", "代码审查"].map((item, index) => (
-            <span className={index === 0 ? "active" : ""} key={item}>
-              {item}
-            </span>
-          ))}
+      <div className="landing-workbench-grid">
+        <aside className="landing-workbench-sidebar">
+          <span className="active">发布方案协作群</span>
+          <span>HTML 应用构建</span>
+          <span>文件总结与风险</span>
+          <span>代码审查流水线</span>
         </aside>
-        <div className="landing-chat-thread">
-          {chatMessages.map((message) => (
-            <article className={`landing-chat-bubble ${message.side}`} key={message.author}>
-              <strong>{message.author}</strong>
-              <p>{message.text}</p>
+        <main className="landing-workbench-chat">
+          <div className="landing-chat-title">
+            <div>
+              <strong>发布方案协作群</strong>
+              <p>Writing Agent · Backend Worker · Reviewer</p>
+            </div>
+            <button type="button">工作流画布</button>
+          </div>
+          <div className="landing-message-thread">
+            {agentMessages.map(([author, text, role]) => (
+              <article className={`landing-message ${role}`} key={author}>
+                <strong>{author}</strong>
+                <p>{text}</p>
+              </article>
+            ))}
+            <article className="landing-preview-card-mini">
+              <FileTextOutlined />
+              <div>
+                <strong>预览产物：项目发布方案.pdf</strong>
+                <p>已生成真实 PDF，可预览、下载和继续修订。</p>
+              </div>
             </article>
-          ))}
-        </div>
+          </div>
+        </main>
       </div>
     </section>
   );
 }
 
-function WorkflowPreview() {
+function WorkflowLayer() {
   return (
-    <section className="landing-product-panel landing-workflow-preview">
-      <div className="landing-panel-top">
-        <span className="landing-dot cyan" />
-        <span className="landing-panel-title">Workflow Canvas</span>
-        <span className="landing-panel-pill">
-          <PlayCircleOutlined /> running
+    <section className="landing-layer landing-workflow-layer">
+      <div className="landing-layer-head">
+        <span>
+          <BranchesOutlined /> Workflow Canvas
         </span>
+        <strong>running</strong>
       </div>
-      <div className="landing-workflow-grid">
-        {workflowNodes.map(([type, label], index) => (
-          <div className="landing-flow-node" key={label}>
+      <div className="landing-node-row">
+        {workflowNodes.map(([type, title], index) => (
+          <div className="landing-node" key={title}>
             <span>{type}</span>
-            <strong>{label}</strong>
+            <strong>{title}</strong>
             {index < workflowNodes.length - 1 && <i aria-hidden="true" />}
           </div>
         ))}
@@ -101,49 +101,58 @@ function WorkflowPreview() {
   );
 }
 
-function ArtifactPreview() {
+function ArtifactLayer() {
   return (
-    <section className="landing-product-panel landing-artifact-preview">
-      <div className="landing-panel-top">
-        <span className="landing-dot violet" />
-        <span className="landing-panel-title">产物预览</span>
-        <span className="landing-panel-pill">
-          <FileTextOutlined /> PDF
+    <section className="landing-layer landing-artifact-layer">
+      <div className="landing-layer-head">
+        <span>
+          <FileTextOutlined /> Artifact Preview
         </span>
+        <strong>PDF</strong>
       </div>
-      <div className="landing-artifact-page">
-        <div>
-          <h3>AgentHub 发布方案</h3>
-          <p>多智能体协作平台 · 正式文档预览</p>
-        </div>
+      <div className="landing-document-page">
+        <h3>AgentHub 项目发布方案</h3>
+        <p>多智能体协作平台 · 正式文档预览</p>
         <ul>
           <li>
-            <CheckCircleOutlined /> 真实 PDF / DOCX 导出
+            <CheckCircleOutlined /> 结构化 DocumentModel 渲染
           </li>
           <li>
-            <CloudUploadOutlined /> 文件上下文与工作区文件树
+            <FunctionOutlined /> artifact.create_pdf 真实产物
           </li>
           <li>
-            <CodeOutlined /> 会话沙箱运行代码块
+            <AuditOutlined /> ToolInvocation 审计记录
           </li>
           <li>
-            <AuditOutlined /> 工具调用审计记录
-          </li>
-          <li>
-            <ApiOutlined /> MCP / Skill / Tool 扩展
-          </li>
-          <li>
-            <BranchesOutlined /> Dify 风格工作流编排
+            <ApiOutlined /> Tool / Skill / MCP 统一能力目录
           </li>
         </ul>
-        <div className="landing-artifact-footer">
-          <span>
-            <FunctionOutlined /> artifact.create_pdf
-          </span>
-          <span>ready</span>
-        </div>
       </div>
     </section>
   );
 }
 
+function ToolRunLayer() {
+  return (
+    <section className="landing-layer landing-tool-layer">
+      <div>
+        <span>
+          <ThunderboltOutlined /> 调用：artifact.create_pdf
+        </span>
+        <strong>succeeded · 842ms</strong>
+      </div>
+      <div>
+        <span>
+          <CodeOutlined /> sandbox.run
+        </span>
+        <strong>exit_code 0</strong>
+      </div>
+      <div>
+        <span>
+          <MessageOutlined /> message_stop
+        </span>
+        <strong>completed</strong>
+      </div>
+    </section>
+  );
+}
