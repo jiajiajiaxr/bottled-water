@@ -1,30 +1,21 @@
+"""pytest 全局配置"""
+
+import sys
+from pathlib import Path
+
+# 将 src/ 加入 Python 路径，确保可以导入 agent_runtime 等模块
+_SRC_DIR = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(_SRC_DIR))
+
 import importlib
 import os
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import pytest
 
 
 DEFAULT_APP_CANDIDATES = ("app:app",)
-
-
-def _configure_test_environment() -> None:
-    if os.getenv("AGENTHUB_API_BASE_URL"):
-        return
-    os.environ.setdefault("AGENTHUB_TESTING", "1")
-    os.environ.setdefault("ENVIRONMENT", "test")
-    db_dir = Path(__file__).resolve().parents[1] / "var" / "test"
-    db_dir.mkdir(parents=True, exist_ok=True)
-    db_path = db_dir / f"agenthub_pytest_{os.getpid()}.db"
-    if db_path.exists():
-        db_path.unlink()
-    os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
-    os.environ["AGENTHUB_TEST_DB_PATH"] = str(db_path)
-
-
-_configure_test_environment()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -96,20 +87,6 @@ def client(api_base_url: str | None) -> Iterator[Any]:
     app = _load_asgi_app()
     with TestClient(app) as test_client:
         yield test_client
-    db_path = os.getenv("AGENTHUB_TEST_DB_PATH")
-    if db_path:
-        try:
-            from app.core.database import engine
-
-            engine.dispose()
-        except Exception:
-            pass
-        for path in (Path(db_path), Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
-            if path.exists():
-                try:
-                    path.unlink()
-                except PermissionError:
-                    pass
 
 
 @pytest.fixture
