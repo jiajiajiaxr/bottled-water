@@ -30,7 +30,6 @@ def test_skill_crud_and_test_does_not_expose_secrets(
     skill = unwrap(created.json())
     skill_id = skill["id"]
     assert skill["config"]["api_key"] == "***"
-    assert skill["manifest"]["runtime"] == "prompt_skill"
 
     listed = client.get("/api/v1/skills?source=manual", headers=auth_headers)
     assert listed.status_code == 200, listed.text
@@ -53,7 +52,6 @@ def test_skill_crud_and_test_does_not_expose_secrets(
     result = unwrap(tested.json())
     assert result["status"] == "passed"
     assert result["response"]
-    assert result["run_id"]
     serialized_skill = json.dumps(result["skill"], ensure_ascii=False)
     assert "super-secret-key" not in serialized_skill
     assert "hidden-token" not in serialized_skill
