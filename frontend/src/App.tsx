@@ -13,6 +13,7 @@ import {
 import { api } from "./api";
 import { LoginScreen } from "./features/auth/components/LoginScreen";
 import { DocsPage } from "./pages/DocsPage";
+import { LandingPage } from "./pages/LandingPage";
 import { Workbench } from "./pages/WorkbenchPage/Workbench";
 import {
   conversationRoutePath,
@@ -153,6 +154,8 @@ function RoutedApp() {
   return (
     <AntApp>
       <Routes>
+        <Route path="/landing" element={<LandingPage />} />
+        <Route path="/product" element={<LandingPage />} />
         <Route path="/docs" element={<DocsPage />} />
         <Route
           path="/login"

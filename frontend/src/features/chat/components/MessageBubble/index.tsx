@@ -138,7 +138,7 @@ function MessageBubbleComponent({
 
   useEffect(() => {
     setCodeRunResults(codeRunResultsFromMessage(message));
-  }, [message.id, message.rawContent]);
+  }, [message]);
 
   const openAttachment = async (attachment: MessageAttachment) => {
     const next = {
