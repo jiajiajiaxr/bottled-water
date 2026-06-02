@@ -253,8 +253,7 @@ export function Workbench({
     );
     if (!scopedConversations.length) {
       setActiveId(undefined);
-      if (routeConversationId)
-        navigateToConversation(activeWorkspaceId, undefined, true);
+      // 不在此处清除 URL，等 conversations 加载完成后再恢复
       return;
     }
     const routeConversation = routeConversationId

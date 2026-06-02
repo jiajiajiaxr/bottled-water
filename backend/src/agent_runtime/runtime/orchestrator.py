@@ -420,6 +420,19 @@ class Orchestrator:
                 },
             )
 
+            # 持久化助手消息到数据库
+            if self.persistence:
+                await self.persistence.save_message(
+                    Message(
+                        id=f"msg_{self.session_id}_agent_{agent_id}_{datetime.utcnow().timestamp()}",
+                        conversation_id=self.session_id,
+                        agent_id=agent_id,
+                        content=work_product,
+                        role="assistant",
+                        metadata={"sender_name": agent.name, "agent_name": agent.name},
+                    )
+                )
+
             # 持久化 Agent 上下文（保留记忆，不清空）
             if self.persistence:
                 archive = agent_ctx.archive()

@@ -68,9 +68,10 @@ class Session:
         persistence: Optional[PersistenceBackend] = None,
         event_sink: Optional[EventSink] = None,
         tool_executor: Optional[ToolExecutor] = None,
+        session_id: Optional[str] = None,
     ) -> "Session":
-        """工厂方法，自动分配 session_id"""
-        session_id = str(uuid.uuid4())
+        """工厂方法，自动分配 session_id（可外部传入）"""
+        session_id = session_id or str(uuid.uuid4())
         logger.info(
             "Session 创建",
             session_id=session_id,

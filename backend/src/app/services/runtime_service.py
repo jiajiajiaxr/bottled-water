@@ -193,6 +193,7 @@ class OrchestratorService:
                 persistence=SQLAlchemyBackend(db),
                 event_sink=event_sink,
                 tool_executor=tool_executor,
+                session_id=str(conversation.id),
             )
 
         agent_configs = [
@@ -220,6 +221,7 @@ class OrchestratorService:
             persistence=SQLAlchemyBackend(db),
             event_sink=event_sink,
             tool_executor=tool_executor,
+            session_id=str(conversation.id),
         )
 
     @staticmethod
