@@ -6,7 +6,6 @@ import type { PointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   App as AntApp,
-  Avatar,
   Button,
   Layout,
   Modal,
@@ -22,7 +21,6 @@ import {
   ToolOutlined,
 } from "@ant-design/icons";
 import { api } from "../../api";
-import { BackgroundTasksButton } from "./BackgroundTasksButton";
 import { ConversationSidebar } from "../../features/chat/components/ConversationSidebar";
 import { ChatPanel } from "../../features/chat/components/ChatPanel";
 import { PreviewPanel } from "../../features/preview/components/PreviewPanel";
@@ -212,6 +210,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   return (
     <Layout className="workbench">
       <ConversationSidebar
+        currentUser={currentUser}
         conversations={conversations}
         activeId={activeId}
         runningConversationIds={runningConversationIds}
@@ -256,18 +255,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
       <Layout className="center-layout">
         <div className="topbar">
           <Space>
-            <Avatar>
-              {currentUser.avatar ?? currentUser.name.slice(0, 1)}
-            </Avatar>
-            <div>
-              <Text strong>{currentUser.name}</Text>
-              <br />
-              <Text type="secondary">
-                {currentUser.role === "demo" ? "演示用户" : "成员"}
-              </Text>
-            </div>
-          </Space>
-          <Space>
             <Select
               style={{ width: 220 }}
               value={activeWorkspace?.id}
@@ -293,32 +280,6 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             >
               工作区文件
             </Button>
-            <BackgroundTasksButton
-              tasks={visibleBackgroundTasks}
-              conversations={conversations}
-              activeConversationId={activeId}
-              onOpenConversation={selectConversation}
-              onCreate={async (prompt) => {
-                await send(prompt);
-                await loadBackgroundTasks().catch(() => undefined);
-              }}
-              onCancel={async (task) => {
-                await api.cancelTask(task.id);
-                if (task.conversation_id) {
-                  await api
-                    .cancelAssistantReply(task.conversation_id)
-                    .catch(() => undefined);
-                  updateLocalRunningConversationIds((current) => {
-                    const next = new Set(current);
-                    if (task.conversation_id) next.delete(task.conversation_id);
-                    return next;
-                  });
-                }
-                await loadBackgroundTasks();
-                message.info("后台任务已停止");
-              }}
-              onRefresh={loadBackgroundTasks}
-            />
             <Button
               icon={<ToolOutlined />}
               onClick={() => openMainTab("settings")}

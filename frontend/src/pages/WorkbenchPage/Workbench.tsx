@@ -49,10 +49,10 @@ export function Workbench({
     tab: "chat" | "agents" | "workspace" | "settings",
     options?: { replace?: boolean },
   ) => void;
-  onOpenWorkflowPage: (workspaceId: string, conversationId: string) => void;
-  onCloseWorkflowPage: (workspaceId: string, conversationId: string) => void;
-  onOpenWorkspaceFilesPage: (workspaceId: string) => void;
-  onCloseWorkspaceFilesPage: (workspaceId: string, conversationId?: string) => void;
+  onOpenWorkflowPage?: (workspaceId: string, conversationId: string) => void;
+  onCloseWorkflowPage?: (workspaceId: string, conversationId: string) => void;
+  onOpenWorkspaceFilesPage?: (workspaceId: string) => void;
+  onCloseWorkspaceFilesPage?: (workspaceId: string, conversationId?: string) => void;
 }) {
   const [currentUser, setCurrentUser] = useState(user);
   const [loadingConversationsList, setLoadingConversationsList] =
@@ -180,7 +180,7 @@ export function Workbench({
     const workspaceId =
       active.workspace_id || activeWorkspaceId || activeWorkspace?.id;
     if (!workspaceId) return;
-    onOpenWorkflowPage(workspaceId, active.id);
+    onOpenWorkflowPage?.(workspaceId, active.id);
   };
 
   const closeWorkflowPage = () => {
@@ -188,19 +188,19 @@ export function Workbench({
     const workspaceId =
       active.workspace_id || activeWorkspaceId || activeWorkspace?.id;
     if (!workspaceId) return;
-    onCloseWorkflowPage(workspaceId, active.id);
+    onCloseWorkflowPage?.(workspaceId, active.id);
   };
 
   const openWorkspaceFilesPage = () => {
     const workspaceId = active?.workspace_id || activeWorkspaceId || activeWorkspace?.id;
     if (!workspaceId) return;
-    onOpenWorkspaceFilesPage(workspaceId);
+    onOpenWorkspaceFilesPage?.(workspaceId);
   };
 
   const closeWorkspaceFilesPage = () => {
     const workspaceId = active?.workspace_id || activeWorkspaceId || activeWorkspace?.id;
     if (!workspaceId) return;
-    onCloseWorkspaceFilesPage(workspaceId, active?.id);
+    onCloseWorkspaceFilesPage?.(workspaceId, active?.id);
   };
 
   const closeMainTab = (tab: "agents" | "workspace" | "settings") => {
