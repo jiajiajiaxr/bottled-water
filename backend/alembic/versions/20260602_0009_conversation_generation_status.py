@@ -18,14 +18,19 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "conversations",
-        sa.Column("generation_status", sa.String(20), nullable=False, server_default="idle"),
-    )
-    op.add_column(
-        "conversations",
-        sa.Column("active_session_id", sa.String(36), nullable=True),
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("conversations")}
+    if "generation_status" not in columns:
+        op.add_column(
+            "conversations",
+            sa.Column("generation_status", sa.String(20), nullable=False, server_default="idle"),
+        )
+    if "active_session_id" not in columns:
+        op.add_column(
+            "conversations",
+            sa.Column("active_session_id", sa.String(36), nullable=True),
+        )
 
 
 def downgrade() -> None:
