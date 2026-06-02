@@ -254,26 +254,21 @@ workflow 数据保存在 `conversation.extra.workflow`。
 
 模型调用集中在后端。
 
-配置从项目根目录 `.env` 读取：
+### 配置方式
 
-```env
-LLM_PROVIDER=ark
-ARK_BASE_URL=...
-ARK_ENDPOINT_ID=...
-ARK_MODEL=...
-ARK_API_KEY=...
-DATABASE_URL=...
-```
+模型配置从数据库的 `model_providers` + `model_configs` 表中读取，在前端"设置 -> 模型 API"中可视化创建、编辑和测试供应商配置。
+
+首次启动后，进入"设置 -> 模型 API"添加供应商（目前支持火山方舟/OpenAI-compatible），填写 API Key、Base URL 和模型 ID，测试连接通过后保存即可使用。
 
 相关代码：
 
-- `backend/app/core/config.py`
-- `backend/app/services/ark.py`
-- `backend/app/services/llm_gateway.py`
-- `backend/app/services/orchestrator.py`
-- `backend/app/services/agentic_runtime.py`
+- `backend/app/services/model_config_resolver.py` — 统一配置解析入口
+- `backend/app/services/ark.py` — 火山方舟 OpenAI-compatible 适配
+- `backend/app/services/llm_gateway.py` — 模型配置连通性测试
+- `backend/app/services/orchestrator.py` — 编排运行时模型调用
+- `backend/app/services/agentic_runtime.py` — Agent 短循环模型调用
 
-`LLM_PROVIDER=ark` 时使用真实火山方舟适配器；`LLM_PROVIDER=mock` 时使用本地模拟响应；`LLM_PROVIDER=auto` 时根据是否存在 Key 自动选择。
+支持 `mock` 模式用于无网络环境下的本地测试：在数据库中创建 provider 时 api_key 填 `mock` 即可。
 
 ## 数据模型
 
