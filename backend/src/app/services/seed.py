@@ -339,7 +339,7 @@ async def ensure_seed_data(db: AsyncSession) -> User:
     roles = {item.code: item for item in (await db.scalars(select(Role))).all()}
     if not roles:
         for code in DEFAULT_ROLE_MAP:
-            role = Role(code=code, name=code.replace("ROLE_", "").Title(), description=f"{code} 默认角色")
+            role = Role(code=code, name=code.replace("ROLE_", "").title(), description=f"{code} 默认角色")
             db.add(role)
             roles[code] = role
         permissions = {}
