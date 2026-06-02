@@ -13,6 +13,9 @@
     "moduleResolution": "Bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
     "noEmit": true,
     "jsx": "react-jsx"
