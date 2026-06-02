@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -24,20 +23,13 @@ from app.schemas.common import ApiResponse, ToolDefinitionOut
 from app.schemas.requests import CreateToolRequest, GenerateToolRequest, InvokeToolRequest, UpdateToolRequest
 from app.services.serialization import redact_sensitive, tool_definition_to_dict
 from app.services.tool_registry import BUILTIN_TOOLS, ensure_tool_tables, invoke_tool, list_tools
-from model_provider import create_provider
-from model_provider.core.config import ModelConfig
-from app.core.config import get_settings
+from app.services.model_config_resolver import create_provider_from_db
 
 router = APIRouter(tags=["tools"])
 
 
-def _model_provider():
-    settings = get_settings()
-    api_key = getattr(settings, "ARK_API_KEY", "")
-    model = getattr(settings, "ARK_DEFAULT_MODEL", "ep-xxx")
-    if not api_key:
-        return None
-    return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
+async def _model_provider(db: AsyncSession):
+    return await create_provider_from_db(db)
 
 
 async def _validate_workspace(db: AsyncSession, user: User, workspace_id: str | None) -> None:
@@ -105,8 +97,8 @@ def _fallback_tool_spec(payload: GenerateToolRequest, reason: str) -> dict:
     }
 
 
-async def _generate_tool_spec(payload: GenerateToolRequest) -> dict:
-    provider = _model_provider()
+async def _generate_tool_spec(payload: GenerateToolRequest, db: AsyncSession) -> dict:
+    provider = await _model_provider(db)
     fallback = _fallback_tool_spec(payload, "not_called")
     if not provider:
         return fallback
@@ -187,7 +179,7 @@ async def create_tool(payload: CreateToolRequest, db: AsyncSession = Depends(get
 async def generate_tool(payload: GenerateToolRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     await ensure_tool_tables(db)
     await _validate_workspace(db, user, payload.workspace_id)
-    spec = await _generate_tool_spec(payload)
+    spec = await _generate_tool_spec(payload, db)
     if spec["name"] in BUILTIN_TOOLS:
         spec["name"] = f"custom_{spec['name']}"
     code = str((spec.get("implementation") or {}).get("code") or "")

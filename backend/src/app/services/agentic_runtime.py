@@ -23,9 +23,7 @@ from app.models import Agent, Conversation, McpServer, Skill, User
 from app.events import app_event_bus as event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
 from app.services.tool_registry import BUILTIN_TOOLS, invoke_tool, normalize_tool_names
-from model_provider import create_provider
-from model_provider.core.config import ModelConfig
-from app.core.config import get_settings
+from app.services.model_config_resolver import create_provider_from_db
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -250,13 +248,9 @@ async def execute_skill(
 
     system_prompt = skill.prompt or skill.content or f"You are the AgentHub skill {skill.name}."
     try:
-        settings = get_settings()
-        api_key = getattr(settings, "ARK_API_KEY", "")
-        model = getattr(settings, "ARK_DEFAULT_MODEL", "ep-xxx")
-        if not api_key:
-            raise RuntimeError("ARK_API_KEY not configured")
-
-        provider = create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
+        provider = await create_provider_from_db(db)
+        if not provider:
+            raise RuntimeError("无可用模型配置")
         response = await provider.chat(
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -266,7 +260,7 @@ async def execute_skill(
             max_tokens=600,
         )
         output = response.content
-        model_name = response.model or model
+        model_name = response.model or "unknown"
         status = "succeeded"
     except Exception as exc:
         output = f"[skill-fallback] {skill.name}: {prompt[:180]}"

@@ -1,4 +1,4 @@
-import { get, post } from "./client";
+import { del, get, patch, post } from "./client";
 import type { ModelProvider, ModelConfig } from "@/types";
 
 export async function modelProviders(): Promise<ModelProvider[]> {
@@ -19,6 +19,26 @@ export async function createModelProvider(payload: {
   config?: Record<string, unknown>;
 }): Promise<ModelProvider> {
   return await post<ModelProvider>("/model-providers", payload);
+}
+
+export async function updateModelProvider(
+  id: string,
+  payload: {
+    name: string;
+    provider_type: string;
+    base_url: string;
+    api_key?: string;
+    default_model: string;
+    supports_streaming?: boolean;
+    supports_embeddings?: boolean;
+    config?: Record<string, unknown>;
+  },
+): Promise<ModelProvider> {
+  return await patch<ModelProvider>(`/model-providers/${id}`, payload);
+}
+
+export async function deleteModelProvider(id: string): Promise<{ id: string; deleted: boolean }> {
+  return await del<{ id: string; deleted: boolean }>(`/model-providers/${id}`);
 }
 
 export async function modelConfigs(): Promise<ModelConfig[]> {

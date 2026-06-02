@@ -14,20 +14,13 @@ from app.core.database import get_db
 from app.core.response import ok
 from app.deps import get_current_user
 from app.models import Message, User
-from model_provider import create_provider
-from model_provider.core.config import ModelConfig
-from app.core.config import get_settings
+from app.services.model_config_resolver import create_provider_from_db
 
 router = APIRouter(tags=["context"])
 
 
-def _model_provider():
-    settings = get_settings()
-    api_key = getattr(settings, "ARK_API_KEY", "")
-    model = getattr(settings, "ARK_DEFAULT_MODEL", "ep-xxx")
-    if not api_key:
-        return None
-    return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
+async def _model_provider(db: AsyncSession):
+    return await create_provider_from_db(db)
 
 
 @router.get("/conversations/{conversation_id}/context", response_model=dict)
@@ -51,7 +44,7 @@ async def compress_context(
         select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.desc()).limit(20)
     )).all()
     text = "\n".join(str(m.content.get("text", "")) for m in messages)
-    provider = _model_provider()
+    provider = await _model_provider(db)
     if not provider:
         return ok({"summary": f"[mock] 压缩上下文 {len(text)} 字", "usage": {}})
 

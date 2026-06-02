@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -29,9 +28,7 @@ from app.schemas.requests import (
 )
 from app.services.serialization import agent_to_dict
 from app.services.tool_registry import normalize_tool_names
-from model_provider import create_provider
-from model_provider.core.config import ModelConfig
-from app.core.config import get_settings
+from app.services.model_config_resolver import create_provider_from_db
 
 router = APIRouter(tags=["agents"])
 
@@ -76,13 +73,8 @@ def _parse_json_object(text: str) -> dict | None:
         return None
 
 
-def _model_provider():
-    settings = get_settings()
-    api_key = getattr(settings, "ARK_API_KEY", "")
-    model = getattr(settings, "ARK_DEFAULT_MODEL", "ep-xxx")
-    if not api_key:
-        return None
-    return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
+async def _model_provider(db: AsyncSession):
+    return await create_provider_from_db(db)
 
 
 @router.get("/agents", response_model=ApiResponse[dict])
@@ -178,12 +170,12 @@ async def parse_capabilities(payload: ParseCapabilitiesRequest, _user: User = De
 
 
 @router.post("/agents/generate", response_model=ApiResponse[dict])
-async def generate_agent(payload: GenerateAgentRequest, _user: User = Depends(get_current_user)):
+async def generate_agent(payload: GenerateAgentRequest, db: AsyncSession = Depends(get_db), _user: User = Depends(get_current_user)):
     brief = payload.brief.strip()
     if not brief:
         raise ValidationAppError("请先输入 Agent 目标或职责描述")
     fallback = _fallback_agent_spec(brief, payload.preferred_tools)
-    provider = _model_provider()
+    provider = await _model_provider(db)
     if not provider:
         return ok(fallback, "Agent 配置已生成（mock 模式）")
 
@@ -296,7 +288,7 @@ async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db), user: 
 @router.post("/agents/{agent_id}/test", response_model=ApiResponse[dict])
 async def test_agent(agent_id: str, payload: TestAgentRequest, db: AsyncSession = Depends(get_db), _user: User = Depends(get_current_user)):
     agent = await _get_agent(db, agent_id)
-    provider = _model_provider()
+    provider = await _model_provider(db)
     system_prompt = (agent.config or {}).get("system_prompt") or agent.description or f"你是 {agent.name}"
     if not provider:
         response_text = f"[mock] {agent.name} received: {payload.message[:80]}"

@@ -93,6 +93,8 @@ export {
 export {
   modelProviders,
   createModelProvider,
+  updateModelProvider,
+  deleteModelProvider,
   modelConfigs,
   createModelConfig,
   testModel,

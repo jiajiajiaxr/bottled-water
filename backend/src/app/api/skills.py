@@ -23,20 +23,13 @@ from app.schemas.requests import (
     CreateSkillRequest, GenerateSkillRequest, ImportMcpSkillRequest, TestSkillRequest, UpdateSkillRequest,
 )
 from app.services.serialization import redact_sensitive, skill_to_dict
-from model_provider import create_provider
-from model_provider.core.config import ModelConfig
-from app.core.config import get_settings
+from app.services.model_config_resolver import create_provider_from_db
 
 router = APIRouter(tags=["skills"])
 
 
-def _model_provider():
-    settings = get_settings()
-    api_key = getattr(settings, "ARK_API_KEY", "")
-    model = getattr(settings, "ARK_DEFAULT_MODEL", "ep-xxx")
-    if not api_key:
-        return None
-    return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
+async def _model_provider(db: AsyncSession):
+    return await create_provider_from_db(db)
 
 
 async def ensure_skill_tables(db: AsyncSession) -> None:
@@ -142,8 +135,8 @@ def _parse_json_object(text: str) -> dict | None:
         return None
 
 
-async def _generate_skill_spec(payload: GenerateSkillRequest) -> dict:
-    provider = _model_provider()
+async def _generate_skill_spec(payload: GenerateSkillRequest, db: AsyncSession) -> dict:
+    provider = await _model_provider(db)
     if not provider:
         return _fallback_skill_spec(payload, "no_api_key")
 
@@ -249,7 +242,7 @@ async def import_mcp_skill(payload: ImportMcpSkillRequest, db: AsyncSession = De
 async def generate_skill(payload: GenerateSkillRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     await ensure_skill_tables(db)
     await _validate_workspace(db, user, payload.workspace_id)
-    spec = await _generate_skill_spec(payload)
+    spec = await _generate_skill_spec(payload, db)
     skill = Skill(
         owner_id=user.id, workspace_id=payload.workspace_id, name=spec["name"], description=spec["description"],
         category=spec["category"], source="ai", status="active", version="1.0.0",
@@ -301,7 +294,7 @@ async def test_skill(skill_id: str, payload: TestSkillRequest, db: AsyncSession 
     skill = await _get_skill(db, user, skill_id)
     input_text = payload.message or (payload.input if isinstance(payload.input, str) else json.dumps(payload.input, ensure_ascii=False))
     system_prompt = skill.prompt or skill.content or f"You are the skill {skill.name}."
-    provider = _model_provider()
+    provider = await _model_provider(db)
     if not provider:
         response = f"[mock] {skill.name} received: {input_text[:160]}"
         return ok({"skill": skill_to_dict(skill), "status": "passed", "response": response, "model": "mock", "usage": {}}, "Skill test completed")

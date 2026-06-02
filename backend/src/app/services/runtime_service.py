@@ -19,7 +19,6 @@ from agent_runtime.strategies.single_agent import SingleAgentScheduler
 from model_provider import create_provider
 from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
 
-from app.core.config import get_settings
 from app.models import Agent, Conversation, Message, User
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink
@@ -101,23 +100,10 @@ class OrchestratorService:
         return (await db.scalars(base_query.where(Agent.type != "custom"))).all()
 
     @staticmethod
-    def _create_model_provider(agent: Agent | None = None) -> Any:
-        """创建模型提供者（默认配置，用于无 model_config_id 时）"""
-        settings = get_settings()
-        api_key = getattr(settings, "ark_api_key", "") or ""
-        model = getattr(settings, "ark_model", "ep-xxx") or "ep-xxx"
-
-        if not api_key:
-            logger.warning("未配置 ARK API Key，使用 mock 提供者")
-            return _MockModelProvider()
-
-        from model_provider.core.config import ModelConfig as MPModelConfig
-        return create_provider(MPModelConfig(provider="ark", model=model, api_key=api_key))
-
-    @staticmethod
     async def create_provider_from_config(db: AsyncSession, model_config_id: str) -> Any:
         """根据 ModelConfig 创建模型提供者"""
         from app.models import ModelConfig as DBModelConfig
+        from app.services.model_config_resolver import create_provider_from_env_fallback, resolve_api_key
         from model_provider.core.config import ModelConfig as MPModelConfig
 
         config = await db.scalar(
@@ -127,25 +113,18 @@ class OrchestratorService:
         )
         if not config:
             logger.warning(f"ModelConfig not found: {model_config_id}")
-            return OrchestratorService._create_model_provider()
+            return create_provider_from_env_fallback()
 
         provider = config.provider
         if not provider or provider.status != "active":
             logger.warning(f"Provider not active for config: {model_config_id}")
-            return OrchestratorService._create_model_provider()
+            return create_provider_from_env_fallback()
 
-        api_key_ref = provider.api_key_ref
-        api_key = ""
-        if api_key_ref == "env:ARK_API_KEY":
-            settings = get_settings()
-            api_key = getattr(settings, "ark_api_key", "") or ""
-        elif api_key_ref and api_key_ref != "mock":
-            # 实际应该从密钥管理服务获取，这里简化处理
-            api_key = api_key_ref
+        api_key = await resolve_api_key(provider)
 
         if not api_key:
             logger.warning(f"No API key for provider: {provider.name}")
-            return OrchestratorService._create_model_provider()
+            return create_provider_from_env_fallback()
 
         return create_provider(MPModelConfig(
             provider=provider.provider_type or "ark",
@@ -182,7 +161,8 @@ class OrchestratorService:
             if model_config_id:
                 model_provider = await OrchestratorService.create_provider_from_config(db, model_config_id)
             else:
-                model_provider = OrchestratorService._create_model_provider(agent)
+                from app.services.model_config_resolver import create_provider_from_db
+                model_provider = await create_provider_from_db(db)
             scheduler = SingleAgentScheduler(agents={agent.id: agent_config})
             tool_executor = _ToolExecutorAdapter(db, agent, user, conversation)
 
@@ -209,7 +189,8 @@ class OrchestratorService:
         if model_config_id:
             model_provider = await OrchestratorService.create_provider_from_config(db, model_config_id)
         else:
-            model_provider = OrchestratorService._create_model_provider(agents[0] if agents else None)
+            from app.services.model_config_resolver import create_provider_from_db
+            model_provider = await create_provider_from_db(db)
         scheduler = TechLeadScheduler(agents={a.id: a for a in agent_configs})
         primary_agent = agents[0]
         tool_executor = _ToolExecutorAdapter(db, primary_agent, user, conversation)

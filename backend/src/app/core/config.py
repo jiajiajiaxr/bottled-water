@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://agenthub:agenthub@localhost:54326/agenthub"
     redis_url: str = "redis://localhost:6380/0"
 
+    # 以下 Ark 相关配置已弃用（deprecated），保留作为迁移期 fallback。
+    # 新代码请通过数据库 ModelProvider / ModelConfig 配置。
+    # 见 app/services/model_config_resolver.py
     llm_provider: Literal["auto", "ark", "mock"] = "auto"
     ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     ark_api_key: str | None = None

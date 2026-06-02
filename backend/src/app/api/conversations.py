@@ -27,9 +27,7 @@ from app.schemas.requests import (
 )
 from app.services.audit import write_audit_log
 from app.services.serialization import conversation_to_dict, participant_to_dict, workflow_run_to_dict
-from model_provider import create_provider
-from model_provider.core.config import ModelConfig
-from app.core.config import get_settings
+from app.services.model_config_resolver import create_provider_from_db
 
 router = APIRouter(tags=["conversations"])
 compat_router = APIRouter(tags=["conversations-compat"])
@@ -37,13 +35,8 @@ compat_router = APIRouter(tags=["conversations-compat"])
 WORKFLOW_NODE_TYPES = {"start", "agent", "tool", "skill", "mcp", "condition", "loop", "review", "artifact", "end"}
 
 
-def _model_provider():
-    settings = get_settings()
-    api_key = getattr(settings, "ARK_API_KEY", "")
-    model = getattr(settings, "ARK_DEFAULT_MODEL", "ep-xxx")
-    if not api_key:
-        return None
-    return create_provider(ModelConfig(provider="ark", model=model, api_key=api_key))
+async def _model_provider(db: AsyncSession):
+    return await create_provider_from_db(db)
 
 
 def _conversation_query(user_id: str):
@@ -370,7 +363,7 @@ async def generate_conversation_workflow(conversation_id: str, payload: Workflow
     fallback = _fallback_workflow(conversation)
     agents = [{"id": it.agent.id, "name": it.agent.name, "type": it.agent.type, "description": it.agent.description, "capabilities": it.agent.capabilities} for it in _active_participants(conversation) if it.agent]
     generated = fallback
-    provider = _model_provider()
+    provider = await _model_provider(db)
     if provider:
         try:
             result = await provider.chat(

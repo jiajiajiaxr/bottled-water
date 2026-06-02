@@ -375,44 +375,50 @@ async def ensure_seed_data(db: AsyncSession) -> User:
         await db.flush()
         db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role="owner", permissions=["*"]))
 
+    # TODO(deprecated): 环境变量同步是迁移期兼容逻辑，
+    # 当所有用户都迁移到数据库配置后，可移除此逻辑。
+    # 仅在环境变量中存在有效 Ark 配置时才同步到数据库，
+    # 否则由用户在前端自行创建供应商。
     settings = get_settings()
-    provider = await db.scalar(select(ModelProvider).where(ModelProvider.name == "火山方舟 OpenAI 兼容"))
-    if not provider:
-        provider = ModelProvider(
-            owner_id=None,
-            name="火山方舟 OpenAI 兼容",
-            provider_type="openai_compatible",
-            base_url=settings.ark_base_url,
-            api_key_ref="mock" if settings.use_mock_llm else "env:ARK_API_KEY",
-            default_model=settings.ark_endpoint_id or settings.ark_model or "doubao-seed-2-0-lite",
-            supports_streaming=True,
-            supports_embeddings=False,
-            config={"source": "env", "api_key_env": "ARK_API_KEY"},
-        )
-        db.add(provider)
-        await db.flush()
-        db.add(
-            ModelConfig(
-                provider_id=provider.id,
-                name="默认豆包对话模型",
-                model_id=provider.default_model,
-                purpose="chat",
-                context_window=128000,
-                max_output_tokens=8192,
+    has_env_config = bool(settings.ark_api_key) or settings.use_mock_llm
+    if has_env_config:
+        provider = await db.scalar(select(ModelProvider).where(ModelProvider.name == "火山方舟 OpenAI 兼容"))
+        if not provider:
+            provider = ModelProvider(
+                owner_id=None,
+                name="火山方舟 OpenAI 兼容",
+                provider_type="openai_compatible",
+                base_url=settings.ark_base_url,
+                api_key_ref="mock" if settings.use_mock_llm else "env:ARK_API_KEY",
+                default_model=settings.ark_endpoint_id or settings.ark_model or "doubao-seed-2-0-lite",
+                supports_streaming=True,
+                supports_embeddings=False,
+                config={"source": "env", "api_key_env": "ARK_API_KEY"},
             )
-        )
-    else:
-        provider.name = "火山方舟 OpenAI 兼容"
-        provider.base_url = settings.ark_base_url
-        provider.default_model = settings.ark_endpoint_id or settings.ark_model or provider.default_model
-        if not settings.use_mock_llm:
-            provider.api_key_ref = "env:ARK_API_KEY"
-        default_config = await db.scalar(
-            select(ModelConfig).where(ModelConfig.provider_id == provider.id, ModelConfig.purpose == "chat")
-        )
-        if default_config:
-            default_config.name = "默认豆包对话模型"
-            default_config.model_id = provider.default_model
+            db.add(provider)
+            await db.flush()
+            db.add(
+                ModelConfig(
+                    provider_id=provider.id,
+                    name="默认豆包对话模型",
+                    model_id=provider.default_model,
+                    purpose="chat",
+                    context_window=128000,
+                    max_output_tokens=8192,
+                )
+            )
+        else:
+            provider.name = "火山方舟 OpenAI 兼容"
+            provider.base_url = settings.ark_base_url
+            provider.default_model = settings.ark_endpoint_id or settings.ark_model or provider.default_model
+            if not settings.use_mock_llm:
+                provider.api_key_ref = "env:ARK_API_KEY"
+            default_config = await db.scalar(
+                select(ModelConfig).where(ModelConfig.provider_id == provider.id, ModelConfig.purpose == "chat")
+            )
+            if default_config:
+                default_config.name = "默认豆包对话模型"
+                default_config.model_id = provider.default_model
 
     if workspace and not await db.scalar(select(McpServer).where(McpServer.workspace_id == workspace.id)):
         db.add(

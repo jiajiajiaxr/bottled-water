@@ -9,18 +9,16 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 from collections.abc import AsyncIterator
 from typing import Any
 
-import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import NotFoundError, ValidationAppError
 from app.models import ModelConfig
-from app.services.ark import LLMResult, extract_output_text
+from app.services.ark import LLMResult
+from model_provider.core.interfaces import ChatMessage
 
 
 def _mock_result(model: ModelConfig, prompt: str, reason: str = "mock") -> LLMResult:
@@ -34,44 +32,50 @@ def _mock_result(model: ModelConfig, prompt: str, reason: str = "mock") -> LLMRe
 
 
 async def test_model_config(db: AsyncSession, model_config_id: str, prompt: str) -> LLMResult:
+    """测试模型配置（非流式）。"""
+    from app.services.model_config_resolver import resolve_api_key
+    from model_provider import create_provider
+    from model_provider.core.config import ModelConfig as MPModelConfig
+
     model = await db.get(ModelConfig, model_config_id)
     if not model or model.deleted_at is not None:
         raise NotFoundError("模型配置不存在")
     provider = model.provider
     if provider.status != "active":
         raise ValidationAppError("模型供应商未启用")
+
     settings = get_settings()
-    api_key = provider.api_key_ref
-    if api_key == "env:ARK_API_KEY":
-        api_key = settings.ark_api_key or os.getenv("ARK_API_KEY")
-    if not api_key and provider.base_url.rstrip("/") == settings.ark_base_url.rstrip("/"):
-        api_key = settings.ark_api_key or os.getenv("ARK_API_KEY")
+    api_key = await resolve_api_key(provider)
+
     if settings.use_mock_llm or api_key == "mock":
         return _mock_result(model, prompt)
     if not api_key:
         raise ValidationAppError("模型供应商缺少 API Key；如需离线演示请显式设置 LLM_PROVIDER=mock")
-    body: dict[str, Any] = {
-        "model": model.model_id,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": model.temperature_default,
-        "max_tokens": min(model.max_output_tokens, 1024),
-    }
+
+    mp = create_provider(
+        MPModelConfig(
+            provider=provider.provider_type or "ark",
+            model=model.model_id,
+            api_key=api_key,
+            base_url=provider.base_url or None,
+        ),
+    )
+
     try:
-        async with httpx.AsyncClient(timeout=provider.config.get("timeout_seconds", 60)) as client:
-            response = await client.post(
-                f"{provider.base_url.rstrip('/')}/chat/completions",
-                json=body,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            )
-    except httpx.HTTPError as exc:
+        response = await mp.chat(
+            messages=[ChatMessage(role="user", content=prompt)],
+            temperature=model.temperature_default,
+            max_tokens=min(model.max_output_tokens, 1024),
+        )
+    except Exception as exc:
         raise ValidationAppError(f"模型真实连接失败：{exc.__class__.__name__}: {exc}") from exc
-    try:
-        data = response.json()
-    except ValueError:
-        data = {"text": response.text}
-    if response.status_code < 200 or response.status_code >= 300:
-        raise ValidationAppError(json.dumps({"status": response.status_code, "error": data}, ensure_ascii=False))
-    return LLMResult(text=extract_output_text(data), model=model.model_id, usage=data.get("usage") or {}, raw=data)
+
+    return LLMResult(
+        text=response.content or "",
+        model=model.model_id,
+        usage=response.usage or {},
+        raw={"content": response.content, "model": response.model},
+    )
 
 
 async def stream_model_config(
@@ -89,6 +93,10 @@ async def stream_model_config(
     Yields:
         包含生成文本片段的字典，如 {"text": "Hello"}。
     """
+    from app.services.model_config_resolver import resolve_api_key
+    from model_provider import create_provider
+    from model_provider.core.config import ModelConfig as MPModelConfig
+
     model = await db.get(ModelConfig, model_config_id)
     if not model or model.deleted_at is not None:
         raise NotFoundError("模型配置不存在")
@@ -97,11 +105,7 @@ async def stream_model_config(
         raise ValidationAppError("模型供应商未启用")
 
     settings = get_settings()
-    api_key = provider.api_key_ref
-    if api_key == "env:ARK_API_KEY":
-        api_key = settings.ark_api_key or os.getenv("ARK_API_KEY")
-    if not api_key and provider.base_url.rstrip("/") == settings.ark_base_url.rstrip("/"):
-        api_key = settings.ark_api_key or os.getenv("ARK_API_KEY")
+    api_key = await resolve_api_key(provider)
 
     if settings.use_mock_llm or api_key == "mock":
         text = f"[mock-openai-compatible] {model.name} 已接收测试提示：{prompt[:120]}"
@@ -113,49 +117,22 @@ async def stream_model_config(
     if not api_key:
         raise ValidationAppError("模型供应商缺少 API Key；如需离线演示请显式设置 LLM_PROVIDER=mock")
 
-    body: dict[str, Any] = {
-        "model": model.model_id,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": True,
-        "stream_options": {"include_usage": True},
-        "temperature": model.temperature_default,
-        "max_tokens": min(model.max_output_tokens, 1024),
-    }
+    mp = create_provider(
+        MPModelConfig(
+            provider=provider.provider_type or "ark",
+            model=model.model_id,
+            api_key=api_key,
+            base_url=provider.base_url or None,
+        ),
+    )
 
-    timeout = httpx.Timeout(provider.config.get("timeout_seconds", 60))
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream(
-            "POST",
-            f"{provider.base_url.rstrip('/')}/chat/completions",
-            json=body,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        ) as response:
-            if response.status_code < 200 or response.status_code >= 300:
-                text = await response.aread()
-                raise ValidationAppError(
-                    json.dumps(
-                        {
-                            "status": response.status_code,
-                            "error": text.decode("utf-8", "replace"),
-                            "model": model.model_id,
-                            "provider": provider.name,
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-            async for line in response.aiter_lines():
-                line = line.strip()
-                if not line or not line.startswith("data:"):
-                    continue
-                data_text = line.removeprefix("data:").strip()
-                if data_text == "[DONE]":
-                    break
-                try:
-                    data = json.loads(data_text)
-                except json.JSONDecodeError:
-                    continue
-                for choice in data.get("choices") or []:
-                    delta = choice.get("delta") or {}
-                    content = delta.get("content")
-                    if content:
-                        yield {"text": content}
+    try:
+        async for chunk in mp.chat_stream(
+            messages=[ChatMessage(role="user", content=prompt)],
+            temperature=model.temperature_default,
+            max_tokens=min(model.max_output_tokens, 1024),
+        ):
+            if chunk.content:
+                yield {"text": chunk.content}
+    except Exception as exc:
+        raise ValidationAppError(f"模型流式调用失败：{exc.__class__.__name__}: {exc}") from exc
