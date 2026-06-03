@@ -5,6 +5,7 @@ import { api } from "@/api";
 import type { User } from "@/types";
 import { LoginRoute } from "./LoginRoute";
 import { WorkbenchRoute } from "./WorkbenchRoute";
+import { DocsPage } from "@/pages/DocsPage";
 
 export function AppRouter() {
   const [user, setUser] = useState<User>();
@@ -73,6 +74,7 @@ export function AppRouter() {
             />
           }
         />
+        <Route path="/docs" element={<DocsPage />} />
         <Route
           path="*"
           element={<Navigate to={user ? "/app" : "/login"} replace />}

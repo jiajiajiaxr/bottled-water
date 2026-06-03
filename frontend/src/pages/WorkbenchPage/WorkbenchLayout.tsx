@@ -11,9 +11,11 @@ import {
   AppstoreOutlined,
   BranchesOutlined,
   CommentOutlined,
+  FileTextOutlined,
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
+import { Link } from "react-router-dom";
 import { api } from "@/api";
 import { ConversationSidebar } from "@/features/chat/components/ConversationSidebar";
 import type {
@@ -189,6 +191,11 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             >
               Agent 广场
             </Button>
+            <Link to="/docs">
+              <Button icon={<FileTextOutlined />} data-testid="docs-link">
+                文档
+              </Button>
+            </Link>
             <Button onClick={onLogout}>退出</Button>
           </Space>
         </div>
