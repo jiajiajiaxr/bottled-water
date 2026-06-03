@@ -75,17 +75,25 @@ async def create_task(
 
 @router.get("/tasks", response_model=ApiResponse[list[TaskOut]])
 async def list_tasks(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    tasks = (await db.scalars(select(Task).where(Task.creator_id == user.id).order_by(Task.created_at.desc()))).all()
+    tasks = (
+        await db.scalars(
+            select(Task).where(Task.creator_id == user.id).order_by(Task.created_at.desc())
+        )
+    ).all()
     return ok([task_to_dict(task) for task in tasks])
 
 
 @router.get("/tasks/{task_id}", response_model=ApiResponse[TaskOut])
-async def get_task(task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def get_task(
+    task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
     return ok(task_to_dict(await _get_task(db, user, task_id)))
 
 
 @router.get("/tasks/{task_id}/status", response_model=ApiResponse[dict])
-async def get_task_status(task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def get_task_status(
+    task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
     task = await _get_task(db, user, task_id)
     subtasks = (await db.scalars(select(Subtask).where(Subtask.parent_task_id == task.id))).all()
     counts = {"total": len(subtasks), "completed": 0, "running": 0, "pending": 0, "failed": 0}
@@ -99,19 +107,25 @@ async def get_task_status(task_id: str, db: AsyncSession = Depends(get_db), user
             counts["failed"] += 1
         else:
             counts["pending"] += 1
-    percentage = int((counts["completed"] / counts["total"]) * 100) if counts["total"] else task.progress
+    percentage = (
+        int((counts["completed"] / counts["total"]) * 100) if counts["total"] else task.progress
+    )
     return ok({"task": task_to_dict(task), "progress": {**counts, "percentage": percentage}})
 
 
 @router.get("/tasks/{task_id}/subtasks", response_model=ApiResponse[list[SubtaskOut]])
-async def list_subtasks(task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def list_subtasks(
+    task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
     await _get_task(db, user, task_id)
     subtasks = (await db.scalars(select(Subtask).where(Subtask.parent_task_id == task_id))).all()
     return ok([subtask_to_dict(item) for item in subtasks])
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=ApiResponse[TaskOut])
-async def cancel_task(task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def cancel_task(
+    task_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
     task = await _get_task(db, user, task_id)
     task.status = "CANCELLED"
     task.completed_at = utcnow()
@@ -130,7 +144,10 @@ async def retry_task(
     task.status = "QUEUED"
     task.progress = min(task.progress or 0, 15)
     task.error_info = None
-    task.output = {**(task.output or {}), "retry": {"switch_agent": payload.switch_agent, "at": utcnow().isoformat()}}
+    task.output = {
+        **(task.output or {}),
+        "retry": {"switch_agent": payload.switch_agent, "at": utcnow().isoformat()},
+    }
     await db.commit()
     await event_bus.publish(f"task:{task.id}", "task:retried", task_to_dict(task))
     return ok(task_to_dict(task), "任务已重新排队")
@@ -148,7 +165,14 @@ async def approve_subtask(
         raise NotFoundError("子任务不存在")
     task = await _get_task(db, user, subtask.parent_task_id)
     subtask.status = "APPROVED"
-    subtask.output = {**(subtask.output or {}), "approval": {"approved_by": user.id, "comment": payload.comment, "at": utcnow().isoformat()}}
+    subtask.output = {
+        **(subtask.output or {}),
+        "approval": {
+            "approved_by": user.id,
+            "comment": payload.comment,
+            "at": utcnow().isoformat(),
+        },
+    }
     task.output = {**(task.output or {}), "last_approval": subtask.id}
     await db.commit()
     return ok(subtask_to_dict(subtask), "子任务已审批通过")
@@ -166,7 +190,10 @@ async def reject_subtask(
         raise NotFoundError("子任务不存在")
     await _get_task(db, user, subtask.parent_task_id)
     subtask.status = "REJECTED"
-    subtask.output = {**(subtask.output or {}), "rejection": {"rejected_by": user.id, "reason": payload.reason, "at": utcnow().isoformat()}}
+    subtask.output = {
+        **(subtask.output or {}),
+        "rejection": {"rejected_by": user.id, "reason": payload.reason, "at": utcnow().isoformat()},
+    }
     await db.commit()
     return ok(subtask_to_dict(subtask), "子任务已驳回")
 

@@ -11,8 +11,13 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.deps import get_current_user
 from db import get_db
 from db.models import User, UserSettings, utcnow
-from app.schemas.common import ApiResponse, UserOut, UserResponse
-from app.schemas.requests import ChangePasswordRequest, LoginRequest, RegisterRequest, UpdateProfileRequest
+from app.schemas.common import ApiResponse, UserResponse
+from app.schemas.requests import (
+    ChangePasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    UpdateProfileRequest,
+)
 from app.services.seed import ensure_seed_data
 from app.services.serialization import user_to_dict
 

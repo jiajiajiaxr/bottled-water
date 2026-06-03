@@ -100,12 +100,16 @@ async def _latest_for_conversation(db: AsyncSession, user: User, conversation_id
     return artifact
 
 
-async def _create_from_payload(db: AsyncSession, user: User, payload: CreateArtifactRequest) -> Artifact:
+async def _create_from_payload(
+    db: AsyncSession, user: User, payload: CreateArtifactRequest
+) -> Artifact:
     conversation_id = payload.conversation_id
     if not conversation_id:
         raise ValidationAppError("conversation_id 不能为空")
     conversation = await db.scalar(
-        select(Conversation).where(Conversation.id == conversation_id, Conversation.creator_id == user.id)
+        select(Conversation).where(
+            Conversation.id == conversation_id, Conversation.creator_id == user.id
+        )
     )
     if not conversation:
         raise NotFoundError("会话不存在")
@@ -125,7 +129,9 @@ async def _create_from_payload(db: AsyncSession, user: User, payload: CreateArti
     return artifact
 
 
-@router.get("/conversations/{conversation_id}/artifacts", response_model=ApiResponse[list[ArtifactOut]])
+@router.get(
+    "/conversations/{conversation_id}/artifacts", response_model=ApiResponse[list[ArtifactOut]]
+)
 async def list_conversation_artifacts(
     conversation_id: str,
     db: AsyncSession = Depends(get_db),
@@ -370,12 +376,14 @@ async def list_knowledge_bases(
     user: User = Depends(get_current_user),
 ):
     await ensure_extension_tables(db)
-    items = (await db.scalars(
-        select(KnowledgeBase)
-        .options(selectinload(KnowledgeBase.documents))
-        .where(KnowledgeBase.owner_id == user.id, KnowledgeBase.deleted_at.is_(None))
-        .order_by(KnowledgeBase.updated_at.desc())
-    )).all()
+    items = (
+        await db.scalars(
+            select(KnowledgeBase)
+            .options(selectinload(KnowledgeBase.documents))
+            .where(KnowledgeBase.owner_id == user.id, KnowledgeBase.deleted_at.is_(None))
+            .order_by(KnowledgeBase.updated_at.desc())
+        )
+    ).all()
     return ok({"items": [knowledge_base_to_dict(item) for item in items], "total": len(items)})
 
 
@@ -409,7 +417,10 @@ async def get_knowledge_base(
     return ok(knowledge_base_to_dict(await _owned_kb(db, user, knowledge_base_id)))
 
 
-@router.post("/knowledge-bases/{knowledge_base_id}/documents", response_model=ApiResponse[KnowledgeDocumentOut])
+@router.post(
+    "/knowledge-bases/{knowledge_base_id}/documents",
+    response_model=ApiResponse[KnowledgeDocumentOut],
+)
 async def import_knowledge_text(
     knowledge_base_id: str,
     payload: ImportKnowledgeTextRequest,
@@ -431,7 +442,9 @@ async def import_knowledge_text(
     return ok(knowledge_document_to_dict(document), "文档已索引")
 
 
-@router.post("/knowledge-bases/{knowledge_base_id}/documents/upload", response_model=ApiResponse[dict])
+@router.post(
+    "/knowledge-bases/{knowledge_base_id}/documents/upload", response_model=ApiResponse[dict]
+)
 async def upload_knowledge_document(
     knowledge_base_id: str,
     file: UploadFile = File(...),
@@ -440,7 +453,9 @@ async def upload_knowledge_document(
 ):
     kb = await _owned_kb(db, user, knowledge_base_id)
     file_asset = await save_upload(db, user=user, upload=file, purpose="knowledge")
-    content = file_asset.extracted_text or f"{file_asset.original_filename} ({file_asset.content_type})"
+    content = (
+        file_asset.extracted_text or f"{file_asset.original_filename} ({file_asset.content_type})"
+    )
     document = await index_document(
         db,
         kb,
@@ -466,7 +481,9 @@ async def list_knowledge_documents(
 ):
     kb = await _owned_kb(db, user, knowledge_base_id)
     documents = [item for item in kb.documents if item.deleted_at is None]
-    return ok({"items": [knowledge_document_to_dict(item) for item in documents], "total": len(documents)})
+    return ok(
+        {"items": [knowledge_document_to_dict(item) for item in documents], "total": len(documents)}
+    )
 
 
 @router.post("/knowledge-bases/{knowledge_base_id}/retrieve", response_model=ApiResponse[dict])
@@ -492,7 +509,11 @@ async def artifact_preview(artifact_id: str, db: AsyncSession = Depends(get_db))
     artifact = await db.get(Artifact, artifact_id)
     if not artifact:
         raise NotFoundError("产物不存在")
-    html = (artifact.content.get("files") or {}).get("index.html") or artifact.content.get("html") or ""
+    html = (
+        (artifact.content.get("files") or {}).get("index.html")
+        or artifact.content.get("html")
+        or ""
+    )
     from fastapi import Response
 
     return Response(content=html, media_type="text/html; charset=utf-8")
@@ -521,7 +542,9 @@ async def compat_upload_file(
 ):
     return ok(
         file_asset_to_dict(
-            await save_upload(db, user=user, upload=file, conversation_id=conversation_id, purpose=purpose)
+            await save_upload(
+                db, user=user, upload=file, conversation_id=conversation_id, purpose=purpose
+            )
         )
     )
 
@@ -533,11 +556,13 @@ async def compat_list_files(
     user: User = Depends(get_current_user),
 ):
     await ensure_extension_tables(db)
-    items = (await db.scalars(
-        select(FileAsset)
-        .where(FileAsset.owner_id == user.id, FileAsset.deleted_at.is_(None))
-        .order_by(FileAsset.created_at.desc())
-    )).all()
+    items = (
+        await db.scalars(
+            select(FileAsset)
+            .where(FileAsset.owner_id == user.id, FileAsset.deleted_at.is_(None))
+            .order_by(FileAsset.created_at.desc())
+        )
+    ).all()
     return ok({"items": [file_asset_to_dict(item) for item in items]})
 
 
@@ -562,11 +587,13 @@ async def compat_list_knowledge_bases(
     user: User = Depends(get_current_user),
 ):
     await ensure_extension_tables(db)
-    items = (await db.scalars(
-        select(KnowledgeBase)
-        .options(selectinload(KnowledgeBase.documents))
-        .where(KnowledgeBase.owner_id == user.id, KnowledgeBase.deleted_at.is_(None))
-    )).all()
+    items = (
+        await db.scalars(
+            select(KnowledgeBase)
+            .options(selectinload(KnowledgeBase.documents))
+            .where(KnowledgeBase.owner_id == user.id, KnowledgeBase.deleted_at.is_(None))
+        )
+    ).all()
     return ok([knowledge_base_to_dict(item) for item in items])
 
 

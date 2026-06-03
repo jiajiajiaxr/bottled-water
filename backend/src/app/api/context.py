@@ -29,9 +29,13 @@ async def get_context(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    messages = (await db.scalars(select(Message).where(Message.conversation_id == conversation_id))).all()
+    messages = (
+        await db.scalars(select(Message).where(Message.conversation_id == conversation_id))
+    ).all()
     chars = sum(len(str(m.content)) for m in messages)
-    return ok({"message_count": len(messages), "estimated_tokens": chars // 3, "compression": "available"})
+    return ok(
+        {"message_count": len(messages), "estimated_tokens": chars // 3, "compression": "available"}
+    )
 
 
 @router.post("/conversations/{conversation_id}/context/compress", response_model=dict)
@@ -40,9 +44,14 @@ async def compress_context(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    messages = (await db.scalars(
-        select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.desc()).limit(20)
-    )).all()
+    messages = (
+        await db.scalars(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.desc())
+            .limit(20)
+        )
+    ).all()
     text = "\n".join(str(m.content.get("text", "")) for m in messages)
     provider = await _model_provider(db)
     if not provider:

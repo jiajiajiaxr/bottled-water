@@ -14,7 +14,13 @@ from db import get_db
 from db.models import FileAsset, User, utcnow
 from app.schemas.common import ApiResponse, FileAssetOut
 from app.services.files import save_upload
-from app.services.file_tools import convert_file, embed_text, extract_text_from_path, preview_payload, summarize_text
+from app.services.file_tools import (
+    convert_file,
+    embed_text,
+    extract_text_from_path,
+    preview_payload,
+    summarize_text,
+)
 from app.services.serialization import file_asset_to_dict
 
 
@@ -22,7 +28,9 @@ router = APIRouter(tags=["files"])
 
 
 async def _get_file(db: AsyncSession, user: User, file_id: str) -> FileAsset:
-    asset = await db.scalar(select(FileAsset).where(FileAsset.id == file_id, FileAsset.deleted_at.is_(None)))
+    asset = await db.scalar(
+        select(FileAsset).where(FileAsset.id == file_id, FileAsset.deleted_at.is_(None))
+    )
     if not asset:
         raise NotFoundError("文件不存在")
     if asset.owner_id != user.id and user.role != "admin":
@@ -38,7 +46,9 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    asset = await save_upload(db, user=user, upload=file, conversation_id=conversation_id, purpose=purpose)
+    asset = await save_upload(
+        db, user=user, upload=file, conversation_id=conversation_id, purpose=purpose
+    )
     return ok(file_asset_to_dict(asset), "文件上传成功")
 
 
@@ -85,7 +95,9 @@ async def download_file(
     user: User = Depends(get_current_user),
 ):
     asset = await _get_file(db, user, file_id)
-    return FileResponse(asset.storage_path, media_type=asset.content_type, filename=asset.original_filename)
+    return FileResponse(
+        asset.storage_path, media_type=asset.content_type, filename=asset.original_filename
+    )
 
 
 @router.post("/files/{file_id}/extract-text", response_model=ApiResponse[dict])
@@ -102,10 +114,16 @@ async def extract_file_text(
     )
     asset.extracted_text = result["text"]
     asset.parse_status = result["status"]
-    asset.extra = {**(asset.extra or {}), **(result.get("metadata") or {}), "tool_chain": ["file.extract_text"]}
+    asset.extra = {
+        **(asset.extra or {}),
+        **(result.get("metadata") or {}),
+        "tool_chain": ["file.extract_text"],
+    }
     await db.commit()
     await db.refresh(asset)
-    return ok({"file": file_asset_to_dict(asset), "text": asset.extracted_text, "metadata": asset.extra})
+    return ok(
+        {"file": file_asset_to_dict(asset), "text": asset.extracted_text, "metadata": asset.extra}
+    )
 
 
 @router.get("/files/{file_id}/preview", response_model=ApiResponse[dict])
@@ -132,7 +150,11 @@ async def summarize_file(
     asset = await _get_file(db, user, file_id)
     text = asset.extracted_text
     if not text:
-        result = extract_text_from_path(Path(asset.storage_path), content_type=asset.content_type, filename=asset.original_filename)
+        result = extract_text_from_path(
+            Path(asset.storage_path),
+            content_type=asset.content_type,
+            filename=asset.original_filename,
+        )
         text = result["text"]
         asset.extracted_text = text
         asset.parse_status = result["status"]
@@ -149,9 +171,19 @@ async def embed_file(
     asset = await _get_file(db, user, file_id)
     text = asset.extracted_text or asset.original_filename
     vector = embed_text(text)
-    asset.extra = {**(asset.extra or {}), "embedding": {"provider": "local-hash", "dimensions": len(vector)}}
+    asset.extra = {
+        **(asset.extra or {}),
+        "embedding": {"provider": "local-hash", "dimensions": len(vector)},
+    }
     await db.commit()
-    return ok({"file_id": asset.id, "embedding": vector, "dimensions": len(vector), "provider": "local-hash"})
+    return ok(
+        {
+            "file_id": asset.id,
+            "embedding": vector,
+            "dimensions": len(vector),
+            "provider": "local-hash",
+        }
+    )
 
 
 @router.get("/files/{file_id}/convert")

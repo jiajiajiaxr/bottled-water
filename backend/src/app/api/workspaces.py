@@ -31,7 +31,14 @@ from app.schemas.requests import (
     UpdateWorkspaceRequest,
     UpsertProjectFileRequest,
 )
-from app.schemas.common import ApiResponse, ProjectFileOut, ProjectOut, PromptTemplateOut, ShortcutCommandOut, WorkspaceOut
+from app.schemas.common import (
+    ApiResponse,
+    ProjectFileOut,
+    ProjectOut,
+    PromptTemplateOut,
+    ShortcutCommandOut,
+    WorkspaceOut,
+)
 from app.services.audit import write_audit_log
 from app.services.serialization import (
     project_file_to_dict,
@@ -53,7 +60,12 @@ WORKSPACE_TEMPLATES = [
         "description": "产品、设计、前端、后端、测试、部署的标准多 Agent 链路。",
         "workflow": {
             "nodes": ["product", "design", "frontend", "backend", "reviewer", "deploy"],
-            "edges": [["product", "design"], ["design", "frontend"], ["backend", "reviewer"], ["reviewer", "deploy"]],
+            "edges": [
+                ["product", "design"],
+                ["design", "frontend"],
+                ["backend", "reviewer"],
+                ["reviewer", "deploy"],
+            ],
             "mode": "hybrid",
         },
         "tools": ["file.read", "file.write", "sandbox.run", "file.summarize", "deploy.preview"],
@@ -97,7 +109,10 @@ def _workspace_query(user: User):
     )
     return (
         select(Workspace)
-        .options(selectinload(Workspace.members).selectinload(WorkspaceMember.user), selectinload(Workspace.projects))
+        .options(
+            selectinload(Workspace.members).selectinload(WorkspaceMember.user),
+            selectinload(Workspace.projects),
+        )
         .where(Workspace.deleted_at.is_(None))
         .where((Workspace.owner_id == user.id) | (Workspace.id.in_(member_workspace_ids)))
     )
@@ -126,7 +141,9 @@ async def workspace_templates(_user: User = Depends(get_current_user)):
 
 
 @router.get("/workspaces", response_model=ApiResponse[dict])
-async def list_workspaces(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def list_workspaces(
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
     await ensure_workspace_tables(db)
     items = (await db.scalars(_workspace_query(user).order_by(Workspace.updated_at.desc()))).all()
     return ok({"items": [workspace_to_dict(item) for item in items], "total": len(items)})
@@ -141,12 +158,17 @@ async def create_workspace(
     await ensure_workspace_tables(db)
     duplicate = await db.scalar(
         select(Workspace).where(
-            Workspace.owner_id == user.id, Workspace.name == payload.name, Workspace.deleted_at.is_(None)
+            Workspace.owner_id == user.id,
+            Workspace.name == payload.name,
+            Workspace.deleted_at.is_(None),
         )
     )
     if duplicate:
         raise ValidationAppError("同名工作区已存在")
-    template = next((item for item in WORKSPACE_TEMPLATES if item["id"] == payload.config.get("template_id")), None)
+    template = next(
+        (item for item in WORKSPACE_TEMPLATES if item["id"] == payload.config.get("template_id")),
+        None,
+    )
     workspace = Workspace(
         owner_id=user.id,
         name=payload.name,
@@ -160,7 +182,9 @@ async def create_workspace(
     )
     db.add(workspace)
     await db.flush()
-    db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role="owner", permissions=["*"]))
+    db.add(
+        WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role="owner", permissions=["*"])
+    )
     await write_audit_log(
         db,
         user=user,
@@ -194,11 +218,21 @@ async def update_workspace(
     if not _can_manage(workspace, user):
         raise ForbiddenError("只有工作区所有者或管理员可以修改配置")
     data = payload.model_dump(exclude_unset=True)
-    for field in ["name", "description", "status", "tags", "config", "workflow", "resource_bindings"]:
+    for field in [
+        "name",
+        "description",
+        "status",
+        "tags",
+        "config",
+        "workflow",
+        "resource_bindings",
+    ]:
         if field in data and data[field] is not None:
             setattr(workspace, field, data[field])
     workspace.last_active_at = utcnow()
-    await write_audit_log(db, user=user, action="workspace.update", target_type="workspace", target_id=workspace.id)
+    await write_audit_log(
+        db, user=user, action="workspace.update", target_type="workspace", target_id=workspace.id
+    )
     await db.commit()
     return ok(workspace_to_dict(await _get_workspace(db, user, workspace.id)), "工作区已更新")
 
@@ -264,7 +298,13 @@ async def list_workspace_members(
     user: User = Depends(get_current_user),
 ):
     workspace = await _get_workspace(db, user, workspace_id)
-    return ok({"items": [workspace_member_to_dict(item) for item in workspace.members if item.left_at is None]})
+    return ok(
+        {
+            "items": [
+                workspace_member_to_dict(item) for item in workspace.members if item.left_at is None
+            ]
+        }
+    )
 
 
 @router.post("/workspaces/{workspace_id}/members", response_model=ApiResponse[WorkspaceOut])
@@ -329,9 +369,13 @@ async def list_projects(
     user: User = Depends(get_current_user),
 ):
     workspace = await _get_workspace(db, user, workspace_id)
-    projects = (await db.scalars(
-        select(Project).where(Project.workspace_id == workspace.id, Project.deleted_at.is_(None)).order_by(Project.updated_at.desc())
-    )).all()
+    projects = (
+        await db.scalars(
+            select(Project)
+            .where(Project.workspace_id == workspace.id, Project.deleted_at.is_(None))
+            .order_by(Project.updated_at.desc())
+        )
+    ).all()
     return ok({"items": [project_to_dict(item) for item in projects], "total": len(projects)})
 
 
@@ -345,12 +389,18 @@ async def upsert_project_file(
     project = await db.scalar(
         select(Project)
         .join(Workspace, Workspace.id == Project.workspace_id)
-        .where(Project.id == project_id, Project.deleted_at.is_(None), Workspace.owner_id == user.id)
+        .where(
+            Project.id == project_id, Project.deleted_at.is_(None), Workspace.owner_id == user.id
+        )
     )
     if not project:
         raise NotFoundError("项目不存在")
     checksum = hashlib.sha256(payload.content.encode("utf-8")).hexdigest()
-    file = await db.scalar(select(ProjectFile).where(ProjectFile.project_id == project.id, ProjectFile.path == payload.path))
+    file = await db.scalar(
+        select(ProjectFile).where(
+            ProjectFile.project_id == project.id, ProjectFile.path == payload.path
+        )
+    )
     if file:
         file.content = payload.content
         file.language = payload.language
@@ -383,15 +433,30 @@ async def list_project_files(
     project = await db.scalar(
         select(Project)
         .join(Workspace, Workspace.id == Project.workspace_id)
-        .where(Project.id == project_id, Project.deleted_at.is_(None), Workspace.owner_id == user.id)
+        .where(
+            Project.id == project_id, Project.deleted_at.is_(None), Workspace.owner_id == user.id
+        )
     )
     if not project:
         raise NotFoundError("项目不存在")
-    files = (await db.scalars(select(ProjectFile).where(ProjectFile.project_id == project.id).order_by(ProjectFile.path))).all()
-    return ok({"items": [project_file_to_dict(item, include_content=False) for item in files], "total": len(files)})
+    files = (
+        await db.scalars(
+            select(ProjectFile)
+            .where(ProjectFile.project_id == project.id)
+            .order_by(ProjectFile.path)
+        )
+    ).all()
+    return ok(
+        {
+            "items": [project_file_to_dict(item, include_content=False) for item in files],
+            "total": len(files),
+        }
+    )
 
 
-@router.post("/workspaces/{workspace_id}/prompt-templates", response_model=ApiResponse[PromptTemplateOut])
+@router.post(
+    "/workspaces/{workspace_id}/prompt-templates", response_model=ApiResponse[PromptTemplateOut]
+)
 async def create_prompt_template(
     workspace_id: str,
     payload: CreatePromptTemplateRequest,
@@ -415,7 +480,9 @@ async def create_prompt_template(
     return ok(prompt_template_to_dict(template), "提示词模板已创建")
 
 
-@router.post("/workspaces/{workspace_id}/shortcut-commands", response_model=ApiResponse[ShortcutCommandOut])
+@router.post(
+    "/workspaces/{workspace_id}/shortcut-commands", response_model=ApiResponse[ShortcutCommandOut]
+)
 async def create_shortcut_command(
     workspace_id: str,
     payload: CreateShortcutCommandRequest,
