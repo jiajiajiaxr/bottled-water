@@ -156,18 +156,6 @@ class Orchestrator:
                 use_streaming=True,
             )
 
-        # 保存用户消息
-        if self.persistence:
-            await self.persistence.save_message(
-                Message(
-                    id=f"msg_{self.session_id}_user_{datetime.utcnow().timestamp()}",
-                    conversation_id=self.session_id,
-                    agent_id=None,
-                    content=user_message,
-                    role="user",
-                )
-            )
-
     async def _scheduling_loop(self, initial_task: str) -> AsyncIterator[Event]:
         """调度循环核心"""
         current_task = initial_task
@@ -578,17 +566,6 @@ class Orchestrator:
                 "round": self.round_num,
             },
         )
-        if self.persistence:
-            await self.persistence.save_message(
-                Message(
-                    id=f"msg_{self.session_id}_user_{datetime.utcnow().timestamp()}",
-                    conversation_id=self.session_id,
-                    agent_id=None,
-                    content=content,
-                    role="user",
-                )
-            )
-
     async def handle_user_input(self, content: str) -> AsyncIterator[Event]:
         """处理用户中途输入。
 
