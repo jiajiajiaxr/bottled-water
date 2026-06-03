@@ -1,0 +1,259 @@
+@use "variables" as *;
+
+.chat-panel {
+  height: calc(100vh - 64px);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  background: $color-bg-white;
+}
+
+.chat-header {
+  height: auto;
+  padding: $spacing-3xl $spacing-4xl;
+  line-height: normal;
+  background: $color-bg-white;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  h3 {
+    margin: 0;
+  }
+}
+
+.message-list {
+  min-height: 0;
+  overflow: auto;
+  padding: $spacing-5xl $spacing-5xl $spacing-md;
+  background: $color-bg-message;
+}
+
+.message-row {
+  display: flex;
+  gap: $spacing-lg;
+  margin-bottom: $spacing-3xl;
+
+  &.from-user {
+    flex-direction: row-reverse;
+  }
+}
+
+.message-avatar {
+  flex: 0 0 auto;
+  background: $color-primary;
+}
+
+.message-card {
+  width: min(720px, 78%);
+  border: 1px solid $color-border;
+  background: $color-bg-white;
+  border-radius: $radius-md;
+  padding: $spacing-xl;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+
+  .from-user & {
+    background: $color-bg-user-message;
+    margin-left: auto;
+  }
+}
+
+.message-content {
+  margin: $spacing-lg 0 !important;
+}
+
+.markdown-content {
+  color: #111827;
+  line-height: 1.7;
+  word-break: break-word;
+
+  h3,
+  h4,
+  h5,
+  h6 {
+    margin: $spacing-lg $spacing-xs 6px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  p {
+    margin: 0 0 $spacing-sm;
+  }
+
+  ul,
+  ol {
+    margin: 6px 0 $spacing-md 20px;
+    padding: 0;
+  }
+
+  li {
+    margin: $spacing-xs 0;
+  }
+
+  code {
+    border: 1px solid $color-border;
+    border-radius: $radius-sm;
+    background: #f5f7fb;
+    padding: 1px 5px;
+  }
+
+  pre {
+    max-width: 100%;
+    overflow: auto;
+    margin: $spacing-sm 0 $spacing-md;
+    padding: $spacing-lg;
+    border-radius: $radius-md;
+    background: #0f172a;
+    color: $color-text-code;
+
+    code {
+      border: 0;
+      background: transparent;
+      padding: 0;
+      color: inherit;
+    }
+  }
+}
+
+.typing-placeholder {
+  color: #6b7280;
+}
+
+.error-box {
+  border-color: $color-error;
+  background: $color-error-bg;
+}
+
+.event-message {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: $spacing-lg;
+  margin: $spacing-xl 0;
+}
+
+.quote-block {
+  color: #536071;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quote-block,
+.composer-quote {
+  border-left: 3px solid $color-primary;
+  background: #f3f7fc;
+  padding: $spacing-sm 10px;
+  margin-top: $spacing-md;
+  border-radius: $radius-sm;
+}
+
+.thinking-block {
+  margin: $spacing-sm 0;
+  border: 1px solid #d9f7be;
+  border-radius: $radius-md;
+  background: #f6ffed;
+  overflow: hidden;
+}
+
+.thinking-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: $spacing-lg;
+  padding: $spacing-sm $spacing-lg;
+  border: 0;
+  background: transparent;
+  color: #389e0d;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    background: #d9f7be;
+  }
+}
+
+.thinking-chevron {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.thinking-content {
+  padding: 0 $spacing-lg $spacing-md;
+  color: #434343;
+  font-size: 13px;
+
+  .markdown-content p {
+    margin: 0 0 $spacing-xs;
+  }
+}
+
+.composer {
+  padding: $spacing-xl $spacing-5xl $spacing-3xl;
+  border-top: 1px solid $color-border;
+  background: $color-bg-white;
+
+  textarea {
+    margin-bottom: $spacing-md;
+  }
+}
+
+.composer-quote {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $spacing-md;
+  margin: 0 0 $spacing-md;
+}
+
+.composer-quote-text {
+  flex: 1;
+  min-height: 28px;
+  max-height: 120px;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+.composer-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 $spacing-md;
+  padding: $spacing-sm;
+  border: 1px dashed #b8c7dc;
+  border-radius: $radius-md;
+  background: #f8fbff;
+}
+
+.participant-strip {
+  margin-top: $spacing-sm;
+}
+
+.drawer-toolbar {
+  gap: $spacing-lg;
+  margin-bottom: $spacing-xxl;
+}
+
+.agent-card {
+  min-height: 0;
+  border-radius: $radius-md;
+
+  .ant-card-body {
+    min-width: 0;
+  }
+
+  .ant-typography {
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+.agent-form {
+  margin-top: $spacing-xl;
+}
+
+.member-list {
+  margin-top: $spacing-xxl;
+}

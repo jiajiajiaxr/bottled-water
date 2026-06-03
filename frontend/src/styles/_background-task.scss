@@ -1,0 +1,55 @@
+@use "variables" as *;
+
+.background-task-popover {
+  width: 340px;
+}
+
+.background-task-head {
+  margin-bottom: $spacing-lg;
+}
+
+.background-task-list {
+  max-height: 320px;
+  overflow: auto;
+
+  .ant-list-item {
+    align-items: flex-start;
+    padding: $spacing-sm 0;
+  }
+}
+
+.background-task-item {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.background-task-empty {
+  min-height: 190px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  text-align: center;
+
+  h4 {
+    margin: $spacing-sm 0 0;
+  }
+}
+
+.background-task-empty-icon {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: $radius-md;
+  background: #f3f6fb;
+  color: $color-text-primary;
+  font-size: 24px;
+}

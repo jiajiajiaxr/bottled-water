@@ -1,0 +1,77 @@
+@use "variables" as *;
+
+.workbench {
+  height: 100vh;
+  min-width: 1120px;
+  overflow: hidden;
+  background: $color-bg-page;
+}
+
+.center-layout {
+  min-width: 0;
+  background: $color-bg-white;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 $spacing-4xl;
+  border-bottom: 1px solid $color-border;
+  background: $color-bg-white;
+}
+
+.page-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: $color-bg-white;
+}
+
+.page-header {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xxl;
+  padding: 0 $spacing-4xl;
+  border-bottom: 1px solid $color-border;
+  background: $color-bg-white;
+}
+
+.page-content {
+  flex: 1;
+  overflow: auto;
+  padding: $spacing-xxl $spacing-4xl;
+}
+
+@media (max-width: 1180px) {
+  .workbench {
+    min-width: 0;
+  }
+
+  .sidebar {
+    width: 280px !important;
+    flex: 0 0 280px !important;
+    max-width: 280px !important;
+    min-width: 280px !important;
+  }
+
+  .preview-panel {
+    width: 360px !important;
+    flex: 0 0 360px !important;
+    max-width: 360px !important;
+    min-width: 360px !important;
+  }
+}

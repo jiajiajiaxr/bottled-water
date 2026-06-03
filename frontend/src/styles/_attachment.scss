@@ -1,0 +1,76 @@
+@use "variables" as *;
+
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-lg;
+  margin: 0 0 $spacing-lg;
+}
+
+.message-attachment {
+  max-width: 100%;
+  display: inline-grid;
+  grid-template-columns: auto minmax(80px, 1fr) auto;
+  align-items: center;
+  gap: $spacing-lg;
+  border: 1px solid $color-border-message;
+  border-radius: $radius-md;
+  background: #f8fbff;
+  color: $color-text-primary;
+  padding: $spacing-sm 10px;
+  cursor: pointer;
+
+  &:hover {
+    border-color: $color-primary;
+    background: $color-bg-user-message;
+  }
+}
+
+.message-attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.message-attachment-meta {
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.attachment-preview {
+  min-height: 180px;
+  display: grid;
+  gap: $spacing-lg;
+  place-items: center;
+}
+
+.attachment-preview-meta {
+  width: 100%;
+}
+
+.attachment-preview pre {
+  width: 100%;
+  max-height: 52vh;
+  overflow: auto;
+  margin: 0;
+  padding: $spacing-lg;
+  border: 1px solid $color-border;
+  border-radius: $radius-md;
+  background: $color-bg-preview;
+  white-space: pre-wrap;
+}
+
+.attachment-preview img,
+.attachment-preview iframe {
+  width: 100%;
+  max-height: 62vh;
+  border: 1px solid $color-border;
+  border-radius: $radius-md;
+}
+
+.attachment-preview iframe {
+  min-height: 420px;
+}

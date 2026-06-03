@@ -1,0 +1,203 @@
+@use "variables" as *;
+
+.sidebar {
+  height: 100vh;
+  padding: $spacing-3xl;
+  background: $color-bg-sidebar !important;
+  border-right: 1px solid $color-border;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+
+  .ant-layout-sider-children {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  h3 {
+    margin: 0;
+  }
+}
+
+.sidebar-collapsed {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: $spacing-lg;
+  padding: $spacing-sm 0;
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: $spacing-lg;
+  padding-bottom: $spacing-xl;
+  margin-bottom: $spacing-xl;
+  border-bottom: 1px solid $color-border-light;
+}
+
+.sidebar-user-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-lg;
+  margin-bottom: $spacing-xxl;
+}
+
+.search-box {
+  margin-bottom: $spacing-lg;
+}
+
+.sidebar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-lg;
+  margin-top: $spacing-md;
+  padding: 0 2px;
+}
+
+.conversation-list {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  overflow: auto;
+  margin-top: $spacing-lg;
+  padding-right: 2px;
+}
+
+.conversation-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: $spacing-md;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: $radius-md;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-sm;
+  cursor: pointer;
+
+  &:hover {
+    background: $color-bg-hover;
+  }
+
+  &.is-active {
+    background: $color-bg-active;
+    border-color: #9cc5ff;
+  }
+
+  &.is-running {
+    border-color: $color-info;
+    background: #eef6ff;
+  }
+}
+
+.conversation-main {
+  min-width: 0;
+}
+
+.last-message {
+  display: block;
+  margin: 6px 0 $spacing-sm;
+}
+
+.time {
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.conversation-folders {
+  display: grid;
+  gap: $spacing-xs;
+  margin: $spacing-md 0;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.folder-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-lg;
+  padding: 0 2px $spacing-xs;
+}
+
+.folder-create-input {
+  margin-bottom: $spacing-xs;
+}
+
+.folder-item {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: $spacing-lg;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: $color-text-secondary;
+  padding: $spacing-lg 10px;
+  border-radius: $radius-md;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &.is-active {
+    background: #eef4ff;
+    color: $color-primary-light;
+  }
+}
+
+.folder-tree-node {
+  margin-bottom: 2px;
+}
+
+.folder-tree-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: $spacing-lg 10px;
+  border-radius: $radius-md;
+  cursor: pointer;
+  color: $color-text-secondary;
+  font-weight: 500;
+  font-size: 13px;
+  user-select: none;
+
+  &:hover {
+    background: #f0f4f9;
+  }
+}
+
+.folder-tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-tree-count {
+  font-size: 12px;
+  color: $color-text-muted;
+  font-weight: 400;
+  margin-left: $spacing-xs;
+}
+
+.folder-tree-children {
+  padding-left: $spacing-xl;
+
+  .conversation-item {
+    margin-bottom: $spacing-xs;
+  }
+}
