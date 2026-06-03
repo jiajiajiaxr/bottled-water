@@ -292,7 +292,7 @@ export function useWorkflowStudio({
       const participant = conversation.participants.find(
         (p) => p.agent_id === agentId && p.participant_type === "agent" && !p.left_at,
       );
-      if (!participant?.participant_id) continue;
+      if (!participant?.id) continue;
       const remainingAgents = conversation.participants.filter(
         (p) => p.participant_type === "agent" && !p.left_at && p.agent_id !== agentId,
       );
@@ -301,16 +301,16 @@ export function useWorkflowStudio({
         continue;
       }
       try {
-        await api.removeParticipant(conversationId, participant.participant_id);
+        await api.removeParticipant(conversationId, participant.id);
       } catch {
-        // 静默失败
+        onError("同步移除工作流成员失败");
       }
     }
     try {
       const nextConversations = await api.conversations(workspaceId);
       setConversation(nextConversations.find((item) => item.id === conversationId));
     } catch {
-      // 静默失败
+      onError("刷新会话列表失败");
     }
   };
 

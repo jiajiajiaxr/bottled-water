@@ -6,10 +6,12 @@ import {
   useConversationStore,
   useMessageStore,
   useArtifactStore,
+  useUIStore,
 } from "@/store";
 import { useStreamingMessages } from "./useStreamingMessages";
 import { makeMessage } from "@/lib";
 import type { ChatMessage, UploadedFile, MessageAttachment } from "@/types";
+import type { MessageBody } from "@/types/messages";
 
 /**
  * 消息操作 Hook。
@@ -53,6 +55,7 @@ export function useMessageOperations(userName?: string) {
     if (!activeId) return;
 
     const conversationId = activeId;
+    const scheduleMode = useUIStore.getState().scheduleMode;
     const localAttachments: MessageAttachment[] = attachments.map((file) => ({
       file_id: file.file_id ?? file.id,
       id: file.id,
@@ -79,7 +82,7 @@ export function useMessageOperations(userName?: string) {
     updateMessages((prev) => [...prev, userMessage]);
 
     // 3. 通过 WebSocket 发送消息并接收流式响应
-    const body = {
+    const body: MessageBody = {
       content_type: "text",
       content: {
         text: content,
@@ -94,6 +97,7 @@ export function useMessageOperations(userName?: string) {
       thinking_enabled: thinkingEnabled,
       model_config_id: modelConfigId,
       client_message_id: `client-${Date.now()}`,
+      scheduling_strategy: scheduleMode === "workflow" ? "workflow" : "tech_lead",
     };
 
     try {

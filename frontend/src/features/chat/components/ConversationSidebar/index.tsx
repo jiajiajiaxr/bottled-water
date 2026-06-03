@@ -294,7 +294,7 @@ export function ConversationSidebar({
                     }
                   >
                     {item.chat_type === "group"
-                      ? `${item.agent_count ?? item.participants.length} Agent`
+                      ? `${item.participants.filter((p) => p.participant_type === "agent" && !p.left_at).length} Agent`
                       : "单聊"}
                   </Tag>
                   {item.tags.map((tag) => (
@@ -399,7 +399,7 @@ export function ConversationSidebar({
                 .filter((p) => p.participant_type === "agent")
                 .map((p) => (
                   <div
-                    key={p.participant_id ?? p.id}
+                    key={p.id}
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
@@ -416,17 +416,17 @@ export function ConversationSidebar({
                         ).length <= 1
                       }
                       onClick={async () => {
-                        if (!p.participant_id) return;
+                        if (!p.id) return;
                         try {
                           await api.removeParticipant(
                             editing.id,
-                            p.participant_id,
+                            p.id,
                           );
                           const nextParticipants = (
                             editing.participants ?? []
                           ).filter(
                             (x) =>
-                              x.participant_id !== p.participant_id,
+                              x.id !== p.id,
                           );
                           const next = { ...editing, participants: nextParticipants };
                           setEditing(next);
@@ -438,7 +438,7 @@ export function ConversationSidebar({
                               editing.participants ?? []
                             ).filter(
                               (x) =>
-                                x.participant_id !== p.participant_id,
+                                x.id !== p.id,
                             );
                             const next = { ...editing, participants: nextParticipants };
                             setEditing(next);
@@ -465,7 +465,7 @@ export function ConversationSidebar({
                     const nextParticipants = [
                       ...(editing.participants ?? []),
                       {
-                        participant_id: value,
+                        id: value,
                         agent_id: value,
                         agent_name: agent?.name ?? agent?.display_name ?? value,
                         participant_type: "agent" as const,

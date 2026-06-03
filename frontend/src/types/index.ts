@@ -1,5 +1,6 @@
 export * from "./auth";
 export * from "./chat";
+export * from "./messages";
 export * from "./workflow";
 export * from "./agent";
 export * from "./file";

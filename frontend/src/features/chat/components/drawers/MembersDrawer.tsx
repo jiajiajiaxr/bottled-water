@@ -55,7 +55,11 @@ export function MembersDrawer({
     <Drawer title="群聊成员与邀请" width={460} open={open} onClose={onClose}>
       <Statistic
         title="当前 Agent 人数"
-        value={active?.agent_count ?? active?.participants.length ?? 0}
+        value={
+          active?.participants.filter(
+            (p) => p.participant_type === "agent" && !p.left_at,
+          ).length ?? 0
+        }
         suffix="/8"
       />
       <List

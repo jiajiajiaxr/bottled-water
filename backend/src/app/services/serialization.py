@@ -152,7 +152,6 @@ def participant_to_dict(participant: ConversationParticipant) -> dict[str, Any]:
     agent = participant.agent
     return {
         "id": participant.id,
-        "participant_id": participant.id,
         "participant_type": participant.participant_type,
         "user_id": participant.user_id,
         "agent_id": participant.agent_id,

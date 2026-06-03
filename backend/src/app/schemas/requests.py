@@ -496,7 +496,7 @@ class SendMessagePayload(BaseModel):
     reply_to_message_id: str | None = None
     quotedMessageId: str | None = None
     thinking_enabled: bool = False
-    scheduling_strategy: Literal["workflow", "tech_lead"] = "workflow"
+    scheduling_strategy: Literal["workflow", "tech_lead"] = "tech_lead"
     regenerate_message_id: str | None = None
     model_config_id: str | None = None  # 用户选择的模型配置ID
 
