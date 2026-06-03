@@ -26,7 +26,13 @@ model_provider - 统一模型接口
 
 from .core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
 from .core.config import ModelConfig
-from .factory import create_provider, list_providers, register_provider, get_provider_info
+from .factory import (
+    create_provider,
+    list_providers,
+    register_provider,
+    get_provider_info,
+    get_builtin_providers,
+)
 
 __all__ = [
     # 接口
@@ -41,4 +47,5 @@ __all__ = [
     "list_providers",
     "register_provider",
     "get_provider_info",
+    "get_builtin_providers",
 ]

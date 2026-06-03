@@ -23,6 +23,31 @@ _PROVIDER_REGISTRY: Dict[str, type] = {
     "openai": ArkProvider,
 }
 
+# 内置 Provider 元数据（前端厂商列表来源）
+_PROVIDER_METADATA: Dict[str, dict] = {
+    "volcengine": {
+        "name": "火山引擎",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "default_model": "doubao-seed-2-0-lite",
+        "supports_streaming": True,
+        "supports_embeddings": False,
+    },
+    "openai": {
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "gpt-4o",
+        "supports_streaming": True,
+        "supports_embeddings": True,
+    },
+    "openai_compatible": {
+        "name": "OpenAI 兼容",
+        "base_url": "",
+        "default_model": "",
+        "supports_streaming": True,
+        "supports_embeddings": False,
+    },
+}
+
 
 def create_provider(config: Union[ModelConfig, Dict[str, Any]]) -> BaseModelProvider:
     """根据配置创建模型提供者
@@ -67,7 +92,7 @@ def register_provider(name: str, provider_cls: type):
         register_provider("my_provider", MyProvider)
     """
     if not issubclass(provider_cls, BaseModelProvider):
-        raise TypeError(f"Provider must inherit BaseModelProvider")
+        raise TypeError("Provider must inherit BaseModelProvider")
     _PROVIDER_REGISTRY[name] = provider_cls
 
 
@@ -77,3 +102,15 @@ def get_provider_info() -> Dict[str, str]:
         name: cls.__doc__ or name
         for name, cls in _PROVIDER_REGISTRY.items()
     }
+
+
+def get_builtin_providers() -> list[dict]:
+    """获取内置 Provider 列表（前端厂商下拉菜单数据源）。
+
+    Returns:
+        每个元素包含 provider_type、name、base_url、default_model 等字段的字典列表。
+    """
+    result = []
+    for provider_type, meta in _PROVIDER_METADATA.items():
+        result.append({"provider_type": provider_type, **meta})
+    return result

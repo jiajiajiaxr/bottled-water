@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.errors import ForbiddenError, NotFoundError
+from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from db import get_db
@@ -15,9 +15,11 @@ from app.schemas.requests import (
     CreateModelConfigRequest,
     CreateModelProviderRequest,
     TestModelRequest,
+    UpdateModelConfigRequest,
 )
 from app.services.llm_gateway import test_model_config
 from app.services.serialization import model_config_to_dict, model_provider_to_dict
+from model_provider import get_builtin_providers
 
 
 router = APIRouter(tags=["model-management"])
@@ -39,6 +41,47 @@ async def _get_provider(db: AsyncSession, user: User, provider_id: str) -> Model
         raise NotFoundError("模型供应商不存在")
     if provider.owner_id not in {None, user.id} and user.role != "admin":
         raise ForbiddenError("无权访问该模型供应商")
+    return provider
+
+
+async def _resolve_provider_by_type(
+    db: AsyncSession, user: User, provider_type: str
+) -> ModelProvider:
+    """根据 provider_type 查找或自动创建内置 ModelProvider 记录。"""
+    await ensure_model_tables(db)
+    from model_provider import get_builtin_providers
+
+    # 查找已存在的同类型 provider（优先 owner_id 为 None 的内置记录）
+    provider = await db.scalar(
+        select(ModelProvider)
+        .where(
+            ModelProvider.provider_type == provider_type,
+            ModelProvider.deleted_at.is_(None),
+        )
+        .order_by(ModelProvider.owner_id.is_(None).desc())
+    )
+    if provider:
+        return provider
+
+    # 根据内置元数据自动创建
+    builtin = {b["provider_type"]: b for b in get_builtin_providers()}
+    meta = builtin.get(provider_type)
+    if not meta:
+        raise ValidationAppError(f"不支持的 provider 类型: {provider_type}")
+
+    provider = ModelProvider(
+        owner_id=None,
+        name=meta["name"],
+        provider_type=provider_type,
+        base_url=meta.get("base_url", "").rstrip("/"),
+        api_key_ref="mock",
+        default_model=meta.get("default_model", ""),
+        supports_streaming=meta.get("supports_streaming", True),
+        supports_embeddings=meta.get("supports_embeddings", False),
+        status="active",
+    )
+    db.add(provider)
+    await db.flush()
     return provider
 
 
@@ -135,6 +178,16 @@ async def delete_model_provider(
     return ok({"id": provider.id, "deleted": True})
 
 
+@router.get("/model-providers/builtin", response_model=ApiResponse[dict])
+async def list_builtin_providers():
+    """返回 model_provider 模块内置支持的厂商列表。
+
+    前端"新增模型"下拉菜单应从此端点获取可用厂商，
+    而非从 /model-providers 读取用户自建记录。
+    """
+    return ok({"items": get_builtin_providers()})
+
+
 @router.get("/model-configs", response_model=ApiResponse[dict])
 async def list_model_configs(
     db: AsyncSession = Depends(get_db),
@@ -160,7 +213,12 @@ async def create_model_config(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    provider = await _get_provider(db, user, payload.provider_id)
+    if payload.provider_id:
+        provider = await _get_provider(db, user, payload.provider_id)
+    elif payload.provider_type:
+        provider = await _resolve_provider_by_type(db, user, payload.provider_type)
+    else:
+        raise ValidationAppError("provider_id 与 provider_type 至少提供一个")
     config = ModelConfig(
         provider_id=provider.id,
         name=payload.name,
@@ -175,6 +233,70 @@ async def create_model_config(
     await db.commit()
     await db.refresh(config)
     return ok(model_config_to_dict(config), "模型配置已创建")
+
+
+@router.patch("/model-configs/{config_id}", response_model=ApiResponse[ModelConfigOut])
+async def update_model_config(
+    config_id: str,
+    payload: UpdateModelConfigRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    config = await db.scalar(
+        select(ModelConfig)
+        .options(selectinload(ModelConfig.provider))
+        .where(ModelConfig.id == config_id, ModelConfig.deleted_at.is_(None))
+    )
+    if not config:
+        raise NotFoundError("模型配置不存在")
+    if (
+        config.provider.owner_id != user.id
+        and config.provider.owner_id is not None
+        and user.role != "admin"
+    ):
+        raise ForbiddenError("无权修改该模型配置")
+    if payload.name is not None:
+        config.name = payload.name
+    if payload.model_id is not None:
+        config.model_id = payload.model_id
+    if payload.purpose is not None:
+        config.purpose = payload.purpose
+    if payload.context_window is not None:
+        config.context_window = payload.context_window
+    if payload.max_output_tokens is not None:
+        config.max_output_tokens = payload.max_output_tokens
+    if payload.temperature_default is not None:
+        config.temperature_default = payload.temperature_default
+    if payload.config is not None:
+        config.config = payload.config
+    await db.commit()
+    await db.refresh(config)
+    return ok(model_config_to_dict(config), "模型配置已更新")
+
+
+@router.delete("/model-configs/{config_id}", response_model=ApiResponse[dict])
+async def delete_model_config(
+    config_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    config = await db.scalar(
+        select(ModelConfig)
+        .options(selectinload(ModelConfig.provider))
+        .where(ModelConfig.id == config_id, ModelConfig.deleted_at.is_(None))
+    )
+    if not config:
+        raise NotFoundError("模型配置不存在")
+    if (
+        config.provider.owner_id != user.id
+        and config.provider.owner_id is not None
+        and user.role != "admin"
+    ):
+        raise ForbiddenError("无权删除该模型配置")
+    config.deleted_at = utcnow()
+    config.status = "deleted"
+    await db.commit()
+    return ok({"id": config.id, "deleted": True}, "模型配置已删除")
 
 
 @router.post("/model-configs/test", response_model=ApiResponse[dict])

@@ -119,7 +119,7 @@ class OrchestratorService:
             logger.warning(f"Provider not active for config: {model_config_id}")
             return create_provider_from_env_fallback()
 
-        api_key = await resolve_api_key(provider)
+        api_key = await resolve_api_key(provider, config)
 
         if not api_key:
             logger.warning(f"No API key for provider: {provider.name}")
