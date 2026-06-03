@@ -186,7 +186,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             <Button onClick={onLogout}>退出</Button>
           </Space>
         </div>
-        {children}
+        <div className="main-content">{children}</div>
       </Layout>
     </Layout>
   );
