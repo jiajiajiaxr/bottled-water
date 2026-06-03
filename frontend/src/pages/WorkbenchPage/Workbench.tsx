@@ -17,6 +17,7 @@ import { GlobalSettingsDrawer } from "@/features/settings/components/GlobalSetti
 import { PlatformControlDrawer } from "@/features/platform/components/PlatformControlDrawer";
 import { ChatPanel } from "@/features/chat/components/ChatPanel";
 import { PreviewPanel } from "@/features/preview/components/PreviewPanel";
+import { WorkflowStudioContent } from "@/features/workflow/WorkflowStudioContent";
 import type { User } from "@/types";
 import {
   useConversationCategories,
@@ -92,6 +93,7 @@ export function Workbench({
     membersOpen,
     createOpen,
     artifactPanelOpen,
+    scheduleMode,
     setAgentDrawerOpen,
     setWorkspacesOpen,
     setGlobalSettingsOpen,
@@ -99,6 +101,7 @@ export function Workbench({
     setMembersOpen,
     setCreateOpen,
     setArtifactPanelOpen,
+    setScheduleMode,
   } = useUIStore();
   const active = conversations.find((item) => item.id === activeId);
   const activeWorkspace =
@@ -311,37 +314,50 @@ export function Workbench({
         setActiveId={setActiveId}
         navigateToConversation={navigateToConversation}
         runningConversationIds={runningConversationIds}
+        agents={agents}
         routeTab={routeTab}
+        scheduleMode={scheduleMode}
+        onScheduleModeChange={setScheduleMode}
       >
         {routeTab === "chat" ? (
-          <>
-            <ChatPanel active={active} loading={loadingMessages} userName={currentUser.name} />
-            {artifactPanelOpen && artifact && (
-              <PreviewPanel
-                artifact={artifact}
-                deployment={deployment}
-                files={files}
-                knowledgeBases={knowledgeBases}
-                onClose={() => setArtifactPanelOpen(false)}
-                onSave={saveArtifact}
-                onDeploy={deploy}
-                onCreateKb={async (payload) => {
-                  const created = await api.createKnowledgeBase(payload);
-                  setKnowledgeBases([created, ...knowledgeBases]);
-                  message.success("知识库已创建");
-                }}
-                onImportText={async (kbId, payload) => {
-                  await api.importKnowledgeText(kbId, payload);
-                  setKnowledgeBases(await api.knowledgeBases());
-                  message.success("文档已索引");
-                }}
-                onRetrieve={async (kbId, query) => {
-                  const result = await api.retrieveKnowledge(kbId, query);
-                  return result.context;
-                }}
-              />
-            )}
-          </>
+          scheduleMode === "workflow" && active ? (
+            <WorkflowStudioContent
+              workspaceId={activeWorkspaceId || ""}
+              conversationId={active.id}
+              embedded
+              onError={(value) => message.error(value)}
+              onSuccess={(value) => message.success(value)}
+            />
+          ) : (
+            <>
+              <ChatPanel active={active} loading={loadingMessages} userName={currentUser.name} />
+              {artifactPanelOpen && artifact && (
+                <PreviewPanel
+                  artifact={artifact}
+                  deployment={deployment}
+                  files={files}
+                  knowledgeBases={knowledgeBases}
+                  onClose={() => setArtifactPanelOpen(false)}
+                  onSave={saveArtifact}
+                  onDeploy={deploy}
+                  onCreateKb={async (payload) => {
+                    const created = await api.createKnowledgeBase(payload);
+                    setKnowledgeBases([created, ...knowledgeBases]);
+                    message.success("知识库已创建");
+                  }}
+                  onImportText={async (kbId, payload) => {
+                    await api.importKnowledgeText(kbId, payload);
+                    setKnowledgeBases(await api.knowledgeBases());
+                    message.success("文档已索引");
+                  }}
+                  onRetrieve={async (kbId, query) => {
+                    const result = await api.retrieveKnowledge(kbId, query);
+                    return result.context;
+                  }}
+                />
+              )}
+            </>
+          )
         ) : routeTab === "agents" ? (
           <AgentDirectoryDrawer
             asPage

@@ -62,6 +62,7 @@ export function WorkflowCanvas({
   onPaneClick,
   onSelectionChange,
   onCopySelection,
+  onDeleteSelection,
 }: {
   workflow: ConversationWorkflow;
   latestRun?: WorkflowRun;
@@ -77,6 +78,7 @@ export function WorkflowCanvas({
   onPaneClick?: () => void;
   onSelectionChange?: (nodeIds: string[], edgeIds: string[]) => void;
   onCopySelection?: () => void;
+  onDeleteSelection?: (removedNodeIds: string[]) => void;
 }) {
   const lastNodePointerAt = useRef(0);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -262,10 +264,15 @@ export function WorkflowCanvas({
 
   const handleNodesChange = (changes: NodeChange[]) => {
     if (locked) return;
+    const removedNodeIds: string[] = [];
     const structuralChanges = changes.filter((change) => {
       if (change.type === "remove") {
         const node = nodeById.get(String(change.id));
-        return node && !["start", "end"].includes(workflowNodeType(node));
+        if (node && !["start", "end"].includes(workflowNodeType(node))) {
+          removedNodeIds.push(String(change.id));
+          return true;
+        }
+        return false;
       }
       return change.type === "position";
     });
@@ -286,6 +293,9 @@ export function WorkflowCanvas({
         nextNodeIds.has(edgeSource(edge)) && nextNodeIds.has(edgeTarget(edge)),
     );
     onChange({ ...workflow, nodes, edges });
+    if (removedNodeIds.length) {
+      onDeleteSelection?.(removedNodeIds);
+    }
   };
 
   const hasNodeDragPayload = (event: DragEvent<HTMLDivElement>) =>
@@ -340,6 +350,7 @@ export function WorkflowCanvas({
     });
     onSelectionChange?.([], []);
     onChange({ ...workflow, nodes, edges });
+    onDeleteSelection?.(Array.from(removableNodeIds));
   };
 
   return (

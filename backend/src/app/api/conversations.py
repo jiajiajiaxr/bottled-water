@@ -611,23 +611,34 @@ async def add_participants(
         missing = set(add_agents) - found
         if missing:
             raise NotFoundError(f"Agent不存在：{', '.join(sorted(missing))}")
+        # 查找已存在但已删除的 participants，恢复它们而不是创建新记录
+        existing_removed = (
+            await db.scalars(
+                select(ConversationParticipant).where(
+                    ConversationParticipant.conversation_id == conversation.id,
+                    ConversationParticipant.agent_id.in_([a.id for a in agents]),
+                    ConversationParticipant.left_at.is_not(None),
+                )
+            )
+        ).all()
+        removed_by_agent_id = {p.agent_id: p for p in existing_removed}
         for agent in agents:
-            db.add(
-                ConversationParticipant(
+            if agent.id in removed_by_agent_id:
+                participant = removed_by_agent_id[agent.id]
+                participant.left_at = None
+                participant.role = payload.role
+                participant.agent = agent
+                added.append(participant)
+            else:
+                participant = ConversationParticipant(
                     conversation_id=conversation.id,
                     participant_type="agent",
                     agent_id=agent.id,
                     role=payload.role,
                 )
-            )
-            added.append(
-                ConversationParticipant(
-                    conversation_id=conversation.id,
-                    participant_type="agent",
-                    agent_id=agent.id,
-                    role=payload.role,
-                )
-            )
+                participant.agent = agent
+                db.add(participant)
+                added.append(participant)
     add_users = [uid for uid in payload.user_ids if uid not in existing_user_ids]
     if add_users:
         users = (
@@ -665,8 +676,7 @@ async def add_participants(
             )
         )
     await db.commit()
-    await db.expire_all()
-    return ok(conversation_to_dict(await _get(db, user, conversation.id)), "成员已加入")
+    return ok(conversation_to_dict(conversation), "成员已加入")
 
 
 @router.patch(
@@ -741,8 +751,7 @@ async def remove_participant(
         )
     )
     await db.commit()
-    await db.expire_all()
-    return ok(conversation_to_dict(await _get(db, user, conversation.id)), "成员已移除")
+    return ok(conversation_to_dict(conversation), "成员已移除")
 
 
 @router.post("/conversations/{conversation_id}/invites", response_model=ApiResponse[dict])
@@ -809,22 +818,34 @@ async def compat_add_participants(
     conversation = await _get(db, user, conversation_id)
     _ensure_can_manage(conversation, user)
     existing = {it.agent_id for it in _active_participants(conversation) if it.agent_id}
+    to_add = [aid for aid in payload.agent_ids if aid not in existing]
     agents = (
+        await db.scalars(select(Agent).where(Agent.id.in_(to_add)))
+    ).all()
+    existing_removed = (
         await db.scalars(
-            select(Agent).where(
-                Agent.id.in_([aid for aid in payload.agent_ids if aid not in existing])
+            select(ConversationParticipant).where(
+                ConversationParticipant.conversation_id == conversation.id,
+                ConversationParticipant.agent_id.in_([a.id for a in agents]),
+                ConversationParticipant.left_at.is_not(None),
             )
         )
     ).all()
+    removed_by_agent_id = {p.agent_id: p for p in existing_removed}
     for agent in agents:
-        db.add(
-            ConversationParticipant(
+        if agent.id in removed_by_agent_id:
+            participant = removed_by_agent_id[agent.id]
+            participant.left_at = None
+            participant.role = payload.role
+            participant.agent = agent
+        else:
+            participant = ConversationParticipant(
                 conversation_id=conversation.id,
                 participant_type="agent",
                 agent_id=agent.id,
                 role=payload.role,
             )
-        )
+            participant.agent = agent
+            db.add(participant)
     await db.commit()
-    await db.expire_all()
-    return conversation_to_dict(await _get(db, user, conversation.id))
+    return conversation_to_dict(conversation)

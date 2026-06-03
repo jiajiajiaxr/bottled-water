@@ -142,9 +142,24 @@ export function WorkflowStudioContent({
     if (embedded && studio.selectedNodeIds.length) setActivePanel("config");
   };
 
-  const deleteSelection = () => {
-    studio.deleteSelection();
+  const deleteSelection = async () => {
+    await studio.deleteSelection();
     if (embedded) setActivePanel(undefined);
+  };
+
+  const handleDeleteSelection = async (removedNodeIds: string[]) => {
+    const removedAgentIds = new Set<string>();
+    for (const nodeId of removedNodeIds) {
+      const node = studio.workflow?.nodes.find((n) => n.id === nodeId);
+      if (node && ["agent", "review"].includes(node.type ?? "") && node.agent_id) {
+        removedAgentIds.add(node.agent_id);
+      }
+    }
+    if (removedAgentIds.size > 0 && studio.workflow) {
+      const removedNodeIdsSet = new Set(removedNodeIds);
+      const currentNodes = studio.workflow.nodes.filter((n) => !removedNodeIdsSet.has(n.id));
+      await studio.syncAgentsAfterNodeRemoval(Array.from(removedAgentIds), currentNodes);
+    }
   };
 
   if (studio.loading) {
@@ -184,6 +199,7 @@ export function WorkflowStudioContent({
           studio.setEditingNodeId(undefined);
         }
       }}
+      onDeleteSelection={handleDeleteSelection}
     />
   );
 

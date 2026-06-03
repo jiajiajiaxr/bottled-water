@@ -3,17 +3,21 @@ import {
   Button,
   Layout,
   Modal,
+  Segmented,
   Select,
   Space,
 } from "antd";
 import {
   AppstoreOutlined,
+  BranchesOutlined,
+  CommentOutlined,
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
 import { api } from "@/api";
 import { ConversationSidebar } from "@/features/chat/components/ConversationSidebar";
 import type {
+  Agent,
   Conversation,
   User,
   Workspace,
@@ -54,8 +58,13 @@ export interface WorkbenchLayoutProps {
 
   runningConversationIds: Set<string>;
 
+  // Agents
+  agents: Agent[];
+
   // Main content
   routeTab: string;
+  scheduleMode: "chat" | "workflow";
+  onScheduleModeChange: (mode: "chat" | "workflow") => void;
   children: React.ReactNode;
 }
 
@@ -81,6 +90,10 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     setActiveId,
     navigateToConversation,
     runningConversationIds,
+    agents,
+    routeTab,
+    scheduleMode,
+    onScheduleModeChange,
     children,
   } = props;
 
@@ -92,6 +105,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         activeId={activeId}
         runningConversationIds={runningConversationIds}
         categoryOptions={conversationCategories}
+        agents={agents}
         onSelect={selectConversation}
         onCreate={() => setCreateOpen({ open: true })}
         onCreateCategory={addConversationCategory}
@@ -151,6 +165,16 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             </Button>
           </Space>
           <Space>
+            {routeTab === "chat" && (
+              <Segmented
+                value={scheduleMode}
+                onChange={(value) => onScheduleModeChange(value as "chat" | "workflow")}
+                options={[
+                  { label: <><CommentOutlined /> 一般</>, value: "chat" },
+                  { label: <><BranchesOutlined /> 工作流</>, value: "workflow" },
+                ]}
+              />
+            )}
             <Button
               icon={<ToolOutlined />}
               onClick={() => openMainTab("settings")}
@@ -168,7 +192,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             <Button onClick={onLogout}>退出</Button>
           </Space>
         </div>
-        {children}
+        <div className="main-content">{children}</div>
       </Layout>
     </Layout>
   );

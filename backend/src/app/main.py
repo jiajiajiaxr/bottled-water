@@ -54,6 +54,17 @@ async def validation_error_handler(_request: Request, exc: RequestValidationErro
     )
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(_request: Request, exc: Exception):
+    import traceback
+    traceback_str = traceback.format_exc()
+    print(f"UNHANDLED EXCEPTION: {exc}\n{traceback_str}", flush=True)
+    return JSONResponse(
+        status_code=500,
+        content=fail(5000, f"Internal Server Error: {exc}", {"traceback": traceback_str}),
+    )
+
+
 @app.get("/api/v1/health")
 async def health():
     return ok({"status": "ok", "provider": "mock" if settings.use_mock_llm else "ark"})
