@@ -14,9 +14,6 @@ from sqlalchemy.orm import selectinload
 
 from agent_runtime import AgentConfig, Session as AgentSession, ToolCall
 from agent_runtime.core.interfaces import ToolExecutor
-from agent_runtime.strategies.tech_lead import TechLeadScheduler
-from agent_runtime.strategies.single_agent import SingleAgentScheduler
-from agent_runtime.strategies.workflow import WorkflowScheduler
 from agent_runtime.workflow.replanner import sanitize_workflow
 from model_provider import create_provider
 from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
@@ -145,10 +142,11 @@ class OrchestratorService:
     ) -> AgentSession:
         """创建 AgentSession（不运行）。
 
+        调度器由 AgentSession 内部根据配置创建，从属于会话生命周期。
         支持三种调度策略：
-        - 单 Agent：SingleAgentScheduler
-        - 多 Agent：TechLeadScheduler
-        - Workflow：WorkflowScheduler
+        - single_agent：单 Agent 纯代码调度
+        - tech_lead：多 Agent LLM 协调调度
+        - workflow：Workflow 图遍历调度
         """
         user = await db.get(User, conversation.creator_id)
         agent_count = len(agents)
@@ -171,7 +169,6 @@ class OrchestratorService:
             )
             for agent in agents
         ]
-        agent_configs_by_id = {a.id: a for a in agent_configs}
 
         # 判断调度策略
         scheduling_strategy = ""
@@ -183,6 +180,11 @@ class OrchestratorService:
             and isinstance(conversation.extra, dict)
             and isinstance(conversation.extra.get("workflow"), dict)
         )
+
+        primary_agent = agents[0] if agents else None
+        tool_executor = _ToolExecutorAdapter(
+            db, primary_agent, user, conversation
+        ) if primary_agent else None
 
         # ---- Workflow 模式 ----
         if scheduling_strategy == "workflow" or has_workflow:
@@ -216,22 +218,13 @@ class OrchestratorService:
                 ],
             )
 
-            # 创建 WorkflowScheduler，传入所有真实 Agent
-            # set_workflow_context 会自动为 tool/skill/mcp/artifact 节点创建虚拟智能体
-            scheduler = WorkflowScheduler(agents=agent_configs_by_id)
-            scheduler.set_workflow_context(workflow, "")
-
-            # 获取完整 Agent 列表（含虚拟工具智能体）
-            all_agents = scheduler.get_all_agents()
-
-            primary_agent = agents[0] if agents else None
-            tool_executor = _ToolExecutorAdapter(
-                db, primary_agent, user, conversation
-            ) if primary_agent else None
-
             return AgentSession.create(
-                agents=list(all_agents.values()),
-                scheduler=scheduler,
+                agents=agent_configs,
+                scheduler_config={
+                    "strategy": "workflow",
+                    "workflow": workflow,
+                    "prompt": "",
+                },
                 model_provider=model_provider,
                 persistence=SQLAlchemyBackend(db),
                 event_sink=event_sink,
@@ -241,13 +234,9 @@ class OrchestratorService:
 
         # ---- 单 Agent 模式 ----
         if agent_count == 1:
-            agent = agents[0]
-            scheduler = SingleAgentScheduler(agents={agent.id: agent_configs[0]})
-            tool_executor = _ToolExecutorAdapter(db, agent, user, conversation)
-
             return AgentSession.create(
                 agents=[agent_configs[0]],
-                scheduler=scheduler,
+                scheduler_config={"strategy": "single_agent"},
                 model_provider=model_provider,
                 persistence=SQLAlchemyBackend(db),
                 event_sink=event_sink,
@@ -256,13 +245,9 @@ class OrchestratorService:
             )
 
         # ---- 多 Agent TechLead 模式 ----
-        scheduler = TechLeadScheduler(agents={a.id: a for a in agent_configs})
-        primary_agent = agents[0]
-        tool_executor = _ToolExecutorAdapter(db, primary_agent, user, conversation)
-
         return AgentSession.create(
             agents=agent_configs,
-            scheduler=scheduler,
+            scheduler_config={"strategy": "tech_lead"},
             model_provider=model_provider,
             persistence=SQLAlchemyBackend(db),
             event_sink=event_sink,
