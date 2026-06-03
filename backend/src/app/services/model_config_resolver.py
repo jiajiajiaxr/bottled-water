@@ -33,11 +33,37 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-async def get_default_model_config(db: AsyncSession) -> tuple[ModelProvider, DBModelConfig] | None:
+async def get_default_model_config(
+    db: AsyncSession, prefer_config_id: str | None = None,
+) -> tuple[ModelProvider, DBModelConfig] | None:
     """获取默认的 (provider, config) 组合。
 
-    直接从 ModelConfig 侧查询，避免先取到无关联配置的空 provider。
+    优先使用用户指定的 prefer_config_id，再从 ModelConfig 侧查询，
+    避免先取到无关联配置的空 provider。
     """
+    if prefer_config_id:
+        config = await db.scalar(
+            select(DBModelConfig)
+            .options(joinedload(DBModelConfig.provider))
+            .join(ModelProvider)
+            .where(
+                DBModelConfig.id == prefer_config_id,
+                DBModelConfig.status == "active",
+                DBModelConfig.deleted_at.is_(None),
+                ModelProvider.status == "active",
+                ModelProvider.deleted_at.is_(None),
+            )
+        )
+        if config and config.provider:
+            logger.info(
+                "使用用户默认模型配置",
+                config_id=prefer_config_id,
+                provider_id=config.provider.id,
+                model_id=config.model_id,
+            )
+            return config.provider, config
+        logger.warning("用户默认模型配置已失效，回退到自动选择", config_id=prefer_config_id)
+
     config = await db.scalar(
         select(DBModelConfig)
         .options(joinedload(DBModelConfig.provider))
@@ -158,12 +184,14 @@ def create_provider_from_env_fallback() -> BaseModelProvider | None:
     )
 
 
-async def create_provider_from_db(db: AsyncSession) -> BaseModelProvider | None:
+async def create_provider_from_db(
+    db: AsyncSession, prefer_config_id: str | None = None,
+) -> BaseModelProvider | None:
     """从数据库创建 provider（推荐方式）。
 
     无可用数据库配置时，fallback 到环境变量。
     """
-    result = await get_default_model_config(db)
+    result = await get_default_model_config(db, prefer_config_id)
     if not result:
         return create_provider_from_env_fallback()
 

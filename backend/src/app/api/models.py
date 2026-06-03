@@ -299,6 +299,35 @@ async def delete_model_config(
     return ok({"id": config.id, "deleted": True}, "模型配置已删除")
 
 
+@router.post("/model-configs/{config_id}/activate", response_model=ApiResponse[dict])
+async def activate_model_config(
+    config_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """将指定模型配置设为当前用户的默认模型。"""
+    config = await db.scalar(
+        select(ModelConfig)
+        .options(selectinload(ModelConfig.provider))
+        .where(ModelConfig.id == config_id, ModelConfig.deleted_at.is_(None))
+    )
+    if not config:
+        raise NotFoundError("模型配置不存在")
+    if (
+        config.provider.owner_id != user.id
+        and config.provider.owner_id is not None
+        and user.role != "admin"
+    ):
+        raise ForbiddenError("无权使用该模型配置")
+
+    user.extra = {**(user.extra or {}), "default_model_config_id": config_id}
+    await db.commit()
+    return ok(
+        {"default_model_config_id": config_id, "name": config.name, "model_id": config.model_id},
+        f"已启用模型：{config.name}",
+    )
+
+
 @router.post("/model-configs/test", response_model=ApiResponse[dict])
 async def test_model(
     payload: TestModelRequest,

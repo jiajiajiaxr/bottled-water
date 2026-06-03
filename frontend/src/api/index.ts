@@ -116,6 +116,7 @@ export {
   testModel,
   availableModels,
   builtinProviders,
+  activateModelConfig,
 } from "./model";
 
 export {
@@ -199,6 +200,7 @@ export const api = {
   ...workspaceFile,
   ...model,
   builtinProviders: model.builtinProviders,
+  activateModelConfig: model.activateModelConfig,
   ...mcp,
   ...skill,
   ...tool,

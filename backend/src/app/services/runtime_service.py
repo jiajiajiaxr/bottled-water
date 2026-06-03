@@ -156,7 +156,8 @@ class OrchestratorService:
             model_provider = await OrchestratorService.create_provider_from_config(db, model_config_id)
         else:
             from app.services.model_config_resolver import create_provider_from_db
-            model_provider = await create_provider_from_db(db)
+            default_id = (user.extra or {}).get("default_model_config_id") if user else None
+            model_provider = await create_provider_from_db(db, default_id)
 
         # 统一构建 AgentConfig
         agent_configs = [

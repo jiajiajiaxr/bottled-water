@@ -29,6 +29,7 @@ class UserOut(ORMModel):
     display_name: str
     avatar_url: str | None = None
     role: str
+    default_model_config_id: str | None = None
 
 
 class UserResponse(BaseModel):

@@ -109,7 +109,7 @@ export function GlobalSettingsDrawer({
           {
             key: "models",
             label: "模型 API",
-            children: <ModelSettings message={message} />,
+            children: <ModelSettings message={message} user={user} onUserUpdated={onUserUpdated} />,
           },
           {
             key: "general",

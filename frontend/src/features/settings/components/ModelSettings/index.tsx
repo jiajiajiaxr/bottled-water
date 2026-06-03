@@ -18,6 +18,7 @@ import {
   PlayCircleOutlined,
   DeleteOutlined,
   SaveOutlined,
+  RocketOutlined,
 } from "@ant-design/icons";
 import {
   Button,
@@ -38,7 +39,7 @@ import {
 } from "antd";
 import type { MenuProps } from "antd";
 import { api } from "@/api";
-import type { ModelConfig, ModelProvider, BuiltinProvider } from "@/types";
+import type { ModelConfig, ModelProvider, BuiltinProvider, User } from "@/types";
 
 const { Text } = Typography;
 
@@ -58,9 +59,11 @@ interface ModelSettingsProps {
     success: (content: string) => void;
     error: (content: string) => void;
   };
+  user: User;
+  onUserUpdated: (user: User) => void;
 }
 
-export function ModelSettings({ message }: ModelSettingsProps) {
+export function ModelSettings({ message, user, onUserUpdated }: ModelSettingsProps) {
   // === 数据 ===
   const [modelProviders, setModelProviders] = useState<ModelProvider[]>([]);
   const [builtinProviders, setBuiltinProviders] = useState<BuiltinProvider[]>([]);
@@ -185,6 +188,18 @@ export function ModelSettings({ message }: ModelSettingsProps) {
     });
   };
 
+  /** 启动模型配置（设为默认） */
+  const handleActivate = async (config: ModelConfig, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const result = await api.activateModelConfig(config.id);
+      message.success(`已启用模型：${result.name}`);
+      onUserUpdated({ ...user, default_model_config_id: config.id });
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "启用失败");
+    }
+  };
+
   /** 打开编辑器并初始化表单 */
   const openEditor = (config: ModelConfig) => {
     setEditingConfig(config);
@@ -269,11 +284,26 @@ export function ModelSettings({ message }: ModelSettingsProps) {
               const provider = modelProviders.find(
                 (p) => p.id === config.provider_id,
               );
+              const isActive = user.default_model_config_id === config.id;
               return (
                 <List.Item>
                   <Card
                     hoverable
                     onClick={() => openEditor(config)}
+                    actions={[
+                      isActive ? (
+                        <Tag color="blue" key="active">运行中</Tag>
+                      ) : (
+                        <Button
+                          type="link"
+                          key="activate"
+                          icon={<RocketOutlined />}
+                          onClick={(e) => handleActivate(config, e)}
+                        >
+                          启动
+                        </Button>
+                      ),
+                    ]}
                   >
                     <Card.Meta
                       avatar={<Avatar icon={<ApiOutlined />} />}

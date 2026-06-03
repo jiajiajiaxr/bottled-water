@@ -117,3 +117,16 @@ export async function availableModels(forceRefresh = false): Promise<AvailableMo
   );
   return result.items;
 }
+
+export async function activateModelConfig(id: string): Promise<{
+  default_model_config_id: string;
+  name: string;
+  model_id: string;
+}> {
+  const result = await post<{
+    default_model_config_id: string;
+    name: string;
+    model_id: string;
+  }>(`/model-configs/${id}/activate`, {});
+  return result;
+}
