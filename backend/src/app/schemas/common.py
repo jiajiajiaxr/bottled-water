@@ -40,104 +40,191 @@ class UserResponse(BaseModel):
     timestamp: str
 
 
+class AgentCapabilityOut(BaseModel):
+    """Agent 能力项。"""
+
+    id: str
+    label: str
+    category: str
+    proficiency: int
+
+
+class AgentConfigOut(BaseModel):
+    """Agent 运行时配置。"""
+
+    max_context_tokens: int = 128000
+    max_output_tokens: int = 8192
+    supports_streaming: bool = True
+    supports_vision: bool = False
+    supports_tool_use: bool = True
+    supports_file_upload: bool = True
+    rate_limit_rpm: int = 60
+    rate_limit_tpm: int = 200000
+    temperature: float = 0.7
+    custom_prompt_prefix: str | None = None
+    custom_parameters: dict[str, Any] = Field(default_factory=dict)
+    tools: list[str] = Field(default_factory=list)
+    skill_ids: list[str] = Field(default_factory=list)
+    mcp_server_ids: list[str] = Field(default_factory=list)
+    agentic_loop: dict[str, Any] = Field(default_factory=dict)
+    base_agent_id: str | None = None
+    model_config_id: str | None = None
+    model_id: str | None = None
+    provider_id: str | None = None
+
+
+class AgentStatsOut(BaseModel):
+    """Agent 统计信息。"""
+
+    total_conversations: int = 0
+    total_messages: int = 0
+    total_tokens_consumed: int = 0
+    avg_response_time_ms: int = 900
+    success_rate: float = 0.98
+    last_active_at: str | None = None
+
+
 class AgentOut(ORMModel):
     id: str
     name: str
+    display_name: str
     type: str
+    version: str
     status: str
+    status_detail: str | None = None
     description: str = ""
     avatar_url: str | None = None
-    capabilities: list[str] = Field(default_factory=list)
+    avatar_color: str = "#1677ff"
+    icon_url: str | None = None
+    capabilities: list[AgentCapabilityOut] = Field(default_factory=list)
+    supported_content_types: list[str] = Field(default_factory=lambda: ["text", "code", "image", "file", "card", "diff"])
+    provider: str
+    is_official: bool
+    created_by: str | None = None
+    last_heartbeat_at: str | None = None
+    response_latency_ms: int = 900
+    config: AgentConfigOut = Field(default_factory=AgentConfigOut)
+    stats: AgentStatsOut = Field(default_factory=AgentStatsOut)
+    tags: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
 
 
 class ConversationParticipantOut(BaseModel):
+    id: str | None = None
+    participant_id: str | None = None
+    participant_type: str | None = None
+    user_id: str | None = None
     agent_id: str | None = None
     agent_name: str | None = None
     agent_type: str | None = None
     agent_avatar_url: str | None = None
+    agent_status: str | None = None
     role: str = "member"
-    joined_at: datetime | None = None
+    nickname: str | None = None
+    unread_count: int = 0
+    left_at: str | None = None
+    joined_at: str | None = None
 
 
 class ConversationOut(ORMModel):
     id: str
+    conversation_id: str
     chat_type: str
+    type: str
     title: str
     description: str = ""
+    workspace_id: str | None = None
     avatar_url: str | None = None
+    participants: list[ConversationParticipantOut] = Field(default_factory=list)
+    participant_names: list[str] = Field(default_factory=list)
+    participant_count: int = 0
+    agent_count: int = 0
+    user_count: int = 0
+    master_enabled: bool = False
+    max_participants: int = 8
     status: str
     is_pinned: bool
-    pinned_at: datetime | None = None
-    unread_count: int
-    last_message_preview: str
-    last_message_sender: str
-    last_message_at: datetime | None = None
-    activity_score: int
-    message_count: int
-    created_at: datetime
-    updated_at: datetime
-    participants: list[ConversationParticipantOut] = Field(default_factory=list)
+    pinned: bool = False
+    pinned_at: str | None = None
+    unread_count: int = 0
+    unread: int = 0
+    last_message_preview: str = ""
+    last_message: str = ""
+    last_message_sender: str = ""
+    last_message_at: str | None = None
+    updated_at: str | None = None
+    activity_score: int = 0
+    message_count: int = 0
+    archived: bool = False
+    tags: list[str] = Field(default_factory=list)
+    category: str = "Default"
+    folder: str = "Default"
+    remark: str = ""
+    workflow: dict[str, Any] | None = None
+    workflow_runtime: dict[str, Any] | None = None
+    created_at: str
 
 
 class MessageOut(ORMModel):
     id: str
+    message_id: str
     client_message_id: str | None = None
     conversation_id: str
+    conversation_id_alias: str | None = Field(None, alias="conversationId")
     sender_type: str
     sender_id: str | None = None
     sender_name: str
     sender_avatar_url: str | None = None
+    role: str = ""
+    author: str = ""
     content_type: str
-    content: dict[str, Any]
+    kind: str = ""
+    content: str = ""
+    raw_content: dict[str, Any] = Field(default_factory=dict)
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
+    thinking: str | None = None
     status: str
     reply_to_message_id: str | None = None
-    version_count: int
-    current_version: int
-    created_at: datetime
-    updated_at: datetime
-
-
-class TaskOut(ORMModel):
-    id: str
-    conversation_id: str | None
-    title: str
-    description: str
-    status: str
-    priority: str
-    progress: int
-    plan: dict[str, Any]
-    output: dict[str, Any]
-    created_at: datetime
-    updated_at: datetime
-
-
-class SubtaskOut(ORMModel):
-    id: str
-    parent_task_id: str
-    title: str
-    description: str
-    status: str
-    order_index: int
-    agent_id: str | None
-    output: dict[str, Any]
-    created_at: datetime
-    updated_at: datetime
+    quoted_message_id: str | None = None
+    version_count: int = 0
+    current_version: int = 0
+    created_at: str
+    created_at_alias: str | None = Field(None, alias="createdAt")
+    updated_at: str
 
 
 class ArtifactOut(ORMModel):
     id: str
+    artifact_id: str
     conversation_id: str
+    conversation_id_alias: str | None = Field(None, alias="conversationId")
     task_id: str | None = None
     agent_id: str | None = None
     type: str
+    kind: str = ""
     name: str
+    title: str = ""
     description: str
     status: str
     storage_url: str
-    content: dict[str, Any]
+    preview_url: str = ""
+    content: dict[str, Any] = Field(default_factory=dict)
+    files: dict[str, Any] = Field(default_factory=dict)
+    code: str = ""
+    previous_code: str = ""
+    language: str = "html"
     current_version: int
-    created_at: datetime
-    updated_at: datetime
+    updated_at: str | None = None
+    created_at: str
+
+
+class LoginOut(BaseModel):
+    """登录响应数据。"""
+
+    access_token: str
+    token: str
+    user: UserOut
 
 
 class FileAssetOut(ORMModel):
@@ -415,23 +502,6 @@ class McpInvocationOut(ORMModel):
     updated_at: str
 
 
-class WorkflowRunOut(ORMModel):
-    id: str
-    conversation_id: str
-    trigger_message_id: str | None = None
-    status: str
-    mode: str
-    workflow_snapshot: dict[str, Any] = Field(default_factory=dict)
-    node_states: list[dict[str, Any]] = Field(default_factory=list)
-    edge_states: list[dict[str, Any]] = Field(default_factory=list)
-    events: list[dict[str, Any]] = Field(default_factory=list)
-    progress: int
-    started_at: str | None = None
-    completed_at: str | None = None
-    created_at: str
-    updated_at: str
-
-
 class SandboxOut(ORMModel):
     id: str
     workspace_id: str | None = None
@@ -465,17 +535,20 @@ class RemoteConnectionOut(ORMModel):
 # ----- 通用列表/分页包装器 -----
 
 
-class ListItems(BaseModel):
-    items: list[Any]
+class ListItems(BaseModel, Generic[T]):
+    items: list[T]
     total: int
 
 
-class PaginatedItems(BaseModel):
-    items: list[Any]
+class PaginatedItems(BaseModel, Generic[T]):
+    items: list[T]
     total: int
     page: int
     page_size: int
+    total_pages: int = 0
     has_more: bool = False
+    has_next: bool = False
+    has_prev: bool = False
 
 
 class MessageResponse(BaseModel):
@@ -484,6 +557,40 @@ class MessageResponse(BaseModel):
 
 class OkResponse(BaseModel):
     ok: bool
+
+
+class IdDeletedOut(BaseModel):
+    """删除操作响应。"""
+
+    id: str
+    deleted: bool
+
+
+class AgentStatusItemOut(BaseModel):
+    """Agent 状态摘要。"""
+
+    status: str
+    name: str
+
+
+class AgentCapabilityItemOut(BaseModel):
+    """全局能力聚合项。"""
+
+    label: str
+    category: str
+    agent_count: int
+    max_proficiency: int
+
+
+class AgentTestOut(BaseModel):
+    """Agent 测试结果。"""
+
+    agent: AgentOut
+    request: str
+    response: str
+    model: str
+    usage: dict[str, Any] = Field(default_factory=dict)
+    latency_ms: int = 0
 
 
 class FrontendLogEntry(BaseModel):

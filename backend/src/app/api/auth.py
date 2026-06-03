@@ -11,7 +11,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.deps import get_current_user
 from db import get_db
 from db.models import User, UserSettings, utcnow
-from app.schemas.common import ApiResponse, UserResponse
+from app.schemas.common import ApiResponse, LoginOut, OkResponse, UserResponse
 from app.schemas.requests import (
     ChangePasswordRequest,
     LoginRequest,
@@ -83,35 +83,83 @@ async def _login(db: AsyncSession, payload: dict) -> dict:
     return _login_response(user)
 
 
-@router.post("/auth/register", response_model=ApiResponse[dict])
+@router.post("/auth/register", response_model=ApiResponse[LoginOut])
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    """用户注册。
+
+    Args:
+        payload: 注册请求，包含邮箱、用户名和密码。
+        db: 数据库会话。
+
+    Returns:
+        包含访问令牌和用户信息的成功响应。
+    """
     data, _ = await _register(db, payload.model_dump())
     return ok(data, "注册成功")
 
 
-@router.post("/auth/signup", response_model=ApiResponse[dict])
+@router.post("/auth/signup", response_model=ApiResponse[LoginOut])
 async def signup_alias(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    """用户注册（别名端点，与 /auth/register 等价）。
+
+    Args:
+        payload: 注册请求，包含邮箱、用户名和密码。
+        db: 数据库会话。
+
+    Returns:
+        包含访问令牌和用户信息的成功响应。
+    """
     data, _ = await _register(db, payload.model_dump())
     return ok(data, "注册成功")
 
 
-@router.post("/auth/login", response_model=ApiResponse[dict])
+@router.post("/auth/login", response_model=ApiResponse[LoginOut])
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+    """用户登录。
+
+    Args:
+        payload: 登录请求，支持邮箱或用户名及密码。
+        db: 数据库会话。
+
+    Returns:
+        包含访问令牌和用户信息的成功响应。
+    """
     return ok(await _login(db, payload.model_dump()), "登录成功")
 
 
-@router.post("/auth/demo", response_model=ApiResponse[dict])
+@router.post("/auth/demo", response_model=ApiResponse[LoginOut])
 async def demo_login(db: AsyncSession = Depends(get_db)):
+    """演示用户快速登录。
+
+    Args:
+        db: 数据库会话。
+
+    Returns:
+        演示用户的访问令牌和基本信息。
+    """
     return ok(_login_response(await ensure_seed_data(db)), "演示用户已登录")
 
 
 @router.get("/auth/me", response_model=UserResponse)
 async def me(user: User = Depends(get_current_user)):
+    """获取当前登录用户信息。
+
+    Args:
+        user: 当前认证用户，由依赖注入解析。
+
+    Returns:
+        当前用户的详细信息。
+    """
     return ok(user_to_dict(user))
 
 
-@router.post("/auth/logout", response_model=ApiResponse[dict])
+@router.post("/auth/logout", response_model=ApiResponse[OkResponse])
 async def logout():
+    """用户登出。
+
+    Returns:
+        表示登出成功的响应。
+    """
     return ok({"ok": True}, "已退出")
 
 
@@ -121,6 +169,16 @@ async def update_me(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """更新当前用户资料。
+
+    Args:
+        payload: 资料更新请求，支持 display_name、avatar_url 和 settings。
+        db: 数据库会话。
+        user: 当前认证用户。
+
+    Returns:
+        更新后的用户信息。
+    """
     raw = payload.model_dump(exclude_unset=True)
     display_name = str(
         raw.get("display_name") or raw.get("name") or user.display_name,
@@ -140,12 +198,22 @@ async def update_me(
     return ok(user_to_dict(user), "profile updated")
 
 
-@router.post("/auth/password", response_model=ApiResponse[dict])
+@router.post("/auth/password", response_model=ApiResponse[OkResponse])
 async def change_password(
     payload: ChangePasswordRequest,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+        db: AsyncSession = Depends(get_db),
+        user: User = Depends(get_current_user),
+    ):
+    """修改当前用户密码。
+
+    Args:
+        payload: 密码修改请求，包含当前密码和新密码。
+        db: 数据库会话。
+        user: 当前认证用户。
+
+    Returns:
+        表示密码修改成功的响应。
+    """
     raw = payload.model_dump(exclude_unset=True)
     current_password = str(raw.get("current_password") or raw.get("old_password") or "")
     new_password = str(raw.get("new_password") or raw.get("password") or "")

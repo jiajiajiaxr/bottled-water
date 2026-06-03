@@ -18,7 +18,16 @@ from app.core.response import ok
 from app.deps import get_current_user
 from db import get_db
 from db.models import Agent, User, utcnow
-from app.schemas.common import AgentOut, ApiResponse
+from app.schemas.common import (
+    AgentCapabilityItemOut,
+    AgentOut,
+    AgentStatusItemOut,
+    AgentTestOut,
+    ApiResponse,
+    IdDeletedOut,
+    ListItems,
+    PaginatedItems,
+)
 from app.schemas.requests import (
     CreateAgentRequest,
     GenerateAgentRequest,
@@ -85,7 +94,7 @@ async def _model_provider(db: AsyncSession):
     return await create_provider_from_db(db)
 
 
-@router.get("/agents", response_model=ApiResponse[dict])
+@router.get("/agents", response_model=ApiResponse[PaginatedItems[AgentOut]])
 async def list_agents(
     page: int = 1,
     page_size: int = 20,
@@ -99,6 +108,24 @@ async def list_agents(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    """分页查询 Agent 列表。
+
+    Args:
+        page: 页码，从 1 开始。
+        page_size: 每页数量。
+        type: 按类型筛选，如 "custom" / "official" / "all"。
+        status: 按状态筛选，支持逗号分隔多选。
+        provider: 按模型提供商筛选。
+        capability: 按能力标签筛选，支持逗号分隔多选。
+        sort_by: 排序字段，如 "default" / "response_time" / "type"。
+        sort_order: 排序方向，"asc" 或 "desc"。
+        search: 关键词搜索，匹配名称和描述。
+        db: 数据库会话。
+        _user: 当前认证用户。
+
+    Returns:
+        分页后的 Agent 列表及元数据。
+    """
     query = select(Agent).where(Agent.deleted_at.is_(None))
     if type != "all":
         query = query.where(Agent.type == type)
@@ -153,20 +180,38 @@ async def list_agents(
     )
 
 
-@router.get("/agents/status", response_model=ApiResponse[dict])
+@router.get("/agents/status", response_model=ApiResponse[dict[str, AgentStatusItemOut]])
 async def agent_status(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    """获取所有 Agent 的状态摘要。
+
+    Args:
+        db: 数据库会话。
+        _user: 当前认证用户。
+
+    Returns:
+        以 Agent ID 为键、状态摘要为值的字典。
+    """
     agents = (await db.scalars(select(Agent).where(Agent.deleted_at.is_(None)))).all()
     return ok({agent.id: {"status": agent.status, "name": agent.name} for agent in agents})
 
 
-@router.get("/agents/capabilities", response_model=ApiResponse[dict])
+@router.get("/agents/capabilities", response_model=ApiResponse[ListItems[AgentCapabilityItemOut]])
 async def list_capabilities(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    """获取系统中所有 Agent 的能力聚合列表。
+
+    Args:
+        db: 数据库会话。
+        _user: 当前认证用户。
+
+    Returns:
+        能力标签列表，每项包含拥有该能力的 Agent 数量及最高熟练度。
+    """
     agents = (await db.scalars(select(Agent).where(Agent.deleted_at.is_(None)))).all()
     capabilities: dict = {}
     for agent in agents:
@@ -191,6 +236,15 @@ async def list_capabilities(
 async def parse_capabilities(
     payload: ParseCapabilitiesRequest, _user: User = Depends(get_current_user)
 ):
+    """从文本中解析能力标签。
+
+    Args:
+        payload: 包含待解析文本的请求体。
+        _user: 当前认证用户。
+
+    Returns:
+        解析出的能力列表及推荐系统提示语。
+    """
     text = payload.text.strip()
     dictionary = [
         ("前端", "编码"),
@@ -223,6 +277,16 @@ async def generate_agent(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    """基于自然语言描述生成 Agent 配置草案。
+
+    Args:
+        payload: 包含职责简述和偏好工具的生成请求。
+        db: 数据库会话。
+        _user: 当前认证用户。
+
+    Returns:
+        生成的 Agent 配置字段，包含 name、capabilities、system_prompt、tools 等。
+    """
     brief = payload.brief.strip()
     if not brief:
         raise ValidationAppError("请先输入 Agent 目标或职责描述")
@@ -273,6 +337,16 @@ async def _get_agent(db: AsyncSession, agent_id: str) -> Agent:
 async def get_agent(
     agent_id: str, db: AsyncSession = Depends(get_db), _user: User = Depends(get_current_user)
 ):
+    """根据 ID 获取单个 Agent 详情。
+
+    Args:
+        agent_id: Agent 唯一标识。
+        db: 数据库会话。
+        _user: 当前认证用户。
+
+    Returns:
+        完整的 Agent 配置和统计信息。
+    """
     return ok(agent_to_dict(await _get_agent(db, agent_id)))
 
 
@@ -282,6 +356,16 @@ async def create_agent(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """创建自定义 Agent。
+
+    Args:
+        payload: Agent 创建请求，包含名称、类型、能力和配置等。
+        db: 数据库会话。
+        user: 当前认证用户，作为创建者。
+
+    Returns:
+        创建成功的 Agent 详情。
+    """
     duplicate = await db.scalar(
         select(Agent).where(Agent.name == payload.name, Agent.deleted_at.is_(None))
     )
@@ -322,6 +406,17 @@ async def update_agent(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """更新指定 Agent 的配置。
+
+    Args:
+        agent_id: Agent 唯一标识。
+        payload: 需要更新的字段，未提供的字段保持原值。
+        db: 数据库会话。
+        user: 当前认证用户，仅创建者或管理员可修改自定义 Agent。
+
+    Returns:
+        更新后的 Agent 详情。
+    """
     agent = await _get_agent(db, agent_id)
     if agent.type == "custom" and agent.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("只能修改自己创建的Agent")
@@ -346,10 +441,20 @@ async def update_agent(
     return ok(agent_to_dict(agent), "Agent已更新")
 
 
-@router.delete("/agents/{agent_id}", response_model=ApiResponse[dict])
+@router.delete("/agents/{agent_id}", response_model=ApiResponse[IdDeletedOut])
 async def delete_agent(
     agent_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
+    """删除自定义 Agent（官方 Agent 不可删除）。
+
+    Args:
+        agent_id: Agent 唯一标识。
+        db: 数据库会话。
+        user: 当前认证用户，仅创建者或管理员可删除。
+
+    Returns:
+        删除结果，包含被删除 Agent 的 ID。
+    """
     agent = await _get_agent(db, agent_id)
     if agent.type != "custom":
         raise ForbiddenError("官方Agent不可删除")
@@ -361,13 +466,24 @@ async def delete_agent(
     return ok({"id": agent.id, "deleted": True})
 
 
-@router.post("/agents/{agent_id}/test", response_model=ApiResponse[dict])
+@router.post("/agents/{agent_id}/test", response_model=ApiResponse[AgentTestOut])
 async def test_agent(
     agent_id: str,
     payload: TestAgentRequest,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    """向指定 Agent 发送测试消息并返回响应。
+
+    Args:
+        agent_id: Agent 唯一标识。
+        payload: 测试请求，包含待发送的消息内容。
+        db: 数据库会话。
+        _user: 当前认证用户。
+
+    Returns:
+        测试响应详情，包括 Agent 信息、请求内容、模型输出及延迟。
+    """
     agent = await _get_agent(db, agent_id)
     provider = await _model_provider(db)
     system_prompt = (

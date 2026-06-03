@@ -25,8 +25,6 @@ from db.models import (
     ToolDefinition,
     SandboxSession,
     RemoteConnection,
-    Subtask,
-    Task,
     User,
     Workspace,
     WorkspaceMember,
@@ -279,40 +277,6 @@ def message_to_dict(message: Message) -> dict[str, Any]:
         "created_at": iso(message.created_at),
         "createdAt": iso(message.created_at),
         "updated_at": iso(message.updated_at),
-    }
-
-
-def task_to_dict(task: Task) -> dict[str, Any]:
-    return {
-        "id": task.id,
-        "task_id": task.id,
-        "conversation_id": task.conversation_id,
-        "title": task.title,
-        "description": task.description,
-        "status": task.status,
-        "priority": task.priority,
-        "progress": task.progress,
-        "plan": task.plan,
-        "output": task.output,
-        "created_at": iso(task.created_at),
-        "updated_at": iso(task.updated_at),
-    }
-
-
-def subtask_to_dict(subtask: Subtask) -> dict[str, Any]:
-    return {
-        "id": subtask.id,
-        "subtask_id": subtask.id,
-        "parent_task_id": subtask.parent_task_id,
-        "title": subtask.title,
-        "description": subtask.description,
-        "status": subtask.status,
-        "order_index": subtask.order_index,
-        "agent_id": subtask.agent_id,
-        "agent_name": subtask.agent.name if subtask.agent else None,
-        "output": subtask.output,
-        "created_at": iso(subtask.created_at),
-        "updated_at": iso(subtask.updated_at),
     }
 
 
