@@ -49,18 +49,23 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Deployment:
     artifact_id = payload.get("artifact_id")
     if not artifact_id and payload.get("conversationId"):
         from sqlalchemy import select
-        artifact_result = (await db.scalars(
+
+        artifact_result = await db.scalars(
             select(Artifact)
-            .where(Artifact.conversation_id == payload["conversationId"], Artifact.deleted_at.is_(None))
+            .where(
+                Artifact.conversation_id == payload["conversationId"], Artifact.deleted_at.is_(None)
+            )
             .order_by(Artifact.updated_at.desc())
             .limit(1)
-        ))
+        )
         artifact = artifact_result.first()
         artifact_id = artifact.id if artifact else None
     if not artifact_id:
         raise NotFoundError("产物不存在")
     artifact = await _check_artifact_owner(db, user, artifact_id)
-    deployment = await create_deployment(db, artifact.id, payload.get("mode") or payload.get("environment") or "preview_link")
+    deployment = await create_deployment(
+        db, artifact.id, payload.get("mode") or payload.get("environment") or "preview_link"
+    )
     return deployment
 
 
@@ -117,7 +122,14 @@ async def get_deployment_logs(
     if level != "all":
         records = [item for item in records if item["level"] == level]
     start = (page - 1) * page_size
-    return ok({"items": records[start : start + page_size], "total": len(records), "page": page, "page_size": page_size})
+    return ok(
+        {
+            "items": records[start : start + page_size],
+            "total": len(records),
+            "page": page,
+            "page_size": page_size,
+        }
+    )
 
 
 @router.post("/deployments/{deployment_id}/cancel", response_model=ApiResponse[DeploymentOut])
@@ -135,7 +147,9 @@ async def cancel_deployment(
     deployment.status = "cancelled"
     deployment.stopped_at = utcnow()
     deployment.error_message = payload.reason or "用户取消部署"
-    deployment.deploy_log = f"{deployment.deploy_log}\n用户取消部署：{deployment.error_message}".strip()
+    deployment.deploy_log = (
+        f"{deployment.deploy_log}\n用户取消部署：{deployment.error_message}".strip()
+    )
     await db.commit()
     return ok(deployment_to_dict(deployment), "部署已取消")
 
@@ -158,7 +172,9 @@ async def rollback_deployment(
         artifact_version_id=(target or deployment).artifact_version_id,
         mode=(target or deployment).mode,
         status="deployed",
-        access_url=f"{(target or deployment).access_url}&rollback=1" if (target or deployment).access_url else None,
+        access_url=f"{(target or deployment).access_url}&rollback=1"
+        if (target or deployment).access_url
+        else None,
         config={**((target or deployment).config or {}), "rollback_from": deployment.id},
         deploy_log=f"回滚部署：from={deployment.id} target={target_id or 'previous'}\n健康检查通过",
         steps=[
@@ -183,12 +199,19 @@ async def list_artifact_deployments(
     user: User = Depends(get_current_user),
 ):
     await _check_artifact_owner(db, user, artifact_id)
-    deployments_list = (await db.scalars(
-        select(Deployment)
-        .where(Deployment.artifact_id == artifact_id, Deployment.deleted_at.is_(None))
-        .order_by(Deployment.created_at.desc())
-    )).all()
-    return ok({"items": [deployment_to_dict(item) for item in deployments_list], "total": len(deployments_list)})
+    deployments_list = (
+        await db.scalars(
+            select(Deployment)
+            .where(Deployment.artifact_id == artifact_id, Deployment.deleted_at.is_(None))
+            .order_by(Deployment.created_at.desc())
+        )
+    ).all()
+    return ok(
+        {
+            "items": [deployment_to_dict(item) for item in deployments_list],
+            "total": len(deployments_list),
+        }
+    )
 
 
 @router.post("/deployments/parse-command", response_model=ApiResponse[dict])

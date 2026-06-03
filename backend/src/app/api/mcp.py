@@ -13,7 +13,11 @@ from app.deps import get_current_user
 from db import get_db
 from db.models import McpServer, McpToolInvocation, User, Workspace, utcnow
 from app.schemas.common import ApiResponse, McpServerOut
-from app.schemas.requests import CreateMcpServerRequest, ImportMcpServerRequest, InvokeMcpToolRequest
+from app.schemas.requests import (
+    CreateMcpServerRequest,
+    ImportMcpServerRequest,
+    InvokeMcpToolRequest,
+)
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_allowed
 from app.services.serialization import mcp_invocation_to_dict, mcp_server_to_dict
 
@@ -22,13 +26,19 @@ router = APIRouter(tags=["mcp"])
 
 
 async def ensure_mcp_tables(db: AsyncSession) -> None:
-    await db.run_sync(lambda session: McpServer.__table__.create(bind=session.get_bind(), checkfirst=True))
-    await db.run_sync(lambda session: McpToolInvocation.__table__.create(bind=session.get_bind(), checkfirst=True))
+    await db.run_sync(
+        lambda session: McpServer.__table__.create(bind=session.get_bind(), checkfirst=True)
+    )
+    await db.run_sync(
+        lambda session: McpToolInvocation.__table__.create(bind=session.get_bind(), checkfirst=True)
+    )
 
 
 async def _get_server(db: AsyncSession, user: User, server_id: str) -> McpServer:
     await ensure_mcp_tables(db)
-    server = await db.scalar(select(McpServer).where(McpServer.id == server_id, McpServer.deleted_at.is_(None)))
+    server = await db.scalar(
+        select(McpServer).where(McpServer.id == server_id, McpServer.deleted_at.is_(None))
+    )
     if not server:
         raise NotFoundError("MCP服务不存在")
     if server.owner_id not in {None, user.id} and user.role != "admin":
@@ -57,11 +67,15 @@ async def list_mcp_servers(
     user: User = Depends(get_current_user),
 ):
     await ensure_mcp_tables(db)
-    query = select(McpServer).where(McpServer.deleted_at.is_(None)).where((McpServer.owner_id == user.id) | (McpServer.owner_id.is_(None)))
+    query = (
+        select(McpServer)
+        .where(McpServer.deleted_at.is_(None))
+        .where((McpServer.owner_id == user.id) | (McpServer.owner_id.is_(None)))
+    )
     if workspace_id:
         query = query.where(McpServer.workspace_id == workspace_id)
     servers = (await db.scalars(query.order_by(McpServer.created_at.desc()))).all()
-    return ok({"items": [mcp_server_to_dict(item) for item in servers_list], "total": len(servers_list)})
+    return ok({"items": [mcp_server_to_dict(item) for item in servers], "total": len(servers)})
 
 
 @router.post("/mcp-servers", response_model=ApiResponse[McpServerOut])
@@ -132,7 +146,9 @@ async def import_mcp_server(
         env=manifest.get("env") if isinstance(manifest.get("env"), dict) else {},
         headers=manifest.get("headers") if isinstance(manifest.get("headers"), dict) else {},
         enabled=bool(manifest.get("enabled", True)),
-        tool_filter=manifest.get("tool_filter") if isinstance(manifest.get("tool_filter"), list) else [],
+        tool_filter=manifest.get("tool_filter")
+        if isinstance(manifest.get("tool_filter"), list)
+        else [],
         timeout_ms=int(manifest.get("timeout_ms") or 30000),
         retry=int(manifest.get("retry") or 1),
         health_status="unknown",
@@ -187,7 +203,11 @@ async def probe_mcp_server(
     server.last_checked_at = utcnow()
     server.tools = server.tools or [
         {"name": "file.read", "description": "读取工作区文件", "enabled": True},
-        {"name": "browser.open", "description": "打开浏览器页面", "enabled": server.transport != "stdio"},
+        {
+            "name": "browser.open",
+            "description": "打开浏览器页面",
+            "enabled": server.transport != "stdio",
+        },
         {"name": "sandbox.run", "description": "在沙箱执行命令", "enabled": True},
     ]
     await db.commit()
@@ -208,7 +228,9 @@ async def list_mcp_tools(
     return ok({"server_id": server.id, "items": tools, "total": len(tools)})
 
 
-@router.post("/mcp-servers/{server_id}/tools/{tool_name:path}/invoke", response_model=ApiResponse[dict])
+@router.post(
+    "/mcp-servers/{server_id}/tools/{tool_name:path}/invoke", response_model=ApiResponse[dict]
+)
 async def invoke_mcp_tool(
     server_id: str,
     tool_name: str,
@@ -245,8 +267,12 @@ async def list_mcp_invocations(
         query = query.where(McpToolInvocation.server_id == server_id)
     if status:
         query = query.where(McpToolInvocation.status == status)
-    items_list = (await db.scalars(query.order_by(McpToolInvocation.created_at.desc()).limit(100))).all()
-    return ok({"items": [mcp_invocation_to_dict(item) for item in items_list], "total": len(items_list)})
+    items_list = (
+        await db.scalars(query.order_by(McpToolInvocation.created_at.desc()).limit(100))
+    ).all()
+    return ok(
+        {"items": [mcp_invocation_to_dict(item) for item in items_list], "total": len(items_list)}
+    )
 
 
 @router.get("/mcp-invocations/{invocation_id}", response_model=ApiResponse[dict])
@@ -257,7 +283,9 @@ async def get_mcp_invocation(
 ):
     await ensure_mcp_tables(db)
     invocation = await db.get(McpToolInvocation, invocation_id)
-    if not invocation or (invocation.owner_id != user.id and user.role not in {"admin", "developer"}):
+    if not invocation or (
+        invocation.owner_id != user.id and user.role not in {"admin", "developer"}
+    ):
         raise NotFoundError("MCP invocation not found")
     return ok(mcp_invocation_to_dict(invocation))
 

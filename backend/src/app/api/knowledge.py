@@ -10,7 +10,11 @@ from app.deps import get_current_user
 from db import get_db
 from db.models import KnowledgeBase, KnowledgeDocument, User, utcnow
 from app.schemas.common import ApiResponse, KnowledgeBaseOut, KnowledgeDocumentOut
-from app.schemas.requests import CreateKnowledgeBaseRequest, ImportKnowledgeTextRequest, RetrieveKnowledgeRequest
+from app.schemas.requests import (
+    CreateKnowledgeBaseRequest,
+    ImportKnowledgeTextRequest,
+    RetrieveKnowledgeRequest,
+)
 from app.services.files import save_upload
 from app.services.knowledge import build_context_snippet, index_document, retrieve
 from app.services.serialization import (
@@ -24,7 +28,9 @@ router = APIRouter(tags=["knowledge"])
 
 
 async def _get_kb(db: AsyncSession, user: User, kb_id: str) -> KnowledgeBase:
-    kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id, KnowledgeBase.deleted_at.is_(None)))
+    kb = await db.scalar(
+        select(KnowledgeBase).where(KnowledgeBase.id == kb_id, KnowledgeBase.deleted_at.is_(None))
+    )
     if not kb:
         raise NotFoundError("知识库不存在")
     if kb.owner_id != user.id and kb.visibility != "public" and user.role != "admin":
@@ -37,14 +43,16 @@ async def list_knowledge_bases(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    items = (await db.scalars(
-        select(KnowledgeBase)
-        .where(
-            KnowledgeBase.deleted_at.is_(None),
-            (KnowledgeBase.owner_id == user.id) | (KnowledgeBase.visibility == "public"),
+    items = (
+        await db.scalars(
+            select(KnowledgeBase)
+            .where(
+                KnowledgeBase.deleted_at.is_(None),
+                (KnowledgeBase.owner_id == user.id) | (KnowledgeBase.visibility == "public"),
+            )
+            .order_by(KnowledgeBase.updated_at.desc())
         )
-        .order_by(KnowledgeBase.updated_at.desc())
-    )).all()
+    ).all()
     return ok({"items": [knowledge_base_to_dict(item) for item in items], "total": len(items)})
 
 
@@ -99,11 +107,15 @@ async def list_documents(
     user: User = Depends(get_current_user),
 ):
     kb = await _get_kb(db, user, kb_id)
-    docs = (await db.scalars(
-        select(KnowledgeDocument)
-        .where(KnowledgeDocument.knowledge_base_id == kb.id, KnowledgeDocument.deleted_at.is_(None))
-        .order_by(KnowledgeDocument.created_at.desc())
-    )).all()
+    docs = (
+        await db.scalars(
+            select(KnowledgeDocument)
+            .where(
+                KnowledgeDocument.knowledge_base_id == kb.id, KnowledgeDocument.deleted_at.is_(None)
+            )
+            .order_by(KnowledgeDocument.created_at.desc())
+        )
+    ).all()
     return ok({"items": [knowledge_document_to_dict(item) for item in docs], "total": len(docs)})
 
 
@@ -142,7 +154,8 @@ async def upload_document(
         db,
         kb,
         title=asset.original_filename,
-        content=asset.extracted_text or f"文件 {asset.original_filename} 已上传，暂不支持二进制内容解析。",
+        content=asset.extracted_text
+        or f"文件 {asset.original_filename} 已上传，暂不支持二进制内容解析。",
         source_type="upload",
         source_uri=asset.storage_path,
         file_asset_id=asset.id,

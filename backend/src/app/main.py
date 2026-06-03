@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import agents, artifacts, auth, context, conversations, deployments, files, knowledge, logs, mcp, messages, models, sandbox, security_ops, skills, tasks, tools, websocket, workspaces
+from app.api import agents, artifacts, auth, context, conversations, deployments, files, knowledge, logs, mcp, messages, models, sandbox, security_ops, skills, tools, websocket, workspaces
 from app.core.config import get_settings
 from app.core.errors import AppError
 from db.session import AsyncSessionLocal
@@ -69,7 +69,6 @@ for router in [
     agents.router,
     conversations.router,
     messages.router,
-    tasks.router,
     artifacts.router,
     deployments.router,
     files.router,
@@ -90,7 +89,6 @@ for router in [
     auth.compat_router,
     conversations.compat_router,
     messages.compat_router,
-    tasks.compat_router,
     artifacts.compat_router,
     deployments.compat_router,
 ]:

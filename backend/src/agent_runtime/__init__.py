@@ -5,14 +5,14 @@ agent_runtime - 多智能体运行时
 可独立使用，也可被 FastAPI/Flask/其他框架集成。
 
 使用示例：
-    from agent_runtime import Session, AgentConfig, TechLeadScheduler
+    from agent_runtime import Session, AgentConfig
     from model_provider import create_provider, ModelConfig
 
     provider = create_provider(ModelConfig(provider="ark", model="ep-xxx", api_key="xxx"))
 
     session = Session.create(
         agents=[AgentConfig(id="coder", name="程序员", system_prompt="...")],
-        scheduler=TechLeadScheduler(),
+        scheduler_config={"strategy": "tech_lead"},
         model_provider=provider,
     )
 

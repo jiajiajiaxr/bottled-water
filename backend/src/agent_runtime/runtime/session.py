@@ -16,6 +16,9 @@ from ..core.interfaces import PersistenceBackend, EventSink, ToolExecutor
 from .orchestrator import Orchestrator
 from .event_dispatcher import EventDispatcher
 from ..strategies.base import Scheduler
+from ..strategies.single_agent import SingleAgentScheduler
+from ..strategies.tech_lead import TechLeadScheduler
+from ..strategies.workflow.scheduler import WorkflowScheduler
 
 logger = get_logger(__name__)
 
@@ -26,24 +29,27 @@ class Session:
 
     纯运行时对象，不依赖 HTTP、数据库、或任何框架。
     所有外部依赖通过接口注入。
+    Scheduler 由 Session 内部根据配置创建，从属于会话生命周期。
     """
 
     def __init__(
         self,
         session_id: str,
         agents: List[AgentConfig],
-        scheduler: Scheduler,
         model_provider: BaseModelProvider,
+        scheduler_config: Dict[str, Any],
         persistence: Optional[PersistenceBackend] = None,
         event_sink: Optional[EventSink] = None,
         tool_executor: Optional[ToolExecutor] = None,
     ):
         self.session_id = session_id
         self.agents = {a.id: a for a in agents}
-        self.scheduler = scheduler
         self.model_provider = model_provider
         self.persistence = persistence
         self.tool_executor = tool_executor or _NullToolExecutor()
+
+        # 内部创建 scheduler（调度器从属于 Session）
+        self.scheduler = self._create_scheduler(scheduler_config)
 
         # 事件分发器（职责上提：Session 层统一管理）
         self.event_dispatcher = EventDispatcher()
@@ -53,18 +59,41 @@ class Session:
         self.orchestrator = Orchestrator(
             session_id=session_id,
             agents=self.agents,
-            scheduler=scheduler,
+            scheduler=self.scheduler,
             model_provider=model_provider,
             persistence=persistence,
             tool_executor=self.tool_executor,
         )
 
+    def _create_scheduler(self, config: Dict[str, Any]) -> Scheduler:
+        """根据配置创建对应的调度器。"""
+        strategy = config.get("strategy", "tech_lead")
+        agents = self.agents
+
+        if strategy == "workflow":
+            scheduler = WorkflowScheduler(agents=agents)
+            workflow = config.get("workflow")
+            if workflow:
+                scheduler.set_workflow_context(workflow, config.get("prompt", ""))
+                # WorkflowScheduler 可能添加了虚拟工具 Agent，同步回 Session
+                self.agents = scheduler.agents
+            logger.info("Session 创建 WorkflowScheduler", session_id=self.session_id)
+            return scheduler
+        elif strategy == "single_agent":
+            logger.info("Session 创建 SingleAgentScheduler", session_id=self.session_id)
+            return SingleAgentScheduler(agents=agents)
+        elif strategy == "tech_lead":
+            logger.info("Session 创建 TechLeadScheduler", session_id=self.session_id)
+            return TechLeadScheduler(agents=agents, model_provider=self.model_provider)
+        else:
+            raise ValueError(f"不支持的调度策略: {strategy}")
+
     @classmethod
     def create(
         cls,
         agents: List[AgentConfig],
-        scheduler: Scheduler,
         model_provider: BaseModelProvider,
+        scheduler_config: Dict[str, Any],
         persistence: Optional[PersistenceBackend] = None,
         event_sink: Optional[EventSink] = None,
         tool_executor: Optional[ToolExecutor] = None,
@@ -72,18 +101,19 @@ class Session:
     ) -> "Session":
         """工厂方法，自动分配 session_id（可外部传入）"""
         session_id = session_id or str(uuid.uuid4())
+        strategy = scheduler_config.get("strategy", "tech_lead")
         logger.info(
             "Session 创建",
             session_id=session_id,
             agent_count=len(agents),
             agent_ids=[a.id for a in agents],
-            scheduler_type=type(scheduler).__name__,
+            scheduler_strategy=strategy,
         )
         return cls(
             session_id=session_id,
             agents=agents,
-            scheduler=scheduler,
             model_provider=model_provider,
+            scheduler_config=scheduler_config,
             persistence=persistence,
             event_sink=event_sink,
             tool_executor=tool_executor,

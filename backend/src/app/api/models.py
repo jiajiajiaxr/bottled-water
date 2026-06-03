@@ -11,7 +11,11 @@ from app.deps import get_current_user
 from db import get_db
 from db.models import ModelConfig, ModelProvider, User, utcnow
 from app.schemas.common import ApiResponse, ModelConfigOut, ModelProviderOut
-from app.schemas.requests import CreateModelConfigRequest, CreateModelProviderRequest, TestModelRequest
+from app.schemas.requests import (
+    CreateModelConfigRequest,
+    CreateModelProviderRequest,
+    TestModelRequest,
+)
 from app.services.llm_gateway import test_model_config
 from app.services.serialization import model_config_to_dict, model_provider_to_dict
 
@@ -39,16 +43,22 @@ async def _get_provider(db: AsyncSession, user: User, provider_id: str) -> Model
 
 
 @router.get("/model-providers", response_model=ApiResponse[dict])
-async def list_model_providers(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def list_model_providers(
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
     await ensure_model_tables(db)
-    providers = (await db.scalars(
-        select(ModelProvider)
-        .options(selectinload(ModelProvider.models))
-        .where(ModelProvider.deleted_at.is_(None))
-        .where((ModelProvider.owner_id == user.id) | (ModelProvider.owner_id.is_(None)))
-        .order_by(ModelProvider.created_at.desc())
-    )).all()
-    return ok({"items": [model_provider_to_dict(item) for item in providers], "total": len(providers)})
+    providers = (
+        await db.scalars(
+            select(ModelProvider)
+            .options(selectinload(ModelProvider.models))
+            .where(ModelProvider.deleted_at.is_(None))
+            .where((ModelProvider.owner_id == user.id) | (ModelProvider.owner_id.is_(None)))
+            .order_by(ModelProvider.created_at.desc())
+        )
+    ).all()
+    return ok(
+        {"items": [model_provider_to_dict(item) for item in providers], "total": len(providers)}
+    )
 
 
 @router.post("/model-providers", response_model=ApiResponse[ModelProviderOut])
@@ -82,7 +92,9 @@ async def create_model_provider(
     db.add(model)
     await db.commit()
     await db.refresh(provider)
-    return ok(model_provider_to_dict(await _get_provider(db, user, provider.id)), "模型供应商已创建")
+    return ok(
+        model_provider_to_dict(await _get_provider(db, user, provider.id)), "模型供应商已创建"
+    )
 
 
 @router.patch("/model-providers/{provider_id}", response_model=ApiResponse[ModelProviderOut])
@@ -129,14 +141,16 @@ async def list_model_configs(
     user: User = Depends(get_current_user),
 ):
     await ensure_model_tables(db)
-    configs = (await db.scalars(
-        select(ModelConfig)
-        .options(selectinload(ModelConfig.provider))
-        .join(ModelProvider)
-        .where(ModelConfig.deleted_at.is_(None), ModelProvider.deleted_at.is_(None))
-        .where((ModelProvider.owner_id == user.id) | (ModelProvider.owner_id.is_(None)))
-        .order_by(ModelConfig.updated_at.desc())
-    )).all()
+    configs = (
+        await db.scalars(
+            select(ModelConfig)
+            .options(selectinload(ModelConfig.provider))
+            .join(ModelProvider)
+            .where(ModelConfig.deleted_at.is_(None), ModelProvider.deleted_at.is_(None))
+            .where((ModelProvider.owner_id == user.id) | (ModelProvider.owner_id.is_(None)))
+            .order_by(ModelConfig.updated_at.desc())
+        )
+    ).all()
     return ok({"items": [model_config_to_dict(item) for item in configs], "total": len(configs)})
 
 
@@ -183,7 +197,9 @@ async def test_model(
             raise NotFoundError("暂无可测试模型")
         model_id = model.id
     result = await test_model_config(db, model_id, payload.prompt)
-    return ok({"response": result.text, "model": result.model, "usage": result.usage}, "模型测试完成")
+    return ok(
+        {"response": result.text, "model": result.model, "usage": result.usage}, "模型测试完成"
+    )
 
 
 @router.get("/models/available", response_model=ApiResponse[dict])
@@ -198,17 +214,20 @@ async def list_available_models(
     """
     await ensure_model_tables(db)
 
-    providers = (await db.scalars(
-        select(ModelProvider)
-        .where(ModelProvider.deleted_at.is_(None), ModelProvider.status == "active")
-        .where((ModelProvider.owner_id == user.id) | (ModelProvider.owner_id.is_(None)))
-    )).all()
+    providers = (
+        await db.scalars(
+            select(ModelProvider)
+            .where(ModelProvider.deleted_at.is_(None), ModelProvider.status == "active")
+            .where((ModelProvider.owner_id == user.id) | (ModelProvider.owner_id.is_(None)))
+        )
+    ).all()
 
     if force_refresh:
         for provider in providers:
             api_key = ""
             if provider.api_key_ref == "env:ARK_API_KEY":
                 from app.core.config import get_settings
+
                 api_key = getattr(get_settings(), "ark_api_key", "") or ""
             elif provider.api_key_ref and provider.api_key_ref != "mock":
                 api_key = provider.api_key_ref
@@ -216,6 +235,7 @@ async def list_available_models(
             try:
                 from model_provider import create_provider
                 from model_provider.core.config import ModelConfig as MPModelConfig
+
                 mp_config = MPModelConfig(
                     provider=provider.provider_type or "ark",
                     model=provider.default_model or "gpt-4o",
@@ -226,13 +246,21 @@ async def list_available_models(
                 remote_models = await prov.list_models()
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"list_models 失败 provider={provider.name} error={e}")
+
+                logging.getLogger(__name__).warning(
+                    f"list_models 失败 provider={provider.name} error={e}"
+                )
                 remote_models = []
 
             # 同步到数据库： upsert ModelConfig
-            existing = {c.model_id: c for c in (
-                await db.scalars(select(ModelConfig).where(ModelConfig.provider_id == provider.id))
-            ).all()}
+            existing = {
+                c.model_id: c
+                for c in (
+                    await db.scalars(
+                        select(ModelConfig).where(ModelConfig.provider_id == provider.id)
+                    )
+                ).all()
+            }
 
             for rm in remote_models:
                 model_id = rm.get("id") or rm.get("model_id") or rm.get("name", "")
@@ -254,28 +282,35 @@ async def list_available_models(
                     db.add(new_cfg)
 
             for model_id, cfg in existing.items():
-                if model_id not in {rm.get("id") or rm.get("model_id") or rm.get("name", "") for rm in remote_models}:
+                if model_id not in {
+                    rm.get("id") or rm.get("model_id") or rm.get("name", "") for rm in remote_models
+                }:
                     cfg.status = "unavailable"
 
             await db.flush()
 
     items = []
     for provider in providers:
-        configs = (await db.scalars(
-            select(ModelConfig)
-            .where(ModelConfig.provider_id == provider.id, ModelConfig.deleted_at.is_(None))
-        )).all()
+        configs = (
+            await db.scalars(
+                select(ModelConfig).where(
+                    ModelConfig.provider_id == provider.id, ModelConfig.deleted_at.is_(None)
+                )
+            )
+        ).all()
 
         for config in configs:
-            items.append({
-                "provider_id": provider.id,
-                "provider_name": provider.name,
-                "model_id": config.model_id,
-                "config_id": config.id,
-                "name": config.name,
-                "context_window": config.context_window,
-                "status": config.status,
-            })
+            items.append(
+                {
+                    "provider_id": provider.id,
+                    "provider_name": provider.name,
+                    "model_id": config.model_id,
+                    "config_id": config.id,
+                    "name": config.name,
+                    "context_window": config.context_window,
+                    "status": config.status,
+                }
+            )
 
     await db.commit()
     return ok({"items": items, "total": len(items)})

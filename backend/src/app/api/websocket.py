@@ -116,7 +116,9 @@ async def _save_user_message(
     scheduling_strategy = data.get("scheduling_strategy", "")
     if not scheduling_strategy and conversation.extra:
         scheduling_strategy = (conversation.extra or {}).get("scheduling_strategy", "tech_lead")
-    scheduling_strategy = scheduling_strategy if scheduling_strategy in ("tech_lead", "workflow") else "tech_lead"
+    scheduling_strategy = (
+        scheduling_strategy if scheduling_strategy in ("tech_lead", "workflow") else "tech_lead"
+    )
 
     message = Message(
         client_message_id=data.get("client_message_id") or str(uuid.uuid4()),
@@ -206,19 +208,19 @@ async def conversation_websocket(
                 )
 
             elif event_type == "chat.cancel":
-                await _handle_chat_cancel(
-                    websocket, conversation_id, request_id, session_manager
-                )
+                await _handle_chat_cancel(websocket, conversation_id, request_id, session_manager)
 
             elif event_type == "ping":
                 await websocket.send_json({"event": "pong", "data": {}})
 
             else:
-                await websocket.send_json({
-                    "event": "error",
-                    "data": {"message": f"未知事件类型: {event_type}"},
-                    "request_id": request_id,
-                })
+                await websocket.send_json(
+                    {
+                        "event": "error",
+                        "data": {"message": f"未知事件类型: {event_type}"},
+                        "request_id": request_id,
+                    }
+                )
 
     except WebSocketDisconnect:
         logger.info("WebSocket 断开", conversation_id=conversation_id, user_id=user.id)
@@ -263,19 +265,23 @@ async def _handle_chat_send(
                 name=f"ws-send-{conversation_id}",
             )
 
-            await websocket.send_json({
-                "event": "chat.ack",
-                "data": {"message_id": str(message.id), "content_preview": content[:100]},
-                "request_id": request_id,
-            })
+            await websocket.send_json(
+                {
+                    "event": "chat.ack",
+                    "data": {"message_id": str(message.id), "content_preview": content[:100]},
+                    "request_id": request_id,
+                }
+            )
 
         except Exception as e:
             logger.error("chat.send 处理失败", conversation_id=conversation_id, error=str(e))
-            await websocket.send_json({
-                "event": "error",
-                "data": {"message": str(e)},
-                "request_id": request_id,
-            })
+            await websocket.send_json(
+                {
+                    "event": "error",
+                    "data": {"message": str(e)},
+                    "request_id": request_id,
+                }
+            )
 
 
 async def _send_user_input_async(
@@ -299,18 +305,22 @@ async def _handle_chat_cancel(
     """处理 chat.cancel 事件。"""
     try:
         cancelled = await session_manager.cancel_generation(conversation_id)
-        await websocket.send_json({
-            "event": "chat.cancelled",
-            "data": {"cancelled": cancelled},
-            "request_id": request_id,
-        })
+        await websocket.send_json(
+            {
+                "event": "chat.cancelled",
+                "data": {"cancelled": cancelled},
+                "request_id": request_id,
+            }
+        )
     except Exception as e:
         logger.error("chat.cancel 处理失败", conversation_id=conversation_id, error=str(e))
-        await websocket.send_json({
-            "event": "error",
-            "data": {"message": str(e)},
-            "request_id": request_id,
-        })
+        await websocket.send_json(
+            {
+                "event": "error",
+                "data": {"message": str(e)},
+                "request_id": request_id,
+            }
+        )
 
 
 # 保留旧的全局 WS 端点（协议兼容性验证）
