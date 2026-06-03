@@ -3,11 +3,14 @@ import {
   Button,
   Layout,
   Modal,
+  Segmented,
   Select,
   Space,
 } from "antd";
 import {
   AppstoreOutlined,
+  BranchesOutlined,
+  CommentOutlined,
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
@@ -56,6 +59,8 @@ export interface WorkbenchLayoutProps {
 
   // Main content
   routeTab: string;
+  scheduleMode: "chat" | "workflow";
+  onScheduleModeChange: (mode: "chat" | "workflow") => void;
   children: React.ReactNode;
 }
 
@@ -81,6 +86,9 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     setActiveId,
     navigateToConversation,
     runningConversationIds,
+    routeTab,
+    scheduleMode,
+    onScheduleModeChange,
     children,
   } = props;
 
@@ -151,6 +159,16 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             </Button>
           </Space>
           <Space>
+            {routeTab === "chat" && (
+              <Segmented
+                value={scheduleMode}
+                onChange={(value) => onScheduleModeChange(value as "chat" | "workflow")}
+                options={[
+                  { label: <><CommentOutlined /> 一般</>, value: "chat" },
+                  { label: <><BranchesOutlined /> 工作流</>, value: "workflow" },
+                ]}
+              />
+            )}
             <Button
               icon={<ToolOutlined />}
               onClick={() => openMainTab("settings")}

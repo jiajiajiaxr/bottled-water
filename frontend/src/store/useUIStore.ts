@@ -13,8 +13,10 @@ interface UIState {
   conversationSettingsOpen: boolean;
   artifactPanelOpen: boolean;
   createOpen: CreateModalState;
+  scheduleMode: "chat" | "workflow";
 
   setAgentDrawerOpen: (open: boolean) => void;
+  setScheduleMode: (mode: "chat" | "workflow") => void;
   setWorkspacesOpen: (open: boolean) => void;
   setGlobalSettingsOpen: (open: boolean) => void;
   setPlatformDrawerOpen: (open: boolean) => void;
@@ -35,8 +37,10 @@ export const useUIStore = create<UIState>((set) => ({
   conversationSettingsOpen: false,
   artifactPanelOpen: false,
   createOpen: { open: false },
+  scheduleMode: "chat",
 
   setAgentDrawerOpen: (agentDrawerOpen) => set({ agentDrawerOpen }),
+  setScheduleMode: (scheduleMode) => set({ scheduleMode }),
   setWorkspacesOpen: (workspacesOpen) => set({ workspacesOpen }),
   setGlobalSettingsOpen: (globalSettingsOpen) => set({ globalSettingsOpen }),
   setPlatformDrawerOpen: (platformDrawerOpen) => set({ platformDrawerOpen }),
