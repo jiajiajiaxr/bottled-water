@@ -60,12 +60,11 @@ export function useWorkbenchActions(
   const createConversation = async (payload: {
     title?: string;
     agentIds: string[];
-    group: boolean;
     masterEnabled: boolean;
     folder: string;
   }) => {
     const created = await api.createConversationWithAgents({
-      chat_type: payload.group ? "group" : "single",
+      chat_type: "group",
       title: payload.title,
       participant_agent_ids: payload.agentIds,
       master_enabled: payload.masterEnabled,
@@ -81,8 +80,8 @@ export function useWorkbenchActions(
       created.id,
     );
     clearMessages();
-    setCreateOpen({ open: false, group: false });
-    message.success(payload.group ? "群聊已创建" : "会话已创建");
+    setCreateOpen({ open: false });
+    message.success("会话已创建");
   };
 
   const saveArtifact = async (next: WorkspaceArtifact) => {

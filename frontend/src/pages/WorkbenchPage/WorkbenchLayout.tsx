@@ -36,7 +36,7 @@ export interface WorkbenchLayoutProps {
   activeId: string | undefined;
   conversationCategories: string[];
   selectConversation: (conversationId?: string, replace?: boolean) => void;
-  setCreateOpen: (value: { open: boolean; group: boolean }) => void;
+  setCreateOpen: (value: { open: boolean }) => void;
   addConversationCategory: (name: string) => void;
   patchConversation: (
     item: Conversation,
@@ -93,7 +93,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         runningConversationIds={runningConversationIds}
         categoryOptions={conversationCategories}
         onSelect={selectConversation}
-        onCreate={(group) => setCreateOpen({ open: true, group })}
+        onCreate={() => setCreateOpen({ open: true })}
         onCreateCategory={addConversationCategory}
         onTogglePin={(item) =>
           patchConversation(item, { pinned: !item.pinned })

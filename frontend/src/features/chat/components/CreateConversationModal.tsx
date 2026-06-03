@@ -5,21 +5,18 @@ import type { Agent } from "@/types";
 
 export function CreateConversationModal({
   open,
-  group,
   agents,
   categoryOptions,
   onCancel,
   onCreate,
 }: {
   open: boolean;
-  group: boolean;
   agents: Agent[];
   categoryOptions: string[];
   onCancel: () => void;
   onCreate: (payload: {
     title?: string;
     agentIds: string[];
-    group: boolean;
     masterEnabled: boolean;
     folder: string;
   }) => void;
@@ -41,22 +38,19 @@ export function CreateConversationModal({
     if (initializedRef.current) return;
     initializedRef.current = true;
     form.setFieldsValue({
-      agentIds: group
-        ? onlineAgents
-            .slice(0, Math.min(4, onlineAgents.length))
-            .map((agent) => agent.id)
-        : [],
+      agentIds: onlineAgents
+        .slice(0, Math.min(4, onlineAgents.length))
+        .map((agent) => agent.id),
       masterEnabled: true,
       folder: "Default",
     });
-  }, [open, group, onlineAgents, form]);
+  }, [open, onlineAgents, form]);
 
   const submit = async () => {
     const values = await form.validateFields();
     onCreate({
       title: values.title,
       agentIds: values.agentIds,
-      group,
       masterEnabled: values.masterEnabled ?? true,
       folder: normalizeConversationCategory(values.folder),
     });
@@ -65,7 +59,7 @@ export function CreateConversationModal({
 
   return (
     <Modal
-      title={group ? "新建多 Agent 群聊" : "新建 Agent 单聊"}
+      title="创建聊天"
       open={open}
       onCancel={onCancel}
       onOk={submit}
@@ -78,24 +72,20 @@ export function CreateConversationModal({
         initialValues={{ masterEnabled: true, folder: "Default" }}
       >
         <Form.Item name="title" label="会话名称">
-          <Input
-            placeholder={group ? "多 Agent 协作-答辩演示" : "Agent 单聊"}
-          />
+          <Input placeholder="多 Agent 协作会话" />
         </Form.Item>
         <Form.Item name="folder" label="分类/文件夹">
           <Select options={categorySelectOptions} placeholder="选择左侧分类" />
         </Form.Item>
         <Form.Item
           name="agentIds"
-          label={group ? "选择 2-8 个 Agent" : "选择 1 个 Agent"}
+          label="选择 1-8 个 Agent"
           rules={[
             {
               validator: async (_, value?: string[]) => {
                 const count = value?.length ?? 0;
-                if (group && (count < 2 || count > 8))
-                  throw new Error("群聊需要选择 2-8 个 Agent");
-                if (!group && count !== 1)
-                  throw new Error("单聊需要选择 1 个 Agent");
+                if (count < 1 || count > 8)
+                  throw new Error("需要选择 1-8 个 Agent");
               },
             },
           ]}
@@ -103,7 +93,7 @@ export function CreateConversationModal({
           <Select
             data-testid="agent-select"
             mode="multiple"
-            maxCount={group ? 8 : 1}
+            maxCount={8}
             placeholder="从 Agent 通讯录选择"
             options={onlineAgents.map((agent) => ({
               label: `${agent.name} · ${agent.capabilities
@@ -114,11 +104,9 @@ export function CreateConversationModal({
             }))}
           />
         </Form.Item>
-        {group && (
-          <Form.Item name="masterEnabled" valuePropName="checked">
-            <Checkbox>启用主控 Agent 自动拆解和调度</Checkbox>
-          </Form.Item>
-        )}
+        <Form.Item name="masterEnabled" valuePropName="checked">
+          <Checkbox>启用主控 Agent 自动拆解和调度</Checkbox>
+        </Form.Item>
       </Form>
     </Modal>
   );
