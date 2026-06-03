@@ -31,15 +31,17 @@ const { Text } = Typography;
 export function ChatPanel({
   active,
   loading,
+  userName,
 }: {
   active?: Conversation;
   loading: boolean;
+  userName?: string;
 }) {
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
   const { message } = AntApp.useApp();
-  const { send, streamingMessages, displayOrder } = useMessageOperations();
+  const { send, streamingMessages, displayOrder } = useMessageOperations(userName);
 
   // 从 Conversation Store 读取当前会话的思考模式状态（持久化）
   const thinkingEnabled = useConversationStore((s) =>

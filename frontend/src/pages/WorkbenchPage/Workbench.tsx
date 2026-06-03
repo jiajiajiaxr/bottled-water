@@ -315,7 +315,7 @@ export function Workbench({
       >
         {routeTab === "chat" ? (
           <>
-            <ChatPanel active={active} loading={loadingMessages} />
+            <ChatPanel active={active} loading={loadingMessages} userName={currentUser.name} />
             {artifactPanelOpen && artifact && (
               <PreviewPanel
                 artifact={artifact}
