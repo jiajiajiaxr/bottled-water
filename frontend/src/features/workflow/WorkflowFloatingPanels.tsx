@@ -130,6 +130,8 @@ export function WorkflowFloatingPanels({
   const validationErrorCount = validationIssues.filter(
     (issue) => issue.severity === "error",
   ).length;
+  const isSidePanel = activePanel && activePanel !== "logs";
+  const isBottomPanel = activePanel === "logs";
 
   return (
     <>
@@ -191,14 +193,14 @@ export function WorkflowFloatingPanels({
       <section
         className="workflow-floating-card"
         style={{
-          opacity: activePanel ? 1 : 0,
-          pointerEvents: activePanel ? "auto" : "none",
-          transform: activePanel ? "translateX(0)" : "translateX(20px)",
+          opacity: isSidePanel ? 1 : 0,
+          pointerEvents: isSidePanel ? "auto" : "none",
+          transform: isSidePanel ? "translateX(0)" : "translateX(20px)",
           transition: "opacity 0.2s ease, transform 0.2s ease",
         }}
       >
         <header className="workflow-floating-card-header">
-          <Text strong>{activePanel ? PANEL_TITLES[activePanel] : ""}</Text>
+          <Text strong>{isSidePanel ? PANEL_TITLES[activePanel!] : ""}</Text>
           <Button
             type="text"
             size="small"
@@ -263,12 +265,6 @@ export function WorkflowFloatingPanels({
               }
             />
           )}
-          {activePanel === "logs" && (
-            <WorkflowRunLogCard
-              latestRun={latestRun}
-              editingNodeState={editingNodeState}
-            />
-          )}
           {activePanel === "settings" && (
             <WorkflowSettingsCard
               workflow={workflow}
@@ -282,6 +278,31 @@ export function WorkflowFloatingPanels({
           {activePanel === "history" && (
             <WorkflowHistoryCard workflowRuns={workflowRuns} />
           )}
+        </div>
+      </section>
+      <section
+        className="workflow-floating-bottom"
+        style={{
+          opacity: isBottomPanel ? 1 : 0,
+          pointerEvents: isBottomPanel ? "auto" : "none",
+          transform: isBottomPanel ? "translateX(-50%) translateY(0)" : "translateX(-50%) translateY(20px)",
+          transition: "opacity 0.2s ease, transform 0.2s ease",
+        }}
+      >
+        <header className="workflow-floating-bottom-header">
+          <Text strong>运行日志</Text>
+          <Button
+            type="text"
+            size="small"
+            icon={<CloseOutlined />}
+            onClick={() => onActivePanelChange(undefined)}
+          />
+        </header>
+        <div className="workflow-floating-bottom-body">
+          <WorkflowRunLogCard
+            latestRun={latestRun}
+            editingNodeState={editingNodeState}
+          />
         </div>
       </section>
     </>

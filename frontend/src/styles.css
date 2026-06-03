@@ -325,6 +325,40 @@ button {
   padding: 16px;
 }
 
+.workflow-floating-bottom {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  width: min(560px, 80%);
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.workflow-floating-bottom-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #edf1f7;
+  flex-shrink: 0;
+}
+
+.workflow-floating-bottom-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
 .workflow-studio-canvas-wrap {
   flex: 1;
   min-height: 0;
