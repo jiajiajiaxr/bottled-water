@@ -10,7 +10,7 @@ import json
 import re
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -75,8 +75,10 @@ def _conversation_query(user_id: str):
             or_(
                 Conversation.creator_id == user_id,
                 Conversation.participants.any(
-                    ConversationParticipant.user_id == user_id,
-                    ConversationParticipant.left_at.is_(None),
+                    and_(
+                        ConversationParticipant.user_id == user_id,
+                        ConversationParticipant.left_at.is_(None),
+                    ),
                 ),
             ),
             Conversation.deleted_at.is_(None),
