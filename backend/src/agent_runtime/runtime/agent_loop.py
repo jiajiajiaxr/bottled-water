@@ -10,6 +10,7 @@ Agent 执行循环
 
 import re
 import json
+import uuid
 from typing import Dict, Any, Optional, List
 
 from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse
@@ -124,6 +125,10 @@ class AgentLoop:
         _emit,
     ) -> Dict[str, Any]:
         """内部执行循环（被 run() 和步进模式共用）"""
+        # 虚拟工具智能体：跳过 LLM，直接执行工具
+        if self.agent.system_prompt == "" and self.agent.role.endswith("_executor"):
+            return await self._execute_virtual_agent(task, tool_executor, _emit)
+
         # 构建系统提示词
         system_prompt = self.agent.system_prompt
 
@@ -363,6 +368,127 @@ class AgentLoop:
         return {
             "work_product": work_product,
             "status_report": status_report,
+            "tool_events": tool_events,
+        }
+
+    async def _execute_virtual_agent(
+        self,
+        task: str,
+        tool_executor: Optional[ToolExecutor],
+        _emit,
+    ) -> Dict[str, Any]:
+        """虚拟工具智能体执行：跳过 LLM，直接调用工具。
+
+        从 model_config 读取节点配置，构造 ToolCall 并执行。
+        """
+        node_config = self.agent.model_config.get("node_config", {})
+        node_type = self.agent.model_config.get("node_type", "")
+
+        tool_name = ""
+        arguments: Dict[str, Any] = {}
+
+        if node_type == "tool":
+            tool_name = node_config.get("tool_name", "") or (self.agent.tools[0] if self.agent.tools else "")
+            arguments = node_config.get("arguments", {})
+        elif node_type == "mcp":
+            tool_name = node_config.get("tool_name", "")
+            arguments = node_config.get("arguments", {})
+        else:
+            # skill / artifact 暂走 LLM 路径（在 _execute_loop 中不应走到这里）
+            logger.warning("虚拟智能体类型不支持直接执行", agent_id=self.agent.id, node_type=node_type)
+            return {
+                "work_product": f"虚拟智能体 {self.agent.name} 暂不支持直接执行",
+                "status_report": AgentReport(
+                    agent_id=self.agent.id,
+                    state=AgentState.COMPLETED,
+                    will=AgentWill.COMPLETE,
+                    rationale=f"节点类型 {node_type} 不走虚拟执行路径",
+                    confidence=1.0,
+                ),
+                "tool_events": [],
+            }
+
+        if not tool_name or not tool_executor:
+            return {
+                "work_product": "工具执行失败：未配置工具名或执行器",
+                "status_report": AgentReport(
+                    agent_id=self.agent.id,
+                    state=AgentState.FAILED,
+                    will=AgentWill.BLOCKED,
+                    rationale="缺少工具名或工具执行器",
+                    confidence=1.0,
+                ),
+                "tool_events": [],
+            }
+
+        logger.info("虚拟智能体直接执行工具", agent_id=self.agent.id, tool=tool_name)
+        await _emit(
+            "agent.tool_call",
+            {
+                "agent_id": self.agent.id,
+                "tool_count": 1,
+                "tools": [tool_name],
+            },
+        )
+
+        # 构造 ToolCall 并执行
+        tool_call = ToolCall(
+            call_id=f"virtual_{self.agent.id}_{uuid.uuid4().hex[:8]}",
+            tool_name=tool_name,
+            parameters=arguments,
+        )
+
+        try:
+            result = await tool_executor.execute(tool_call)
+            if not isinstance(result, ToolResult):
+                result = ToolResult(
+                    call_id=tool_call.call_id,
+                    success=True,
+                    result=result,
+                )
+        except Exception as e:
+            logger.error("虚拟智能体工具执行失败", agent_id=self.agent.id, tool=tool_name, error=str(e))
+            result = ToolResult(
+                call_id=tool_call.call_id,
+                success=False,
+                result=None,
+                error=str(e),
+            )
+
+        await _emit(
+            "agent.tool_result",
+            {
+                "agent_id": self.agent.id,
+                "tool": tool_name,
+                "success": result.success,
+            },
+        )
+
+        tool_events = [
+            {
+                "agent_id": self.agent.id,
+                "round": 1,
+                "results": [
+                    {
+                        "tool": tool_name,
+                        "success": result.success,
+                        "result": result.result,
+                    }
+                ],
+            }
+        ]
+
+        work_product = str(result.result) if result.success else f"工具执行失败: {result.error}"
+
+        return {
+            "work_product": work_product,
+            "status_report": AgentReport(
+                agent_id=self.agent.id,
+                state=AgentState.COMPLETED if result.success else AgentState.FAILED,
+                will=AgentWill.COMPLETE if result.success else AgentWill.BLOCKED,
+                rationale=f"工具 {tool_name} 执行{'成功' if result.success else '失败'}",
+                confidence=1.0,
+            ),
             "tool_events": tool_events,
         }
 

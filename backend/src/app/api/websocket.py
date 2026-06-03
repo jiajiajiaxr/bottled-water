@@ -116,7 +116,7 @@ async def _save_user_message(
     scheduling_strategy = data.get("scheduling_strategy", "")
     if not scheduling_strategy and conversation.extra:
         scheduling_strategy = (conversation.extra or {}).get("scheduling_strategy", "tech_lead")
-    scheduling_strategy = scheduling_strategy if scheduling_strategy in ("tech_lead",) else "tech_lead"
+    scheduling_strategy = scheduling_strategy if scheduling_strategy in ("tech_lead", "workflow") else "tech_lead"
 
     message = Message(
         client_message_id=data.get("client_message_id") or str(uuid.uuid4()),

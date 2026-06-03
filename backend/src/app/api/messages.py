@@ -102,7 +102,7 @@ async def _send(
     if not scheduling_strategy and conversation.extra:
         scheduling_strategy = (conversation.extra or {}).get("scheduling_strategy", "tech_lead")
     scheduling_strategy = (
-        scheduling_strategy if scheduling_strategy in ("tech_lead",) else "tech_lead"
+        scheduling_strategy if scheduling_strategy in ("tech_lead", "workflow") else "tech_lead"
     )
 
     # 如果消息指定了新策略，持久化到会话

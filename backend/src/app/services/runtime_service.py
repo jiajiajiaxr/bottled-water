@@ -16,6 +16,8 @@ from agent_runtime import AgentConfig, Session as AgentSession, ToolCall
 from agent_runtime.core.interfaces import ToolExecutor
 from agent_runtime.strategies.tech_lead import TechLeadScheduler
 from agent_runtime.strategies.single_agent import SingleAgentScheduler
+from agent_runtime.strategies.workflow import WorkflowScheduler
+from agent_runtime.workflow.replanner import sanitize_workflow
 from model_provider import create_provider
 from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
 
@@ -143,39 +145,22 @@ class OrchestratorService:
     ) -> AgentSession:
         """创建 AgentSession（不运行）。
 
-        提取自 SingleAgentOrchestrator / TechLeadOrchestrator 的 Session 创建逻辑，
-        供 ConversationSessionManager 复用。
+        支持三种调度策略：
+        - 单 Agent：SingleAgentScheduler
+        - 多 Agent：TechLeadScheduler
+        - Workflow：WorkflowScheduler
         """
         user = await db.get(User, conversation.creator_id)
         agent_count = len(agents)
 
-        if agent_count == 1:
-            agent = agents[0]
-            agent_config = AgentConfig(
-                id=agent.id,
-                name=agent.name,
-                system_prompt=(agent.config or {}).get("system_prompt", "") or agent.description or f"你是 {agent.name}。",
-                role=agent.type or "worker",
-                tools=(agent.config or {}).get("tools", []),
-            )
-            if model_config_id:
-                model_provider = await OrchestratorService.create_provider_from_config(db, model_config_id)
-            else:
-                from app.services.model_config_resolver import create_provider_from_db
-                model_provider = await create_provider_from_db(db)
-            scheduler = SingleAgentScheduler(agents={agent.id: agent_config})
-            tool_executor = _ToolExecutorAdapter(db, agent, user, conversation)
+        # 构建统一的模型提供者
+        if model_config_id:
+            model_provider = await OrchestratorService.create_provider_from_config(db, model_config_id)
+        else:
+            from app.services.model_config_resolver import create_provider_from_db
+            model_provider = await create_provider_from_db(db)
 
-            return AgentSession.create(
-                agents=[agent_config],
-                scheduler=scheduler,
-                model_provider=model_provider,
-                persistence=SQLAlchemyBackend(db),
-                event_sink=event_sink,
-                tool_executor=tool_executor,
-                session_id=str(conversation.id),
-            )
-
+        # 统一构建 AgentConfig
         agent_configs = [
             AgentConfig(
                 id=agent.id,
@@ -186,11 +171,91 @@ class OrchestratorService:
             )
             for agent in agents
         ]
-        if model_config_id:
-            model_provider = await OrchestratorService.create_provider_from_config(db, model_config_id)
-        else:
-            from app.services.model_config_resolver import create_provider_from_db
-            model_provider = await create_provider_from_db(db)
+        agent_configs_by_id = {a.id: a for a in agent_configs}
+
+        # 判断调度策略
+        scheduling_strategy = ""
+        if conversation.extra and isinstance(conversation.extra, dict):
+            scheduling_strategy = conversation.extra.get("scheduling_strategy", "")
+
+        has_workflow = (
+            conversation.extra
+            and isinstance(conversation.extra, dict)
+            and isinstance(conversation.extra.get("workflow"), dict)
+        )
+
+        # ---- Workflow 模式 ----
+        if scheduling_strategy == "workflow" or has_workflow:
+            from agent_runtime.workflow.replanner import _fallback_workflow
+
+            if has_workflow:
+                raw_workflow = conversation.extra["workflow"]
+            else:
+                # 无 workflow 定义时构建默认 workflow
+                raw_workflow = _fallback_workflow(
+                    conversation.id,
+                    [
+                        {
+                            "id": agent.id,
+                            "name": agent.name,
+                            "type": agent.type,
+                            "description": agent.description,
+                            "config": agent.config,
+                        }
+                        for agent in agents
+                    ],
+                )
+
+            # 清理 workflow
+            workflow = sanitize_workflow(
+                raw_workflow,
+                conversation_id=str(conversation.id),
+                available_agents=[
+                    {"id": agent.id, "name": agent.name, "type": agent.type}
+                    for agent in agents
+                ],
+            )
+
+            # 创建 WorkflowScheduler，传入所有真实 Agent
+            # set_workflow_context 会自动为 tool/skill/mcp/artifact 节点创建虚拟智能体
+            scheduler = WorkflowScheduler(agents=agent_configs_by_id)
+            scheduler.set_workflow_context(workflow, "")
+
+            # 获取完整 Agent 列表（含虚拟工具智能体）
+            all_agents = scheduler.get_all_agents()
+
+            primary_agent = agents[0] if agents else None
+            tool_executor = _ToolExecutorAdapter(
+                db, primary_agent, user, conversation
+            ) if primary_agent else None
+
+            return AgentSession.create(
+                agents=list(all_agents.values()),
+                scheduler=scheduler,
+                model_provider=model_provider,
+                persistence=SQLAlchemyBackend(db),
+                event_sink=event_sink,
+                tool_executor=tool_executor,
+                session_id=str(conversation.id),
+            )
+
+        # ---- 单 Agent 模式 ----
+        if agent_count == 1:
+            agent = agents[0]
+            scheduler = SingleAgentScheduler(agents={agent.id: agent_configs[0]})
+            tool_executor = _ToolExecutorAdapter(db, agent, user, conversation)
+
+            return AgentSession.create(
+                agents=[agent_configs[0]],
+                scheduler=scheduler,
+                model_provider=model_provider,
+                persistence=SQLAlchemyBackend(db),
+                event_sink=event_sink,
+                tool_executor=tool_executor,
+                session_id=str(conversation.id),
+            )
+
+        # ---- 多 Agent TechLead 模式 ----
         scheduler = TechLeadScheduler(agents={a.id: a for a in agent_configs})
         primary_agent = agents[0]
         tool_executor = _ToolExecutorAdapter(db, primary_agent, user, conversation)
