@@ -10,7 +10,7 @@ import json
 import re
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -71,7 +71,18 @@ def _conversation_query(user_id: str):
         .options(
             selectinload(Conversation.participants).selectinload(ConversationParticipant.agent)
         )
-        .where(Conversation.creator_id == user_id, Conversation.deleted_at.is_(None))
+        .where(
+            or_(
+                Conversation.creator_id == user_id,
+                Conversation.participants.any(
+                    and_(
+                        ConversationParticipant.user_id == user_id,
+                        ConversationParticipant.left_at.is_(None),
+                    ),
+                ),
+            ),
+            Conversation.deleted_at.is_(None),
+        )
     )
 
 
@@ -170,6 +181,14 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
                 role="member",
             )
         )
+    db.add(
+        ConversationParticipant(
+            conversation_id=conversation.id,
+            participant_type="user",
+            user_id=user.id,
+            role="owner",
+        )
+    )
     db.add(
         Message(
             conversation_id=conversation.id,
@@ -847,5 +866,79 @@ async def compat_add_participants(
             )
             participant.agent = agent
             db.add(participant)
+    await db.commit()
+    return conversation_to_dict(conversation)
+
+
+@compat_router.get("/conversations/{conversation_id}", response_model=dict)
+async def compat_get_conversation(
+    conversation_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
+    return conversation_to_dict(await _get(db, user, conversation_id))
+
+
+@compat_router.patch("/conversations/{conversation_id}", response_model=dict)
+async def compat_update_conversation(
+    conversation_id: str,
+    payload: UpdateConversationRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return conversation_to_dict(await _patch(db, user, conversation_id, payload.model_dump()))
+
+
+@compat_router.delete("/conversations/{conversation_id}", response_model=dict)
+async def compat_delete_conversation(
+    conversation_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
+    conversation = await _get(db, user, conversation_id)
+    conversation.deleted_at = utcnow()
+    conversation.status = "deleted"
+    await db.commit()
+    return {"id": conversation.id, "deleted_at": conversation.deleted_at.isoformat()}
+
+
+@compat_router.delete("/conversations/{conversation_id}/participants/{participant_id}", response_model=dict)
+@compat_router.delete("/conversations/{conversation_id}/members/{participant_id}", response_model=dict)
+async def compat_remove_participant(
+    conversation_id: str,
+    participant_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conversation = await _get(db, user, conversation_id)
+    _ensure_can_manage(conversation, user)
+    participant = next(
+        (it for it in conversation.participants if it.id == participant_id and it.left_at is None),
+        None,
+    )
+    if not participant:
+        raise NotFoundError("成员不存在")
+    active_agents = [
+        it for it in _active_participants(conversation) if it.participant_type == "agent"
+    ]
+    if participant.participant_type == "agent" and len(active_agents) <= 1:
+        raise ValidationAppError("会话至少需要保留 1 个 Agent")
+    if participant.participant_type != "agent" and participant.role == "owner":
+        raise ValidationAppError("不能直接移除群主，请先转让群主")
+    participant.left_at = utcnow()
+    extra = dict(conversation.extra or {})
+    if not isinstance(extra.get("workflow"), dict) or not (
+        extra.get("workflow", {}).get("settings") or {}
+    ).get("edited_by_user"):
+        extra["workflow"] = _fallback_workflow(conversation)
+        conversation.extra = extra
+    conversation.last_message_preview = "群成员已移除"
+    conversation.last_message_at = utcnow()
+    db.add(
+        Message(
+            conversation_id=conversation.id,
+            sender_type="system",
+            sender_name="System",
+            content_type="event",
+            content={"text": conversation.last_message_preview},
+            status="completed",
+        )
+    )
     await db.commit()
     return conversation_to_dict(conversation)

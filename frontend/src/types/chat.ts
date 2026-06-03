@@ -14,7 +14,6 @@ export type StreamState = "idle" | "streaming" | "done" | "error";
 
 export interface Participant {
   id?: string;
-  participant_id?: string;
   participant_type?: "agent" | "user";
   user_id?: string;
   agent_id?: string;

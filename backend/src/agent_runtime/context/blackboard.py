@@ -40,10 +40,17 @@ class BlackboardManager:
         return blackboard
 
     async def get(self, conversation_id: str) -> Optional[Dict[str, Any]]:
-        """获取 Blackboard（优先缓存）"""
+        """获取 Blackboard（优先缓存，其次持久化）"""
         if conversation_id in self._cache:
             return self._cache[conversation_id]
-        # TODO: 从持久化加载
+        if self._persistence:
+            try:
+                bb = await self._persistence.load_blackboard(conversation_id)
+                if bb and bb.get("raw_history"):
+                    self._cache[conversation_id] = bb
+                    return bb
+            except Exception:
+                logger.warning("Blackboard 加载失败", conversation_id=conversation_id, exc_info=True)
         return None
 
     # --- 写操作 ---

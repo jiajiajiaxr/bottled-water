@@ -126,10 +126,12 @@ class Orchestrator:
         self._agent_loops.clear()
         self._user_input_queue = asyncio.Queue()
 
-        # 创建/加载 Blackboard
-        blackboard = await self.blackboard_mgr.create(self.session_id)
-        if self.persistence:
-            await self.persistence.save_blackboard(self.session_id, blackboard)
+        # 加载已有 Blackboard，不存在则创建
+        blackboard = await self.blackboard_mgr.get(self.session_id)
+        if not blackboard:
+            blackboard = await self.blackboard_mgr.create(self.session_id)
+            if self.persistence:
+                await self.persistence.save_blackboard(self.session_id, blackboard)
 
         # 记录用户消息到 Blackboard
         await self.blackboard_mgr.append_history(
@@ -141,20 +143,32 @@ class Orchestrator:
             },
         )
 
-        # 初始化各 Agent 上下文
+        # 加载历史消息注入 AgentContext
+        if self.persistence:
+            try:
+                history = await self.persistence.load_messages(self.session_id, limit=50)
+                for agent_id, agent in self.agents.items():
+                    ctx = self.agent_ctx_mgr.get(agent_id, self.session_id)
+                    ctx.system_prompt = agent.system_prompt
+                    ctx.role_config = {"name": agent.name, "role": agent.role, "tools": agent.tools}
+                    for msg in reversed(history):
+                        if msg.role == "user":
+                            ctx.add("thought", f"【用户】{msg.content}")
+                        elif msg.role == "assistant" and msg.agent_id == agent_id:
+                            ctx.add("thought", msg.content)
+                        elif msg.role == "assistant":
+                            ctx.add("thought", f"【{msg.agent_id or '其他 Agent'}】{msg.content}")
+            except Exception:
+                logger.warning("加载历史消息失败", session_id=self.session_id, exc_info=True)
+
+        # 初始化各 Agent Loop
         for agent_id, agent in self.agents.items():
-            self.agent_ctx_mgr.initialize(
-                agent_id=agent_id,
-                conversation_id=self.session_id,
-                system_prompt=agent.system_prompt,
-                role_config={"name": agent.name, "role": agent.role, "tools": agent.tools},
-            )
-            # 创建 AgentLoop 实例
-            self._agent_loops[agent_id] = AgentLoop(
-                agent_config=agent,
-                model_provider=self.model_provider,
-                use_streaming=True,
-            )
+            if agent_id not in self._agent_loops:
+                self._agent_loops[agent_id] = AgentLoop(
+                    agent_config=agent,
+                    model_provider=self.model_provider,
+                    use_streaming=True,
+                )
 
     async def _scheduling_loop(self, initial_task: str) -> AsyncIterator[Event]:
         """调度循环核心"""

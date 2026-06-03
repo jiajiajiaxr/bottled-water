@@ -1,0 +1,57 @@
+// 主色
+$color-primary: #1677ff;
+$color-primary-light: #0958d9;
+
+// 背景色
+$color-bg-page: #edf1f7;
+$color-bg-white: #ffffff;
+$color-bg-sidebar: #f9fbfe;
+$color-bg-preview: #f8fafc;
+$color-bg-message: #fbfcff;
+$color-bg-user-message: #eef6ff;
+$color-bg-hover: #eef5ff;
+$color-bg-active: #e7f0ff;
+
+// 边框色
+$color-border: #dbe3ef;
+$color-border-light: #e8edf5;
+$color-border-message: #c9d8ea;
+
+// 文字色
+$color-text-primary: #1f2937;
+$color-text-secondary: #4b5563;
+$color-text-muted: #9ca3af;
+$color-text-code: #e5e7eb;
+
+// 状态色
+$color-success: #16a34a;
+$color-warning: #f59e0b;
+$color-error: #ffccc7;
+$color-error-bg: #fff2f0;
+$color-info: #91caff;
+
+// 间距
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 10px;
+$spacing-lg: 12px;
+$spacing-xl: 14px;
+$spacing-xxl: 16px;
+$spacing-3xl: 18px;
+$spacing-4xl: 22px;
+$spacing-5xl: 24px;
+$spacing-6xl: 32px;
+
+// 圆角
+$radius-sm: 6px;
+$radius-md: 8px;
+$radius-lg: 10px;
+$radius-full: 999px;
+
+// 阴影
+$shadow-sm: 0 4px 16px rgba(15, 23, 42, 0.08);
+$shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+$shadow-lg: 0 24px 80px rgba(15, 23, 42, 0.14);
+
+// 字体
+$font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;

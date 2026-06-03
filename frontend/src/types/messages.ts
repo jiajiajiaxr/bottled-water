@@ -14,14 +14,33 @@ export type StreamAssistantHandlers = {
   onThinking?: (agentId: string, thinking: string) => void;
 };
 
+/** 消息内容中附件的精简结构（发送时只需要这几个字段） */
+export type MessageBodyAttachment = {
+  file_id?: string;
+  id?: string;
+  filename?: string;
+  content_type?: string;
+  size?: number;
+};
+
+/** 消息内容结构 */
+export type MessageBodyContent = {
+  text?: string;
+  attachments?: MessageBodyAttachment[];
+};
+
+/** 发送消息请求体（与后端 SendMessagePayload 对齐） */
 export type MessageBody = {
-  replay: boolean;
-  content_type: string;
-  content: {
-    text: string;
-    attachments: string[];
-  };
-  reply_to_message_id: string;
-  thinking_enabled: boolean;
-  regenerate_message_id: string;
+  client_message_id?: string;
+  content_type?: string;
+  content?: MessageBodyContent;
+  text?: string;
+  prompt?: string;
+  attachments?: MessageBodyAttachment[];
+  reply_to_message_id?: string;
+  quotedMessageId?: string;
+  thinking_enabled?: boolean;
+  scheduling_strategy?: "workflow" | "tech_lead";
+  regenerate_message_id?: string;
+  model_config_id?: string;
 };

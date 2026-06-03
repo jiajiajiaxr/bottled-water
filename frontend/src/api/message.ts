@@ -1,7 +1,7 @@
-import { StreamAssistantHandlers } from "@/types/messages";
+import type { StreamAssistantHandlers, MessageBody } from "@/types/messages";
+import type { ChatMessage } from "@/types";
 import { get, post, sse } from "./client";
 import { getConversationWS } from "./websocket";
-import type { ChatMessage } from "@/types";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
   const result = await get<{ items: ChatMessage[] } | ChatMessage[]>(
@@ -187,7 +187,7 @@ function dispatchStreamEvent(
 /** 标准 SSE fetch 客户端（POST + ReadableStream）。 */
 export async function sendMessage(
   conversationId: string,
-  body: Record<string, unknown>,
+  body: MessageBody,
   handlers: StreamAssistantHandlers,
 ): Promise<string> {
   const abortController = new AbortController();
@@ -249,7 +249,7 @@ export async function cancelAssistantReply(
  */
 export async function sendMessageWs(
   conversationId: string,
-  body: Record<string, unknown>,
+  body: MessageBody,
   handlers: StreamAssistantHandlers,
 ): Promise<string> {
   const ws = getConversationWS(conversationId);

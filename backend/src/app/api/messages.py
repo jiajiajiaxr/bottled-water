@@ -266,7 +266,7 @@ async def cancel_stream(
     return ok({"conversation_id": conversation.id, "cancelled": cancelled}, "Generation cancelled")
 
 
-# ---- compat routes (只保留列表，删除发送和流式) ----
+# ---- compat routes ----
 
 
 @compat_router.get("/conversations/{conversation_id}/messages", response_model=list[dict])
@@ -276,3 +276,33 @@ async def compat_list_messages(
     user: User = Depends(get_current_user),
 ):
     return await _list_messages(db, user, conversation_id)
+
+
+@compat_router.post("/conversations/{conversation_id}/stream/cancel", response_model=dict)
+async def compat_cancel_stream(
+    conversation_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """取消 generation（兼容路由，无 SSE）。"""
+    from app.services.conversation_session_manager import ConversationSessionManager
+
+    conversation = await _get_conversation(db, user, conversation_id)
+
+    task = ORCHESTRATION_TASKS.get(conversation.id)
+    cancelled = False
+    if task and not task.done():
+        task.cancel()
+        cancelled = True
+
+    session_manager = ConversationSessionManager.get_instance()
+    if session_manager.is_generation_running(conversation.id):
+        await session_manager.cancel_generation(conversation.id)
+        cancelled = True
+
+    await event_bus.publish(
+        f"conversation:{conversation.id}",
+        "generation:cancelled",
+        {"conversation_id": conversation.id, "cancelled": cancelled},
+    )
+    return {"conversation_id": conversation.id, "cancelled": cancelled}

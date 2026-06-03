@@ -40,6 +40,7 @@ export function ChatPanel({
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
+  const [awaitingResponse, setAwaitingResponse] = useState(false);
   const { message } = AntApp.useApp();
   const { send, streamingMessages, displayOrder } = useMessageOperations(userName);
 
@@ -70,6 +71,7 @@ export function ChatPanel({
     const value =
       text.trim() || (pendingFiles.length ? "请结合上传附件继续处理。" : "");
     if (!value || !active) return;
+    setAwaitingResponse(true);
     send(value, quoted, pendingFiles, thinkingEnabled);
     setText("");
     setQuoted(undefined);
@@ -129,6 +131,13 @@ export function ChatPanel({
     if (el) el.scrollTop = el.scrollHeight;
   }, [active?.id, loading]);
 
+  // 智能体开始回复后，隐藏思考中指示器
+  useEffect(() => {
+    if (awaitingResponse && (streamingMessages.size > 0 || displayOrder.length > 0)) {
+      setAwaitingResponse(false);
+    }
+  }, [streamingMessages.size, displayOrder.length, awaitingResponse]);
+
   const renderMessageBubble = (item: ChatMessage) => {
     return (
       <MessageBubble
@@ -160,6 +169,16 @@ export function ChatPanel({
 
               return msg ? renderMessageBubble(msg) : null;
             })}
+            {awaitingResponse && (
+              <div className="thinking-indicator">
+                <div className="thinking-indicator-dots">
+                  <span className="dot" />
+                  <span className="dot" />
+                  <span className="dot" />
+                </div>
+                <span className="thinking-indicator-text">思考中</span>
+              </div>
+            )}
           </>
         ) : (
           <Empty description="暂无消息" />

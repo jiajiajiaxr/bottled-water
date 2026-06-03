@@ -1,0 +1,33 @@
+@use "variables" as *;
+
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: $spacing-5xl;
+  background:
+    linear-gradient(135deg, rgba(22, 119, 255, 0.16), rgba(20, 184, 166, 0.12)),
+    #f6f8fc;
+}
+
+.login-panel {
+  width: min(460px, 100%);
+  background: $color-bg-white;
+  border: 1px solid $color-border;
+  border-radius: $radius-md;
+  padding: $spacing-6xl;
+  box-shadow: $shadow-lg;
+
+  h1 {
+    margin: 0;
+  }
+}
+
+.login-actions {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.login-mode {
+  margin: 18px 0;
+}
