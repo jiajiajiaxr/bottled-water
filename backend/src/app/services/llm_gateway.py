@@ -12,7 +12,9 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.errors import NotFoundError, ValidationAppError
@@ -37,15 +39,19 @@ async def test_model_config(db: AsyncSession, model_config_id: str, prompt: str)
     from model_provider import create_provider
     from model_provider.core.config import ModelConfig as MPModelConfig
 
-    model = await db.get(ModelConfig, model_config_id)
-    if not model or model.deleted_at is not None:
+    model = await db.scalar(
+        select(ModelConfig)
+        .options(selectinload(ModelConfig.provider))
+        .where(ModelConfig.id == model_config_id, ModelConfig.deleted_at.is_(None))
+    )
+    if not model:
         raise NotFoundError("模型配置不存在")
     provider = model.provider
     if provider.status != "active":
         raise ValidationAppError("模型供应商未启用")
 
     settings = get_settings()
-    api_key = await resolve_api_key(provider)
+    api_key = await resolve_api_key(provider, model)
 
     if settings.use_mock_llm or api_key == "mock":
         return _mock_result(model, prompt)
@@ -97,15 +103,19 @@ async def stream_model_config(
     from model_provider import create_provider
     from model_provider.core.config import ModelConfig as MPModelConfig
 
-    model = await db.get(ModelConfig, model_config_id)
-    if not model or model.deleted_at is not None:
+    model = await db.scalar(
+        select(ModelConfig)
+        .options(selectinload(ModelConfig.provider))
+        .where(ModelConfig.id == model_config_id, ModelConfig.deleted_at.is_(None))
+    )
+    if not model:
         raise NotFoundError("模型配置不存在")
     provider = model.provider
     if provider.status != "active":
         raise ValidationAppError("模型供应商未启用")
 
     settings = get_settings()
-    api_key = await resolve_api_key(provider)
+    api_key = await resolve_api_key(provider, model)
 
     if settings.use_mock_llm or api_key == "mock":
         text = f"[mock-openai-compatible] {model.name} 已接收测试提示：{prompt[:120]}"

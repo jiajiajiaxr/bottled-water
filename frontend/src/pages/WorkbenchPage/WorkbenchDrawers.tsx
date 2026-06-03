@@ -25,12 +25,11 @@ export interface WorkbenchDrawersProps {
   ) => Promise<void>;
 
   // CreateConversationModal
-  createOpen: { open: boolean; group: boolean };
+  createOpen: { open: boolean };
   onCancelCreate: () => void;
   onCreateConversation: (payload: {
     title?: string;
     agentIds: string[];
-    group: boolean;
     masterEnabled: boolean;
     folder: string;
   }) => Promise<void>;
@@ -101,7 +100,6 @@ export function WorkbenchDrawers(props: WorkbenchDrawersProps) {
       />
       <CreateConversationModal
         open={createOpen.open}
-        group={createOpen.group}
         agents={agents}
         categoryOptions={conversationCategories}
         onCancel={onCancelCreate}

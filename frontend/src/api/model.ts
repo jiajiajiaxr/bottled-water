@@ -1,9 +1,16 @@
 import { del, get, patch, post } from "./client";
-import type { ModelProvider, ModelConfig } from "@/types";
+import type { ModelProvider, ModelConfig, BuiltinProvider } from "@/types";
 
 export async function modelProviders(): Promise<ModelProvider[]> {
   const result = await get<{ items: ModelProvider[] }>(
     "/model-providers",
+  );
+  return result.items;
+}
+
+export async function builtinProviders(): Promise<BuiltinProvider[]> {
+  const result = await get<{ items: BuiltinProvider[] }>(
+    "/model-providers/builtin",
   );
   return result.items;
 }
@@ -46,8 +53,13 @@ export async function modelConfigs(): Promise<ModelConfig[]> {
   return result.items;
 }
 
+export async function deleteModelConfig(id: string): Promise<{ id: string; deleted: boolean }> {
+  return await del<{ id: string; deleted: boolean }>(`/model-configs/${id}`);
+}
+
 export async function createModelConfig(payload: {
-  provider_id: string;
+  provider_id?: string;
+  provider_type?: string;
   name: string;
   model_id: string;
   purpose: string;
@@ -57,6 +69,21 @@ export async function createModelConfig(payload: {
   config?: Record<string, unknown>;
 }): Promise<ModelConfig> {
   return await post<ModelConfig>("/model-configs", payload);
+}
+
+export async function updateModelConfig(
+  id: string,
+  payload: {
+    name?: string;
+    model_id?: string;
+    purpose?: string;
+    context_window?: number;
+    max_output_tokens?: number;
+    temperature_default?: number;
+    config?: Record<string, unknown>;
+  },
+): Promise<ModelConfig> {
+  return await patch<ModelConfig>(`/model-configs/${id}`, payload);
 }
 
 export async function testModel(
@@ -89,4 +116,17 @@ export async function availableModels(forceRefresh = false): Promise<AvailableMo
     `/models/available${forceRefresh ? "?force_refresh=true" : ""}`,
   );
   return result.items;
+}
+
+export async function activateModelConfig(id: string): Promise<{
+  default_model_config_id: string;
+  name: string;
+  model_id: string;
+}> {
+  const result = await post<{
+    default_model_config_id: string;
+    name: string;
+    model_id: string;
+  }>(`/model-configs/${id}/activate`, {});
+  return result;
 }

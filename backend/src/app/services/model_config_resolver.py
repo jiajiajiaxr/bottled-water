@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, AsyncIterator, Dict, List, Optional
 
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from app.core.config import get_settings
 from db.models import ModelConfig as DBModelConfig, ModelProvider
@@ -33,30 +33,57 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-async def get_default_model_config(db: AsyncSession) -> tuple[ModelProvider, DBModelConfig] | None:
+async def get_default_model_config(
+    db: AsyncSession, prefer_config_id: str | None = None,
+) -> tuple[ModelProvider, DBModelConfig] | None:
     """获取默认的 (provider, config) 组合。
 
-    优先级：
-    1. 数据库中第一个 active 的 provider + 其第一个 chat 类型的 active config
-    2. 环境变量 fallback（deprecated，打 warning 日志）
-    3. None（无可用配置）
+    优先使用用户指定的 prefer_config_id，再从 ModelConfig 侧查询，
+    避免先取到无关联配置的空 provider。
     """
-    provider = await db.scalar(
-        select(ModelProvider)
-        .where(ModelProvider.status == "active", ModelProvider.deleted_at.is_(None))
-        .options(selectinload(ModelProvider.models))
-        .order_by(ModelProvider.created_at)
+    if prefer_config_id:
+        config = await db.scalar(
+            select(DBModelConfig)
+            .options(joinedload(DBModelConfig.provider))
+            .join(ModelProvider)
+            .where(
+                DBModelConfig.id == prefer_config_id,
+                DBModelConfig.status == "active",
+                DBModelConfig.deleted_at.is_(None),
+                ModelProvider.status == "active",
+                ModelProvider.deleted_at.is_(None),
+            )
+        )
+        if config and config.provider:
+            logger.info(
+                "使用用户默认模型配置",
+                config_id=prefer_config_id,
+                provider_id=config.provider.id,
+                model_id=config.model_id,
+            )
+            return config.provider, config
+        logger.warning("用户默认模型配置已失效，回退到自动选择", config_id=prefer_config_id)
+
+    config = await db.scalar(
+        select(DBModelConfig)
+        .options(joinedload(DBModelConfig.provider))
+        .join(ModelProvider)
+        .where(
+            DBModelConfig.status == "active",
+            DBModelConfig.deleted_at.is_(None),
+            ModelProvider.status == "active",
+            ModelProvider.deleted_at.is_(None),
+        )
+        .order_by(DBModelConfig.created_at.asc())
     )
-    if provider and provider.models:
-        for cfg in provider.models:
-            if cfg.status == "active" and cfg.deleted_at is None:
-                logger.info(
-                    "使用数据库模型配置",
-                    provider_id=provider.id,
-                    provider_name=provider.name,
-                    model_id=cfg.model_id,
-                )
-                return provider, cfg
+    if config and config.provider:
+        logger.info(
+            "使用数据库模型配置",
+            provider_id=config.provider.id,
+            provider_name=config.provider.name,
+            model_id=config.model_id,
+        )
+        return config.provider, config
 
     logger.warning(
         "数据库中无可用模型配置，回退到环境变量（已弃用，请在前端设置中配置模型供应商）",
@@ -80,14 +107,23 @@ async def get_model_provider(
     return result[0] if result else None
 
 
-async def resolve_api_key(provider: ModelProvider) -> str:
-    """解析供应商的 API Key。
+async def resolve_api_key(provider: ModelProvider, model_config: DBModelConfig | None = None) -> str:
+    """解析 API Key。
+
+    优先级：
+    1. 模型配置 config.api_key（用户为具体模型单独配置）
+    2. 供应商 api_key_ref（供应商级别的 key）
 
     支持 api_key_ref 格式：
     - "env:XXX" -> 从环境变量读取
     - "mock" -> mock 模式
     - 其他 -> 视为明文 key
     """
+    if model_config and model_config.config:
+        cfg_api_key = model_config.config.get("api_key")
+        if cfg_api_key:
+            return str(cfg_api_key)
+
     api_key_ref = provider.api_key_ref or ""
 
     if api_key_ref.startswith("env:"):
@@ -148,17 +184,19 @@ def create_provider_from_env_fallback() -> BaseModelProvider | None:
     )
 
 
-async def create_provider_from_db(db: AsyncSession) -> BaseModelProvider | None:
+async def create_provider_from_db(
+    db: AsyncSession, prefer_config_id: str | None = None,
+) -> BaseModelProvider | None:
     """从数据库创建 provider（推荐方式）。
 
     无可用数据库配置时，fallback 到环境变量。
     """
-    result = await get_default_model_config(db)
+    result = await get_default_model_config(db, prefer_config_id)
     if not result:
         return create_provider_from_env_fallback()
 
     provider, config = result
-    api_key = await resolve_api_key(provider)
+    api_key = await resolve_api_key(provider, config)
 
     if not api_key:
         logger.warning(f"Provider API Key 为空: {provider.name}")

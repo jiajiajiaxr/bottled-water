@@ -315,7 +315,7 @@ export function Workbench({
       >
         {routeTab === "chat" ? (
           <>
-            <ChatPanel active={active} loading={loadingMessages} />
+            <ChatPanel active={active} loading={loadingMessages} userName={currentUser.name} />
             {artifactPanelOpen && artifact && (
               <PreviewPanel
                 artifact={artifact}
@@ -408,7 +408,7 @@ export function Workbench({
         conversationCategories={conversationCategories}
         onPatchConversation={patchConversation}
         createOpen={createOpen}
-        onCancelCreate={() => setCreateOpen({ open: false, group: false })}
+        onCancelCreate={() => setCreateOpen({ open: false })}
         onCreateConversation={createConversation}
         agents={agents}
       />

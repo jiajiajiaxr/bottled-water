@@ -1,5 +1,5 @@
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class LoginRequest(BaseModel):
@@ -319,7 +319,8 @@ class CreateModelProviderRequest(BaseModel):
 
 
 class CreateModelConfigRequest(BaseModel):
-    provider_id: str
+    provider_id: str | None = None
+    provider_type: str | None = None
     name: str
     model_id: str
     purpose: str = "chat"
@@ -327,6 +328,22 @@ class CreateModelConfigRequest(BaseModel):
     max_output_tokens: int = 8192
     temperature_default: float = 0.7
     config: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def check_provider(self):
+        if not self.provider_id and not self.provider_type:
+            raise ValueError("provider_id 与 provider_type 至少提供一个")
+        return self
+
+
+class UpdateModelConfigRequest(BaseModel):
+    name: str | None = None
+    model_id: str | None = None
+    purpose: str | None = None
+    context_window: int | None = None
+    max_output_tokens: int | None = None
+    temperature_default: float | None = None
+    config: dict[str, Any] | None = None
 
 
 class TestModelRequest(BaseModel):

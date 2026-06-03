@@ -18,7 +18,7 @@ from .event_dispatcher import EventDispatcher
 from ..strategies.base import Scheduler
 from ..strategies.single_agent import SingleAgentScheduler
 from ..strategies.tech_lead import TechLeadScheduler
-from ..strategies.workflow.scheduler import WorkflowScheduler
+from ..strategies.workflow import WorkflowScheduler
 
 logger = get_logger(__name__)
 

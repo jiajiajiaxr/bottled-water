@@ -43,7 +43,9 @@ class ArkProvider(BaseModelProvider):
     ) -> ChatResponse:
         payload = self._build_payload(messages, system_prompt, tools, temperature, max_tokens)
 
-        logger.info("chat 调用开始", model=self.model, msg_count=len(messages), temperature=temperature)
+        logger.info(
+            "chat 调用开始", model=self.model, msg_count=len(messages), temperature=temperature
+        )
 
         try:
             response = await self.client.chat.completions.create(**payload)
@@ -121,7 +123,9 @@ class ArkProvider(BaseModelProvider):
                         }
 
                 content = delta.content or ""
-                reasoning = delta.reasoning_content or "" if hasattr(delta, "reasoning_content") else ""
+                reasoning = (
+                    delta.reasoning_content or "" if hasattr(delta, "reasoning_content") else ""
+                )
                 total_chars += len(content)
 
                 yield StreamChunk(

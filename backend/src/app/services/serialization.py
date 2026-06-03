@@ -55,6 +55,7 @@ def redact_sensitive(value: Any) -> Any:
 
 
 def user_to_dict(user: User) -> dict[str, Any]:
+    extra = user.extra or {}
     return {
         "id": user.id,
         "email": user.email,
@@ -63,6 +64,7 @@ def user_to_dict(user: User) -> dict[str, Any]:
         "display_name": user.display_name,
         "avatar_url": user.avatar_url,
         "role": "demo" if user.username == "demo" else user.role,
+        "default_model_config_id": extra.get("default_model_config_id"),
     }
 
 

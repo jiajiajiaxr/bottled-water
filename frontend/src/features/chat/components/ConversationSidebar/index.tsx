@@ -8,11 +8,11 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   MessageOutlined,
+  PlusOutlined,
   PushpinFilled,
   PushpinOutlined,
   SearchOutlined,
   TeamOutlined,
-  UserAddOutlined,
 } from "@ant-design/icons";
 import {
   Avatar,
@@ -60,7 +60,7 @@ export function ConversationSidebar({
   runningConversationIds: Set<string>;
   categoryOptions: string[];
   onSelect: (id: string) => void;
-  onCreate: (group: boolean) => void;
+  onCreate: () => void;
   onCreateCategory: (name: string) => void;
   onTogglePin: (item: Conversation) => void;
   onToggleArchive: (item: Conversation) => void;
@@ -140,23 +140,14 @@ export function ConversationSidebar({
               onClick={() => setCollapsed(false)}
             />
           </Tooltip>
-          <Tooltip title="新建单聊">
+          <Tooltip title="创建聊天">
             <Button
               shape="circle"
               type="primary"
               size="small"
-              icon={<UserAddOutlined />}
-              onClick={() => onCreate(false)}
+              icon={<PlusOutlined />}
+              onClick={() => onCreate()}
               data-testid="new-chat"
-            />
-          </Tooltip>
-          <Tooltip title="新建群聊">
-            <Button
-              shape="circle"
-              size="small"
-              icon={<TeamOutlined />}
-              onClick={() => onCreate(true)}
-              data-testid="new-group-chat"
             />
           </Tooltip>
         </div>
@@ -181,21 +172,13 @@ export function ConversationSidebar({
               <Title level={3}>会话</Title>
             </div>
             <Space>
-              <Tooltip title="新建单聊">
+              <Tooltip title="创建聊天">
                 <Button
                   shape="circle"
                   type="primary"
-                  icon={<UserAddOutlined />}
-                  onClick={() => onCreate(false)}
+                  icon={<PlusOutlined />}
+                  onClick={() => onCreate()}
                   data-testid="new-chat"
-                />
-              </Tooltip>
-              <Tooltip title="新建群聊">
-                <Button
-                  shape="circle"
-                  icon={<TeamOutlined />}
-                  onClick={() => onCreate(true)}
-                  data-testid="new-group-chat"
                 />
               </Tooltip>
               <Tooltip title="收起侧边栏">

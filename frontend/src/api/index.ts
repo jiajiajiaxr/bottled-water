@@ -111,8 +111,12 @@ export {
   deleteModelProvider,
   modelConfigs,
   createModelConfig,
+  updateModelConfig,
+  deleteModelConfig,
   testModel,
   availableModels,
+  builtinProviders,
+  activateModelConfig,
 } from "./model";
 
 export {
@@ -195,6 +199,8 @@ export const api = {
   ...workspace,
   ...workspaceFile,
   ...model,
+  builtinProviders: model.builtinProviders,
+  activateModelConfig: model.activateModelConfig,
   ...mcp,
   ...skill,
   ...tool,

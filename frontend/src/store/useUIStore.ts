@@ -2,7 +2,6 @@ import { create } from "zustand";
 
 interface CreateModalState {
   open: boolean;
-  group: boolean;
 }
 
 interface UIState {
@@ -35,7 +34,7 @@ export const useUIStore = create<UIState>((set) => ({
   membersOpen: false,
   conversationSettingsOpen: false,
   artifactPanelOpen: false,
-  createOpen: { open: false, group: false },
+  createOpen: { open: false },
 
   setAgentDrawerOpen: (agentDrawerOpen) => set({ agentDrawerOpen }),
   setWorkspacesOpen: (workspacesOpen) => set({ workspacesOpen }),

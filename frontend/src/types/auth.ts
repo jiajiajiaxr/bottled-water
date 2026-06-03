@@ -3,4 +3,5 @@ export interface User {
   name: string;
   avatar?: string;
   role: "demo" | "member" | "admin" | string;
+  default_model_config_id?: string;
 }

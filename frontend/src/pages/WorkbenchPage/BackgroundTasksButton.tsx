@@ -25,7 +25,7 @@ export function BackgroundTasksButton({
   tasks,
   conversations,
   activeConversationId,
-  currentUserName: _currentUserName,
+  currentUserName,
   onOpenConversation,
   onAfterSend,
   onCancel,
@@ -43,7 +43,7 @@ export function BackgroundTasksButton({
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
-  const { send } = useMessageOperations();
+  const { send } = useMessageOperations(currentUserName);
   const conversationMap = useMemo(
     () => new Map(conversations.map((item) => [item.id, item.title])),
     [conversations],

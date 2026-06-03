@@ -23,7 +23,7 @@ import type { ChatMessage, UploadedFile, MessageAttachment } from "@/types";
  * 流式消息的状态管理委托给 {@link useStreamingMessages}，
  * 本 Hook 只负责业务编排（何时调用、以什么顺序调用）。
  */
-export function useMessageOperations() {
+export function useMessageOperations(userName?: string) {
   const { message } = AntApp.useApp();
   const { activeId } = useConversationStore();
   const { updateMessages } = useMessageStore();
@@ -69,7 +69,7 @@ export function useMessageOperations() {
       conversationId,
       role: "user",
       kind: "text",
-      author: "我",
+      author: userName || "我",
       content,
       streamState: "done",
       state: "active",

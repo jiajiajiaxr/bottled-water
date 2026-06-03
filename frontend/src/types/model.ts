@@ -13,6 +13,15 @@ export interface ModelProvider {
   updated_at?: string;
 }
 
+export interface BuiltinProvider {
+  provider_type: string;
+  name: string;
+  base_url: string;
+  default_model: string;
+  supports_streaming: boolean;
+  supports_embeddings: boolean;
+}
+
 export interface ModelConfig {
   id: string;
   provider_id: string;
