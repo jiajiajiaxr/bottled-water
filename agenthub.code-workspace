@@ -13,6 +13,10 @@
             "name": "E2E Tests"
         },
         {
+            "path": "docker",
+            "name": "Docker"
+        },
+        {
             "path": ".",
             "name": "Root"
         }

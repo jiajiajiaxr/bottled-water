@@ -30,14 +30,15 @@ agenthub/
 ## 后端 core
 
 - `backend/app/core/config.py`：统一配置。当前只读取项目根目录 `.env` 和 `backend/.env`，不读取项目外层目录。
-- `backend/app/core/database.py`：SQLAlchemy engine、session、SQLite 兼容配置。
+- `backend/db/session.py`：SQLAlchemy async engine、AsyncSessionLocal、get_db。
+- `backend/db/base.py`：DeclarativeBase、TimestampMixin、uuid_str、utcnow。
 - `backend/app/core/security.py`：密码哈希、JWT 创建和解析。
 - `backend/app/core/errors.py`：业务异常类型。
 - `backend/app/core/response.py`：统一响应结构。
 
 ## 后端模型
 
-所有主要数据库表定义在 `backend/app/models.py`。
+所有主要数据库表定义在 `backend/db/models/` 下，按领域拆分。
 
 核心模型分组：
 
@@ -58,7 +59,6 @@ agenthub/
 - `backend/app/api/workspaces.py`：工作区、成员、项目文件、提示词模板、快捷命令。
 - `backend/app/api/conversations.py`：会话创建、编辑、分类、归档、删除、成员、工作流画布、工作流运行态。
 - `backend/app/api/messages.py`：消息列表、发送、重试、回复、SSE 流、停止生成。
-- `backend/app/api/tasks.py`：后台任务、任务状态、取消、重试、子任务审批。
 - `backend/app/api/agents.py`：Agent 广场、创建、AI 生成、编辑、删除、测试、能力解析。
 - `backend/app/api/models.py`：模型供应商、模型配置、模型测试。
 - `backend/app/api/files.py`：文件上传、列表、下载、提取文本、预览、摘要、向量入口、转换、删除。
@@ -75,7 +75,8 @@ agenthub/
 
 ## 后端 services
 
-- `backend/app/services/orchestrator.py`：核心编排服务。负责单聊 Agent 执行、群聊工作流执行、任务拆解、运行态同步、产物卡片生成。
+- `backend/app/services/runtime_service.py`：统一编排入口。负责创建 AgentSession、选择调度策略（单 Agent / TechLead / Workflow）。
+- `backend/agent_runtime/`：核心运行时。包含 Session、Scheduler、AgentLoop、Workflow 图遍历等。
 - `backend/app/services/agentic_runtime.py`：Agent 小循环。根据 Agent 权限选择并执行工具、Skill、MCP，然后汇总回复。
 - `backend/app/services/ark.py`：火山方舟和 OpenAI-compatible 模型适配，包括普通调用、流式调用和 mock fallback。
 - `backend/app/services/llm_gateway.py`：模型配置测试和模型调用统一入口。
@@ -127,8 +128,6 @@ agenthub/
 - `tests/test_auth_settings.py`：用户资料和密码设置。
 - `tests/test_conversation.py`：会话、成员、分类、工作流。
 - `tests/test_message.py`：消息发送、流式、附件。
-- `tests/test_orchestrator.py`：多 Agent 编排和工作流运行。
-- `tests/test_orchestrator_output.py`：输出过滤和最终回复。
 - `tests/test_artifact.py`：产物创建、版本、Diff、预览。
 - `tests/test_deployment.py`：部署记录。
 - `tests/test_tools_files.py`：文件工具和工具目录。

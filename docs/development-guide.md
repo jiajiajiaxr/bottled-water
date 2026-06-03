@@ -56,7 +56,7 @@ uv run --project backend --directory backend alembic upgrade head
 
 新增表或字段时：
 
-1. 修改 `backend/app/models.py`。
+1. 修改 `backend/db/models/` 下对应领域模型文件。
 2. 新增 Alembic migration。
 3. 更新 `backend/app/services/serialization.py` 里的输出结构。
 4. 更新 `frontend/src/types.ts`。
@@ -109,7 +109,7 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 
 1. 在 `backend/app/api` 下选择已有领域文件或新建文件。
 2. 在 `backend/app/main.py` 注册 router。
-3. 如果涉及数据库，修改 `backend/app/models.py` 和迁移。
+3. 如果涉及数据库，修改 `backend/db/models/` 下对应领域模型文件和迁移。
 4. 在 `backend/app/services/serialization.py` 增加输出转换。
 5. 在 `frontend/src/api.ts` 增加 SDK 方法。
 6. 在 `frontend/src/types.ts` 增加类型。
@@ -117,22 +117,22 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 
 ### 新增一个 Agent 字段
 
-1. 修改 `Agent` 模型。
+1. 修改 `backend/db/models/agents.py` 中 `Agent` 模型。
 2. 增加 migration。
 3. 修改 `agent_to_dict`。
 4. 修改 `frontend/src/types.ts` 的 `Agent` / `AgentConfig`。
 5. 修改 Agent 创建、编辑表单。
 6. 修改 `backend/app/api/agents.py` 的创建和更新逻辑。
-7. 如果影响执行，修改 `agentic_runtime.py` 或 `orchestrator.py`。
+7. 如果影响执行，修改 `agentic_runtime.py` 或 `runtime_service.py` / `agent_runtime/`。
 
 ### 新增一个工作流节点类型
 
 1. 修改 `frontend/src/types.ts` 的 `WorkflowNode` 约定。
 2. 修改 `frontend/src/App.tsx` 的节点类型选项、创建默认配置、编辑表单。
 3. 修改 `backend/app/api/conversations.py` 的 normalize 逻辑，确保 `type/config` 不丢失。
-4. 修改 `backend/app/services/orchestrator.py` 的执行逻辑。
-5. 修改 `WorkflowRun.node_states` 输出。
-6. 增加 `tests/test_conversation.py` 和 `tests/test_orchestrator.py`。
+4. 修改 `backend/agent_runtime/workflow/` 或 `backend/app/services/runtime_service.py` 的执行逻辑。
+5. 修改 `conversation.extra.workflow_runtime` 输出。
+6. 增加 `tests/test_conversation.py` 和相关工作流测试。
 
 ### 新增一个内置工具
 
@@ -167,7 +167,7 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 
 - 后端过滤：`backend/app/services/output_filter.py`
 - 前端过滤：`frontend/src/App.tsx` 中的 `stripInternalAgentOutput`
-- 编排生成：`backend/app/services/orchestrator.py`
+- 编排生成：`backend/app/services/runtime_service.py`、`backend/agent_runtime/`
 
 ## 7. 数据流速查
 
@@ -178,7 +178,7 @@ frontend Workbench.send
   -> api.sendMessage
   -> backend/app/api/messages.py
   -> Message 入库
-  -> orchestrator.run_orchestration
+  -> runtime_service.run / conversation_session_manager
   -> events 发布流式事件
   -> frontend api.streamConversation
   -> 聊天气泡增量更新
@@ -223,7 +223,7 @@ send message
 - 页面空白：先跑 `corepack pnpm exec tsc --noEmit --pretty false`。
 - 登录失败：查 `backend/app/api/auth.py` 和 `.env` 的 `SECRET_KEY`。
 - 模型无响应：查 `LLM_PROVIDER`、`ARK_API_KEY`、`ARK_ENDPOINT_ID`，再看 `backend/app/services/ark.py`。
-- 消息一直显示正在回答：查 `/tasks` 返回状态、`localRunningConversationIds` 清理逻辑和 `orchestrator.run_orchestration` 是否抛错。
+- 消息一直显示正在回答：查 `localRunningConversationIds` 清理逻辑和 `runtime_service.run` / `conversation_session_manager` 是否抛错。
 - 工作流节点配置丢失：查 `conversations.py` normalize 是否保留 `type/config`。
 - 产物打不开：查 `Artifact.content`、`artifact_exports.py` 和 `PreviewPanel`。
 - MCP 调用失败：先 probe，再看 `McpToolInvocation` 记录。

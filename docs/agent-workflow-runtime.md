@@ -28,7 +28,8 @@ User message
 
 关键文件：
 
-- `backend/app/services/orchestrator.py`：判断会话类型，选择单聊或群聊路径。
+- `backend/app/services/runtime_service.py`：统一编排入口，判断会话类型，选择单聊或群聊路径，创建 AgentSession。
+- `backend/agent_runtime/`：核心运行时，包含 Session、Scheduler、AgentLoop。
 - `backend/app/services/agentic_runtime.py`：执行 Agent 的小循环。
 - `backend/app/services/tool_registry.py`：执行工具。
 - `backend/app/services/mcp_runtime.py`：执行 MCP。

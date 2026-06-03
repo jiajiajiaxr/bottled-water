@@ -71,7 +71,7 @@ AgentHub 后端采用经典的分层架构，自上而下分为六层：
 | `runtime_adapter.py` | **适配器层**。将 `agent_runtime` 的 `ToolExecutor` 接口桥接到 app 层的 `build_tools_for_agent` / `execute_tool_by_name` |
 | `agentic_runtime.py` | 旧版工具注册与执行系统，被 `runtime_adapter.py` 复用 |
 | `tool_registry.py` | 工具定义注册表 |
-| `orchestrator.py` | 旧版编排器（正在逐步迁移到 `agent_runtime`） |
+| `runtime_service.py` | 统一编排入口，创建 `AgentSession` 并选择调度策略 |
 | `llm_gateway.py` / `ark.py` | LLM 调用网关（旧版兼容） |
 | `artifacts.py` / `file_tools.py` | 产物与文件相关业务逻辑 |
 | `mcp_runtime.py` | MCP 工具运行时管理 |
@@ -156,9 +156,9 @@ model_provider/
 
 ---
 
-### 2.5 持久化层 (`app/models.py`, `app/persistence/`)
+### 2.5 持久化层 (`db/models/`, `app/persistence/`)
 
-#### 数据模型 (`app/models.py`)
+#### 数据模型 (`db/models/`)
 
 核心实体：
 
@@ -195,7 +195,7 @@ model_provider/
 |------|------|
 | `common/logger.py` | 结构化日志（基于 `structlog`） |
 | `app/core/config.py` | 应用配置（Pydantic Settings） |
-| `app/core/database.py` | 异步数据库引擎与 Session 依赖 |
+| `db/session.py` / `db/base.py` | 异步数据库引擎、Session 依赖与声明基类 |
 | `app/core/security.py` | JWT Token 签发与校验、密码哈希 |
 | `app/core/errors.py` | 统一异常体系 |
 | `app/core/response.py` | 统一响应封装 |
