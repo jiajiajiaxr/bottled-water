@@ -24,7 +24,6 @@ from db.models import (
     ConversationParticipant,
     Message,
     User,
-    WorkflowRun,
     Workspace,
     WorkspaceMember,
     utcnow,
@@ -37,15 +36,11 @@ from app.schemas.requests import (
     ParticipantRoleUpdatePayload,
     UpdateConversationRequest,
     WorkflowGeneratePayload,
-    WorkflowNodeUpdatePayload,
-    WorkflowRunStartPayload,
     WorkflowUpdatePayload,
 )
-from app.services.audit import write_audit_log
 from app.services.serialization import (
     conversation_to_dict,
     participant_to_dict,
-    workflow_run_to_dict,
 )
 from app.services.model_config_resolver import create_provider_from_db
 
@@ -380,61 +375,6 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
         "edges": normalized_edges or fallback["edges"],
     }
 
-
-def _new_node_states(workflow: dict) -> list[dict]:
-    states = []
-    for index, node in enumerate(workflow.get("nodes") or []):
-        if not isinstance(node, dict):
-            continue
-        node_type = str(node.get("type") or "agent")
-        config = node.get("config") if isinstance(node.get("config"), dict) else {}
-        output = {}
-        if node_type == "condition":
-            branches = (
-                config.get("branches")
-                if isinstance(config.get("branches"), list)
-                else ["true", "false"]
-            )
-            output = {
-                "expression": config.get("expression") or "true",
-                "matched_branch": branches[0] if branches else "default",
-            }
-        elif node_type == "loop":
-            output = {
-                "max_iterations": int(config.get("max_iterations") or 3),
-                "current_iteration": 0,
-            }
-        states.append(
-            {
-                "id": str(node.get("id") or f"node-{index + 1}"),
-                "title": str(node.get("title") or node.get("name") or f"Node {index + 1}"),
-                "type": node_type,
-                "role": str(node.get("role") or "worker"),
-                "agent_id": node.get("agent_id"),
-                "config": config,
-                "status": "running" if index == 0 else "queued",
-                "progress": 5 if index == 0 else 0,
-                "output": output,
-                "started_at": utcnow().isoformat() if index == 0 else None,
-                "completed_at": None,
-            }
-        )
-    return states
-
-
-def _sync_workflow_runtime(conversation: Conversation, run: WorkflowRun) -> None:
-    conversation.extra = {
-        **(conversation.extra or {}),
-        "workflow_runtime": {
-            "run_id": run.id,
-            "status": run.status,
-            "progress": run.progress,
-            "node_states": run.node_states or [],
-            "updated_at": utcnow().isoformat(),
-        },
-    }
-
-
 async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: dict) -> Conversation:
     conversation = await _get(db, user, conversation_id)
     action = payload.get("action")
@@ -599,173 +539,6 @@ async def generate_conversation_workflow(
     await db.commit()
     return ok(workflow, "工作流已生成")
 
-
-@router.get("/conversations/{conversation_id}/workflow/runs", response_model=ApiResponse[dict])
-async def list_workflow_runs(
-    conversation_id: str,
-    latest: bool = False,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    conversation = await _get(db, user, conversation_id)
-    query = (
-        select(WorkflowRun)
-        .where(WorkflowRun.conversation_id == conversation.id)
-        .order_by(WorkflowRun.created_at.desc())
-    )
-    if latest:
-        run = (await db.scalars(query.limit(1))).first()
-        return ok(workflow_run_to_dict(run) if run else None)
-    runs = (await db.scalars(query.limit(50))).all()
-    return ok({"items": [workflow_run_to_dict(it) for it in runs], "total": len(runs)})
-
-
-@router.post("/conversations/{conversation_id}/workflow/runs", response_model=ApiResponse[dict])
-async def start_workflow_run(
-    conversation_id: str,
-    payload: WorkflowRunStartPayload,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    conversation = await _get(db, user, conversation_id)
-    payload_dict = payload.model_dump()
-    workflow = (conversation.extra or {}).get("workflow")
-    if not isinstance(workflow, dict):
-        workflow = _fallback_workflow(conversation)
-    workflow = _normalize_workflow(
-        payload_dict.get("workflow")
-        if isinstance(payload_dict.get("workflow"), dict)
-        else workflow,
-        conversation,
-    )
-    run = WorkflowRun(
-        conversation_id=conversation.id,
-        trigger_message_id=payload_dict.get("trigger_message_id"),
-        started_by=user.id,
-        status="running",
-        mode=str(payload_dict.get("mode") or workflow.get("mode") or "manual"),
-        workflow_snapshot=workflow,
-        node_states=_new_node_states(workflow),
-        edge_states=[
-            {"from": edge[0], "to": edge[1], "status": "waiting"}
-            for edge in workflow.get("edges", [])
-            if isinstance(edge, list) and len(edge) == 2
-        ],
-        events=[{"type": "run.started", "at": utcnow().isoformat(), "actor_id": user.id}],
-        progress=5,
-        started_at=utcnow(),
-    )
-    db.add(run)
-    await db.flush()
-    _sync_workflow_runtime(conversation, run)
-    await write_audit_log(
-        db,
-        user=user,
-        action="workflow.run.start",
-        target_type="conversation",
-        target_id=conversation.id,
-        detail={"run_id": run.id, "mode": run.mode},
-        request=None,
-        risk_score=0.15,
-    )
-    await db.commit()
-    await db.refresh(run)
-    return ok(workflow_run_to_dict(run), "Workflow run started")
-
-
-@router.patch(
-    "/conversations/{conversation_id}/workflow/runs/{run_id}/nodes/{node_id}",
-    response_model=ApiResponse[dict],
-)
-async def update_workflow_node_state(
-    conversation_id: str,
-    run_id: str,
-    node_id: str,
-    payload: WorkflowNodeUpdatePayload,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    conversation = await _get(db, user, conversation_id)
-    run = await db.get(WorkflowRun, run_id)
-    if not run or run.conversation_id != conversation.id:
-        raise NotFoundError("Workflow run not found")
-    payload_dict = payload.model_dump()
-    states = list(run.node_states or [])
-    found = False
-    now = utcnow().isoformat()
-    for state in states:
-        if state.get("id") != node_id:
-            continue
-        found = True
-        next_status = str(payload_dict.get("status") or state.get("status") or "running")
-        state["status"] = next_status
-        if "progress" in payload_dict:
-            state["progress"] = max(0, min(100, int(payload_dict.get("progress") or 0)))
-        elif next_status in {"completed", "succeeded"}:
-            state["progress"] = 100
-        state["output"] = payload_dict.get("output", state.get("output") or {})
-        if state.get("type") == "condition" and "matched_branch" in payload_dict:
-            state["output"] = {
-                **(state.get("output") or {}),
-                "matched_branch": payload_dict.get("matched_branch"),
-            }
-        if state.get("type") == "loop":
-            loop_output = dict(state.get("output") or {})
-            if "current_iteration" in payload_dict:
-                loop_output["current_iteration"] = max(
-                    0, int(payload_dict.get("current_iteration") or 0)
-                )
-            if "max_iterations" in payload_dict:
-                loop_output["max_iterations"] = max(1, int(payload_dict.get("max_iterations") or 1))
-            state["output"] = loop_output
-        state["message"] = payload_dict.get("message", state.get("message"))
-        if next_status in {"running", "reviewing"} and not state.get("started_at"):
-            state["started_at"] = now
-        if next_status in {"completed", "succeeded", "failed", "skipped"}:
-            state["completed_at"] = now
-        break
-    if not found:
-        raise NotFoundError("Workflow node not found")
-    completed = len(
-        [it for it in states if it.get("status") in {"completed", "succeeded", "skipped"}]
-    )
-    failed = any(it.get("status") == "failed" for it in states)
-    total = max(1, len(states))
-    run.node_states = states
-    run.progress = int((completed / total) * 100)
-    if failed:
-        run.status = "failed"
-        run.completed_at = utcnow()
-    elif completed == total:
-        run.status = "completed"
-        run.progress = 100
-        run.completed_at = utcnow()
-    else:
-        run.status = "running"
-    run.events = [
-        *[it for it in (run.events or []) if isinstance(it, dict)],
-        {
-            "type": "node.updated",
-            "node_id": node_id,
-            "status": payload_dict.get("status"),
-            "at": now,
-            "actor_id": user.id,
-        },
-    ][-200:]
-    _sync_workflow_runtime(conversation, run)
-    await write_audit_log(
-        db,
-        user=user,
-        action="workflow.node.update",
-        target_type="workflow_run",
-        target_id=run.id,
-        detail={"node_id": node_id, "status": payload_dict.get("status"), "progress": run.progress},
-        request=None,
-        risk_score=0.1,
-    )
-    await db.commit()
-    await db.refresh(run)
-    return ok(workflow_run_to_dict(run), "Workflow node state updated")
 
 
 @router.patch("/conversations/{conversation_id}", response_model=ApiResponse[dict])
