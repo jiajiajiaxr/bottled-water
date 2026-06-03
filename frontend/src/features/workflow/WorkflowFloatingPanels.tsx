@@ -127,21 +127,19 @@ export function WorkflowFloatingPanels({
     { key: "config", icon: <SlidersOutlined />, disabled: !editingNode },
     { key: "logs", icon: <ProfileOutlined />, disabled: false },
   ] as const;
-  const cardSide =
-    activePanel === "config" || activePanel === "logs" ? "right" : "left";
   const validationErrorCount = validationIssues.filter(
     (issue) => issue.severity === "error",
   ).length;
 
   return (
     <>
-      <nav className="workflow-floating-menu" aria-label="工作流工具菜单">
+      <nav className="workflow-floating-toolbar" aria-label="工作流工具栏">
         <WorkflowFloatingButton
           title="返回聊天"
           icon={<ArrowLeftOutlined />}
           onClick={onBack}
         />
-        <div className="workflow-floating-menu-divider" />
+        <div className="workflow-floating-toolbar-divider" />
         {leftMenuItems.map((item) => (
           <WorkflowFloatingButton
             key={item.key}
@@ -158,7 +156,7 @@ export function WorkflowFloatingPanels({
             onClick={() => openPanel(item.key)}
           />
         ))}
-        <div className="workflow-floating-menu-divider" />
+        <div className="workflow-floating-toolbar-divider" />
         <WorkflowFloatingButton
           title="适配画布"
           icon={<CompressOutlined />}
@@ -177,11 +175,7 @@ export function WorkflowFloatingPanels({
           disabled={!selectedNodeIds.length && !selectedEdgeIds.length}
           onClick={onDeleteSelection}
         />
-      </nav>
-      <nav
-        className="workflow-floating-menu workflow-floating-menu-right"
-        aria-label="工作流右侧工具菜单"
-      >
+        <div className="workflow-floating-toolbar-divider" />
         {rightMenuItems.map((item) => (
           <WorkflowFloatingButton
             key={item.key}
@@ -194,96 +188,102 @@ export function WorkflowFloatingPanels({
           />
         ))}
       </nav>
-      {activePanel && (
-        <section className={`workflow-floating-card workflow-floating-card-${cardSide}`}>
-          <header className="workflow-floating-card-header">
-            <Text strong>{PANEL_TITLES[activePanel]}</Text>
-            <Button
-              type="text"
-              size="small"
-              icon={<CloseOutlined />}
-              onClick={() => onActivePanelChange(undefined)}
+      <section
+        className="workflow-floating-card"
+        style={{
+          opacity: activePanel ? 1 : 0,
+          pointerEvents: activePanel ? "auto" : "none",
+          transform: activePanel ? "translateX(0)" : "translateX(20px)",
+          transition: "opacity 0.2s ease, transform 0.2s ease",
+        }}
+      >
+        <header className="workflow-floating-card-header">
+          <Text strong>{activePanel ? PANEL_TITLES[activePanel] : ""}</Text>
+          <Button
+            type="text"
+            size="small"
+            icon={<CloseOutlined />}
+            onClick={() => onActivePanelChange(undefined)}
+          />
+        </header>
+        <div className="workflow-floating-card-body" key={activePanel}>
+          {activePanel === "library" && (
+            <WorkflowNodeLibraryCard
+              disabled={generating}
+              onAddNode={(type) => {
+                onNodeTypeChange(type);
+                onAddNode(type);
+              }}
             />
-          </header>
-          <div className="workflow-floating-card-body">
-            {activePanel === "library" && (
-              <WorkflowNodeLibraryCard
-                disabled={generating}
-                onAddNode={(type) => {
-                  onNodeTypeChange(type);
-                  onAddNode(type);
-                }}
-              />
-            )}
-            {activePanel === "ai" && (
-              <WorkflowAIGenerateCard
-                generating={generating}
-                workflowInstruction={workflowInstruction}
-                onInstructionChange={onInstructionChange}
-                onGenerate={onGenerate}
-              />
-            )}
-            {activePanel === "config" && (
-              <WorkflowNodeConfigPanel
-                nodeForm={nodeForm}
-                editingNode={editingNode}
-                editingNodeState={editingNodeState}
-                latestRun={latestRun}
-                workflowEdges={workflowEdges}
-                workflowJson={workflowJson}
-                agentOptions={agentOptions}
-                toolOptions={toolOptions}
-                skillOptions={skillOptions}
-                mcpServerOptions={mcpServerOptions}
-                mcpToolOptions={mcpToolOptions}
-                onSaveNode={onSaveNode}
-                onWorkflowJsonChange={onWorkflowJsonChange}
-                className="workflow-floating-config"
-                showRunState={false}
-                showWorkflowJson={false}
-                extraActions={
-                  <Space wrap>
-                    <Button
-                      icon={<CopyOutlined />}
-                      disabled={!selectedNodeIds.length}
-                      onClick={onCopySelection}
-                    >
-                      复制
-                    </Button>
-                    <Button
-                      danger
-                      icon={<DeleteOutlined />}
-                      disabled={!selectedNodeIds.length && !selectedEdgeIds.length}
-                      onClick={onDeleteSelection}
-                    >
-                      删除
-                    </Button>
-                  </Space>
-                }
-              />
-            )}
-            {activePanel === "logs" && (
-              <WorkflowRunLogCard
-                latestRun={latestRun}
-                editingNodeState={editingNodeState}
-              />
-            )}
-            {activePanel === "settings" && (
-              <WorkflowSettingsCard
-                workflow={workflow}
-                generating={generating}
-                validationIssues={validationIssues}
-                onPatchSettings={onPatchSettings}
-                onSave={onSave}
-                onRun={onRun}
-              />
-            )}
-            {activePanel === "history" && (
-              <WorkflowHistoryCard workflowRuns={workflowRuns} />
-            )}
-          </div>
-        </section>
-      )}
+          )}
+          {activePanel === "ai" && (
+            <WorkflowAIGenerateCard
+              generating={generating}
+              workflowInstruction={workflowInstruction}
+              onInstructionChange={onInstructionChange}
+              onGenerate={onGenerate}
+            />
+          )}
+          {activePanel === "config" && (
+            <WorkflowNodeConfigPanel
+              nodeForm={nodeForm}
+              editingNode={editingNode}
+              editingNodeState={editingNodeState}
+              latestRun={latestRun}
+              workflowEdges={workflowEdges}
+              workflowJson={workflowJson}
+              agentOptions={agentOptions}
+              toolOptions={toolOptions}
+              skillOptions={skillOptions}
+              mcpServerOptions={mcpServerOptions}
+              mcpToolOptions={mcpToolOptions}
+              onSaveNode={onSaveNode}
+              onWorkflowJsonChange={onWorkflowJsonChange}
+              className="workflow-floating-config"
+              showRunState={false}
+              showWorkflowJson={false}
+              extraActions={
+                <Space wrap>
+                  <Button
+                    icon={<CopyOutlined />}
+                    disabled={!selectedNodeIds.length}
+                    onClick={onCopySelection}
+                  >
+                    复制
+                  </Button>
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    disabled={!selectedNodeIds.length && !selectedEdgeIds.length}
+                    onClick={onDeleteSelection}
+                  >
+                    删除
+                  </Button>
+                </Space>
+              }
+            />
+          )}
+          {activePanel === "logs" && (
+            <WorkflowRunLogCard
+              latestRun={latestRun}
+              editingNodeState={editingNodeState}
+            />
+          )}
+          {activePanel === "settings" && (
+            <WorkflowSettingsCard
+              workflow={workflow}
+              generating={generating}
+              validationIssues={validationIssues}
+              onPatchSettings={onPatchSettings}
+              onSave={onSave}
+              onRun={onRun}
+            />
+          )}
+          {activePanel === "history" && (
+            <WorkflowHistoryCard workflowRuns={workflowRuns} />
+          )}
+        </div>
+      </section>
     </>
   );
 }
