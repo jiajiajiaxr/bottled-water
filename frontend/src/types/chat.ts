@@ -25,6 +25,7 @@ export interface Participant {
   role?: "owner" | "admin" | "member";
   nickname?: string;
   joined_at?: string;
+  left_at?: string;
 }
 
 export interface Conversation {

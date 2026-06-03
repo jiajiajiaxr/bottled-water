@@ -73,8 +73,10 @@ export function useWorkflowStudio({
     .map((edge) => [edgeSource(edge), edgeTarget(edge)])
     .filter(([from, to]) => from && to);
 
-  const agentOptions = activeAgents.map((agent) => ({
-    label: `${agent.name} · ${agent.type}`,
+  const agentOptions = agents.map((agent) => ({
+    label: activeAgentIds.has(agent.id)
+      ? `${agent.name} · ${agent.type}`
+      : `${agent.name} · ${agent.type} (未加入)`,
     value: agent.id,
   }));
   const toolOptions = Array.from(
@@ -260,9 +262,59 @@ export function useWorkflowStudio({
     setWorkflowDraft({ ...workflow, nodes });
     setSelectedNodeIds([editingNodeId]);
     setSelectedEdgeIds([]);
+
+    // 自动添加不在 conversation 中的 agent
+    const newAgentId = config.agent_id ? String(config.agent_id) : undefined;
+    if (newAgentId && conversation && !activeAgentIds.has(newAgentId)) {
+      try {
+        await api.addParticipants(conversationId, [newAgentId]);
+        const nextConversations = await api.conversations(workspaceId);
+        setConversation(nextConversations.find((item) => item.id === conversationId));
+      } catch {
+        // 静默失败，不影响节点保存
+      }
+    }
   };
 
-  const deleteSelection = () => {
+  const syncAgentsAfterNodeRemoval = async (
+    removedAgentIds: string[],
+    currentNodes: WorkflowNode[],
+  ) => {
+    if (!conversation) return;
+    const remainingAgentIds = new Set(
+      currentNodes
+        .filter((node) => ["agent", "review"].includes(workflowNodeType(node)))
+        .map((node) => node.agent_id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    for (const agentId of removedAgentIds) {
+      if (remainingAgentIds.has(agentId)) continue;
+      const participant = conversation.participants.find(
+        (p) => p.agent_id === agentId && p.participant_type === "agent" && !p.left_at,
+      );
+      if (!participant?.participant_id) continue;
+      const remainingAgents = conversation.participants.filter(
+        (p) => p.participant_type === "agent" && !p.left_at && p.agent_id !== agentId,
+      );
+      if (remainingAgents.length < 1) {
+        onError("会话至少需要保留 1 个 Agent");
+        continue;
+      }
+      try {
+        await api.removeParticipant(conversationId, participant.participant_id);
+      } catch {
+        // 静默失败
+      }
+    }
+    try {
+      const nextConversations = await api.conversations(workspaceId);
+      setConversation(nextConversations.find((item) => item.id === conversationId));
+    } catch {
+      // 静默失败
+    }
+  };
+
+  const deleteSelection = async () => {
     if (!workflow || workflowGenerating) return;
     const protectedIds = new Set(
       workflow.nodes
@@ -273,6 +325,13 @@ export function useWorkflowStudio({
       selectedNodeIds.filter((id) => !protectedIds.has(id)),
     );
     const edgeIds = new Set(selectedEdgeIds);
+    const removedAgentIds = new Set<string>();
+    for (const nodeId of removableNodeIds) {
+      const node = workflow.nodes.find((item) => item.id === nodeId);
+      if (node && ["agent", "review"].includes(workflowNodeType(node)) && node.agent_id) {
+        removedAgentIds.add(node.agent_id);
+      }
+    }
     const nodes = workflow.nodes.filter((node) => !removableNodeIds.has(node.id));
     const edges = (workflow.edges ?? []).filter((edge) => {
       if (edgeIds.has(edgeId(edge))) return false;
@@ -285,6 +344,9 @@ export function useWorkflowStudio({
     setSelectedNodeIds([]);
     setSelectedEdgeIds([]);
     setEditingNodeId(undefined);
+    if (removedAgentIds.size > 0) {
+      await syncAgentsAfterNodeRemoval(Array.from(removedAgentIds), nodes);
+    }
   };
 
   const copySelection = () => {
@@ -370,5 +432,6 @@ export function useWorkflowStudio({
     saveWorkflowNode,
     deleteSelection,
     copySelection,
+    syncAgentsAfterNodeRemoval,
   };
 }

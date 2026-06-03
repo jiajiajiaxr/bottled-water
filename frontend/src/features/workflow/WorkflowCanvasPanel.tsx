@@ -25,6 +25,7 @@ export function WorkflowCanvasPanel({
   onOpenNode,
   onClearSelection,
   onSelectionChange,
+  onDeleteSelection,
 }: {
   workflow?: ConversationWorkflow;
   latestRun?: WorkflowRun;
@@ -42,6 +43,7 @@ export function WorkflowCanvasPanel({
   onOpenNode: (node: WorkflowNode) => void;
   onClearSelection: () => void;
   onSelectionChange: (nodeIds: string[], edgeIds: string[]) => void;
+  onDeleteSelection?: (removedNodeIds: string[]) => void;
 }) {
   return (
     <main className="workflow-studio-canvas-wrap">
@@ -61,6 +63,7 @@ export function WorkflowCanvasPanel({
           onPaneClick={onClearSelection}
           onCopySelection={onCopySelection}
           onSelectionChange={onSelectionChange}
+          onDeleteSelection={onDeleteSelection}
         />
       ) : (
         <Empty description="当前会话暂无工作流" />
