@@ -188,7 +188,8 @@ class OrchestratorService:
         ) if primary_agent else None
 
         # ---- Workflow 模式 ----
-        if scheduling_strategy == "workflow" or has_workflow:
+        # 仅当显式指定 workflow 或未指定策略但存在 workflow 定义时才使用 workflow
+        if scheduling_strategy == "workflow" or (not scheduling_strategy and has_workflow):
             from agent_runtime.workflow.replanner import _fallback_workflow
 
             if has_workflow:

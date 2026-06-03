@@ -38,6 +38,16 @@ class WorkflowScheduler(Scheduler):
         self._last_decision_node_id: str | None = None
         self._last_decision_type: str = ""
 
+    def reset(self) -> None:
+        """重置 Workflow 遍历状态，支持 Session 复用。"""
+        super().reset()
+        self._state = WorkflowState()
+        self._last_decision_node_id = None
+        self._last_decision_type = ""
+        if self._graph:
+            start_node = self._graph.find_start_node()
+            self._state.start(start_node)
+
     # ------------------------------------------------------------------
     # 上下文注入
     # ------------------------------------------------------------------
