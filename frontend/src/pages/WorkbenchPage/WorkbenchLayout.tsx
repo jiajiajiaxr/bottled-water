@@ -17,6 +17,7 @@ import {
 import { api } from "@/api";
 import { ConversationSidebar } from "@/features/chat/components/ConversationSidebar";
 import type {
+  Agent,
   Conversation,
   User,
   Workspace,
@@ -57,6 +58,9 @@ export interface WorkbenchLayoutProps {
 
   runningConversationIds: Set<string>;
 
+  // Agents
+  agents: Agent[];
+
   // Main content
   routeTab: string;
   scheduleMode: "chat" | "workflow";
@@ -86,6 +90,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     setActiveId,
     navigateToConversation,
     runningConversationIds,
+    agents,
     routeTab,
     scheduleMode,
     onScheduleModeChange,
@@ -100,6 +105,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         activeId={activeId}
         runningConversationIds={runningConversationIds}
         categoryOptions={conversationCategories}
+        agents={agents}
         onSelect={selectConversation}
         onCreate={() => setCreateOpen({ open: true })}
         onCreateCategory={addConversationCategory}

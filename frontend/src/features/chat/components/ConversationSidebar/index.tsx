@@ -32,9 +32,11 @@ import {
   Tooltip,
   Typography,
 } from "antd";
+import { api } from "@/api";
 import { mergeConversationCategories } from "@/lib/conversation";
 import { formatTime } from "@/lib/format";
-import type { Conversation, User } from "@/types";
+import type { Agent, Conversation, User } from "@/types";
+import { message } from "antd";
 
 const { Sider } = Layout;
 const { Text, Title } = Typography;
@@ -46,6 +48,7 @@ export function ConversationSidebar({
   activeId,
   runningConversationIds,
   categoryOptions,
+  agents,
   onSelect,
   onCreate,
   onCreateCategory,
@@ -59,6 +62,7 @@ export function ConversationSidebar({
   activeId?: string;
   runningConversationIds: Set<string>;
   categoryOptions: string[];
+  agents: Agent[];
   onSelect: (id: string) => void;
   onCreate: () => void;
   onCreateCategory: (name: string) => void;
@@ -75,6 +79,7 @@ export function ConversationSidebar({
   const [editing, setEditing] = useState<Conversation>();
   const [editForm] = Form.useForm();
   const [collapsed, setCollapsed] = useState(false);
+  const [addingAgent, setAddingAgent] = useState(false);
 
   const folders = useMemo(() => {
     const names = conversations.map(
@@ -386,6 +391,110 @@ export function ConversationSidebar({
             <TextArea rows={3} />
           </Form.Item>
         </Form>
+        {editing && (
+          <div style={{ marginTop: 16 }}>
+            <Text strong>成员</Text>
+            <Space direction="vertical" style={{ width: "100%", marginTop: 8 }}>
+              {(editing.participants ?? [])
+                .filter((p) => p.participant_type === "agent")
+                .map((p) => (
+                  <div
+                    key={p.participant_id ?? p.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Tag>{p.agent_name ?? p.agent_id}</Tag>
+                    <Button
+                      size="small"
+                      danger
+                      disabled={
+                        (editing.participants ?? []).filter(
+                          (x) => x.participant_type === "agent",
+                        ).length <= 1
+                      }
+                      onClick={async () => {
+                        if (!p.participant_id) return;
+                        try {
+                          await api.removeParticipant(
+                            editing.id,
+                            p.participant_id,
+                          );
+                          const nextParticipants = (
+                            editing.participants ?? []
+                          ).filter(
+                            (x) =>
+                              x.participant_id !== p.participant_id,
+                          );
+                          const next = { ...editing, participants: nextParticipants };
+                          setEditing(next);
+                          onEdit(next, { participants: nextParticipants });
+                          message.success("成员已移除");
+                        } catch (err: any) {
+                          if (err?.response?.status === 404) {
+                            const nextParticipants = (
+                              editing.participants ?? []
+                            ).filter(
+                              (x) =>
+                                x.participant_id !== p.participant_id,
+                            );
+                            const next = { ...editing, participants: nextParticipants };
+                            setEditing(next);
+                            onEdit(next, { participants: nextParticipants });
+                            message.success("成员已移除");
+                          } else {
+                            message.error("移除成员失败");
+                          }
+                        }
+                      }}
+                    >
+                      删除
+                    </Button>
+                  </div>
+                ))}
+              <Select
+                placeholder="添加成员"
+                value={addingAgent ? undefined : null}
+                onChange={async (value: string) => {
+                  if (!value || !editing) return;
+                  try {
+                    await api.addParticipants(editing.id, [value]);
+                    const agent = agents.find((a) => a.id === value);
+                    const nextParticipants = [
+                      ...(editing.participants ?? []),
+                      {
+                        participant_id: value,
+                        agent_id: value,
+                        agent_name: agent?.name ?? agent?.display_name ?? value,
+                        participant_type: "agent" as const,
+                      },
+                    ];
+                    const next = { ...editing, participants: nextParticipants };
+                    setEditing(next);
+                    onEdit(next, { participants: nextParticipants });
+                    message.success("成员已添加");
+                    setAddingAgent(false);
+                  } catch {
+                    message.error("添加成员失败");
+                  }
+                }}
+                options={agents
+                  .filter(
+                    (a) =>
+                      !(editing.participants ?? []).some(
+                        (p) => p.agent_id === a.id,
+                      ),
+                  )
+                  .map((a) => ({
+                    label: a.display_name ?? a.name,
+                    value: a.id,
+                  }))}
+              />
+            </Space>
+          </div>
+        )}
       </Modal>
         </>
       )}

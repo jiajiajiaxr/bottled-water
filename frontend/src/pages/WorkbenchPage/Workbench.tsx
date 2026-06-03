@@ -314,6 +314,7 @@ export function Workbench({
         setActiveId={setActiveId}
         navigateToConversation={navigateToConversation}
         runningConversationIds={runningConversationIds}
+        agents={agents}
         routeTab={routeTab}
         scheduleMode={scheduleMode}
         onScheduleModeChange={setScheduleMode}
