@@ -381,16 +381,6 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
     }
 
 
-async def _ensure_workflow_tables(db: AsyncSession) -> None:
-    async def _create_tables(conn):
-        await conn.run_sync(
-            lambda sync_conn: WorkflowRun.__table__.create(bind=sync_conn, checkfirst=True)
-        )
-
-    # For AsyncSession, tables should already be created via migration; this is a no-op placeholder
-    pass
-
-
 def _new_node_states(workflow: dict) -> list[dict]:
     states = []
     for index, node in enumerate(workflow.get("nodes") or []):
@@ -617,7 +607,6 @@ async def list_workflow_runs(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await _ensure_workflow_tables(db)
     conversation = await _get(db, user, conversation_id)
     query = (
         select(WorkflowRun)
@@ -638,7 +627,6 @@ async def start_workflow_run(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await _ensure_workflow_tables(db)
     conversation = await _get(db, user, conversation_id)
     payload_dict = payload.model_dump()
     workflow = (conversation.extra or {}).get("workflow")
@@ -697,7 +685,6 @@ async def update_workflow_node_state(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await _ensure_workflow_tables(db)
     conversation = await _get(db, user, conversation_id)
     run = await db.get(WorkflowRun, run_id)
     if not run or run.conversation_id != conversation.id:

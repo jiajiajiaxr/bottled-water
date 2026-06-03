@@ -198,7 +198,12 @@ def conversation_to_dict(conversation: Conversation) -> dict[str, Any]:
         "participant_count": len(participants),
         "agent_count": len([item for item in participants if item.get("participant_type") == "agent"]),
         "user_count": len([item for item in participants if item.get("participant_type") == "user"]),
-        "master_enabled": bool(conversation.extra.get("master_enabled", conversation.chat_type == "group")),
+        "master_enabled": bool(
+            conversation.extra.get(
+                "master_enabled",
+                len([p for p in active_participants if p.participant_type == "agent"]) > 1,
+            )
+        ),
         "max_participants": conversation.extra.get("max_participants", 8),
         "status": conversation.status,
         "is_pinned": conversation.is_pinned,
