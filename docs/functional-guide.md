@@ -14,7 +14,7 @@
 - 前端 API：`frontend/src/api.ts`
 - 后端 API：`backend/app/api/auth.py`
 - 密码与 token：`backend/app/core/security.py`
-- 用户模型：`backend/app/models.py`
+- 用户模型：`backend/db/models/users.py`
 - 测试：`tests/test_auth.py`、`tests/test_auth_settings.py`
 
 ## 2. 工作区
@@ -79,7 +79,7 @@
 
 - Agent 列表与编辑：`backend/app/api/agents.py`
 - Agent 执行循环：`backend/app/services/agentic_runtime.py`
-- 编排入口：`backend/app/services/orchestrator.py`
+- 编排入口：`backend/app/services/runtime_service.py`、`backend/agent_runtime/`
 - 官方 Agent 种子：`backend/app/services/seed.py`
 - 前端 Agent 广场：`frontend/src/App.tsx` 中的 `AgentDirectoryDrawer`
 
@@ -97,10 +97,9 @@
 相关代码：
 
 - 工作流保存：`backend/app/api/conversations.py`
-- 工作流执行：`backend/app/services/orchestrator.py`
+- 工作流执行：`backend/app/services/runtime_service.py`、`backend/agent_runtime/`
 - 工作流类型：`frontend/src/types.ts`
 - 群聊设置与画布：`frontend/src/App.tsx` 中的 `ConversationSettingsDrawer`
-- 测试：`tests/test_orchestrator.py`、`tests/test_orchestrator_output.py`
 
 ## 6. 工作流画布
 
@@ -129,7 +128,7 @@
 相关代码：
 
 - 后端保存与 normalize：`backend/app/api/conversations.py`
-- 后端运行态：`backend/app/services/orchestrator.py`
+- 后端运行态：`backend/app/services/runtime_service.py`、`backend/agent_runtime/`
 - 前端画布编辑：`frontend/src/App.tsx`
 - 类型定义：`frontend/src/types.ts`
 - 数据模型：`WorkflowRun`
@@ -331,9 +330,8 @@ MCP 服务用于接入外部工具和上下文服务。
 
 相关代码：
 
-- 任务 API：`backend/app/api/tasks.py`
 - 队列：`backend/app/services/queue.py`
-- 编排入口：`backend/app/services/orchestrator.py`
+- 编排入口：`backend/app/services/runtime_service.py`、`backend/agent_runtime/`
 - 前端组件：`frontend/src/App.tsx` 中的 `BackgroundTasksButton`
 - 测试：`tests/test_workspace_security_deploy_task.py`
 
