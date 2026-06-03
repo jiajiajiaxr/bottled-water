@@ -53,3 +53,8 @@ log_file_level = "DEBUG"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.alembic]
+script_location = "alembic"
+prepend_sys_path = "."
+version_path_separator = "os"
