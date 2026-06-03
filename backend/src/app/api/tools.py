@@ -14,11 +14,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import ToolDefinition, User, Workspace, utcnow
+from db import get_db
+from db.models import ToolDefinition, User, Workspace, utcnow
 from app.schemas.common import ApiResponse, ToolDefinitionOut
 from app.schemas.requests import CreateToolRequest, GenerateToolRequest, InvokeToolRequest, UpdateToolRequest
 from app.services.serialization import redact_sensitive, tool_definition_to_dict

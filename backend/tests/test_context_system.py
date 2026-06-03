@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.database import Base
-from app.models import (
+from db.base import Base
+from db.models import (
     Agent,
     Artifact,
     Conversation,

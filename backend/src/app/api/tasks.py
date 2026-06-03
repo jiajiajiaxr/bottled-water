@@ -6,11 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.core.database import get_db
 from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import Conversation, Subtask, Task, User, utcnow
+from db import get_db
+from db.models import Conversation, Subtask, Task, User, utcnow
 from app.schemas.common import ApiResponse, SubtaskOut, TaskOut
 from app.schemas.requests import CreateTaskRequest
 from app.services.orchestrator import create_task_for_prompt

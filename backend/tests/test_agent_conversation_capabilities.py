@@ -19,7 +19,7 @@ from agent_capability_support import (
     tool_call,
     tool_invocation_names,
 )
-from app.models import Artifact, McpToolInvocation, Message, SkillRun, ToolInvocation
+from db.models import Artifact, McpToolInvocation, Message, SkillRun, ToolInvocation
 from app.services.ark import LLMStreamEvent
 from app.services.tools.builtins.artifact.export import export_artifact
 

@@ -7,9 +7,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database import Base
+from db.base import Base
 from app.core.errors import ValidationAppError
-from app.models import Skill, User
+from db.models import Skill, User
 from app.services.skills.adapters.legacy import legacy_skill_manifest
 from app.services.skills.dependencies import check_skill_dependencies
 from app.services.skills.manifest import validate_manifest

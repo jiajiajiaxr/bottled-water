@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from app.models import (
+from db.models import (
     Agent,
     Artifact,
     FileAsset,

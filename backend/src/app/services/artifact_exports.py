@@ -9,7 +9,7 @@ from html import escape
 from html.parser import HTMLParser
 from typing import Any
 
-from app.models import Artifact
+from db.models import Artifact
 from app.services.file_tools import generate_pdf
 from app.services.serialization import artifact_to_dict
 

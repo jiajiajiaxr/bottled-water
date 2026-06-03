@@ -7,11 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import (
+from db import get_db
+from db.models import (
     AuditLog,
     Project,
     ProjectFile,

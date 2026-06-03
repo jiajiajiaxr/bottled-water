@@ -10,8 +10,8 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.database import Base
-from app.models import Agent, Conversation, Message, Task, User, WorkflowRun
+from db.base import Base
+from db.models import Agent, Conversation, Message, Task, User, WorkflowRun
 from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.agents.function_types import AgentFunctionLoopResult
 from app.services.ark import LLMStreamEvent

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditLog, User
+from db.models import AuditLog, User
 
 
 ROLE_PERMISSIONS = {

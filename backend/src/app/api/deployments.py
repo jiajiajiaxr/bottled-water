@@ -6,11 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.core.database import get_db
 from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import Artifact, Conversation, Deployment, User, utcnow
+from db import get_db
+from db.models import Artifact, Conversation, Deployment, User, utcnow
 from app.schemas.common import ApiResponse, DeploymentOut
 from app.schemas.requests import CreateDeploymentRequest
 from app.services.artifacts import create_deployment

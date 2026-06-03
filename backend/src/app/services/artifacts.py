@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import NotFoundError
-from app.models import Artifact, ArtifactVersion, Conversation, Deployment, Message, Task, utcnow
+from db.models import Artifact, ArtifactVersion, Conversation, Deployment, Message, Task, utcnow
 
 
 def classify_artifact_request(prompt: str) -> str | None:

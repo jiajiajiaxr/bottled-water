@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Agent, Conversation, McpServer, Skill, User
+from db.models import Agent, Conversation, McpServer, Skill, User
 from app.events import app_event_bus as event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
 from app.services.tool_registry import BUILTIN_TOOLS, invoke_tool, normalize_tool_names

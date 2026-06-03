@@ -12,8 +12,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.errors import ValidationAppError
-from app.core.database import Base
-from app.models import (
+from db.base import Base
+from db.models import (
     Agent,
     Artifact,
     ArtifactVersion,

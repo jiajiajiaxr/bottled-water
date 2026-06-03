@@ -12,7 +12,7 @@ from agent_runtime.core.interfaces import PersistenceBackend
 from agent_runtime.core.types import Message
 
 from common.logger import get_logger
-from app.models import Message as DBMessage, Conversation
+from db.models import Message as DBMessage, Conversation
 
 logger = get_logger(__name__)
 

@@ -19,11 +19,11 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import AsyncSessionLocal
 from app.core.errors import NotFoundError, UnauthorizedError, ValidationAppError
 from app.core.security import decode_access_token
 from app.events import WebSocketSink
-from app.models import Conversation, FileAsset, Message, User, utcnow
+from db.models import Conversation, FileAsset, Message, User, utcnow
+from db.session import AsyncSessionLocal
 from app.services.conversation_session_manager import (
     ConversationSessionManager,
 )

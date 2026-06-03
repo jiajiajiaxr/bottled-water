@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database import Base
-from app.models import Agent, Conversation, FileAsset, McpServer, McpToolInvocation, Message, Skill, ToolInvocation, User
+from db.base import Base
+from db.models import Agent, Conversation, FileAsset, McpServer, McpToolInvocation, Message, Skill, ToolInvocation, User
 from app.services.agents.function_loop import run_agent_function_call_loop
 
 

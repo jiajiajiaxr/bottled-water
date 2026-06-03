@@ -12,7 +12,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, ValidationAppError
-from app.models import McpServer, McpToolInvocation, User, utcnow
+from db.models import McpServer, McpToolInvocation, User, utcnow
 from app.services.audit import write_audit_log
 from app.services.serialization import mcp_invocation_to_dict
 

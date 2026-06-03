@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
 import pytest
 
-from app.models import Agent, Conversation, Message, Task, User, WorkflowRun
+from db.models import Agent, Conversation, Message, Task, User, WorkflowRun
 from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.graph import WorkflowGraph
 from app.services.workflows.io import resolve_node_input

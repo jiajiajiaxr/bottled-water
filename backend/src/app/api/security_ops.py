@@ -5,11 +5,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.errors import ForbiddenError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import AuditLog, Permission, Role, RolePermission, User, UserRole, utcnow
+from db import get_db
+from db.models import AuditLog, Permission, Role, RolePermission, User, UserRole, utcnow
 from app.schemas.common import ApiResponse
 from app.services.audit import permissions_for_user, write_audit_log
 from app.services.serialization import iso

@@ -13,9 +13,9 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.database import Base
+from db.base import Base
 from app.core.errors import ValidationAppError
-from app.models import Artifact, Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
+from db.models import Artifact, Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
 from app.api.artifacts import download_artifact_preview_pdf
 from app.api.messages import _send
 from app.api.workspace_files import download_workspace_file, download_workspace_file_preview_pdf, preview_workspace_file

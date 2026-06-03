@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import ValidationAppError
-from app.models import AuditLog, FileAsset, KnowledgeBase, KnowledgeDocument, User
+from db.models import AuditLog, FileAsset, KnowledgeBase, KnowledgeDocument, User
 from app.services.file_tools import extract_text_from_path
 
 

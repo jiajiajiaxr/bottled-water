@@ -8,7 +8,7 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import KnowledgeBase, KnowledgeDocument
+from db.models import KnowledgeBase, KnowledgeDocument
 
 
 TOKEN_PATTERN = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)

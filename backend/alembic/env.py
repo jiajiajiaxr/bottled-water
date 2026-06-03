@@ -11,12 +11,12 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.core.config import get_settings  # noqa: E402
-from app.core.database import Base  # noqa: E402
-from app import models  # noqa: F401,E402
+from db.base import Base  # noqa: E402
+from db.config import get_db_settings  # noqa: E402
+from db import models  # noqa: F401,E402
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().resolved_database_url)
+config.set_main_option("sqlalchemy.url", get_db_settings().resolved_database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -26,7 +26,7 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=get_settings().resolved_database_url,
+        url=get_db_settings().resolved_database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},

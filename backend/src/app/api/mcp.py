@@ -7,11 +7,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import McpServer, McpToolInvocation, User, Workspace, utcnow
+from db import get_db
+from db.models import McpServer, McpToolInvocation, User, Workspace, utcnow
 from app.schemas.common import ApiResponse, McpServerOut
 from app.schemas.requests import CreateMcpServerRequest, ImportMcpServerRequest, InvokeMcpToolRequest
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_allowed

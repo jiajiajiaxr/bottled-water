@@ -9,8 +9,8 @@ from fastapi.responses import JSONResponse
 
 from app.api import agents, artifacts, auth, context, conversations, deployments, files, knowledge, logs, mcp, messages, models, sandbox, security_ops, skills, tasks, tools, websocket, workspaces
 from app.core.config import get_settings
-from app.core.database import AsyncSessionLocal
 from app.core.errors import AppError
+from db.session import AsyncSessionLocal
 from app.core.logging_config import configure_logging
 from app.core.response import fail, ok
 from app.services.seed import ensure_seed_data

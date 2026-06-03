@@ -19,7 +19,7 @@ from agent_runtime.strategies.single_agent import SingleAgentScheduler
 from model_provider import create_provider
 from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
 
-from app.models import Agent, Conversation, Message, User
+from db.models import Agent, Conversation, Message, User
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink
 from common.logger import get_logger
@@ -76,7 +76,7 @@ class OrchestratorService:
     @staticmethod
     async def _get_conversation_agents(db: AsyncSession, conversation: Conversation) -> list[Agent]:
         """获取会话中的 Agent"""
-        from app.models import ConversationParticipant
+        from db.models import ConversationParticipant
 
         participant_agent_ids = [
             item.agent_id
@@ -102,7 +102,7 @@ class OrchestratorService:
     @staticmethod
     async def create_provider_from_config(db: AsyncSession, model_config_id: str) -> Any:
         """根据 ModelConfig 创建模型提供者"""
-        from app.models import ModelConfig as DBModelConfig
+        from db.models import ModelConfig as DBModelConfig
         from app.services.model_config_resolver import create_provider_from_env_fallback, resolve_api_key
         from model_provider.core.config import ModelConfig as MPModelConfig
 

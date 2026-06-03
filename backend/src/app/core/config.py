@@ -57,7 +57,6 @@ class Settings(BaseSettings):
             ]
         return self
 
-    database_url: str = "postgresql+psycopg://agenthub:agenthub@localhost:54326/agenthub"
     redis_url: str = "redis://localhost:6380/0"
 
     # 以下 Ark 相关配置已弃用（deprecated），保留作为迁移期 fallback。
@@ -80,20 +79,6 @@ class Settings(BaseSettings):
     max_upload_mb: int = 50
 
     enable_function_calling: bool = True
-
-    @property
-    def resolved_database_url(self) -> str:
-        if not self.database_url.startswith("sqlite:///"):
-            return self.database_url
-        raw_path = self.database_url.removeprefix("sqlite:///")
-        if raw_path in {"", ":memory:"}:
-            return self.database_url
-        if Path(raw_path).is_absolute():
-            return self.database_url
-        normalized = raw_path.replace("\\", "/")
-        base_dir = ROOT_DIR if normalized.startswith(("backend/", "./backend/")) else ROOT_DIR / "backend"
-        target = (base_dir / raw_path).resolve()
-        return f"sqlite:///{target.as_posix()}"
 
     @property
     def model_candidates(self) -> list[str]:

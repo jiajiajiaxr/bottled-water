@@ -19,8 +19,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import AsyncSessionLocal
-from app.models import (
+from db.session import AsyncSessionLocal
+from db.models import (
     Agent,
     Artifact,
     Conversation,

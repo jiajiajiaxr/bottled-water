@@ -3,24 +3,16 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
 
-from app.core.config import get_settings
-
-
-class Base(DeclarativeBase):
-    pass
+from db.config import get_db_settings
 
 
-settings = get_settings()
+settings = get_db_settings()
 
 database_url = settings.resolved_database_url
 is_sqlite = database_url.startswith("sqlite")
 async_connect_args = {"check_same_thread": False, "timeout": 30} if is_sqlite else {}
 
-# 替换为异步引擎 URL
-# sqlite:/// → sqlite+aiosqlite:///
-# postgresql:// → postgresql+asyncpg://
 if database_url.startswith("sqlite"):
     async_database_url = database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
 elif database_url.startswith("postgresql"):

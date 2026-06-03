@@ -7,11 +7,11 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.errors import ForbiddenError, NotFoundError
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import FileAsset, User, utcnow
+from db import get_db
+from db.models import FileAsset, User, utcnow
 from app.schemas.common import ApiResponse, FileAssetOut
 from app.services.files import save_upload
 from app.services.file_tools import convert_file, embed_text, extract_text_from_path, preview_payload, summarize_text

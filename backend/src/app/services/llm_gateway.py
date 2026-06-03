@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import NotFoundError, ValidationAppError
-from app.models import ModelConfig
+from db.models import ModelConfig
 from app.services.ark import LLMResult
 from model_provider.core.interfaces import ChatMessage
 

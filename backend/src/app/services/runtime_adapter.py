@@ -15,7 +15,7 @@ from common.logger import get_logger
 from agent_runtime.core.interfaces import ToolExecutor
 from agent_runtime.core.types import Event, ToolCall
 
-from app.models import Agent, Conversation
+from db.models import Agent, Conversation
 
 logger = get_logger(__name__)
 

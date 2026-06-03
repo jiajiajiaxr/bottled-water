@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_runtime import Session as AgentSession
 from agent_runtime.core.types import Event as RuntimeEvent
 from app.events import WebSocketSink
-from app.models import Conversation
+from db.models import Conversation
 from app.services.runtime_service import OrchestratorService
 from common.logger import get_logger
 

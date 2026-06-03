@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
-from app.models import ModelConfig as DBModelConfig, ModelProvider
+from db.models import ModelConfig as DBModelConfig, ModelProvider
 from common.logger import get_logger
 from model_provider import create_provider
 from model_provider.core.config import ModelConfig as MPModelConfig

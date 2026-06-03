@@ -10,10 +10,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.database import get_db
 from app.core.response import ok
 from app.deps import get_current_user
-from app.models import Message, User
+from db import get_db
+from db.models import Message, User
 from app.services.model_config_resolver import create_provider_from_db
 
 router = APIRouter(tags=["context"])

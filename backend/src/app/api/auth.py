@@ -5,12 +5,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import get_db
 from app.core.errors import UnauthorizedError, ValidationAppError
 from app.core.response import ok
 from app.core.security import create_access_token, hash_password, verify_password
 from app.deps import get_current_user
-from app.models import User, UserSettings, utcnow
+from db import get_db
+from db.models import User, UserSettings, utcnow
 from app.schemas.common import ApiResponse, UserOut, UserResponse
 from app.schemas.requests import ChangePasswordRequest, LoginRequest, RegisterRequest, UpdateProfileRequest
 from app.services.seed import ensure_seed_data
