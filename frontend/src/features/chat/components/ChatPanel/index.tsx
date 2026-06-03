@@ -121,6 +121,14 @@ export function ChatPanel({
     el.scrollTop = el.scrollHeight;
   }, [historyMessages, displayOrder]);
 
+  // 进入新对话且消息加载完成后，滚动到底部
+  useEffect(() => {
+    if (!active?.id || loading) return;
+    isAtBottom.current = true;
+    const el = messageListRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [active?.id, loading]);
+
   const renderMessageBubble = (item: ChatMessage) => {
     return (
       <MessageBubble
