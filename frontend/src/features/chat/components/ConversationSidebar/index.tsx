@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import {
+  CaretDownOutlined,
+  CaretRightOutlined,
   DeleteOutlined,
   EditOutlined,
   FolderAddOutlined,
@@ -23,7 +25,6 @@ import {
   Form,
   Input,
   Layout,
-  List,
   Modal,
   Segmented,
   Select,
@@ -73,20 +74,15 @@ export function ConversationSidebar({
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"active" | "archived">("active");
-  const [folder, setFolder] = useState("all");
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
+    new Set(),
+  );
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [editing, setEditing] = useState<Conversation>();
   const [editForm] = Form.useForm();
   const [collapsed, setCollapsed] = useState(false);
   const [addingAgent, setAddingAgent] = useState(false);
-
-  const folders = useMemo(() => {
-    const names = conversations.map(
-      (item) => item.folder || item.category || "Default",
-    );
-    return ["all", ...mergeConversationCategories(categoryOptions, names)];
-  }, [categoryOptions, conversations]);
 
   const selectCategoryOptions = useMemo(() => {
     const existing = conversations.map(
@@ -97,15 +93,10 @@ export function ConversationSidebar({
     );
   }, [categoryOptions, conversations]);
 
-  const visible = useMemo(() => {
+  const filtered = useMemo(() => {
     return conversations
       .filter((item) =>
         filter === "archived" ? item.archived : !item.archived,
-      )
-      .filter(
-        (item) =>
-          folder === "all" ||
-          (item.folder || item.category || "Default") === folder,
       )
       .filter((item) =>
         `${item.title} ${item.lastMessage} ${item.tags.join(" ")}`
@@ -117,15 +108,171 @@ export function ConversationSidebar({
           Number(b.pinned) - Number(a.pinned) ||
           +new Date(b.updatedAt) - +new Date(a.updatedAt),
       );
-  }, [conversations, filter, folder, query]);
+  }, [conversations, filter, query]);
+
+  const treeData = useMemo(() => {
+    const root: Conversation[] = [];
+    const groups: Record<string, Conversation[]> = {};
+
+    for (const item of filtered) {
+      const cat = item.folder || item.category;
+      if (cat) {
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(item);
+      } else {
+        root.push(item);
+      }
+    }
+
+    const folders = Object.entries(groups)
+      .map(([name, items]) => ({
+        name,
+        items: items.sort(
+          (a, b) =>
+            Number(b.pinned) - Number(a.pinned) ||
+            +new Date(b.updatedAt) - +new Date(a.updatedAt),
+        ),
+        latestUpdated: Math.max(
+          ...items.map((i) => +new Date(i.updatedAt)),
+        ),
+      }))
+      .sort((a, b) => b.latestUpdated - a.latestUpdated);
+
+    const sortedRoot = root.sort(
+      (a, b) =>
+        Number(b.pinned) - Number(a.pinned) ||
+        +new Date(b.updatedAt) - +new Date(a.updatedAt),
+    );
+
+    return { folders, root: sortedRoot };
+  }, [filtered]);
+
+  const toggleFolder = (name: string) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  };
 
   const submitNewFolder = () => {
     const name = newFolderName.trim();
     if (!name) return;
     onCreateCategory(name);
-    setFolder(name);
+    setExpandedFolders((prev) => new Set(prev).add(name));
     setNewFolderName("");
     setCreatingFolder(false);
+  };
+
+  const renderConversationItem = (item: Conversation) => {
+    const running = runningConversationIds.has(item.id);
+    return (
+      <div
+        key={item.id}
+        role="button"
+        tabIndex={0}
+        className={`conversation-item ${item.id === activeId ? "is-active" : ""} ${running ? "is-running" : ""}`}
+        onClick={() => onSelect(item.id)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ")
+            onSelect(item.id);
+        }}
+      >
+        <div className="conversation-main">
+          <Flex justify="space-between" align="center">
+            <Text strong ellipsis>
+              {item.title}
+            </Text>
+            <Text type="secondary" className="time">
+              {formatTime(item.updatedAt)}
+            </Text>
+          </Flex>
+          <Text type="secondary" ellipsis className="last-message">
+            {item.lastMessage || (running ? "正在回答..." : "")}
+          </Text>
+          <Space size={[4, 4]} wrap>
+            {running && <Tag color="processing">正在回答</Tag>}
+            <Tag
+              icon={
+                item.chat_type === "group" ? (
+                  <TeamOutlined />
+                ) : (
+                  <MessageOutlined />
+                )
+              }
+            >
+              {item.chat_type === "group"
+                ? `${item.participants.filter((p) => p.participant_type === "agent" && !p.left_at).length} Agent`
+                : "单聊"}
+            </Tag>
+            {item.tags.map((tag) => (
+              <Tag key={tag}>{tag}</Tag>
+            ))}
+            {item.unread > 0 && (
+              <Badge count={item.unread} size="small" />
+            )}
+          </Space>
+        </div>
+        <Space direction="vertical" size={6}>
+          <Tooltip title={item.pinned ? "取消置顶" : "置顶"}>
+            <Button
+              size="small"
+              shape="circle"
+              icon={item.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+              onClick={(event) => {
+                event.stopPropagation();
+                onTogglePin(item);
+              }}
+            />
+          </Tooltip>
+          <Tooltip title={item.archived ? "移出归档" : "归档"}>
+            <Button
+              size="small"
+              shape="circle"
+              icon={<InboxOutlined />}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleArchive(item);
+              }}
+            />
+          </Tooltip>
+          <Tooltip title="Edit">
+            <Button
+              size="small"
+              shape="circle"
+              icon={<EditOutlined />}
+              onClick={(event) => {
+                event.stopPropagation();
+                setEditing(item);
+                editForm.setFieldsValue({
+                  title: item.title,
+                  folder: item.folder || item.category || "Default",
+                  remark: item.remark || "",
+                });
+              }}
+            />
+          </Tooltip>
+          {item.archived && (
+            <Tooltip title="删除归档">
+              <Button
+                size="small"
+                danger
+                shape="circle"
+                icon={<DeleteOutlined />}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete(item);
+                }}
+              />
+            </Tooltip>
+          )}
+        </Space>
+      </div>
+    );
   };
 
   return (
@@ -211,161 +358,63 @@ export function ConversationSidebar({
           { label: "归档", value: "archived" },
         ]}
       />
-      <div className="conversation-folders">
-        <div className="folder-section-head">
-          <Text type="secondary">文件夹</Text>
-          <Tooltip title="新建分类">
-            <Button
-              size="small"
-              shape="circle"
-              icon={<FolderAddOutlined />}
-              onClick={() => setCreatingFolder((value) => !value)}
-            />
-          </Tooltip>
-        </div>
-        {creatingFolder && (
-          <Input.Search
-            className="folder-create-input"
+      <div className="sidebar-toolbar">
+        <Text type="secondary">会话列表</Text>
+        <Tooltip title="新建分类">
+          <Button
             size="small"
-            autoFocus
-            placeholder="新建分类名称"
-            value={newFolderName}
-            enterButton="添加"
-            onChange={(event) => setNewFolderName(event.target.value)}
-            onSearch={submitNewFolder}
+            shape="circle"
+            icon={<FolderAddOutlined />}
+            onClick={() => setCreatingFolder((value) => !value)}
+          />
+        </Tooltip>
+      </div>
+      {creatingFolder && (
+        <Input.Search
+          className="folder-create-input"
+          size="small"
+          autoFocus
+          placeholder="新建分类名称"
+          value={newFolderName}
+          enterButton="添加"
+          onChange={(event) => setNewFolderName(event.target.value)}
+          onSearch={submitNewFolder}
+        />
+      )}
+      <div className="conversation-list">
+        {treeData.folders.length === 0 && treeData.root.length === 0 && (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="暂无会话"
           />
         )}
-        {folders.map((name) => (
-          <button
-            key={name}
-            className={`folder-item ${folder === name ? "is-active" : ""}`}
-            onClick={() => setFolder(name)}
-          >
-            {name === "all" ? <InboxOutlined /> : <FolderOpenOutlined />}
-            <span>{name === "all" ? "All" : name}</span>
-          </button>
-        ))}
-      </div>
-      <List
-        className="conversation-list"
-        dataSource={visible}
-        locale={{
-          emptyText: (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="暂无会话"
-            />
-          ),
-        }}
-        renderItem={(item) => {
-          const running = runningConversationIds.has(item.id);
+        {treeData.folders.map((folder) => {
+          const expanded = expandedFolders.has(folder.name);
           return (
-            <div
-              role="button"
-              tabIndex={0}
-              className={`conversation-item ${item.id === activeId ? "is-active" : ""} ${running ? "is-running" : ""}`}
-              onClick={() => onSelect(item.id)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ")
-                  onSelect(item.id);
-              }}
-            >
-              <div className="conversation-main">
-                <Flex justify="space-between" align="center">
-                  <Text strong ellipsis>
-                    {item.title}
-                  </Text>
-                  <Text type="secondary" className="time">
-                    {formatTime(item.updatedAt)}
-                  </Text>
-                </Flex>
-                <Text type="secondary" ellipsis className="last-message">
-                  {item.lastMessage || (running ? "正在回答..." : "")}
-                </Text>
-                <Space size={[4, 4]} wrap>
-                  {running && <Tag color="processing">正在回答</Tag>}
-                  <Tag
-                    icon={
-                      item.chat_type === "group" ? (
-                        <TeamOutlined />
-                      ) : (
-                        <MessageOutlined />
-                      )
-                    }
-                  >
-                    {item.chat_type === "group"
-                      ? `${item.participants.filter((p) => p.participant_type === "agent" && !p.left_at).length} Agent`
-                      : "单聊"}
-                  </Tag>
-                  {item.tags.map((tag) => (
-                    <Tag key={tag}>{tag}</Tag>
-                  ))}
-                  {(item.folder || item.category) && (
-                    <Tag color="purple">{item.folder || item.category}</Tag>
-                  )}
-                  {item.unread > 0 && (
-                    <Badge count={item.unread} size="small" />
-                  )}
-                </Space>
-              </div>
-              <Space direction="vertical" size={6}>
-                <Tooltip title={item.pinned ? "取消置顶" : "置顶"}>
-                  <Button
-                    size="small"
-                    shape="circle"
-                    icon={item.pinned ? <PushpinFilled /> : <PushpinOutlined />}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onTogglePin(item);
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip title={item.archived ? "移出归档" : "归档"}>
-                  <Button
-                    size="small"
-                    shape="circle"
-                    icon={<InboxOutlined />}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onToggleArchive(item);
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip title="Edit">
-                  <Button
-                    size="small"
-                    shape="circle"
-                    icon={<EditOutlined />}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setEditing(item);
-                      editForm.setFieldsValue({
-                        title: item.title,
-                        folder: item.folder || item.category || "Default",
-                        remark: item.remark || "",
-                      });
-                    }}
-                  />
-                </Tooltip>
-                {item.archived && (
-                  <Tooltip title="删除归档">
-                    <Button
-                      size="small"
-                      danger
-                      shape="circle"
-                      icon={<DeleteOutlined />}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDelete(item);
-                      }}
-                    />
-                  </Tooltip>
+            <div key={folder.name} className="folder-tree-node">
+              <div
+                className="folder-tree-header"
+                onClick={() => toggleFolder(folder.name)}
+              >
+                {expanded ? (
+                  <CaretDownOutlined />
+                ) : (
+                  <CaretRightOutlined />
                 )}
-              </Space>
+                <FolderOpenOutlined />
+                <span className="folder-tree-name">{folder.name}</span>
+                <span className="folder-tree-count">{folder.items.length}</span>
+              </div>
+              {expanded && (
+                <div className="folder-tree-children">
+                  {folder.items.map((item) => renderConversationItem(item))}
+                </div>
+              )}
             </div>
           );
-        }}
-      />
+        })}
+        {treeData.root.map((item) => renderConversationItem(item))}
+      </div>
       <Modal
         title="Edit conversation"
         open={Boolean(editing)}
