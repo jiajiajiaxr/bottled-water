@@ -33,6 +33,23 @@ def _can_become_status_report_fence(value: str) -> bool:
     )
 
 
+def _body_looks_like_status_report(body_lines: list[str]) -> bool:
+    first_meaningful = next((line.strip().lower() for line in body_lines if line.strip()), "")
+    if not first_meaningful:
+        return False
+    if first_meaningful in _STATUS_REPORT_NAMES:
+        return True
+
+    body = "\n".join(body_lines).lower()
+    if not body.strip().startswith("{"):
+        return False
+    has_state = bool(re.search(r'"state"\s*:', body))
+    has_status_fields = bool(
+        re.search(r'"(?:will|rationale|blockers|priority|confidence)"\s*:', body)
+    )
+    return has_state and has_status_fields
+
+
 def _section_title(line: str) -> tuple[str | None, str]:
     clean = re.sub(r"^\s*(?:#{1,6}\s*)?(?:\d+[.、)]\s*)?", "", line).strip()
     clean = clean.strip("* ")
@@ -112,40 +129,45 @@ def _strip_internal_fenced_blocks(text: str) -> tuple[str, bool]:
     """Remove complete or currently streaming status_report fenced code blocks."""
     lines = text.splitlines()
     visible: list[str] = []
-    skipping = False
     removed = False
 
-    for index, line in enumerate(lines):
+    index = 0
+    while index < len(lines):
+        line = lines[index]
         trimmed = line.strip()
         lowered = trimmed.lower()
 
-        if skipping:
-            if lowered.startswith("```"):
-                skipping = False
-            continue
-
-        if _STATUS_REPORT_FENCE_RE.match(trimmed):
-            skipping = True
-            removed = True
-            continue
-
         if index == len(lines) - 1 and _can_become_status_report_fence(lowered):
             removed = True
+            index += 1
             continue
 
-        if lowered == "```" and index == len(lines) - 1:
-            removed = True
-            continue
+        if lowered.startswith("```"):
+            opening_could_be_internal = bool(
+                _STATUS_REPORT_FENCE_RE.match(trimmed)
+                or _can_become_status_report_fence(lowered)
+            )
+            body: list[str] = []
+            cursor = index + 1
+            while cursor < len(lines) and not lines[cursor].strip().startswith("```"):
+                body.append(lines[cursor])
+                cursor += 1
 
-        if (
-            lowered.startswith("```")
-            and lowered != "```"
-            and _STATUS_REPORT_FENCE.startswith(lowered)
-        ):
-            skipping = True
-            removed = True
+            closed = cursor < len(lines)
+            if not closed:
+                removed = True
+                break
+
+            if opening_could_be_internal or _body_looks_like_status_report(body):
+                removed = True
+                index = cursor + 1
+                continue
+
+            visible.extend([line, *body, lines[cursor]])
+            index = cursor + 1
             continue
 
         visible.append(line)
+        index += 1
 
     return "\n".join(visible), removed

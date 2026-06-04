@@ -125,7 +125,6 @@ export function stripInternalAgentOutput(raw: string) {
 function stripInternalFencedBlocks(text: string) {
   const lines = text.split(/\r?\n/);
   const visible: string[] = [];
-  let skippingFence = false;
   let removed = false;
   const statusFence = "```status_report";
   const statusFenceNames = ["status_report", "status"];
@@ -143,39 +142,60 @@ function stripInternalFencedBlocks(text: string) {
           name.startsWith(partial[1].toLowerCase()),
         );
       })());
+  const bodyLooksLikeStatusReport = (bodyLines: string[]) => {
+    const firstMeaningful = bodyLines.find((line) => line.trim().length > 0);
+    if (!firstMeaningful) return false;
+    const first = firstMeaningful.trim().toLowerCase();
+    if (statusFenceNames.includes(first)) return true;
 
-  for (const [index, line] of lines.entries()) {
+    const body = bodyLines.join("\n").toLowerCase();
+    if (!body.trim().startsWith("{")) return false;
+    const hasState = /"state"\s*:/.test(body);
+    const hasStatusFields =
+      /"will"\s*:/.test(body) ||
+      /"rationale"\s*:/.test(body) ||
+      /"blockers"\s*:/.test(body) ||
+      /"priority"\s*:/.test(body) ||
+      /"confidence"\s*:/.test(body);
+    return hasState && hasStatusFields;
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     const trimmed = line.trim();
     const lowered = trimmed.toLowerCase();
-
-    if (!skippingFence && isStatusFence(trimmed)) {
-      skippingFence = true;
-      removed = true;
-      continue;
-    }
-
-    if (skippingFence) {
-      if (isClosingFence(trimmed)) skippingFence = false;
-      continue;
-    }
 
     if (index === lines.length - 1 && canBecomeStatusFence(lowered)) {
       removed = true;
       continue;
     }
 
-    if (lowered === "```" && index === lines.length - 1) {
-      removed = true;
-      continue;
-    }
+    if (lowered.startsWith("```")) {
+      const openingCouldBeInternal =
+        isStatusFence(trimmed) || canBecomeStatusFence(lowered);
+      const body: string[] = [];
+      let cursor = index + 1;
+      while (cursor < lines.length && !isClosingFence(lines[cursor])) {
+        body.push(lines[cursor]);
+        cursor += 1;
+      }
 
-    if (
-      lowered.startsWith("```") &&
-      lowered !== "```" &&
-      statusFence.startsWith(lowered)
-    ) {
-      skippingFence = true;
-      removed = true;
+      const closed = cursor < lines.length;
+      if (!closed) {
+        removed = true;
+        break;
+      }
+
+      const internal =
+        openingCouldBeInternal || bodyLooksLikeStatusReport(body);
+      if (internal) {
+        removed = true;
+        index = cursor;
+        continue;
+      }
+
+      visible.push(line, ...body, lines[cursor]);
+      index = cursor;
       continue;
     }
 

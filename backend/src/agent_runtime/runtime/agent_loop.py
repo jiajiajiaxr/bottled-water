@@ -27,6 +27,8 @@ class _StatusReportStreamFilter:
     """Hide status_report fenced blocks while preserving the raw final response."""
 
     _fence = "```status_report"
+    _names = ("status_report", "status")
+    _fence_re = re.compile(r"^```\s*(?:status_report|status)\b", re.IGNORECASE)
 
     def __init__(self) -> None:
         self._raw = ""
@@ -51,29 +53,77 @@ class _StatusReportStreamFilter:
     def _strip_status_report(cls, text: str) -> str:
         lines = text.splitlines()
         visible: list[str] = []
-        skipping = False
         removed = False
-        for index, line in enumerate(lines):
+        index = 0
+        while index < len(lines):
+            line = lines[index]
             trimmed = line.strip()
             lowered = trimmed.lower()
-            if skipping:
-                if lowered.startswith("```"):
-                    skipping = False
-                continue
-            if lowered.startswith(cls._fence):
-                skipping = True
+
+            if index == len(lines) - 1 and cls._can_become_status_fence(lowered):
                 removed = True
+                index += 1
                 continue
-            if lowered == "```" and index == len(lines) - 1:
-                removed = True
+
+            if lowered.startswith("```"):
+                opening_could_be_internal = bool(
+                    cls._fence_re.match(trimmed) or cls._can_become_status_fence(lowered)
+                )
+                body: list[str] = []
+                cursor = index + 1
+                while cursor < len(lines) and not lines[cursor].strip().startswith("```"):
+                    body.append(lines[cursor])
+                    cursor += 1
+
+                closed = cursor < len(lines)
+                if not closed:
+                    removed = True
+                    break
+
+                if opening_could_be_internal or cls._body_looks_like_status_report(body):
+                    removed = True
+                    index = cursor + 1
+                    continue
+
+                visible.extend([line, *body, lines[cursor]])
+                index = cursor + 1
                 continue
-            if lowered.startswith("```") and lowered != "```" and cls._fence.startswith(lowered):
-                skipping = True
-                removed = True
-                continue
+
             visible.append(line)
+            index += 1
         cleaned = "\n".join(visible).strip()
         return cleaned if cleaned or not removed else ""
+
+    @classmethod
+    def _can_become_status_fence(cls, value: str) -> bool:
+        if not value:
+            return False
+        normalized = value.strip().lower()
+        if cls._fence.startswith(normalized):
+            return True
+        if cls._fence_re.match(normalized):
+            return True
+        partial = re.match(r"^```\s*([a-z_]*)$", normalized, flags=re.IGNORECASE)
+        return bool(
+            partial
+            and any(name.startswith(partial.group(1).lower()) for name in cls._names)
+        )
+
+    @classmethod
+    def _body_looks_like_status_report(cls, body_lines: list[str]) -> bool:
+        first_meaningful = next((line.strip().lower() for line in body_lines if line.strip()), "")
+        if not first_meaningful:
+            return False
+        if first_meaningful in cls._names:
+            return True
+        body = "\n".join(body_lines).lower()
+        if not body.strip().startswith("{"):
+            return False
+        has_state = bool(re.search(r'"state"\s*:', body))
+        has_status_fields = bool(
+            re.search(r'"(?:will|rationale|blockers|priority|confidence)"\s*:', body)
+        )
+        return has_state and has_status_fields
 
 
 class AgentLoop:
@@ -681,8 +731,20 @@ class AgentLoop:
         """从回复中提取状态报告"""
         import re
 
-        pattern = r"```status_report\s*([\s\S]*?)\s*```"
-        match = re.search(pattern, content)
+        pattern = r"```\s*status_report\s*([\s\S]*?)\s*```"
+        match = re.search(pattern, content, flags=re.IGNORECASE)
+        if not match:
+            for fenced in re.finditer(
+                r"```\s*(?:json|status)?\s*([\s\S]*?)\s*```",
+                content,
+                flags=re.IGNORECASE,
+            ):
+                candidate = fenced.group(1)
+                if _StatusReportStreamFilter._body_looks_like_status_report(
+                    candidate.splitlines()
+                ):
+                    match = fenced
+                    break
         if match:
             try:
                 data = json.loads(match.group(1))
@@ -709,8 +771,7 @@ class AgentLoop:
     def _remove_status_report(self, content: str) -> str:
         """从回复中移除状态报告部分"""
 
-        pattern = r"```status_report\s*[\s\S]*?\s*```"
-        return re.sub(pattern, "", content).strip()
+        return _StatusReportStreamFilter._strip_status_report(content)
 
     def _parse_state(self, state_str: str) -> AgentState:
         """解析状态字符串"""

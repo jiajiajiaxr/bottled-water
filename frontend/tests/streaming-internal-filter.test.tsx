@@ -70,4 +70,40 @@ describe("useStreamingMessages internal block filtering", () => {
       "可见回答\n继续说明",
     );
   });
+  it("keeps bare opening fences hidden until status_report body is removed", () => {
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onMessageStart({
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+
+    act(() => {
+      result.current.streamHandlers.onDelta?.("visible answer\n```\n", {
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+      });
+    });
+
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
+      "visible answer",
+    );
+
+    act(() => {
+      result.current.streamHandlers.onDelta?.(
+        'status_report\n{"state":"completed","will":"complete"}\n```\nfinal',
+        {
+          agent_id: "agent-1",
+          agent_message_id: "message-1",
+        },
+      );
+    });
+
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
+      "visible answer\nfinal",
+    );
+  });
 });

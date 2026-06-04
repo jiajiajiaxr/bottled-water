@@ -21,4 +21,23 @@ describe("MarkdownContent", () => {
     expect(container.querySelector("pre")).toBeNull();
     expect(screen.queryByText(/status_report/)).not.toBeInTheDocument();
   });
+
+  it("does not render status report shaped json fences as code blocks", () => {
+    const { container } = render(
+      <MarkdownContent
+        text={[
+          "visible answer",
+          "```json",
+          '{"state":"completed","will":"complete","confidence":0.95}',
+          "```",
+          "final answer",
+        ].join("\n")}
+      />,
+    );
+
+    expect(screen.getByText(/visible answer/)).toBeInTheDocument();
+    expect(screen.getByText(/final answer/)).toBeInTheDocument();
+    expect(container.querySelector("pre")).toBeNull();
+    expect(screen.queryByText(/confidence/)).not.toBeInTheDocument();
+  });
 });
