@@ -95,7 +95,6 @@ export function Workbench({
     artifactPanelOpen,
     scheduleMode,
     setAgentDrawerOpen,
-    setWorkspacesOpen,
     setGlobalSettingsOpen,
     setConversationSettingsOpen,
     setMembersOpen,
@@ -141,14 +140,12 @@ export function Workbench({
 
   const openMainTab = (tab: "agents" | "workspace" | "settings") => {
     setAgentDrawerOpen(tab === "agents");
-    setWorkspacesOpen(tab === "workspace");
     setGlobalSettingsOpen(tab === "settings");
     onRouteTabChange(tab);
   };
 
   const closeMainTab = (tab: "agents" | "workspace" | "settings") => {
     if (tab === "agents") setAgentDrawerOpen(false);
-    if (tab === "workspace") setWorkspacesOpen(false);
     if (tab === "settings") setGlobalSettingsOpen(false);
     if (routeTab === tab) onRouteTabChange("chat");
   };
@@ -217,9 +214,8 @@ export function Workbench({
 
   useEffect(() => {
     setAgentDrawerOpen(routeTab === "agents");
-    setWorkspacesOpen(routeTab === "workspace");
     setGlobalSettingsOpen(routeTab === "settings");
-  }, [routeTab, setAgentDrawerOpen, setWorkspacesOpen, setGlobalSettingsOpen]);
+  }, [routeTab, setAgentDrawerOpen, setGlobalSettingsOpen]);
 
   useEffect(() => {
     if (!activeWorkspaceId && workspaces.length) return;

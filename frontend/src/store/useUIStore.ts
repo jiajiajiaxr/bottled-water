@@ -6,7 +6,6 @@ interface CreateModalState {
 
 interface UIState {
   agentDrawerOpen: boolean;
-  workspacesOpen: boolean;
   globalSettingsOpen: boolean;
   platformDrawerOpen: boolean;
   membersOpen: boolean;
@@ -17,7 +16,6 @@ interface UIState {
 
   setAgentDrawerOpen: (open: boolean) => void;
   setScheduleMode: (mode: "chat" | "workflow") => void;
-  setWorkspacesOpen: (open: boolean) => void;
   setGlobalSettingsOpen: (open: boolean) => void;
   setPlatformDrawerOpen: (open: boolean) => void;
   setMembersOpen: (open: boolean) => void;
@@ -30,7 +28,6 @@ interface UIState {
 
 export const useUIStore = create<UIState>((set) => ({
   agentDrawerOpen: false,
-  workspacesOpen: false,
   globalSettingsOpen: false,
   platformDrawerOpen: false,
   membersOpen: false,
@@ -41,7 +38,6 @@ export const useUIStore = create<UIState>((set) => ({
 
   setAgentDrawerOpen: (agentDrawerOpen) => set({ agentDrawerOpen }),
   setScheduleMode: (scheduleMode) => set({ scheduleMode }),
-  setWorkspacesOpen: (workspacesOpen) => set({ workspacesOpen }),
   setGlobalSettingsOpen: (globalSettingsOpen) => set({ globalSettingsOpen }),
   setPlatformDrawerOpen: (platformDrawerOpen) => set({ platformDrawerOpen }),
   setMembersOpen: (membersOpen) => set({ membersOpen }),
@@ -53,7 +49,6 @@ export const useUIStore = create<UIState>((set) => ({
   closeAllDrawers: () =>
     set({
       agentDrawerOpen: false,
-      workspacesOpen: false,
       globalSettingsOpen: false,
       platformDrawerOpen: false,
       membersOpen: false,
