@@ -34,14 +34,14 @@
 | Skill 包化能力：manifest、runtime、测试、版本、依赖 | `backend/src/app/services/skills/` | 已实现，需持续加固 | `prompt/agent/mcp/script` runner 和 legacy adapter 已拆分；脚本 runner 仍以受控能力为主，不应宣称生产级插件沙箱。 | P1 |
 | MCP 服务管理、发现、健康检查、调用记录 | `backend/src/app/services/mcp/`、`backend/src/app/api/mcp.py` | 已实现，需持续加固 | HTTP/stdio/SSE-WS transport 分层已存在；外部网络、鉴权和超时策略依赖运行环境。 | P1 |
 | 单聊 Agent 走完整 Function Calling Loop | `backend/src/app/services/agents/function_loop.py`、`tool_loop.py`、`direct.py` | 已完成 | 真实模型是否选择 tool_calls 取决于供应商；后端保留产物请求兜底和权限拒绝路径。 | P0 |
-| 群聊 workflow 是事实来源，agent/tool/skill/mcp 节点真实执行 | `backend/src/app/services/workflows/engine.py`、`nodes/`、`scheduler.py`、`runtime.py` | 已完成 | 当前支持基础 DAG、并行、条件/循环基础语义；复杂人工审批和版本发布不在当前完成范围。 | P0 |
+| 群聊 workflow 是事实来源，agent/tool/skill/mcp/artifact 节点真实执行 | `backend/src/app/services/workflows/engine.py`、`nodes/`、`scheduler.py`、`runtime.py` | 已完成 | 当前支持基础 DAG、并行、条件/循环基础语义；Artifact 节点已走统一 `artifact.create_*` 工具链并回写真实 `artifact_id/export_url`；复杂人工审批和版本发布不在当前完成范围。 | P0 |
 | 工作流画布可编辑、可拖拽、连线、节点运行态可见 | `frontend/src/features/workflow/`、`features/chat/components/drawers/WorkflowCanvas.tsx` | 已实现，需持续加固 | 已迁到工作台内嵌模式并保留完整画布；本轮修复返回聊天和按钮事件冒泡。 | P1 |
 | SSE/WS 事件、停止响应、正在回答状态收敛 | `backend/src/app/services/chat/cancellation.py`、`finalizer.py`、`realtime/`、`frontend/src/api/message.ts`、`frontend/src/lib/runningConversations.ts` | 已实现，需持续加固 | 已有回归测试覆盖 message_stop / generation_finished 边界；跨进程运行需 Redis 或 sticky session。 | P0 |
 | 文件系统像云盘/IDE 一样展示工作区文件 | `backend/src/app/api/workspace_files.py`、`services/files/workspace_*`、`frontend/src/features/workspaceFiles/` | 已实现，需持续加固 | 上传、产物、沙箱、项目文件聚合已实现；Office 预览依赖 LibreOffice，缺失时降级并提示。 | P1 |
 | 产物生成真实 PDF/DOCX/PPTX/XLSX/HTML，支持预览和主格式下载 | `services/tools/builtins/artifact/`、`services/document_model/`、`api/artifacts.py`、`features/preview/` | 已实现，需持续加固 | PDF/DOCX 已使用 DocumentModel 渲染；Office 在线预览走转 PDF 缓存，环境未安装 LibreOffice 时降级。 | P0 |
 | 沙箱真实受控执行，工作区隔离 | `services/tools/builtins/sandbox/`、`services/workspaces/filesystem.py`、`api/sandbox.py` | 已完成 | 本地执行有命令白名单、cwd 限制、超时和输出截断；生产容器隔离策略由部署环境承载。 | P0 |
 | 上下文系统支持真实 role history、附件、工具结果、会话状态 | `services/context/`、`services/agents/function_messages.py` | 已完成 | 工作区长期记忆只在用户明确要求时写入，不自动跨会话保存闲聊。 | P0 |
-| 多智能体 V2：ConversationSessionManager、TechLeadScheduler、Watchdog 最小闭环 | `backend/src/app/services/conversation_session_manager.py`、`backend/src/agent_runtime/` | 部分完成 | 运行时骨架、调度器、看门狗、状态报告解析和测试存在；主产品群聊仍以 workflow engine 为事实来源。 | P1 |
+| 多智能体 V2：ConversationSessionManager、TechLeadScheduler、Watchdog 最小闭环 | `backend/src/app/services/conversation_session_manager.py`、`backend/src/agent_runtime/`、`backend/src/app/persistence/sqlalchemy_backend.py` | 部分完成 | 运行时骨架、调度器、看门狗、状态报告解析和测试存在；Blackboard / Agent Context 可通过 SQLAlchemyBackend 持久化恢复；主产品群聊仍以 workflow engine 为事实来源。 | P1 |
 | 完整 Actor 化、Blackboard 协商式调度、分布式多 Agent 生命周期 | `docs/architecture/multi-agent-v2-design.md` | Roadmap | 属于长期架构计划，不应作为当前已交付功能承诺；当前只保留最小闭环和适配层。 | P2 |
 | RBAC / 审计后台 | `api/security_ops.py`、`services/audit.py`、`db/models/security.py` | 部分完成 | 权限和审计表/API 存在；细粒度后台运营界面仍偏基础。 | P2 |
 | 部署 / 远程控制生产级能力 | `api/deployments.py`、`api/sandbox.py`、`services/tools/builtins/sandbox/` | 部分完成 | 演示级部署记录、预览和回滚接口存在；生产级远程控制、容器隔离和云部署仍是 roadmap。 | P2 |
@@ -56,6 +56,8 @@
 - Agent 编辑时，如果已有授权工具不在当前目录中，会作为 disabled legacy 选项展示，防止用户保存时误丢旧配置。
 - `tool_registry.py` 降级为兼容 shim，真实逻辑迁移到 `services/tools/*`。
 - 工作流内嵌画布“返回聊天”切换状态和路由同步，悬浮按钮点击不再冒泡给 React Flow。
+- SQLAlchemy 持久化后端改为替换 `Conversation.extra` JSON，确保 Blackboard 版本、结构化摘要、KV 状态和 Agent 私有上下文栈能跨 Session 恢复。
+- Workflow Artifact 节点不再使用旧 demo HTML 路径，改为通过 `execute_tool_by_name()` 调用真实 `artifact.create_pdf/docx/xlsx/pptx/html/web_app`，并发布真实产物和预览消息事件。
 
 ## Roadmap 边界
 

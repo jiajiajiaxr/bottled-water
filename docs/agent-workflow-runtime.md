@@ -223,6 +223,13 @@ run_agentic_tool_loop(..., agent=agent)
 
 产物节点，用于创建 PDF、DOCX、XLSX、PPTX、HTML、Web App 等真实产物。
 
+执行语义：
+
+- 根据 `config.tool_name` 或 `config.artifact_type / format / output_format` 映射到 `artifact.create_*`。
+- 节点参数支持 `name`、`body`、`html`、`template`、`content_model` 和 `arguments`，所有字符串会经过工作流变量 resolver。
+- 后端通过 `agents.tool_loop.execute_tool_by_name()` 进入统一工具层，执行结果写入 `tool_invocations`，并返回真实 `artifact_id`、`preview_url`、`export_url`、`format`、`filename`、`media_type`。
+- 成功后发布 `artifact:created` 和预览卡片 `message:new`；失败时节点状态为 `failed`，错误写入 `node_states`。
+
 ### end
 
 结束节点，汇总最终回复。

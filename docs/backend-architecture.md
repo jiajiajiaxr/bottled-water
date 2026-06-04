@@ -188,6 +188,8 @@ model_provider/
 - `load_blackboard()` / `save_blackboard()`（基于 `Conversation.extra`）
 - `load_agent_context()` / `save_agent_context()`（基于 `Conversation.extra`）
 
+`Conversation.extra` 是 JSON 字段，运行时写入 Blackboard 和 Agent Context 时会整体替换目标 key，而不是原地修改嵌套 dict。这样 SQLAlchemy 可以可靠追踪变更，避免版本号、结构化摘要、KV 状态或私有上下文栈在刷新 Session 后丢失。
+
 ---
 
 ### 2.6 基础设施层 (`common/`, `app/core/`)

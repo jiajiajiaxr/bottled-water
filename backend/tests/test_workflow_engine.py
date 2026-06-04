@@ -12,6 +12,7 @@ from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.graph import WorkflowGraph
 from app.services.workflows.io import resolve_node_input
 from app.services.workflows.nodes.base import NodeExecutionResult, WorkflowNodeExecutor
+from app.services.workflows.nodes.artifact import ArtifactNodeExecutor
 from app.services.workflows.nodes.condition import ConditionNodeExecutor
 from app.services.workflows.nodes.end import EndNodeExecutor
 from app.services.workflows.nodes.loop import LoopNodeExecutor
@@ -692,3 +693,73 @@ async def test_tool_node_executes_real_tool_and_records_failure_status() -> None
     execute_tool.assert_awaited_once()
     assert result.status == "failed"
     assert result.output["result"]["output"] == "missing"
+
+
+@pytest.mark.asyncio
+async def test_artifact_node_uses_real_artifact_tool_executor() -> None:
+    workflow = {
+        "nodes": [
+            {
+                "id": "artifact",
+                "type": "artifact",
+                "title": "Deliverable",
+                "config": {
+                    "artifact_type": "pdf",
+                    "name": "交付报告",
+                    "content_model": {
+                        "title": "交付报告",
+                        "sections": [{"title": "摘要", "blocks": [{"type": "paragraph", "text": "{{input}}"}]}],
+                    },
+                },
+            }
+        ],
+        "edges": [],
+    }
+    db, conversation, _user_message, _task, run = _runtime(workflow)
+    db.get.side_effect = lambda model, item_id: SimpleNamespace(id="user-1") if model is User else None
+    context = SimpleNamespace(
+        db=db,
+        conversation=conversation,
+        workflow_run=run,
+        channel="conversation:conv-1",
+        outputs={},
+        prompt="生成正式项目报告",
+        node_input={"upstream_text": "上游分析结果"},
+    )
+    payload = {
+        "status": "succeeded",
+        "output": {
+            "status": "succeeded",
+            "artifact_id": "artifact-1",
+            "artifact": {"id": "artifact-1", "name": "交付报告"},
+            "preview_url": "/api/v1/artifacts/artifact-1/preview",
+            "export_url": "/api/v1/artifacts/artifact-1/export?format=pdf",
+            "format": "pdf",
+            "filename": "交付报告.pdf",
+            "media_type": "application/pdf",
+        },
+    }
+
+    with patch(
+        "app.services.workflows.nodes.artifact.execute_tool_by_name",
+        new_callable=AsyncMock,
+    ) as execute_tool:
+        execute_tool.return_value = payload
+        with patch("app.services.workflows.nodes.artifact.publish_tool_event", new_callable=AsyncMock):
+            with patch("app.services.workflows.nodes.artifact.event_bus.publish", new_callable=AsyncMock) as publish:
+                result = await ArtifactNodeExecutor().execute(
+                    WorkflowGraph.from_workflow(workflow).nodes[0],
+                    context,
+                )
+
+    execute_tool.assert_awaited_once()
+    call = execute_tool.await_args.kwargs
+    assert call["tool_name"] == "artifact.create_pdf"
+    assert call["arguments"]["conversation_id"] == "conv-1"
+    assert call["arguments"]["title"] == "交付报告"
+    assert call["arguments"]["body"] == "上游分析结果"
+    assert call["arguments"]["content_model"]["sections"][0]["blocks"][0]["text"] == "生成正式项目报告"
+    assert result.status == "completed"
+    assert result.output["artifact_id"] == "artifact-1"
+    assert result.output["export_url"].endswith("format=pdf")
+    assert any(call.args[1] == "artifact:created" for call in publish.await_args_list)
