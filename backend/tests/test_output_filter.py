@@ -21,6 +21,7 @@ def test_strip_partial_streaming_status_report_block() -> None:
     assert strip_internal_agent_output("```") == ""
     assert strip_internal_agent_output("visible answer\n``") == "visible answer"
     assert strip_internal_agent_output("```stat") == ""
+    assert strip_internal_agent_output("visible answer\n``` sta") == "visible answer"
     assert strip_internal_agent_output("visible answer\n```status") == "visible answer"
 
 
@@ -44,6 +45,18 @@ def test_internal_output_stream_filter_only_emits_visible_delta() -> None:
     assert stream_filter.push("visible answer\n") == "visible answer"
     assert stream_filter.push("``") == ""
     assert stream_filter.push("`status_report\n") == ""
+    assert stream_filter.push('{"state":"completed"}\n') == ""
+    assert stream_filter.push("```\n") == ""
+    assert stream_filter.push("final answer") == "\nfinal answer"
+
+
+def test_internal_output_stream_filter_buffers_spaced_status_report_prefix() -> None:
+    stream_filter = InternalOutputStreamFilter()
+
+    assert stream_filter.push("visible answer") == "visible answer"
+    assert stream_filter.push("\n``` ") == ""
+    assert stream_filter.push("sta") == ""
+    assert stream_filter.push("tus_report\n") == ""
     assert stream_filter.push('{"state":"completed"}\n') == ""
     assert stream_filter.push("```\n") == ""
     assert stream_filter.push("final answer") == "\nfinal answer"

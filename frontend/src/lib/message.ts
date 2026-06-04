@@ -128,11 +128,18 @@ function stripInternalFencedBlocks(text: string) {
   let skippingFence = false;
   let removed = false;
   const statusFence = "```status_report";
+  const statusFenceNames = ["status_report", "status"];
   const canBecomeStatusFence = (value: string) =>
     Boolean(value) &&
     (statusFence.startsWith(value) ||
-      /^```\s*status_report\b/i.test(value) ||
-      /^```\s*status\b/i.test(value));
+      /^```\s*(?:status_report|status)\b/i.test(value) ||
+      (() => {
+        const partial = value.match(/^```\s*([a-z_]*)$/i);
+        if (!partial) return false;
+        return statusFenceNames.some((name) =>
+          name.startsWith(partial[1].toLowerCase()),
+        );
+      })());
 
   for (const [index, line] of lines.entries()) {
     const trimmed = line.trim();

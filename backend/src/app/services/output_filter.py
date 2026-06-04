@@ -13,16 +13,22 @@ _FINAL_SECTION_TITLES = {
     "回复",
 }
 _STATUS_REPORT_FENCE = "```status_report"
+_STATUS_REPORT_NAMES = ("status_report", "status")
 
 
 def _can_become_status_report_fence(value: str) -> bool:
     """Return True for an in-flight fence prefix that should stay hidden."""
     if not value:
         return False
-    return (
-        _STATUS_REPORT_FENCE.startswith(value)
-        or re.match(r"^```\s*status_report\b", value, flags=re.IGNORECASE) is not None
-        or re.match(r"^```\s*status\b", value, flags=re.IGNORECASE) is not None
+    normalized = value.strip().lower()
+    if _STATUS_REPORT_FENCE.startswith(normalized):
+        return True
+    if re.match(r"^```\s*(?:status_report|status)\b", normalized, flags=re.IGNORECASE):
+        return True
+    partial = re.match(r"^```\s*([a-z_]*)$", normalized, flags=re.IGNORECASE)
+    return bool(
+        partial
+        and any(name.startswith(partial.group(1).lower()) for name in _STATUS_REPORT_NAMES)
     )
 
 
