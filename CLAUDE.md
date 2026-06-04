@@ -8,6 +8,11 @@ AgentHub (codename `fish`) is a multi-agent collaboration IM workbench. It combi
 
 项目的文档位于`docs/`目录下，包括项目介绍和更详细的功能设计。
 
+### 前端项目速查
+
+- **`frontend/README.md`** — 前端项目梗概，包含技术栈、目录结构、关键架构决策、重要修改边界和环境变量。**AI 助手在修改前端代码前应优先阅读此文件。**
+- **`frontend/EVALUATION.md`** — 前端代码库评估报告，包含改进建议、已知问题和潜在缺陷。
+
 ## 开发规范
 
 ### 总述
