@@ -67,6 +67,7 @@ AgentHub 后端采用经典的分层架构，自上而下分为六层：
 | 模块 | 职责 |
 |------|------|
 | `conversation_session_manager.py` | **Conversation 级会话管理器**（进程内单例）。管理每个 conversation 的长期运行 `AgentSession`，负责创建/复用、用户输入发送、generation 取消、Session 清理 |
+| `runtime/generation_records.py` | V2 运行记录服务。把 generation、AgentRun、调度决策和 watchdog 事件折叠写入 `Conversation.extra.runtime`，为刷新恢复和后续迁移独立表提供结构化数据 |
 | `runtime_service.py` | **统一编排入口**。根据 Agent 数量自动选择调度器（单 Agent → `SingleAgentScheduler`，多 Agent → `TechLeadScheduler`），创建 `AgentSession` |
 | `runtime_adapter.py` | **适配器层**。将 `agent_runtime` 的 `ToolExecutor` 接口桥接到 app 层的 `build_tools_for_agent` / `execute_tool_by_name` |
 | `agents/function_loop.py` / `agents/tool_loop.py` | Agent Function Calling Loop、工具 schema 构造、权限过滤和工具结果回填 |
@@ -80,6 +81,7 @@ AgentHub 后端采用经典的分层架构，自上而下分为六层：
 **关键设计**：
 - `ConversationSessionManager` 是进程内单例，多进程部署时需配合 sticky session
 - `OrchestratorService.create_session()` 是 V2 运行时创建 `AgentSession` 的入口；当前主产品群聊仍以 `app/services/workflows/` 为事实来源。
+- WebSocket 路径每次 `start_generation()` 都会创建 `Conversation.extra.runtime.generations[]` 记录。记录包含 `session_id`、`model_config_id`、prompt 摘要、事件计数、调度决策、watchdog 触发项和每个 Agent 的 `agent_runs` 终态；完成后 `generation_status` 会从 `running` 收敛到 `idle / failed / cancelled`。
 
 ---
 

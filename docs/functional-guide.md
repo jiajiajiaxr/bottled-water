@@ -80,6 +80,7 @@
 - Agent 列表与编辑：`backend/src/app/api/agents.py`
 - Agent 执行循环：`backend/src/app/services/agents/function_loop.py`、`backend/src/app/services/agents/tool_loop.py`
 - 编排入口：`backend/src/app/services/runtime_service.py`、`backend/src/agent_runtime/`
+- 运行记录：`backend/src/app/services/runtime/generation_records.py`
 - 官方 Agent 种子：`backend/src/app/services/seed.py`
 - 前端 Agent 广场：`frontend/src/features/agents/components/AgentDirectoryDrawer/`
 
@@ -99,6 +100,8 @@
 - 工作流保存：`backend/src/app/api/conversations.py`
 - 工作流执行：`backend/src/app/services/workflows/engine.py`、`backend/src/app/services/workflows/nodes/`
 - 工作流类型：`frontend/src/types/`
+
+WebSocket V2 运行时会在每次 generation 启动时写入 `conversation.extra.runtime.generations[]`。该记录保存本轮 prompt 摘要、模型配置、调度决策、watchdog 事件和每个 Agent 的运行状态，取消或失败也会落库，便于刷新后排查和后续做运行历史界面。
 - 群聊设置与画布：`frontend/src/features/chat/components/drawers/ConversationSettingsDrawer.tsx`、`frontend/src/features/workflow/`
 
 ## 6. 工作流画布

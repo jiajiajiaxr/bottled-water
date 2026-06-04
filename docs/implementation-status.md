@@ -41,7 +41,7 @@
 | 产物生成真实 PDF/DOCX/PPTX/XLSX/HTML，支持预览和主格式下载 | `services/tools/builtins/artifact/`、`services/document_model/`、`api/artifacts.py`、`features/preview/` | 已实现，需持续加固 | PDF/DOCX 已使用 DocumentModel 渲染；Office 在线预览走转 PDF 缓存，环境未安装 LibreOffice 时降级。 | P0 |
 | 沙箱真实受控执行，工作区隔离 | `services/tools/builtins/sandbox/`、`services/workspaces/filesystem.py`、`api/sandbox.py` | 已完成 | 本地执行有命令白名单、cwd 限制、超时和输出截断；生产容器隔离策略由部署环境承载。 | P0 |
 | 上下文系统支持真实 role history、附件、工具结果、会话状态 | `services/context/`、`services/agents/function_messages.py` | 已完成 | 工作区长期记忆只在用户明确要求时写入，不自动跨会话保存闲聊。 | P0 |
-| 多智能体 V2：ConversationSessionManager、TechLeadScheduler、Watchdog 最小闭环 | `backend/src/app/services/conversation_session_manager.py`、`backend/src/agent_runtime/`、`backend/src/app/persistence/sqlalchemy_backend.py` | 部分完成 | 运行时骨架、调度器、看门狗、状态报告解析和测试存在；Blackboard / Agent Context 可通过 SQLAlchemyBackend 持久化恢复；主产品群聊仍以 workflow engine 为事实来源。 | P1 |
+| 多智能体 V2：ConversationSessionManager、TechLeadScheduler、Watchdog 最小闭环 | `backend/src/app/services/conversation_session_manager.py`、`backend/src/app/services/runtime/generation_records.py`、`backend/src/agent_runtime/`、`backend/src/app/persistence/sqlalchemy_backend.py` | 部分完成 | 运行时骨架、调度器、看门狗、状态报告解析和测试存在；Generation / AgentRun 历史已写入 `Conversation.extra.runtime`，Blackboard / Agent Context 可通过 SQLAlchemyBackend 持久化恢复；主产品群聊仍以 workflow engine 为事实来源。 | P1 |
 | 完整 Actor 化、Blackboard 协商式调度、分布式多 Agent 生命周期 | `docs/architecture/multi-agent-v2-design.md` | Roadmap | 属于长期架构计划，不应作为当前已交付功能承诺；当前只保留最小闭环和适配层。 | P2 |
 | RBAC / 审计后台 | `api/security_ops.py`、`services/audit.py`、`db/models/security.py` | 部分完成 | 权限和审计表/API 存在；细粒度后台运营界面仍偏基础。 | P2 |
 | 部署 / 远程控制生产级能力 | `api/deployments.py`、`api/sandbox.py`、`services/tools/builtins/sandbox/` | 部分完成 | 演示级部署记录、预览和回滚接口存在；生产级远程控制、容器隔离和云部署仍是 roadmap。 | P2 |
@@ -58,6 +58,7 @@
 - 工作流内嵌画布“返回聊天”切换状态和路由同步，悬浮按钮点击不再冒泡给 React Flow。
 - SQLAlchemy 持久化后端改为替换 `Conversation.extra` JSON，确保 Blackboard 版本、结构化摘要、KV 状态和 Agent 私有上下文栈能跨 Session 恢复。
 - Workflow Artifact 节点不再使用旧 demo HTML 路径，改为通过 `execute_tool_by_name()` 调用真实 `artifact.create_pdf/docx/xlsx/pptx/html/web_app`，并发布真实产物和预览消息事件。
+- WebSocket V2 runtime 启动 generation 时会创建可恢复运行记录，消费 runtime 事件时更新 AgentRun 状态、调度决策和 watchdog 事件，完成/失败/取消后收敛到终态。
 
 ## Roadmap 边界
 
