@@ -34,7 +34,7 @@
 | Skill 包化能力：manifest、runtime、测试、版本、依赖 | `backend/src/app/services/skills/` | 已实现，需持续加固 | `prompt/agent/mcp/script` runner 和 legacy adapter 已拆分；脚本 runner 仍以受控能力为主，不应宣称生产级插件沙箱。 | P1 |
 | MCP 服务管理、发现、健康检查、调用记录 | `backend/src/app/services/mcp/`、`backend/src/app/api/mcp.py` | 已实现，需持续加固 | HTTP/stdio/SSE-WS transport 分层已存在；外部网络、鉴权和超时策略依赖运行环境。 | P1 |
 | 单聊 Agent 走完整 Function Calling Loop | `backend/src/app/services/agents/function_loop.py`、`tool_loop.py`、`direct.py` | 已完成 | 真实模型是否选择 tool_calls 取决于供应商；后端保留产物请求兜底和权限拒绝路径。 | P0 |
-| 群聊 workflow 是事实来源，agent/tool/skill/mcp/artifact 节点真实执行 | `backend/src/app/services/workflows/engine.py`、`nodes/`、`scheduler.py`、`runtime.py` | 已完成 | 当前支持基础 DAG、并行、条件/循环基础语义；Artifact 节点已走统一 `artifact.create_*` 工具链并回写真实 `artifact_id/export_url`；复杂人工审批和版本发布不在当前完成范围。 | P0 |
+| 群聊 workflow 是事实来源，agent/tool/skill/mcp/artifact 节点真实执行 | `backend/src/app/services/workflows/engine.py`、`nodes/`、`scheduler.py`、`runtime.py` | 已完成 | 当前支持基础 DAG、并行、条件/循环基础语义；Artifact 节点已走统一 `artifact.create_*` 工具链并回写真实 `artifact_id/export_url`；节点失败策略支持 `stop/retry/skip`，`retry_count` 和 `node.retry` 事件已持久化；复杂人工审批和版本发布不在当前完成范围。 | P0 |
 | 工作流画布可编辑、可拖拽、连线、节点运行态可见 | `frontend/src/features/workflow/`、`features/chat/components/drawers/WorkflowCanvas.tsx` | 已实现，需持续加固 | 已迁到工作台内嵌模式并保留完整画布；本轮修复返回聊天和按钮事件冒泡。 | P1 |
 | SSE/WS 事件、停止响应、正在回答状态收敛 | `backend/src/app/services/chat/cancellation.py`、`finalizer.py`、`realtime/`、`frontend/src/api/message.ts`、`frontend/src/lib/runningConversations.ts` | 已实现，需持续加固 | 已有回归测试覆盖 message_stop / generation_finished 边界；跨进程运行需 Redis 或 sticky session。 | P0 |
 | 文件系统像云盘/IDE 一样展示工作区文件 | `backend/src/app/api/workspace_files.py`、`services/files/workspace_*`、`frontend/src/features/workspaceFiles/` | 已实现，需持续加固 | 上传、产物、沙箱、项目文件聚合已实现；Office 预览依赖 LibreOffice，缺失时降级并提示。 | P1 |
@@ -59,6 +59,7 @@
 - SQLAlchemy 持久化后端改为替换 `Conversation.extra` JSON，确保 Blackboard 版本、结构化摘要、KV 状态和 Agent 私有上下文栈能跨 Session 恢复。
 - Workflow Artifact 节点不再使用旧 demo HTML 路径，改为通过 `execute_tool_by_name()` 调用真实 `artifact.create_pdf/docx/xlsx/pptx/html/web_app`，并发布真实产物和预览消息事件。
 - WebSocket V2 runtime 启动 generation 时会创建可恢复运行记录，消费 runtime 事件时更新 AgentRun 状态、调度决策和 watchdog 事件，完成/失败/取消后收敛到终态。
+- WorkflowRun 的 `node_states` 新增 `retry_count`，工作流引擎支持节点级 `stop/retry/skip` 失败策略，并用测试覆盖失败结果重试、异常重试和跳过后继续下游。
 
 ## Roadmap 边界
 

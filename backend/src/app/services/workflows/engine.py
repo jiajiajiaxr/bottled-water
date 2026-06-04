@@ -205,9 +205,8 @@ class WorkflowEngine:
     async def _run_node(self, node: Node) -> bool:
         if self.workflow_run.status == "cancelled":
             return False
-        retry_limit = max(
-            0, min(int(node.config.get("retry") or node.config.get("retry_count") or 0), 3)
-        )
+        retry_limit = self._retry_limit(node)
+        failure_strategy = self._failure_strategy(node)
         attempt = 0
         while True:
             try:
@@ -228,6 +227,23 @@ class WorkflowEngine:
                     raw_output=execution.output,
                     graph=self.graph,
                 )
+                if execution.status in {"failed", "error"} and attempt < retry_limit:
+                    attempt += 1
+                    await self._mark_retry(node, attempt, retry_limit, str(execution.output.get("error") or "node failed"))
+                    continue
+                if execution.status in {"failed", "error"} and failure_strategy == "skip":
+                    execution = NodeExecutionResult(
+                        status="skipped",
+                        output={
+                            **(execution.output or {}),
+                            "reason": "failure_strategy_skip",
+                            "failed_status": execution.status,
+                        },
+                        branch=execution.branch,
+                        message=execution.message or f"{node.title} skipped after failure",
+                        retries=attempt,
+                    )
+                execution.retries = max(execution.retries, attempt)
                 await self._complete_node(node, execution)
                 return execution.status not in {"failed", "error"}
             except asyncio.CancelledError:
@@ -240,20 +256,80 @@ class WorkflowEngine:
             except Exception as exc:
                 attempt += 1
                 if attempt <= retry_limit:
-                    append_run_event(
-                        self.workflow_run, "node.retry", {"node_id": node.id, "attempt": attempt}
-                    )
-                    self.db.commit()
+                    await self._mark_retry(node, attempt, retry_limit, str(exc))
                     continue
+                if failure_strategy == "skip":
+                    await self._mark_node(
+                        node,
+                        "skipped",
+                        100,
+                        output={
+                            "reason": "failure_strategy_skip",
+                            "error": str(exc),
+                            "attempts": attempt,
+                        },
+                        retry_count=attempt,
+                        message=f"{node.title} skipped after failure",
+                        edge_updates=[
+                            *[
+                                (edge.source, edge.target, "skipped")
+                                for edge in self.graph.incoming.get(node.id, [])
+                            ],
+                            *[
+                                (edge.source, edge.target, "ready")
+                                for edge in self.graph.outgoing.get(node.id, [])
+                            ],
+                        ],
+                    )
+                    self.result.outputs[node.id] = {
+                        "reason": "failure_strategy_skip",
+                        "error": str(exc),
+                        "attempts": attempt,
+                    }
+                    return True
                 await self._mark_node(
                     node,
                     "failed",
                     100,
                     output={"error": str(exc), "attempts": attempt},
                     error=str(exc),
+                    retry_count=attempt,
                     message=f"{node.title} failed",
                 )
                 return False
+
+    def _retry_limit(self, node: Node) -> int:
+        raw = node.config.get("retry")
+        if raw is None:
+            raw = node.config.get("retry_count")
+        if raw is None and self._failure_strategy(node) == "retry":
+            raw = 1
+        try:
+            return max(0, min(int(raw or 0), 3))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _failure_strategy(node: Node) -> str:
+        value = str(node.config.get("failure_strategy") or node.config.get("on_failure") or "stop")
+        value = value.lower().strip()
+        return value if value in {"stop", "skip", "retry"} else "stop"
+
+    async def _mark_retry(self, node: Node, attempt: int, retry_limit: int, error: str) -> None:
+        await self._mark_node(
+            node,
+            "running",
+            20,
+            output={"last_error": error},
+            retry_count=attempt,
+            message=f"{node.title} retrying ({attempt}/{retry_limit})",
+        )
+        append_run_event(
+            self.workflow_run,
+            "node.retry",
+            {"node_id": node.id, "attempt": attempt, "retry_limit": retry_limit, "error": error},
+        )
+        self.db.commit()
 
     def _context(self, node_input: dict[str, Any]) -> WorkflowExecutionContext:
         return WorkflowExecutionContext(
@@ -281,6 +357,7 @@ class WorkflowEngine:
         error: str | None = None,
         message: str | None = None,
         edge_updates: list[tuple[str, str, str]] | None = None,
+        retry_count: int | None = None,
     ) -> None:
         def _mutate(run: WorkflowRun) -> None:
             if status == "running":
@@ -297,11 +374,16 @@ class WorkflowEngine:
                 output=output,
                 error=error,
                 message=message,
+                retry_count=retry_count,
             )
             append_run_event(
                 run,
                 f"node.{status}",
-                {"node_id": node.id, **({"error": error} if error else {})},
+                {
+                    "node_id": node.id,
+                    **({"error": error} if error else {}),
+                    **({"retry_count": retry_count} if retry_count is not None else {}),
+                },
             )
 
         await mutate_workflow_run_locked(self.db, self.conversation, self.workflow_run, _mutate)
@@ -370,6 +452,7 @@ class WorkflowEngine:
             else None,
             message=execution.message,
             edge_updates=edge_updates,
+            retry_count=execution.retries,
         )
 
     def _node_input(self, node: Node) -> dict[str, Any]:

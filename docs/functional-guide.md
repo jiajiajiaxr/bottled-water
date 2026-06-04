@@ -127,6 +127,7 @@ WebSocket V2 运行时会在每次 generation 启动时写入 `conversation.extr
 - `loop` 节点记录最大循环次数和当前迭代。
 - `agent` 节点记录 Agent 输出摘要。
 - `tool` / `skill` / `mcp` 节点记录调用结果。
+- 节点失败策略支持 `stop`、`retry`、`skip`，重试次数会写入 `retry_count`，跳过失败节点时下游可以继续执行。
 
 相关代码：
 

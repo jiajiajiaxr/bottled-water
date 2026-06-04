@@ -160,6 +160,7 @@ def test_runtime_node_states_include_input_output_error_fields() -> None:
     assert states[0]["input"] == {}
     assert states[0]["output"] == {}
     assert states[0]["error"] is None
+    assert states[0]["retry_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -359,6 +360,17 @@ class FailingExecutor(WorkflowNodeExecutor):
         return NodeExecutionResult(output={"ok": node.id})
 
 
+class FailedResultThenSuccessExecutor(WorkflowNodeExecutor):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def execute(self, node: Any, context: Any) -> NodeExecutionResult:
+        self.calls += 1
+        if self.calls == 1:
+            return NodeExecutionResult(status="failed", output={"error": "temporary result failure"})
+        return NodeExecutionResult(output={"ok": True})
+
+
 class SlowParallelExecutor(WorkflowNodeExecutor):
     def __init__(self) -> None:
         self.started: list[str] = []
@@ -405,6 +417,9 @@ async def test_engine_retry_and_cancel_paths() -> None:
 
     assert flaky.calls == 2
     assert result.outputs["tool"] == {"ok": True}
+    retry_state = next(state for state in run.node_states if state["id"] == "tool")
+    assert retry_state["retry_count"] == 1
+    assert any(event["type"] == "node.retry" for event in run.events)
 
     cancelled_run = SimpleNamespace(**{**run.__dict__, "status": "cancelled", "events": []})
     with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
@@ -421,6 +436,47 @@ async def test_engine_retry_and_cancel_paths() -> None:
         ).run()
     assert cancelled.outputs == {}
     assert cancelled_run.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_engine_retries_failed_node_result_before_stopping() -> None:
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {
+                "id": "tool",
+                "type": "tool",
+                "config": {"failure_strategy": "retry", "tool_name": "api.test"},
+            },
+            {"id": "end", "type": "end"},
+        ],
+        "edges": [["start", "tool"], ["tool", "end"]],
+    }
+    db, conversation, user_message, task, run = _runtime(workflow)
+    executor = FailedResultThenSuccessExecutor()
+
+    with patch(
+        "app.services.workflows.engine.get_executor",
+        side_effect=lambda node_type: executor if node_type == "tool" else WorkflowNodeExecutor(),
+    ):
+        with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+            result = await WorkflowEngine(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                task=task,
+                workflow_run=run,
+                workflow=workflow,
+                prompt="hello",
+                channel="conversation:conv-1",
+                agents=[],
+            ).run()
+
+    state = next(item for item in run.node_states if item["id"] == "tool")
+    assert executor.calls == 2
+    assert result.outputs["tool"] == {"ok": True}
+    assert state["status"] == "completed"
+    assert state["retry_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -455,6 +511,44 @@ async def test_engine_marks_failed_node_and_skips_downstream_dependencies() -> N
     assert states["fail"]["error"] == "boom"
     assert states["end"]["status"] == "skipped"
     assert result.outputs["fail"]["error"] == "boom"
+
+
+@pytest.mark.asyncio
+async def test_engine_skip_failure_strategy_allows_downstream_nodes() -> None:
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {
+                "id": "fail",
+                "type": "tool",
+                "config": {"tool_name": "bad.tool", "failure_strategy": "skip"},
+            },
+            {"id": "end", "type": "end"},
+        ],
+        "edges": [["start", "fail"], ["fail", "end"]],
+    }
+    db, conversation, user_message, task, run = _runtime(workflow)
+
+    with patch("app.services.workflows.engine.get_executor", return_value=FailingExecutor()):
+        with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+            result = await WorkflowEngine(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                task=task,
+                workflow_run=run,
+                workflow=workflow,
+                prompt="hello",
+                channel="conversation:conv-1",
+                agents=[],
+            ).run()
+
+    states = {state["id"]: state for state in run.node_states}
+    assert run.status == "completed"
+    assert states["fail"]["status"] == "skipped"
+    assert states["fail"]["output"]["reason"] == "failure_strategy_skip"
+    assert states["end"]["status"] == "completed"
+    assert result.outputs["fail"]["failed_status"] == "failed"
 
 
 @pytest.mark.asyncio

@@ -256,10 +256,19 @@ run_agentic_tool_loop(..., agent=agent)
 - `progress`
 - `message`
 - `output`
+- `retry_count`
 - `started_at`
 - `completed_at`
 
 前端可以通过它展示每个节点是否运行、是否失败、输出是什么。
+
+节点失败策略由 `config.failure_strategy` 或 `config.on_failure` 控制：
+
+- `stop`：默认策略。节点失败后当前工作流失败，依赖它的下游节点会被跳过。
+- `retry`：节点失败后重试。可用 `config.retry` 或 `config.retry_count` 指定重试次数，当前实现限制在 0-3 次；如果只写 `failure_strategy: "retry"`，默认重试 1 次。
+- `skip`：节点失败后将该节点标记为 `skipped`，在 `output.reason` 写入 `failure_strategy_skip`，并允许下游继续运行。
+
+每次重试会更新 `node_states[].retry_count`，并记录 `node.retry` 事件，便于刷新后恢复运行历史和排查失败原因。
 
 ## 8. 工具调用链
 

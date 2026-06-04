@@ -69,6 +69,7 @@ def build_node_states(workflow: dict[str, Any]) -> list[dict[str, Any]]:
                 "progress": 0,
                 "output": output,
                 "error": None,
+                "retry_count": 0,
                 "started_at": None,
                 "completed_at": None,
             }
@@ -115,6 +116,7 @@ def _set_workflow_node_state(
     output: dict[str, Any] | None = None,
     error: str | None = None,
     message: str | None = None,
+    retry_count: int | None = None,
 ) -> None:
     states = list(run.node_states or [])
     now = utcnow().isoformat()
@@ -127,6 +129,8 @@ def _set_workflow_node_state(
             state["input"] = input_data
         if output is not None:
             state["output"] = {**(state.get("output") or {}), **output}
+        if retry_count is not None:
+            state["retry_count"] = max(0, int(retry_count))
         if error is not None:
             state["error"] = error
         elif status not in {"failed", "error"}:
