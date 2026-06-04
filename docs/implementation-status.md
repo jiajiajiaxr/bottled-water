@@ -64,6 +64,14 @@
 - 安全后台的用户角色更新会同步 `users.role` 与 `user_roles`，默认保留 `ROLE_USER` 并追加提升角色，同时写入 `security.user.role.update` 审计日志；前端安全运营面板已支持直接变更用户角色并展开审计详情。
 - 预览部署迁入 `services/deployments.py`，创建和 `deploy.preview` 工具调用都执行产物可访问性健康检查；容器部署无运行时时会以 failed 状态和清晰错误降级，并写入部署审计。
 - Skill manifest 现在支持 `mcp_skill` 和 `script_skill` runtime；脚本 Skill 只有在 manifest 显式依赖 `file.write` 与 `sandbox.run` 时才会写入脚本和输入文件，并通过同一沙箱工具执行，运行记录落到 `SkillRun` 与 `ToolInvocation`。
+- Skill manifest 更新会保存可恢复版本快照和 hash；manifest tests 通过 `SkillRuntime` 生成 suite/case 级测试报告，依赖检查会从数据库 ToolDefinition / MCP / Skill 目录返回 resolved 明细。
+
+## 2026-06-04 Skill 包审计加固
+
+- `services/skills/versions.py` 现在会为 manifest 生成稳定 SHA-256 指纹；每次更新都会把前一版完整 manifest 快照、summary、变更字段、操作者、替换目标写入 `skills.metadata.versions`，并在当前 metadata 上保存 `manifest_hash`、`manifest_updated_at`、`manifest_updated_by`。
+- `services/skills/testing.py` 的 manifest tests 通过 `SkillRuntime` 执行，报告会持久化到 `skills.metadata.test_reports`，包含 suite id、manifest hash、依赖解析报告、每个 case 的输入、断言、输出摘要、provider status 和 `SkillRun.run_id`。
+- `services/skills/dependencies.py` 的 Tool 依赖解析改为以数据库 `tool_definitions` 为目录来源，同时返回 Tool / MCP / Skill 的 resolved 明细；缺失、禁用、不可见、无用户上下文等情况会给出可审计 reason。
+- 覆盖测试：`tests/test_skill_packages.py` 新增 manifest 版本快照、case 级测试报告、数据库工具目录依赖解析用例。
 
 ## Roadmap 边界
 
