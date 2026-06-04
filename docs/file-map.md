@@ -85,8 +85,8 @@ agenthub/
 - `backend/src/app/services/agents/tool_loop.py`：同步 Function Call 工具 schema 构造、授权校验、Tool / Skill / MCP 执行分发。
 - `backend/src/app/services/agents/async_tool_loop.py`、`async_tool_selection.py`：AsyncSession-backed V2 runtime adapter 的工具暴露、选择和执行分发。
 - `backend/src/app/services/agentic_runtime.py`：旧运行时兼容 shim，纯 re-export 到 `agents/async_tool_loop.py`，不包含业务逻辑。
-- `backend/src/app/services/ark.py`：火山方舟和 OpenAI-compatible 模型适配，包括普通调用、流式调用和 mock fallback。
-- `backend/src/app/services/llm_gateway.py`：模型配置测试和模型调用统一入口。
+- `backend/src/app/services/llm/ark.py`：火山方舟和 OpenAI-compatible 模型适配，包括普通调用、流式调用和 mock fallback；`services/ark.py` 仅保留旧导入 shim。
+- `backend/src/app/services/llm/gateway.py`：模型配置测试和模型调用统一入口；`services/llm_gateway.py` 仅保留旧导入 shim。
 - `backend/src/app/services/tool_registry.py`：兼容 shim。新代码使用 `backend/src/app/services/tools/catalog.py`、`executor.py`、`permissions.py`。
 - `backend/src/app/services/tools/builtins/`：内置工具真实实现，按 artifact、file、sandbox 等复杂能力拆分目录。
 - `backend/src/app/services/file_tools.py`：文件工具兼容入口，核心能力已迁到 `services/tools/builtins/file/` 和 `services/files/`。

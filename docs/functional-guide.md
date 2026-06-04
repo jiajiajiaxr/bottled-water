@@ -236,8 +236,8 @@ Agent 广场包含官方 Agent 和用户自定义 Agent。
 相关代码：
 
 - 配置读取：`backend/src/app/core/config.py`
-- 火山方舟适配：`backend/src/app/services/ark.py`
-- 模型测试：`backend/src/app/services/llm_gateway.py`
+- 火山方舟适配：`backend/src/app/services/llm/ark.py`
+- 模型测试：`backend/src/app/services/llm/gateway.py`
 - 模型 API：`backend/src/app/api/models.py`
 - 前端设置：`frontend/src/features/settings/components/GlobalSettingsDrawer/`
 

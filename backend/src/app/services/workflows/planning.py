@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, utcnow
-from app.services.ark import ArkProviderError, ark_client
+from app.services.llm.ark import ArkProviderError, ark_client
 from app.services.realtime.event_bus import event_bus
 from app.services.workflows.definition import WORKFLOW_REPLAN_PATTERN, _sanitize_workflow
 

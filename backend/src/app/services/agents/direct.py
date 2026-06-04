@@ -8,12 +8,12 @@ from app.core.config import get_settings
 from app.models import Agent, Conversation, Message, Subtask, Task, utcnow
 from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.agents.tool_loop import run_agentic_tool_loop
-from app.services.ark import ark_client
+from app.services.llm.ark import ark_client
 from app.services.chat.artifacts import _publish_tool_artifacts
 from app.services.chat.finalizer import finalize_streaming_agent_messages
 from app.services.context.builder import ContextBuilder
 from app.services.context.state import update_conversation_state_after_turn
-from app.services.llm_gateway import stream_model_config_chat
+from app.services.llm.gateway import stream_model_config_chat
 from app.services.output_filter import InternalOutputStreamFilter, strip_internal_agent_output
 from app.services.queue import queue_service
 from app.services.realtime.event_bus import event_bus

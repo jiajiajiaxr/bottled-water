@@ -104,7 +104,7 @@ Python 3.11 + FastAPI + SQLAlchemy (async) + Alembic + Pydantic。
   - `tools/builtins/`：内置 Tool 真实实现，按 artifact、file、sandbox 等领域拆分。
   - `skills/` / `mcp/`：Skill 包运行时与 MCP 服务管理、发现、调用记录。
   - `files/` / `document_model/`：工作区文件树、Office 预览和结构化文档渲染。
-  - `llm_gateway.py` / `ark.py`：模型调用网关。
+  - `llm/ark.py` / `llm/gateway.py`：模型调用网关；`ark.py` / `llm_gateway.py` 仅保留旧导入 shim。
 - `backend/src/db/models/`：按领域拆分的数据库模型。
 - `backend/src/agent_runtime/`：多智能体运行时引擎（Session、Scheduler、AgentLoop、Workflow）。
 - `backend/model_provider/`：大模型提供者抽象。

@@ -38,7 +38,7 @@ from app.schemas.requests import (
 from app.services.serialization import agent_to_dict
 from app.services.model_config_resolver import create_provider_from_db
 from app.services.tools.permissions import normalize_tool_names
-from app.services.llm_gateway import test_model_config
+from app.services.llm.gateway import test_model_config
 from model_provider.core.interfaces import ChatMessage
 
 router = APIRouter(tags=["agents"])

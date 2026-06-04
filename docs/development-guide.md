@@ -153,8 +153,8 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 
 ### 调整模型供应商
 
-1. 修改 `backend/src/app/services/ark.py` 或新增 provider service。
-2. 修改 `backend/src/app/services/llm_gateway.py`。
+1. 修改 `backend/src/app/services/llm/ark.py` 或新增 provider service。
+2. 修改 `backend/src/app/services/llm/gateway.py`；旧 `ark.py` / `llm_gateway.py` 只做兼容导出，不承载新逻辑。
 3. 修改 `backend/src/app/api/models.py` 的配置和测试接口。
 4. 修改全局设置表单。
 5. 不要把 API Key 暴露到 `frontend/src`。
@@ -222,7 +222,7 @@ send message
 
 - 页面空白：先跑 `corepack pnpm exec tsc --noEmit --pretty false`。
 - 登录失败：查 `backend/src/app/api/auth.py` 和 `.env` 的 `SECRET_KEY`。
-- 模型无响应：查 `LLM_PROVIDER`、`ARK_API_KEY`、`ARK_ENDPOINT_ID`，再看 `backend/src/app/services/ark.py`。
+- 模型无响应：查 `LLM_PROVIDER`、`ARK_API_KEY`、`ARK_ENDPOINT_ID`，再看 `backend/src/app/services/llm/ark.py`。
 - 消息一直显示正在回答：查 `localRunningConversationIds` 清理逻辑和 `runtime_service.run` / `conversation_session_manager` 是否抛错。
 - 工作流节点配置丢失：查 `conversations.py` normalize 是否保留 `type/config`。
 - 产物打不开：查 `Artifact.content`、`services/tools/builtins/artifact/export.py` 和 `PreviewPanel`。

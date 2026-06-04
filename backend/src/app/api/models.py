@@ -17,7 +17,7 @@ from app.schemas.requests import (
     TestModelRequest,
     UpdateModelConfigRequest,
 )
-from app.services.llm_gateway import test_model_config
+from app.services.llm.gateway import test_model_config
 from app.services.model_config_resolver import normalize_provider_type
 from app.services.serialization import model_config_to_dict, model_provider_to_dict
 from model_provider import get_builtin_providers

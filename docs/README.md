@@ -28,5 +28,5 @@
 - Agent 不按权限调用工具：`backend/src/app/services/agents/function_loop.py`、`backend/src/app/services/agents/tool_loop.py`、`backend/src/app/services/tools/`、`backend/src/db/models/`
 - 工作流画布保存或运行异常：`backend/src/app/api/conversations.py`、`backend/src/app/services/workflows/`、`frontend/src/features/workflow/`
 - 文件/产物异常：`backend/src/app/api/files.py`、`backend/src/app/api/artifacts.py`、`backend/src/app/services/files/`、`backend/src/app/services/tools/builtins/artifact/`
-- 模型调用失败：`backend/src/app/core/config.py`、`backend/src/app/services/ark.py`、`backend/src/app/services/llm_gateway.py`
+- 模型调用失败：`backend/src/app/core/config.py`、`backend/src/app/services/llm/ark.py`、`backend/src/app/services/llm/gateway.py`
 

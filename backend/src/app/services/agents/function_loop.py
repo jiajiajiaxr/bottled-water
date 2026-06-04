@@ -13,13 +13,13 @@ from app.services.agents.function_types import AgentFunctionLoopResult
 from app.services.agents.permission_guard import complete_missing_artifact_tool
 from app.services.agents.tool_events import tool_event_from_record
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
-from app.services.ark import ark_client
+from app.services.llm.ark import ark_client
 from app.services.context.attachments import attachment_preflight_reply
 from app.services.context.builder import ContextBuilder
 from app.services.context.state import update_conversation_state_after_turn
 from app.services.llm.tool_calls import artifact_arguments, detect_artifact_tool
 from app.services.llm.html_artifacts import HTML_ARTIFACT_TOOLS, normalize_html_artifact_arguments
-from app.services.llm_gateway import stream_model_config_chat
+from app.services.llm.gateway import stream_model_config_chat
 from app.services.output_filter import InternalOutputStreamFilter, strip_internal_agent_output
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import message_to_dict, task_to_dict

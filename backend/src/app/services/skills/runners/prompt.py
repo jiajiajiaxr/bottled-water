@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from app.models import Skill
-from app.services.ark import ark_client
+from app.services.llm.ark import ark_client
 
 
 async def run_prompt_skill(

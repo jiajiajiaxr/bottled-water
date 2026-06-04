@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.core.database import SessionLocal
 from app.models import Conversation, Message, Subtask, Task, WorkflowRun, utcnow
 from app.services.agents.direct import _run_direct_agent
-from app.services.ark import ArkProviderError, ark_client
+from app.services.llm.ark import ArkProviderError, ark_client
 from app.services.chat.artifacts import _publish_tool_artifacts
 from app.services.chat.finalizer import fail_generation, finalize_streaming_agent_messages
 from app.services.output_filter import InternalOutputStreamFilter, strip_internal_agent_output

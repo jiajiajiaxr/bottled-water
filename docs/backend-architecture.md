@@ -74,7 +74,7 @@ AgentHub 后端采用经典的分层架构，自上而下分为六层：
 | `tools/catalog.py` / `tools/executor.py` / `tools/permissions.py` | 工具目录、数据库同步、参数校验、权限检查和调用记录 |
 | `tool_registry.py` | 已废弃兼容 shim，新代码不要依赖 |
 | `runtime_service.py` | 统一编排入口，创建 `AgentSession` 并选择调度策略 |
-| `llm_gateway.py` / `ark.py` | LLM 调用网关（旧版兼容） |
+| `llm/ark.py` / `llm/gateway.py` | LLM 调用网关；`ark.py` / `llm_gateway.py` 仅保留旧版 re-export shim |
 | `tools/builtins/artifact/` / `files/` / `document_model/` | 产物、工作区文件、Office 预览和结构化文档渲染 |
 | `mcp/` | MCP 目录、发现、transport、调用和审计 |
 
