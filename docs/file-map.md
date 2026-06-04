@@ -88,6 +88,7 @@ agenthub/
 - `backend/src/agent_runtime/runtime/agent_actor.py`：独立 asyncio Task Agent actor。
 - `backend/src/agent_runtime/runtime/actor_orchestrator.py`：opt-in 事件驱动 Actor Runtime 生命周期管理。
 - `backend/src/agent_runtime/strategies/scheduler_agent.py`：事件驱动 Team Leader / Scheduler actor。
+- `backend/src/app/services/runtime/generation_records.py`：把旧 Orchestrator 和新 Actor Runtime 的 generation、AgentRun、调度决策、watchdog、取消事件折叠进 `Conversation.extra.runtime`，供刷新恢复和前端运行态展示使用。
 - `backend/src/app/services/agents/function_loop.py`：Agent Function Calling Loop。根据 Agent 权限暴露 Tool、Skill、MCP，执行 tool_calls 并把结果回填模型。
 - `backend/src/app/services/agents/tool_loop.py`：同步 Function Call 工具 schema 构造、授权校验、Tool / Skill / MCP 执行分发。
 - `backend/src/app/services/agents/async_tool_loop.py`、`async_tool_selection.py`：AsyncSession-backed V2 runtime adapter 的工具暴露、选择和执行分发。

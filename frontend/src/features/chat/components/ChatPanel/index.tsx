@@ -22,6 +22,7 @@ import {
 import type { UploadProps } from "antd";
 import { api } from "@/api";
 import { MessageBubble } from "@/features/chat/components/MessageBubble";
+import { RuntimeDecisionStrip } from "@/features/chat/components/ChatPanel/RuntimeDecisionStrip";
 import { useMessageStore, useConversationStore } from "@/store";
 import { useMessageOperations } from "@/hooks";
 import type { ChatMessage, Conversation, ModelConfig, UploadedFile } from "@/types";
@@ -215,6 +216,7 @@ export function ChatPanel({
   return (
     <Content className="chat-panel">
       <div ref={messageListRef} className="message-list">
+        <RuntimeDecisionStrip conversation={active} />
         {loading ? (
           <Spin />
         ) : allMessages.length ? (

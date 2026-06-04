@@ -202,10 +202,13 @@ model_provider/
 - `agent_runtime.runtime.mailbox.Mailbox`：每个 Agent / Scheduler 的 inbox。
 - `agent_runtime.runtime.agent_stepper.AgentStepper`：在旧 AgentLoop 外层增加 step 间控制点。
 - `agent_runtime.runtime.agent_actor.AgentActor`：独立 asyncio Task，接收 control.assign，发布 AgentReport，并写入 Blackboard。
-- `agent_runtime.strategies.scheduler_agent.SchedulerAgent`：事件驱动 Team Leader 调度员，订阅 user.input / agent.report / blackboard.updated，输出 control.*。
+- `agent_runtime.strategies.scheduler_agent.SchedulerAgent`：继承 AgentActor 的事件驱动 Team Leader 调度员，订阅 user.input / agent.report / blackboard.updated，输出 scheduler.decision 与 control.*，并通过 agent.state_changed 暴露自身运行态。
 - `agent_runtime.runtime.actor_orchestrator.ActorOrchestrator`：Actor 生命周期管理器。
+- `app.services.runtime.generation_records`：折叠 actor runtime 事件到 `Conversation.extra.runtime.generations[]`，包括 scheduler.decision、agent.state_changed、agent.report、agent.failed、control.cancel 和 watchdog 事件。
 
 启用方式：`AgentSession.create(..., scheduler_config={"strategy": "tech_lead", "runtime": "actor"})`。业务层可通过 `conversation.extra.runtime = "actor"` 或 `runtime_mode = "actor"` 让 `OrchestratorService.create_session()` 进入该路径。默认 workflow 画布仍走现有 WorkflowEngine / 旧 Orchestrator，避免破坏当前演示主链路。
+
+取消边界：`ConversationSessionManager.cancel_generation()` 会先调用 `Session.cancel()` 让 actor runtime 收到 `control.cancel`，再取消后台 generation task，并把 `control.cancel` 与 terminal status 写入同一条 generation 记录。后台 task done 回调如果发现 generation 已被取消接口收敛，不会再次覆盖终态。
 
 ---
 

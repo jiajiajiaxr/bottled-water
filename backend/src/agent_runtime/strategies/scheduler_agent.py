@@ -19,14 +19,18 @@ from ..core.protocol import (
     USER_INPUT,
 )
 from ..core.types import AgentConfig, AgentReport, AgentState, AgentWill, Event, SchedulingDecision
+from ..runtime.agent_actor import AgentActor
 from ..runtime.event_dispatcher import EventDispatcher
-from ..runtime.mailbox import Mailbox
 from .tech_lead import TechLeadScheduler
 
 logger = get_logger(__name__)
 
+TEAM_LEADER_RUNTIME_PROMPT = """你是 AgentHub 群聊中的 Team Leader Agent。
+你的职责是根据用户输入、Blackboard、各 Agent 状态报告，选择下一步调度动作：
+assign、parallel、pause、wait 或 complete。你不是隐藏最高权限，只是擅长规划与协调的普通 Agent。"""
 
-class SchedulerAgent:
+
+class SchedulerAgent(AgentActor):
     """A scheduler that behaves like an event-driven runtime actor."""
 
     def __init__(
@@ -39,17 +43,25 @@ class SchedulerAgent:
         model_provider: BaseModelProvider | None = None,
         scheduler_id: str = "team_leader",
     ) -> None:
-        self.session_id = session_id
+        scheduler_config = AgentConfig(
+            id=scheduler_id,
+            name="Team Leader Scheduler",
+            system_prompt=TEAM_LEADER_RUNTIME_PROMPT,
+            role="leader",
+        )
+        super().__init__(
+            session_id=session_id,
+            agent_config=scheduler_config,
+            model_provider=model_provider,  # SchedulerAgent overrides run(); AgentLoop is not invoked here.
+            event_bus=event_bus,
+            blackboard_mgr=blackboard_mgr,
+            use_streaming=False,
+        )
         self.agents = agents
-        self.event_bus = event_bus
-        self.blackboard_mgr = blackboard_mgr
         self.scheduler_id = scheduler_id
-        self.mailbox = Mailbox(scheduler_id)
         self.reports: dict[str, AgentReport] = {}
         self.current_task = ""
         self.round_num = 0
-        self._closed = False
-        self._task: asyncio.Task | None = None
         self._subscriptions: list[str] = []
         self._scheduler = TechLeadScheduler(agents=agents, model_provider=model_provider)
         self._bind()
@@ -76,6 +88,7 @@ class SchedulerAgent:
         self.mailbox.close()
 
     async def run(self) -> None:
+        await self._set_state(AgentState.READY, reason="scheduler_started")
         while not self._closed:
             event = await self.mailbox.recv()
             if event.type == CONTROL_COMPLETE:
@@ -83,6 +96,7 @@ class SchedulerAgent:
             should_schedule = await self._consume_event(event)
             if should_schedule:
                 await self._schedule()
+        await self._set_state(AgentState.COMPLETED, reason="scheduler_stopped")
 
     async def _consume_event(self, event: Event) -> bool:
         if event.type == USER_INPUT:
@@ -99,6 +113,7 @@ class SchedulerAgent:
 
     async def _schedule(self) -> None:
         self.round_num += 1
+        await self._set_state(AgentState.RUNNING, reason="scheduler_deciding")
         blackboard = await self.blackboard_mgr.get(self.session_id) or {}
         reports = list(self.reports.values()) or list(self._initial_reports().values())
         try:
@@ -126,6 +141,8 @@ class SchedulerAgent:
             )
         )
         await self._publish_control(decision)
+        if not self._closed:
+            await self._set_state(AgentState.WAITING, reason="scheduler_waiting_for_reports")
 
     async def _publish_control(self, decision: SchedulingDecision) -> None:
         if decision.decision_type == "complete":

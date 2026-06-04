@@ -14,6 +14,7 @@ export type StreamAssistantHandlers = {
   onControl?: (stop: () => void) => void;
   onToken?: (agentId: string, token: string) => void;
   onThinking?: (agentId: string, thinking: string) => void;
+  onRuntimeEvent?: (event: string, payload: Record<string, unknown>) => void;
 };
 
 /** 消息内容中附件的精简结构（发送时只需要这几个字段） */

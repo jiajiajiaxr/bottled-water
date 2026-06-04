@@ -48,6 +48,49 @@ export interface Conversation {
   lastMessage: string;
   workflow?: ConversationWorkflow;
   workflow_runtime?: WorkflowRun;
+  generation_status?: "idle" | "running" | "failed" | "cancelled" | string;
+  active_session_id?: string | null;
+  runtime?: ConversationRuntime;
+}
+
+export interface ConversationRuntimeAgentRun {
+  agent_id: string;
+  agent_name?: string;
+  role?: string;
+  status?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+  output_preview?: string;
+  rationale?: string;
+  current_task?: string;
+}
+
+export interface ConversationRuntimeDecision {
+  round?: number;
+  decision?: string;
+  target?: string;
+  task?: string;
+  rationale?: string;
+  created_at?: string;
+}
+
+export interface ConversationRuntimeGeneration {
+  id: string;
+  session_id?: string;
+  status?: string;
+  started_at?: string;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
+  error?: string | null;
+  event_counts?: Record<string, number>;
+  decisions?: ConversationRuntimeDecision[];
+  agent_runs?: ConversationRuntimeAgentRun[];
+}
+
+export interface ConversationRuntime {
+  active_generation_id?: string | null;
+  generations?: ConversationRuntimeGeneration[];
 }
 
 export interface MessageAttachment {

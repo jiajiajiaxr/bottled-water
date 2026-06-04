@@ -140,6 +140,8 @@ function dispatchStreamEvent(
     // 运行时事件：Session 生命周期
     case "system.session_started":
     case "system.session_completed":
+    case "system.session_cancelled":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
     case "system.session_error":
       handlers.onDone?.(data as Record<string, unknown>);
@@ -154,6 +156,14 @@ function dispatchStreamEvent(
     case "system.agent_completed":
     case "system.agent_failed":
       handlers.onMessageEnd?.(data as Record<string, unknown>);
+      break;
+
+    case "scheduler.decision":
+    case "agent.state_changed":
+    case "agent.report":
+    case "agent.failed":
+    case "control.cancel":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
 
     // 运行时事件：工具调用

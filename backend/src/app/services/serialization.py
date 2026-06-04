@@ -219,6 +219,8 @@ def conversation_to_dict(conversation: Conversation) -> dict[str, Any]:
         "last_message_sender": conversation.last_message_sender,
         "last_message_at": iso(conversation.last_message_at),
         "updatedAt": iso(conversation.updated_at),
+        "generation_status": conversation.generation_status,
+        "active_session_id": conversation.active_session_id,
         "activity_score": conversation.activity_score,
         "message_count": conversation.message_count,
         "archived": conversation.status == "archived",
@@ -228,6 +230,7 @@ def conversation_to_dict(conversation: Conversation) -> dict[str, Any]:
         "remark": conversation.extra.get("remark", "") if isinstance(conversation.extra, dict) else "",
         "workflow": conversation.extra.get("workflow") if isinstance(conversation.extra, dict) else None,
         "workflow_runtime": conversation.extra.get("workflow_runtime") if isinstance(conversation.extra, dict) else None,
+        "runtime": redact_sensitive(conversation.extra.get("runtime")) if isinstance(conversation.extra, dict) else None,
         "created_at": iso(conversation.created_at),
         "updated_at": iso(conversation.updated_at),
     }

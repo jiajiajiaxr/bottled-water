@@ -1,0 +1,147 @@
+import type {
+  Conversation,
+  ConversationRuntime,
+  ConversationRuntimeAgentRun,
+  ConversationRuntimeGeneration,
+} from "../types";
+
+export function applyRuntimeEvent(
+  conversation: Conversation,
+  event: string,
+  payload: Record<string, unknown>,
+): Partial<Conversation> {
+  const runtime = ensureRuntime(conversation.runtime, payload);
+  const generation = latestOrActiveGeneration(runtime);
+  if (!generation) return {};
+
+  generation.event_counts = {
+    ...(generation.event_counts || {}),
+    [event]: (generation.event_counts?.[event] || 0) + 1,
+  };
+
+  if (event === "scheduler.decision") {
+    const decision = payload.decision as Record<string, unknown> | undefined;
+    generation.decisions = [
+      ...(generation.decisions || []),
+      {
+        round: numberOrUndefined(payload.round),
+        decision: stringOrUndefined(decision?.decision_type ?? decision?.decision),
+        target: stringOrUndefined(decision?.target_agent_id ?? payload.target),
+        task: stringOrUndefined(decision?.task_description ?? payload.task),
+        rationale: stringOrUndefined(decision?.rationale ?? payload.rationale),
+        created_at: new Date().toISOString(),
+      },
+    ].slice(-20);
+  }
+
+  if (event === "agent.state_changed") {
+    const agentId = agentIdFromPayload(payload);
+    if (agentId) {
+      const run = upsertAgentRun(generation, agentId);
+      run.status = stringOrUndefined(payload.state) || run.status;
+      run.current_task = stringOrUndefined(payload.task) || run.current_task;
+      if (run.status === "running") run.started_at ||= new Date().toISOString();
+      if (["completed", "failed", "cancelled"].includes(String(run.status))) {
+        run.completed_at ||= new Date().toISOString();
+      }
+      if (run.status === "failed") run.error = stringOrUndefined(payload.reason) || run.error;
+    }
+  }
+
+  if (event === "agent.report") {
+    const agentId = agentIdFromPayload(payload);
+    const report = payload.report as Record<string, unknown> | undefined;
+    if (agentId) {
+      const run = upsertAgentRun(generation, agentId);
+      run.status = stringOrUndefined(report?.state) || "completed";
+      run.output_preview = stringOrUndefined(payload.work_product) || run.output_preview;
+      run.rationale = stringOrUndefined(report?.rationale) || run.rationale;
+      run.completed_at ||= new Date().toISOString();
+    }
+  }
+
+  if (event === "agent.failed") {
+    const agentId = agentIdFromPayload(payload);
+    if (agentId) {
+      const run = upsertAgentRun(generation, agentId);
+      run.status = "failed";
+      run.error = stringOrUndefined(payload.error) || "Agent failed";
+      run.completed_at ||= new Date().toISOString();
+    }
+  }
+
+  if (["system.session_completed", "system.session_cancelled", "control.cancel"].includes(event)) {
+    generation.status = event === "system.session_completed" ? "completed" : "cancelled";
+    generation.completed_at ||= new Date().toISOString();
+    if (event !== "system.session_completed") generation.cancelled_at ||= generation.completed_at;
+    runtime.active_generation_id = null;
+  }
+
+  return {
+    runtime,
+    generation_status: runtime.active_generation_id ? "running" : event === "system.session_completed" ? "idle" : generation.status,
+  };
+}
+
+function ensureRuntime(
+  runtime: ConversationRuntime | undefined,
+  payload: Record<string, unknown>,
+): ConversationRuntime {
+  const generations: ConversationRuntimeGeneration[] = (runtime?.generations || []).map((item) => ({
+    ...item,
+    decisions: item.decisions ? [...item.decisions] : undefined,
+    agent_runs: item.agent_runs ? item.agent_runs.map((run) => ({ ...run })) : undefined,
+    event_counts: item.event_counts ? { ...item.event_counts } : undefined,
+  }));
+  const next: ConversationRuntime = {
+    active_generation_id: runtime?.active_generation_id,
+    generations,
+  };
+  if (!next.active_generation_id && generations.length) {
+    const latest = generations[generations.length - 1];
+    if (!["completed", "failed", "cancelled", "canceled"].includes(String(latest.status || ""))) {
+      next.active_generation_id = latest.id;
+    }
+  }
+  if (!next.active_generation_id) {
+    const id = stringOrUndefined(payload.generation_id ?? payload.session_id) || `live-${Date.now()}`;
+    next.active_generation_id = id;
+    generations.push({ id, status: "running", started_at: new Date().toISOString() });
+  }
+  return next;
+}
+
+function latestOrActiveGeneration(runtime: ConversationRuntime): ConversationRuntimeGeneration | undefined {
+  const generations = runtime.generations || [];
+  if (!generations.length) return undefined;
+  return (
+    generations.find((item) => item.id === runtime.active_generation_id) ||
+    generations[generations.length - 1]
+  );
+}
+
+function upsertAgentRun(generation: ConversationRuntimeGeneration, agentId: string): ConversationRuntimeAgentRun {
+  const runs = [...(generation.agent_runs || [])];
+  let run = runs.find((item) => item.agent_id === agentId);
+  if (!run) {
+    run = { agent_id: agentId, agent_name: agentId.slice(0, 8), status: "queued" };
+    runs.push(run);
+    generation.agent_runs = runs;
+  }
+  return run;
+}
+
+function agentIdFromPayload(payload: Record<string, unknown>): string | undefined {
+  const report = payload.report as Record<string, unknown> | undefined;
+  return stringOrUndefined(payload.agent_id ?? report?.agent_id);
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return String(value);
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}

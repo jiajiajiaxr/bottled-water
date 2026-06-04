@@ -6,6 +6,13 @@ from typing import Any, Iterable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_runtime.core.protocol import (
+    AGENT_FAILED,
+    AGENT_REPORT,
+    AGENT_STATE_CHANGED,
+    BLACKBOARD_UPDATED,
+    SCHEDULER_DECISION,
+)
 from agent_runtime.core.types import Event
 from db.models import Conversation, utcnow
 
@@ -173,12 +180,13 @@ async def finish_generation_record(
 def _should_record_event(event: Event) -> bool:
     if event.type.startswith("agent.token"):
         return False
-    return event.type.startswith(("system.", "control.", "agent.", "user."))
+    return event.type.startswith(("system.", "control.", "agent.", "user.", "scheduler.")) or event.type == BLACKBOARD_UPDATED
 
 
 def _record_agent_event(record: dict[str, Any], event: Event) -> None:
     payload = event.payload or {}
-    agent_id = str(payload.get("agent_id") or "")
+    report_payload = payload.get("report") if isinstance(payload.get("report"), dict) else {}
+    agent_id = str(payload.get("agent_id") or report_payload.get("agent_id") or "")
     if not agent_id:
         return
     agent_runs = list(record.get("agent_runs") or [])
@@ -201,6 +209,38 @@ def _record_agent_event(record: dict[str, Any], event: Event) -> None:
 
 def _apply_agent_status(item: dict[str, Any], event: Event) -> None:
     payload = event.payload or {}
+    if event.type == AGENT_STATE_CHANGED:
+        state = _normalize_agent_run_status(payload.get("state"))
+        item["status"] = state
+        if state == "running":
+            item["started_at"] = item.get("started_at") or _now_iso()
+            item["error"] = None
+        if state in {"completed", "failed", "cancelled"}:
+            item["completed_at"] = item.get("completed_at") or _now_iso()
+        if state == "failed":
+            item["error"] = str(payload.get("reason") or "Agent failed")[:1000]
+        item["last_reason"] = str(payload.get("reason") or "")[:300]
+        item["current_task"] = str(payload.get("task") or item.get("current_task") or "")[:300]
+        return
+    if event.type == AGENT_REPORT:
+        report = payload.get("report") if isinstance(payload.get("report"), dict) else {}
+        state = _normalize_agent_run_status(report.get("state"))
+        item["status"] = state
+        item["completed_at"] = item.get("completed_at") or _now_iso()
+        item["output_preview"] = str(payload.get("work_product") or "")[:300]
+        item["rationale"] = str(report.get("rationale") or "")[:500]
+        item["will"] = str(report.get("will") or "")[:50]
+        item["confidence"] = report.get("confidence")
+        if state == "failed":
+            item["error"] = "; ".join(str(x) for x in report.get("blockers") or [])[:1000]
+        else:
+            item["error"] = None
+        return
+    if event.type == AGENT_FAILED:
+        item["status"] = "failed"
+        item["completed_at"] = item.get("completed_at") or _now_iso()
+        item["error"] = str(payload.get("error") or "Agent failed")[:1000]
+        return
     if event.type.endswith("agent_started"):
         item["status"] = "running"
         item["started_at"] = item.get("started_at") or _now_iso()
@@ -219,17 +259,27 @@ def _apply_agent_status(item: dict[str, Any], event: Event) -> None:
 
 
 def _record_decision_event(record: dict[str, Any], event: Event) -> None:
-    if event.type != "control.scheduling_decision":
+    if event.type not in {"control.scheduling_decision", SCHEDULER_DECISION}:
         return
     payload = event.payload or {}
+    decision_payload = payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    decision_type = (
+        decision_payload.get("decision_type")
+        or decision_payload.get("decision")
+        or payload.get("decision")
+    )
+    target = decision_payload.get("target_agent_id") or payload.get("target")
+    task = decision_payload.get("task_description") or payload.get("task")
+    rationale = decision_payload.get("rationale") or payload.get("rationale")
     decisions = list(record.get("decisions") or [])
     decisions.append(
         {
             "round": payload.get("round"),
-            "decision": payload.get("decision"),
-            "target": payload.get("target"),
-            "task": str(payload.get("task") or "")[:300],
-            "rationale": str(payload.get("rationale") or "")[:500],
+            "decision": decision_type,
+            "target": target,
+            "task": str(task or "")[:300],
+            "rationale": str(rationale or "")[:500],
+            "raw": deepcopy(payload),
             "created_at": _now_iso(),
         }
     )
@@ -265,3 +315,19 @@ def _normalize_terminal_status(status: str) -> str:
         return "failed"
     return "completed"
 
+
+def _normalize_agent_run_status(value: Any) -> str:
+    status = str(value or "").lower()
+    if status in {"ready", "idle", "queued"}:
+        return "queued"
+    if status in {"running", "working"}:
+        return "running"
+    if status in {"paused", "waiting"}:
+        return status
+    if status in {"completed", "complete", "succeeded", "success"}:
+        return "completed"
+    if status in {"cancelled", "canceled"}:
+        return "cancelled"
+    if status in {"failed", "failure", "error", "blocked"}:
+        return "failed"
+    return "unknown"

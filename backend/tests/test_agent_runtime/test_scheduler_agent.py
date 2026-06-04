@@ -5,6 +5,7 @@ import pytest
 from agent_runtime.context.blackboard import BlackboardManager
 from agent_runtime.core.protocol import CONTROL_ASSIGN, SCHEDULER_DECISION, USER_INPUT
 from agent_runtime.core.types import AgentConfig, Event
+from agent_runtime.runtime.agent_actor import AgentActor
 from agent_runtime.runtime.event_dispatcher import EventDispatcher
 from agent_runtime.strategies.scheduler_agent import SchedulerAgent
 
@@ -26,6 +27,8 @@ async def test_scheduler_agent_turns_user_input_into_control_assign():
         model_provider=None,
     )
     scheduler.start()
+
+    assert isinstance(scheduler, AgentActor)
 
     await bus.publish(Event(type=USER_INPUT, payload={"content": "build a page"}, source="user"))
     decision = await _wait_for(events, SCHEDULER_DECISION)
@@ -50,4 +53,3 @@ async def _wait_for(events: list[Event], event_type: str) -> Event:
                 return event
         await asyncio.sleep(0.02)
     raise AssertionError(f"event {event_type} was not published")
-

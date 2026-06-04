@@ -224,8 +224,9 @@ class ConversationSessionManager:
             )
             ws_sink = WebSocketSink(conversation_id)
             await ws_sink.emit(cancel_event)
-            generation_id = self._generation_ids.get(conversation_id)
+            generation_id = self._generation_ids.pop(conversation_id, None)
             if generation_id:
+                await self._record_generation_event(conversation_id, generation_id, cancel_event)
                 await self._finish_generation(
                     conversation_id,
                     generation_id,
@@ -254,8 +255,9 @@ class ConversationSessionManager:
             status = "failed"
             error = str(e)
 
-        if self._generation_ids.get(conversation_id) == generation_id:
-            self._generation_ids.pop(conversation_id, None)
+        if self._generation_ids.get(conversation_id) != generation_id:
+            return
+        self._generation_ids.pop(conversation_id, None)
         try:
             asyncio.create_task(
                 self._finish_generation(conversation_id, generation_id, status=status, error=error)

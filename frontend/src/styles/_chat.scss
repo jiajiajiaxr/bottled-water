@@ -29,6 +29,25 @@
   background: $color-bg-message;
 }
 
+.runtime-decision-strip {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  width: fit-content;
+  max-width: min(920px, 100%);
+  margin: 0 auto $spacing-xxl;
+  padding: 8px 12px;
+  border: 1px solid rgba(145, 170, 210, 0.45);
+  border-radius: $radius-md;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(10px);
+
+  .ant-tag {
+    margin-inline-end: 0;
+  }
+}
+
 .message-row {
   display: flex;
   gap: $spacing-lg;

@@ -142,11 +142,16 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   setConversationCategories: (conversationCategories) =>
     set({ conversationCategories }),
   updateConversation: (id, patch) =>
-    set((state) => ({
-      conversations: state.conversations.map((c) =>
+    set((state) => {
+      const conversations = state.conversations.map((c) =>
         c.id === id ? { ...c, ...patch } : c,
-      ),
-    })),
+      );
+      const activeConversation =
+        state.activeConversation?.id === id
+          ? { ...state.activeConversation, ...patch }
+          : state.activeConversation;
+      return { conversations, activeConversation };
+    }),
   addConversation: (conversation) =>
     set((state) => ({
       conversations: [conversation, ...state.conversations],

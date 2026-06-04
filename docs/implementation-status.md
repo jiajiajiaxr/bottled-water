@@ -97,8 +97,10 @@
 - `runtime.agent_actor.AgentActor` 作为独立 `asyncio.Task` 运行，接收 `control.assign` 后执行 AgentLoop，发布 `agent.state_changed` / `agent.report` / `agent.failed`，并把 `agent_work` / `agent_error` 写入 Blackboard。
 - `strategies.scheduler_agent.SchedulerAgent` 作为事件驱动 Team Leader actor，订阅 `user.input`、`agent.report`、`blackboard.updated`，复用 `TechLeadScheduler` 的 LLM 调度能力，失败时回退到规则指派，并发布 `scheduler.decision` 和 `control.*` 指令。
 - `runtime.actor_orchestrator.ActorOrchestrator` 提供 opt-in 事件驱动运行入口；`Session` 在 `scheduler_config.runtime == "actor"` 时启用该路径，默认旧 Orchestrator 和 workflow 主链路不变。
-- `ConversationSessionManager.cancel_generation()` 会优先调用 `Session.cancel()`，让 actor runtime 收到取消事件后再取消后台 generation task。
-- 覆盖测试：`test_eventbus.py`、`test_agent_actor.py`、`test_scheduler_agent.py`、`test_actor_orchestrator.py` 覆盖事件路由、Actor 执行、调度员指派和 actor session 端到端闭环。
+- `ConversationSessionManager.cancel_generation()` 会优先调用 `Session.cancel()`，让 actor runtime 收到取消事件后再取消后台 generation task；取消事件会写入 generation 记录，并避免 task done 回调覆盖用户取消终态。
+- `SchedulerAgent` 已归入 `AgentActor` 继承体系，调度员会像普通 Agent 一样发布 `agent.state_changed`，同时把 LLM/规则调度结果发布为 `scheduler.decision`。
+- `generation_records` 已支持折叠 `scheduler.decision`、`agent.state_changed`、`agent.report`、`agent.failed`、`control.cancel` 等 actor runtime 事件，刷新后可以恢复调度决策、AgentRun 状态、输出摘要和取消原因。
+- 覆盖测试：`test_eventbus.py`、`test_agent_actor.py`、`test_scheduler_agent.py`、`test_actor_orchestrator.py`、`test_conversation_session_manager.py` 覆盖事件路由、Actor 执行、调度员指派、actor session 端到端闭环和 generation 运行记录恢复。
 
 ## 2026-06-04 MCP 调用链路加固
 
