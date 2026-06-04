@@ -156,6 +156,7 @@ function MessageBubbleComponent({
     previewAttachment?.previewUrl ??
     previewAttachment?.public_url ??
     previewAttachment?.url;
+  const visibleMessageContent = stripInternalAgentOutput(message.content);
 
   return (
     <>
@@ -200,9 +201,13 @@ function MessageBubbleComponent({
           )}
           <div className="message-content">
             {message.streamState === "streaming" ? (
-              <div className="markdown-content">{message.content}</div>
+              <div className="markdown-content">
+                {visibleMessageContent || (
+                  <p className="typing-placeholder">正在组织语言...</p>
+                )}
+              </div>
             ) : (
-              <MarkdownContent text={message.content} />
+              <MarkdownContent text={visibleMessageContent} />
             )}
           </div>
           {attachments.length > 0 && (

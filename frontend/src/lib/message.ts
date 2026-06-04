@@ -92,7 +92,8 @@ export function sectionTitle(line: string): { title?: string; remainder: string 
 export function stripInternalAgentOutput(raw: string) {
   const text = String(raw || "");
   if (!text.trim()) return "";
-  const lines = text.split(/\r?\n/);
+  const internalFenceResult = stripInternalFencedBlocks(text);
+  const lines = internalFenceResult.text.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     const { title, remainder } = sectionTitle(lines[index]);
     if (title && FINAL_SECTION_TITLES.has(title)) {
@@ -116,7 +117,35 @@ export function stripInternalAgentOutput(raw: string) {
     if (!skipping) visible.push(line);
   });
   const cleaned = visible.join("\n").trim();
-  return cleaned || (sawInternal ? "" : text.trim());
+  return cleaned || (
+    sawInternal || internalFenceResult.removed ? "" : text.trim()
+  );
+}
+
+function stripInternalFencedBlocks(text: string) {
+  const lines = text.split(/\r?\n/);
+  const visible: string[] = [];
+  let skippingFence = false;
+  let removed = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (!skippingFence && /^```\s*status_report\b/i.test(trimmed)) {
+      skippingFence = true;
+      removed = true;
+      continue;
+    }
+
+    if (skippingFence) {
+      if (trimmed.startsWith("```")) skippingFence = false;
+      continue;
+    }
+
+    visible.push(line);
+  }
+
+  return { text: visible.join("\n"), removed };
 }
 
 export function isTaskRunning(status?: string) {
