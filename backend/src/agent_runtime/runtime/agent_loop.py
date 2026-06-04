@@ -19,6 +19,7 @@ from common.logger import get_logger
 from ..core.types import AgentConfig, AgentReport, AgentState, AgentWill, ToolCall, ToolResult
 from ..core.interfaces import ToolExecutor
 from ..context.agent_ctx import AgentContext
+from .status_report import parse_agent_status_report
 
 logger = get_logger(__name__)
 
@@ -729,36 +730,7 @@ class AgentLoop:
 
     def _extract_status_report(self, content: str) -> AgentReport:
         """从回复中提取状态报告"""
-        import re
-
-        pattern = r"```\s*status_report\s*([\s\S]*?)\s*```"
-        match = re.search(pattern, content, flags=re.IGNORECASE)
-        if not match:
-            for fenced in re.finditer(
-                r"```\s*(?:json|status)?\s*([\s\S]*?)\s*```",
-                content,
-                flags=re.IGNORECASE,
-            ):
-                candidate = fenced.group(1)
-                if _StatusReportStreamFilter._body_looks_like_status_report(
-                    candidate.splitlines()
-                ):
-                    match = fenced
-                    break
-        if match:
-            try:
-                data = json.loads(match.group(1))
-                return AgentReport(
-                    agent_id=self.agent.id,
-                    state=self._parse_state(data.get("state", "unknown")),
-                    will=self._parse_will(data.get("will", "wait")),
-                    rationale=data.get("rationale", ""),
-                    blockers=data.get("blockers", []),
-                    priority=data.get("priority", 0),
-                    confidence=data.get("confidence", 0.0),
-                )
-            except (json.JSONDecodeError, ValueError):
-                pass
+        return parse_agent_status_report(content, self.agent.id)
 
         return AgentReport(
             agent_id=self.agent.id,
@@ -779,6 +751,7 @@ class AgentLoop:
             "idle": AgentState.IDLE,
             "ready": AgentState.READY,
             "running": AgentState.RUNNING,
+            "paused": AgentState.PAUSED,
             "waiting": AgentState.WAITING,
             "completed": AgentState.COMPLETED,
             "failed": AgentState.FAILED,

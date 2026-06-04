@@ -210,6 +210,10 @@ class ConversationSessionManager:
         """
         task = self._running_tasks.get(conversation_id)
         if task and not task.done():
+            session = self._sessions.get(conversation_id)
+            cancel = getattr(session, "cancel", None) if session else None
+            if cancel:
+                await cancel("user_cancelled")
             task.cancel()
             logger.info("Generation 取消", conversation_id=conversation_id)
 

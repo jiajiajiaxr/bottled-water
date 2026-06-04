@@ -193,6 +193,20 @@ model_provider/
 
 `Conversation.extra` 是 JSON 字段，运行时写入 Blackboard 和 Agent Context 时会整体替换目标 key，而不是原地修改嵌套 dict。这样 SQLAlchemy 可以可靠追踪变更，避免版本号、结构化摘要、KV 状态或私有上下文栈在刷新 Session 后丢失。
 
+### 2.4 异步 Actor Runtime（opt-in）
+
+当前代码保留稳定的旧 `Orchestrator` 轮询调度路径，同时新增可选的事件驱动 Actor Runtime：
+
+- `agent_runtime.core.protocol`：统一运行时事件协议。
+- `agent_runtime.runtime.event_dispatcher.EventDispatcher`：EventBus，支持 publish/subscribe/target routing，并兼容旧 sink dispatch。
+- `agent_runtime.runtime.mailbox.Mailbox`：每个 Agent / Scheduler 的 inbox。
+- `agent_runtime.runtime.agent_stepper.AgentStepper`：在旧 AgentLoop 外层增加 step 间控制点。
+- `agent_runtime.runtime.agent_actor.AgentActor`：独立 asyncio Task，接收 control.assign，发布 AgentReport，并写入 Blackboard。
+- `agent_runtime.strategies.scheduler_agent.SchedulerAgent`：事件驱动 Team Leader 调度员，订阅 user.input / agent.report / blackboard.updated，输出 control.*。
+- `agent_runtime.runtime.actor_orchestrator.ActorOrchestrator`：Actor 生命周期管理器。
+
+启用方式：`AgentSession.create(..., scheduler_config={"strategy": "tech_lead", "runtime": "actor"})`。业务层可通过 `conversation.extra.runtime = "actor"` 或 `runtime_mode = "actor"` 让 `OrchestratorService.create_session()` 进入该路径。默认 workflow 画布仍走现有 WorkflowEngine / 旧 Orchestrator，避免破坏当前演示主链路。
+
 ---
 
 ### 2.6 基础设施层 (`common/`, `app/core/`)

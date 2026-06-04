@@ -193,6 +193,13 @@ class OrchestratorService:
             and isinstance(conversation.extra, dict)
             and isinstance(conversation.extra.get("workflow"), dict)
         )
+        runtime_mode = ""
+        if conversation.extra and isinstance(conversation.extra, dict):
+            runtime_mode = str(
+                conversation.extra.get("runtime")
+                or conversation.extra.get("runtime_mode")
+                or ""
+            ).strip()
 
         tool_executor = _ToolExecutorAdapter(
             db, primary_agent, user, conversation
@@ -260,7 +267,10 @@ class OrchestratorService:
         # ---- 多 Agent TechLead 模式 ----
         return AgentSession.create(
             agents=agent_configs,
-            scheduler_config={"strategy": "tech_lead"},
+            scheduler_config={
+                "strategy": "tech_lead",
+                **({"runtime": "actor"} if runtime_mode == "actor" else {}),
+            },
             model_provider=model_provider,
             persistence=SQLAlchemyBackend(db),
             event_sink=event_sink,

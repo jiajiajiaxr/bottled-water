@@ -88,6 +88,18 @@
 
 这些方向可以继续演进，但新增实现应保持当前模块边界：`chat -> workflows/agents -> tools/skills/mcp -> llm/files/artifacts/sandbox`，避免把新逻辑重新堆回旧 shim。
 
+## 2026-06-04 异步 Actor Runtime 落地
+
+- `agent_runtime.core.protocol` 定义了 `control.assign/pause/resume/cancel/complete`、`agent.report/state_changed`、`blackboard.updated`、`scheduler.decision` 等事件协议。
+- `runtime.event_dispatcher.EventDispatcher` 已从单纯 sink dispatcher 扩展为 EventBus，支持 `publish()`、`subscribe()`、`unsubscribe()`、通配事件过滤和 target 定向路由；旧 `dispatch()` / SSE sink 兼容保留。
+- `runtime.mailbox.Mailbox` 为每个 Agent / Scheduler 提供 `asyncio.Queue` inbox，可绑定 EventBus 接收定向控制事件。
+- `runtime.agent_stepper.AgentStepper` 在兼容旧 `AgentLoop.run()` 的前提下，增加 step 间控制检查，支持 assign/pause/resume/cancel/complete 状态处理。
+- `runtime.agent_actor.AgentActor` 作为独立 `asyncio.Task` 运行，接收 `control.assign` 后执行 AgentLoop，发布 `agent.state_changed` / `agent.report` / `agent.failed`，并把 `agent_work` / `agent_error` 写入 Blackboard。
+- `strategies.scheduler_agent.SchedulerAgent` 作为事件驱动 Team Leader actor，订阅 `user.input`、`agent.report`、`blackboard.updated`，复用 `TechLeadScheduler` 的 LLM 调度能力，失败时回退到规则指派，并发布 `scheduler.decision` 和 `control.*` 指令。
+- `runtime.actor_orchestrator.ActorOrchestrator` 提供 opt-in 事件驱动运行入口；`Session` 在 `scheduler_config.runtime == "actor"` 时启用该路径，默认旧 Orchestrator 和 workflow 主链路不变。
+- `ConversationSessionManager.cancel_generation()` 会优先调用 `Session.cancel()`，让 actor runtime 收到取消事件后再取消后台 generation task。
+- 覆盖测试：`test_eventbus.py`、`test_agent_actor.py`、`test_scheduler_agent.py`、`test_actor_orchestrator.py` 覆盖事件路由、Actor 执行、调度员指派和 actor session 端到端闭环。
+
 ## 2026-06-04 MCP 调用链路加固
 
 - `services/mcp/invocation.py` 在 allowlist 拒绝、参数 schema 校验失败、transport 超时、鉴权失败和不支持的 SSE/WebSocket transport 降级时，都会创建并完成 `McpToolInvocation`，调用结果包含稳定 `error_code` 和可读 `error_message`。

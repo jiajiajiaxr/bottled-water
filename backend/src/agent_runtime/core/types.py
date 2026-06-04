@@ -17,6 +17,7 @@ class AgentState(str, Enum):
     IDLE = "idle"
     READY = "ready"
     RUNNING = "running"
+    PAUSED = "paused"
     WAITING = "waiting"
     COMPLETED = "completed"
     FAILED = "failed"

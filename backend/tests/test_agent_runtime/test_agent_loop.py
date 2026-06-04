@@ -224,6 +224,31 @@ class TestAgentLoopStatusParsing:
         assert report.state == AgentState.UNKNOWN
         assert report.will == AgentWill.WAIT
 
+    def test_extract_status_report_normalizes_aliases_and_bounds(self, loop):
+        content = "\n".join(
+            [
+                "done",
+                "```status_report",
+                '{"state": "done", "will": "finish", "blockers": "none", "priority": 99, "confidence": 1.5}',
+                "```",
+            ]
+        )
+        report = loop._extract_status_report(content)
+
+        assert report.state == AgentState.COMPLETED
+        assert report.will == AgentWill.COMPLETE
+        assert report.blockers == ["none"]
+        assert report.priority == 10
+        assert report.confidence == 1.0
+
+    def test_extract_status_report_from_plain_json_object(self, loop):
+        content = 'work result {"state": "error", "will": "blocked", "rationale": "tool failed"}'
+        report = loop._extract_status_report(content)
+
+        assert report.state == AgentState.FAILED
+        assert report.will == AgentWill.BLOCKED
+        assert report.rationale == "tool failed"
+
     def test_extract_missing_block(self, loop):
         content = "没有任何状态报告"
         report = loop._extract_status_report(content)

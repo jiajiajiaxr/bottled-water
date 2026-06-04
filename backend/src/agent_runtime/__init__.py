@@ -33,7 +33,12 @@ from .core.types import (
 )
 from .core.interfaces import PersistenceBackend, EventSink, ToolExecutor
 from .runtime.session import Session
+from .runtime.agent_actor import AgentActor
+from .runtime.actor_orchestrator import ActorOrchestrator
+from .runtime.event_dispatcher import EventDispatcher
+from .runtime.mailbox import Mailbox
 from .runtime.watchdog import Watchdog, WatchdogConfig
+from .strategies.scheduler_agent import SchedulerAgent
 from .strategies.base import Scheduler
 from .strategies.tech_lead import TechLeadScheduler
 from .strategies.single_agent import SingleAgentScheduler
@@ -59,11 +64,16 @@ __all__ = [
     "ToolExecutor",
     # 运行时
     "Session",
+    "AgentActor",
+    "ActorOrchestrator",
+    "EventDispatcher",
+    "Mailbox",
     "Watchdog",
     "WatchdogConfig",
     # 调度策略
     "Scheduler",
     "TechLeadScheduler",
+    "SchedulerAgent",
     "SingleAgentScheduler",
     # 上下文管理
     "BlackboardManager",

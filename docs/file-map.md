@@ -81,6 +81,13 @@ agenthub/
 - `backend/src/app/services/runtime_service.py`：统一编排入口。负责创建 AgentSession、选择调度策略（单 Agent / TechLead / Workflow）。
 - `backend/src/app/services/chat/scheduling.py`：消息级、会话级和 workflow 默认策略的统一解析入口，供 SSE、WebSocket 和 RuntimeService 复用。
 - `backend/src/agent_runtime/`：核心运行时。包含 Session、Scheduler、AgentLoop、Workflow 图遍历等。
+- `backend/src/agent_runtime/core/protocol.py`：异步多 Agent Runtime 事件协议常量。
+- `backend/src/agent_runtime/runtime/event_dispatcher.py`：运行时 EventBus，兼容 sink dispatch，并支持 publish/subscribe/target routing。
+- `backend/src/agent_runtime/runtime/mailbox.py`：Agent / Scheduler inbox。
+- `backend/src/agent_runtime/runtime/agent_stepper.py`：兼容旧 AgentLoop 的 step 间控制层。
+- `backend/src/agent_runtime/runtime/agent_actor.py`：独立 asyncio Task Agent actor。
+- `backend/src/agent_runtime/runtime/actor_orchestrator.py`：opt-in 事件驱动 Actor Runtime 生命周期管理。
+- `backend/src/agent_runtime/strategies/scheduler_agent.py`：事件驱动 Team Leader / Scheduler actor。
 - `backend/src/app/services/agents/function_loop.py`：Agent Function Calling Loop。根据 Agent 权限暴露 Tool、Skill、MCP，执行 tool_calls 并把结果回填模型。
 - `backend/src/app/services/agents/tool_loop.py`：同步 Function Call 工具 schema 构造、授权校验、Tool / Skill / MCP 执行分发。
 - `backend/src/app/services/agents/async_tool_loop.py`、`async_tool_selection.py`：AsyncSession-backed V2 runtime adapter 的工具暴露、选择和执行分发。
