@@ -352,6 +352,8 @@ agent_runtime/（零业务依赖）
 - `app.services.mcp.invocation` 是 MCP 调用记录和错误收敛入口；它负责创建 `McpToolInvocation`、执行 allowlist/schema 预检、分发 transport、写入 `error_code` 与审计日志。
 - `app.services.mcp.transports.common` 只负责通用 allowlist/env 规则；`http.py`、`stdio.py`、`sse_ws.py` 分别承载 transport 细节。
 - 失败调用分为配置/权限错误和连接/transport 错误：前者不会把 MCP Server 健康误判为离线，后者会更新为 offline，便于管理页提示真实故障。
+- `app.services.mcp.discovery.probe_server_async` 是服务探测入口。HTTP / stdio 会优先发起真实 JSON-RPC `tools/list`，刷新 `server.tools` 并记录 `metadata.last_probe`；探测失败会标记 offline 并保留错误原因。
+- 本地演示用 `agenthub-mcp-filesystem` stdio 命令提供受控内置适配目录，外部二进制缺失时以 degraded probe 记录降级原因，不会伪造任意第三方 MCP 服务在线。
 
 ### Skill Runtime 边界
 

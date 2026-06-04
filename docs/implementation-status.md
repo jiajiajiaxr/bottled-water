@@ -90,5 +90,7 @@
 - `services/mcp/invocation.py` 在 allowlist 拒绝、参数 schema 校验失败、transport 超时、鉴权失败和不支持的 SSE/WebSocket transport 降级时，都会创建并完成 `McpToolInvocation`，调用结果包含稳定 `error_code` 和可读 `error_message`。
 - `services/mcp/transports/common.py` 明确规则：`server.tools` 中显式禁用的工具优先于 `tool_filter` 通配符，避免 `echo.*` 重新放开 `echo.secret` 这类禁用工具。
 - `services/mcp/transports/http.py` 对 HTTP timeout、request error、401/403 鉴权错误返回清晰诊断；SSE/WebSocket transport 目前走显式降级入口，不伪装成 HTTP 调用。
+- `/mcp-servers/{id}/probe` 不再在 API 路由里硬编码默认工具；`services/mcp/discovery.py` 会对 HTTP / stdio 优先发起真实 JSON-RPC `tools/list`，刷新 `server.tools`，并把探测来源、错误和工具数量写入 `server.metadata.last_probe`。
+- 本地演示 `agenthub-mcp-filesystem` stdio 命令保留受控内置适配目录，缺少外部二进制时以 degraded probe 记录降级原因，避免把普通第三方 MCP 误判为在线。
 - 服务健康状态只在真实连接/transport 失败时标记 offline；allowlist 或参数错误不会误判 MCP Server 离线。
-- 覆盖测试：`tests/test_capability_systems.py` 中新增 allowlist、schema failure、timeout、SSE/WebSocket 降级记录用例。
+- 覆盖测试：`tests/test_capability_systems.py` 中新增 allowlist、schema failure、timeout、SSE/WebSocket 降级记录、HTTP tools/list 探测和 probe 失败诊断用例。

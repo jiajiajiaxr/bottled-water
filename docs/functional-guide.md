@@ -279,6 +279,8 @@ MCP 服务用于接入外部工具和上下文服务。
 - 查看调用记录。
 - 删除用户创建的 MCP 服务。
 - Agent 可按权限绑定 MCP。
+- HTTP / stdio MCP 探测会发起 JSON-RPC `tools/list`，并将结果写入服务工具目录；探测失败会在服务 metadata 中记录 `last_probe` 错误原因。
+- 本地演示内置 `agenthub-mcp-filesystem` 适配器可在缺少外部二进制时降级为受控工具目录，便于演示文件类 MCP 能力。
 
 相关代码：
 
@@ -377,3 +379,4 @@ MCP 服务用于接入外部工具和上下文服务。
 - `error_code` 目前包含 `mcp_tool_not_allowed`、`mcp_argument_validation_failed`、`mcp_timeout`、`mcp_authentication_failed`、`mcp_transport_unsupported`、`mcp_transport_error`，前端可以据此展示明确提示。
 - `server.tools` 中显式禁用的工具优先级高于 `tool_filter` 通配符；被拒绝的调用不会触发真实 transport。
 - HTTP MCP 会明确区分 timeout、request error 和 401/403 鉴权问题；SSE/WebSocket MCP 暂未启用真实 transport 时会返回可读降级错误，并保留原文件/配置下载与调用记录。
+- MCP 服务探测和工具列表不再由路由硬编码默认工具；`/mcp-servers/{id}/probe` 复用 `services/mcp/discovery.py`，HTTP/stdio 优先真实 `tools/list`，失败时显示 `last_probe` 诊断。
