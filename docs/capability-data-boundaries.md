@@ -17,7 +17,7 @@ AgentHub 将 Tool、MCP、Skill 拆成两层职责：
 
 内置工具的真实执行仍在 `backend/src/app/services/tools/builtins/executor.py` 以及 `builtins/file/`、`builtins/artifact/`、`builtins/sandbox/` 等领域目录。自定义 Python 工具走 `backend/src/app/services/tools/custom.py`。统一入口是 `backend/src/app/services/tools/executor.py`，执行前会读取 `ToolDefinition`、校验参数、检查权限并写入 `tool_invocations`。
 
-旧入口 `backend/src/app/services/tool_registry.py` 和 `backend/src/app/services/tools/registry.py` 仅保留为 shim，方便旧代码继续导入；新代码应直接使用 `services/tools/catalog.py`、`executor.py` 和 `permissions.py`。
+旧入口 `backend/src/app/services/tool_registry.py` 和 `backend/src/app/services/tools/registry.py` 仅保留为 shim，方便旧代码继续导入；历史 awaitable 适配集中在 `services/tools/legacy_registry.py`；新代码应直接使用 `services/tools/catalog.py`、`executor.py` 和 `permissions.py`。
 
 ## MCP
 

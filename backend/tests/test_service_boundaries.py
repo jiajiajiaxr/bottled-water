@@ -27,6 +27,8 @@ def test_legacy_capability_imports_are_reexport_shims() -> None:
     from app.services.llm import ark as llm_ark
     from app.services.llm import gateway as llm_gateway_impl
     from app.services.mcp import invoke_mcp_tool_recorded, tool_name
+    from app.services import tool_registry
+    from app.services.tools import legacy_registry
     from app.services.tools import builtin_executor
     from app.services.tools.builtins.artifact import export as artifact_export
     from app.services.tools.builtins import file as builtin_file
@@ -43,6 +45,8 @@ def test_legacy_capability_imports_are_reexport_shims() -> None:
     assert ark.LLMStreamEvent is llm_ark.LLMStreamEvent
     assert llm_gateway.stream_model_config_chat is llm_gateway_impl.stream_model_config_chat
     assert llm_gateway.test_model_config is llm_gateway_impl.test_model_config
+    assert tool_registry.list_tools is legacy_registry.list_tools
+    assert tool_registry.invoke_tool is legacy_registry.invoke_tool
     assert builtin_executor.invoke_builtin_tool
 
 

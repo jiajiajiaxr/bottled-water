@@ -87,7 +87,8 @@ agenthub/
 - `backend/src/app/services/agentic_runtime.py`：旧运行时兼容 shim，纯 re-export 到 `agents/async_tool_loop.py`，不包含业务逻辑。
 - `backend/src/app/services/llm/ark.py`：火山方舟和 OpenAI-compatible 模型适配，包括普通调用、流式调用和 mock fallback；`services/ark.py` 仅保留旧导入 shim。
 - `backend/src/app/services/llm/gateway.py`：模型配置测试和模型调用统一入口；`services/llm_gateway.py` 仅保留旧导入 shim。
-- `backend/src/app/services/tool_registry.py`：兼容 shim。新代码使用 `backend/src/app/services/tools/catalog.py`、`executor.py`、`permissions.py`。
+- `backend/src/app/services/tool_registry.py`：兼容 shim，纯 re-export 到 `tools/legacy_registry.py`。新代码使用 `backend/src/app/services/tools/catalog.py`、`executor.py`、`permissions.py`。
+- `backend/src/app/services/tools/legacy_registry.py`：历史 awaitable registry API 适配层，用于旧集成兼容；不承载新的工具业务逻辑。
 - `backend/src/app/services/tools/builtins/`：内置工具真实实现，按 artifact、file、sandbox 等复杂能力拆分目录。
 - `backend/src/app/services/file_tools.py`：文件工具兼容入口，核心能力已迁到 `services/tools/builtins/file/` 和 `services/files/`。
 - `backend/src/app/services/files/`：工作区文件树、文件引用解析、Office 预览和文件类 Tool 支撑。

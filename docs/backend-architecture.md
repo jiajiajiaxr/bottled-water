@@ -72,7 +72,7 @@ AgentHub 后端采用经典的分层架构，自上而下分为六层：
 | `runtime_adapter.py` | **适配器层**。将 `agent_runtime` 的 `ToolExecutor` 接口桥接到 app 层的 `build_tools_for_agent` / `execute_tool_by_name` |
 | `agents/function_loop.py` / `agents/tool_loop.py` / `agents/async_tool_loop.py` | Agent Function Calling Loop、工具 schema 构造、权限过滤和工具结果回填；`async_tool_loop.py` 仅服务 AsyncSession-backed V2 runtime adapter |
 | `tools/catalog.py` / `tools/executor.py` / `tools/permissions.py` | 工具目录、数据库同步、参数校验、权限检查和调用记录 |
-| `tool_registry.py` | 已废弃兼容 shim，新代码不要依赖 |
+| `tool_registry.py` / `tools/legacy_registry.py` | 已废弃兼容 shim；顶层旧入口仅 re-export，历史 awaitable 适配集中在 `tools/legacy_registry.py`，新代码不要依赖 |
 | `runtime_service.py` | 统一编排入口，创建 `AgentSession` 并选择调度策略 |
 | `llm/ark.py` / `llm/gateway.py` | LLM 调用网关；`ark.py` / `llm_gateway.py` 仅保留旧版 re-export shim |
 | `tools/builtins/artifact/` / `files/` / `document_model/` | 产物、工作区文件、Office 预览和结构化文档渲染 |
