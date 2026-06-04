@@ -39,6 +39,40 @@ async def run_legacy_mcp(
     }
 
 
+async def run_mcp_skill(
+    db: Session,
+    skill: Skill,
+    user: User | None,
+    conversation: Conversation | None,
+    manifest: dict[str, Any],
+    runtime_input: dict[str, Any],
+) -> dict[str, Any]:
+    entry = manifest.get("entry") if isinstance(manifest.get("entry"), dict) else {}
+    server_id = str(entry.get("server_id") or entry.get("mcp_server_id") or "")
+    tool_name = str(entry.get("tool_name") or entry.get("name") or "")
+    if not server_id or not tool_name:
+        return {"status": "failed", "output": "mcp_skill requires entry.server_id and entry.tool_name", "runtime": manifest["runtime"]}
+    server = db.get(McpServer, server_id)
+    if not server:
+        return {"status": "failed", "output": "MCP server not found", "runtime": manifest["runtime"]}
+    invocation = await invoke_mcp_tool_recorded(
+        db,
+        server=server,
+        tool_name_value=tool_name,
+        arguments=mcp_arguments(runtime_input, tool_name),
+        user=user,
+        conversation_id=conversation.id if conversation else None,
+        timeout_ms=min(server.timeout_ms or 30000, 5000),
+    )
+    return {
+        "status": invocation["status"],
+        "output": invocation.get("result") or invocation.get("error_message"),
+        "invocation_id": invocation["id"],
+        "runtime": manifest["runtime"],
+        "type": "skill_mcp",
+    }
+
+
 def legacy_mcp_refs(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     entry = manifest.get("entry") if isinstance(manifest.get("entry"), dict) else {}
     refs = entry.get("legacy_tool_refs") if isinstance(entry.get("legacy_tool_refs"), list) else []

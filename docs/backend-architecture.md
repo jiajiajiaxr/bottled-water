@@ -353,6 +353,12 @@ agent_runtime/（零业务依赖）
 - `app.services.mcp.transports.common` 只负责通用 allowlist/env 规则；`http.py`、`stdio.py`、`sse_ws.py` 分别承载 transport 细节。
 - 失败调用分为配置/权限错误和连接/transport 错误：前者不会把 MCP Server 健康误判为离线，后者会更新为 offline，便于管理页提示真实故障。
 
+### Skill Runtime 边界
+
+- `app.services.skills.runtime.SkillRuntime` 是 Skill 包唯一执行入口，负责 manifest 校验、依赖检查、`SkillRun` 记录和 runner 分发。
+- `prompt_skill` / `agent_skill` 负责提示词或 Agent 风格能力编排；`mcp_skill` 只桥接到 MCP invocation，不直接实现外部工具。
+- `script_skill` 必须在 manifest 中声明 `file.write` 与 `sandbox.run` 依赖，运行时通过统一 Tool Executor 写入脚本/输入文件并调用受控沙箱，因此会同时产生 `SkillRun` 和 `ToolInvocation`。
+
 ### RBAC 与审计边界
 
 - `app.api.security_ops` 负责安全运营 API，包括角色、权限、用户角色和审计查询。

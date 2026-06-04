@@ -6,7 +6,7 @@ from typing import Any
 from app.core.errors import ValidationAppError
 
 
-SUPPORTED_SKILL_RUNTIMES = {"prompt_skill", "agent_skill"}
+SUPPORTED_SKILL_RUNTIMES = {"prompt_skill", "agent_skill", "mcp_skill", "script_skill"}
 DEFAULT_INPUT_SCHEMA = {
     "type": "object",
     "properties": {

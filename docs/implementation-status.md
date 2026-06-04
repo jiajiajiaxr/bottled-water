@@ -31,7 +31,7 @@
 | Tool 目录统一展示内置和自定义工具，Agent Function Calling 暴露与执行一致 | `backend/src/app/services/tools/catalog.py`、`executor.py`、`builtins/`、`backend/src/app/services/agents/tool_loop.py`、`backend/src/app/api/tools.py` | 已完成 | 本轮已将 `/api/v1/tools`、seed 和旧 `agentic_runtime.py` 收敛到新版 catalog/executor；顶层 `tool_registry.py` 仅保留 shim。 | P0 |
 | 内置 Tool 同步到 `tool_definitions`，目录去重，执行写入 `tool_invocations` | `services/tools/catalog.py`、`services/tools/runs.py`、`db/models/capabilities.py` | 已完成 | 本轮增加按 name 去重，避免内置工具重复显示；执行仍由代码 handler 完成。 | P0 |
 | Agent 可配置工具、Skill、MCP 权限，并在页面模式正常加载 | `frontend/src/features/agents/components/AgentDirectoryDrawer/` | 已完成 | 本轮修复 `asPage` 模式不加载模型/工具/Skill/MCP 目录；旧授权工具会显示为 disabled legacy 选项，避免保存时丢配置。 | P0 |
-| Skill 包化能力：manifest、runtime、测试、版本、依赖 | `backend/src/app/services/skills/` | 已实现，需持续加固 | `prompt/agent/mcp/script` runner 和 legacy adapter 已拆分；脚本 runner 仍以受控能力为主，不应宣称生产级插件沙箱。 | P1 |
+| Skill 包化能力：manifest、runtime、测试、版本、依赖 | `backend/src/app/services/skills/` | 已实现，需持续加固 | `prompt/agent/mcp/script` runner 和 legacy adapter 已拆分；`mcp_skill` 走记录化 MCP 调用，`script_skill` 必须声明 `file.write` + `sandbox.run` 依赖并通过受控工具链执行，不应宣称生产级插件沙箱。 | P1 |
 | MCP 服务管理、发现、健康检查、调用记录 | `backend/src/app/services/mcp/`、`backend/src/app/api/mcp.py` | 已实现，需持续加固 | HTTP/stdio/SSE-WS transport 分层已存在；外部网络、鉴权和超时策略依赖运行环境。 | P1 |
 | 单聊 Agent 走完整 Function Calling Loop | `backend/src/app/services/agents/function_loop.py`、`tool_loop.py`、`direct.py` | 已完成 | 真实模型是否选择 tool_calls 取决于供应商；后端保留产物请求兜底和权限拒绝路径。 | P0 |
 | 群聊 workflow 是事实来源，agent/tool/skill/mcp/artifact 节点真实执行 | `backend/src/app/services/workflows/engine.py`、`nodes/`、`scheduler.py`、`runtime.py` | 已完成 | 当前支持基础 DAG、并行、条件/循环基础语义；Artifact 节点已走统一 `artifact.create_*` 工具链并回写真实 `artifact_id/export_url`；节点失败策略支持 `stop/retry/skip`，`retry_count` 和 `node.retry` 事件已持久化；复杂人工审批和版本发布不在当前完成范围。 | P0 |
@@ -63,6 +63,7 @@
 - 消息入口、SSE 兼容入口和 WebSocket 入口统一使用 `services/chat/scheduling.py` 解析调度策略；有 workflow 的群聊默认走 `workflow`，显式切换 `tech_lead` 会重建对应 Session，避免复用旧调度器。
 - 安全后台的用户角色更新会同步 `users.role` 与 `user_roles`，默认保留 `ROLE_USER` 并追加提升角色，同时写入 `security.user.role.update` 审计日志；前端安全运营面板已支持直接变更用户角色并展开审计详情。
 - 预览部署迁入 `services/deployments.py`，创建和 `deploy.preview` 工具调用都执行产物可访问性健康检查；容器部署无运行时时会以 failed 状态和清晰错误降级，并写入部署审计。
+- Skill manifest 现在支持 `mcp_skill` 和 `script_skill` runtime；脚本 Skill 只有在 manifest 显式依赖 `file.write` 与 `sandbox.run` 时才会写入脚本和输入文件，并通过同一沙箱工具执行，运行记录落到 `SkillRun` 与 `ToolInvocation`。
 
 ## Roadmap 边界
 

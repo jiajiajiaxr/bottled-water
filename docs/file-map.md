@@ -94,6 +94,7 @@ agenthub/
 - `backend/src/app/services/artifacts.py`：产物对象创建和基础内容组织。
 - `backend/src/app/services/artifact_exports.py`：产物导出兼容入口，核心导出在 `services/tools/builtins/artifact/export.py`。
 - `backend/src/app/services/deployments.py`：预览部署创建、产物可访问性健康检查、部署步骤和日志生成。
+- `backend/src/app/services/skills/`：Skill manifest、依赖检查、版本记录、测试运行和 `prompt/agent/mcp/script` runner。
 - `backend/src/app/services/mcp_runtime.py`：MCP 兼容入口，核心目录、发现、transport 和调用在 `services/mcp/`。
 - `backend/src/app/services/knowledge.py`：轻量知识库切片、索引、检索和上下文片段构造。
 - `backend/src/app/services/realtime/event_bus.py`：事件总线，优先 Redis PubSub，缺省使用内存队列；用于 SSE/实时状态。
