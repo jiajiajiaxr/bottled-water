@@ -1,11 +1,9 @@
 import { useEffect } from "react";
-import { App as AntApp } from "antd";
 import { api } from "@/api";
 import { disconnectConversationWS } from "@/api/websocket";
 import {
   useConversationStore,
   useMessageStore,
-  useArtifactStore,
   useUIStore,
 } from "@/store";
 import { useStreamingMessages } from "./useStreamingMessages";
@@ -26,7 +24,6 @@ import type { MessageBody } from "@/types/messages";
  * 本 Hook 只负责业务编排（何时调用、以什么顺序调用）。
  */
 export function useMessageOperations(userName?: string) {
-  const { message } = AntApp.useApp();
   const { activeId } = useConversationStore();
   const { updateMessages } = useMessageStore();
   // === 流式状态子模块 ===
@@ -102,7 +99,7 @@ export function useMessageOperations(userName?: string) {
 
     try {
       await api.sendMessageWs(conversationId, body, streaming.streamHandlers);
-    } catch (error) {
+    } catch {
       // 处理错误
     } finally {
       // 清理状态

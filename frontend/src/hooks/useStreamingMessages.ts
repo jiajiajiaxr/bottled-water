@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMessageStore } from "@/store";
 import type { ChatMessage } from "@/types";
 import { StreamAssistantHandlers } from "@/types/messages";
@@ -21,7 +21,6 @@ export function useStreamingMessages(conversationId?: string) {
   const [streamingMessages, setStreamingMessages] = useState<
     Map<string, ChatMessage>
   >(new Map());
-  const [streamState, setStreamState] = useState<StreamState>("idle");
   const [displayOrder, setDisplayOrder] = useState<string[]>([]);
 
   /**
@@ -29,7 +28,10 @@ export function useStreamingMessages(conversationId?: string) {
    * 否则 React 闭包陷阱会导致 onMessageEnd 读到旧值，无法正确归档。
    */
   const streamingMessagesRef = useRef(streamingMessages);
-  streamingMessagesRef.current = streamingMessages;
+
+  useEffect(() => {
+    streamingMessagesRef.current = streamingMessages;
+  }, [streamingMessages]);
 
   const streamHandlers: StreamAssistantHandlers = {
     onMessageStart: (payload) => {
@@ -90,7 +92,7 @@ export function useStreamingMessages(conversationId?: string) {
         return [...prev, { ...msg, streamState: "done" as const }];
       });
 
-      updateMessageVersions((prev) => {
+      updateMessageVersions(() => {
         return new Map();
       });
     },
@@ -145,9 +147,7 @@ export function useStreamingMessages(conversationId?: string) {
       }
     },
 
-    onDone: () => {
-      setStreamState("done");
-    },
+    onDone: () => {},
 
     // 以下暂时空实现
     onMessageNew: () => {},
