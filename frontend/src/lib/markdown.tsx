@@ -2,6 +2,23 @@ import React, { useMemo, type ReactNode } from "react";
 import { stripInternalAgentOutput } from "./message";
 import { renderInlineMarkdown } from "./markdown-inline";
 
+function looksLikeInternalFence(
+  fenceName: string | undefined,
+  code: string[],
+): boolean {
+  if (fenceName === "status_report" || fenceName === "status") return true;
+  const firstMeaningful = code.find((line) => line.trim().length > 0);
+  if (!firstMeaningful) return false;
+  const first = firstMeaningful.trim().toLowerCase();
+  if (first === "status_report" || first === "status") return true;
+  const body = code.join("\n").toLowerCase();
+  return (
+    body.trim().startsWith("{") &&
+    /"state"\s*:/.test(body) &&
+    /"(?:will|rationale|blockers|priority|confidence)"\s*:/.test(body)
+  );
+}
+
 function MarkdownContentComponent({ text }: { text: string }) {
   const blocks = useMemo(() => {
     const result: ReactNode[] = [];
@@ -34,7 +51,14 @@ function MarkdownContentComponent({ text }: { text: string }) {
           code.push(lines[index]);
           index += 1;
         }
-        if (isInternalFence) continue;
+        const closed = index < lines.length;
+        if (
+          isInternalFence ||
+          !closed ||
+          looksLikeInternalFence(fenceName, code)
+        ) {
+          continue;
+        }
         result.push(
           <pre key={`code-${result.length}`}>
             <code>{code.join("\n")}</code>

@@ -389,6 +389,7 @@ async def _stream_master_response(
     stream_text = ""
     reasoning_text = ""
     stream_filter = InternalOutputStreamFilter()
+    reasoning_filter = InternalOutputStreamFilter()
     async for event in ark_client.stream_chat(messages, purpose="chat", thinking=thinking):
         if event.type == "delta":
             if event.text:
@@ -405,10 +406,13 @@ async def _stream_master_response(
                     )
             if event.reasoning:
                 reasoning_text += event.reasoning
+                visible_reasoning = reasoning_filter.push(event.reasoning)
+                if not visible_reasoning:
+                    continue
                 await event_bus.publish(
                     channel,
                     "content_block_delta",
-                    {"agent_message_id": assistant.id, "delta": {"type": "reasoning_delta", "text": event.reasoning}},
+                    {"agent_message_id": assistant.id, "delta": {"type": "reasoning_delta", "text": visible_reasoning}},
                 )
         elif event.type == "usage":
             await event_bus.publish(channel, "usage", {"agent_message_id": assistant.id, "usage": event.usage})
