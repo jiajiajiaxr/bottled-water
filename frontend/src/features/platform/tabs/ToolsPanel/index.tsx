@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   App as AntApp,
   Avatar,
@@ -35,6 +35,20 @@ export function ToolsPanel({ activeWorkspace, activeConversation }: ToolsPanelPr
 
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [toolInvokeResult, setToolInvokeResult] = useState("");
+
+  const load = async () => {
+    try {
+      const items = await api.tools(activeWorkspace?.id).catch(() => [] as ToolDefinition[]);
+      setTools(items);
+    } catch {
+      message.error("加载工具目录失败");
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspace?.id]);
 
   return (
     <div className="workspace-grid">
