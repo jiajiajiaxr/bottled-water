@@ -123,31 +123,31 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 4. 修改 `frontend/src/types/` 的 `Agent` / `AgentConfig`。
 5. 修改 Agent 创建、编辑表单。
 6. 修改 `backend/src/app/api/agents.py` 的创建和更新逻辑。
-7. 如果影响执行，修改 `agentic_runtime.py` 或 `runtime_service.py` / `agent_runtime/`。
+7. 如果影响执行，优先修改 `backend/src/app/services/agents/function_loop.py`、`agents/tool_loop.py` 或 `workflows/`；`agentic_runtime.py` 仅用于兼容。
 
 ### 新增一个工作流节点类型
 
 1. 修改 `frontend/src/types/` 的 `WorkflowNode` 约定。
-2. 修改 `frontend/src/App.tsx` 的节点类型选项、创建默认配置、编辑表单。
+2. 修改 `frontend/src/features/workflow/` 的节点类型选项、创建默认配置、编辑表单。
 3. 修改 `backend/src/app/api/conversations.py` 的 normalize 逻辑，确保 `type/config` 不丢失。
-4. 修改 `backend/src/agent_runtime/workflow/` 或 `backend/src/app/services/runtime_service.py` 的执行逻辑。
+4. 修改 `backend/src/app/services/workflows/nodes/`、`engine.py`、`scheduler.py` 的执行逻辑。
 5. 修改 `conversation.extra.workflow_runtime` 输出。
 6. 增加 `tests/test_conversation.py` 和相关工作流测试。
 
 ### 新增一个内置工具
 
-1. 在 `backend/src/app/services/tool_registry.py` 增加工具定义。
-2. 在 `invoke_builtin_tool` 中实现真实执行。
-3. 给官方 Agent 工具箱加权限。
-4. 如果需要文件能力，优先复用 `file_tools.py`。
+1. 在 `backend/src/app/services/tools/builtins/registry.py` 增加工具定义。
+2. 在 `backend/src/app/services/tools/builtins/executor.py` 或对应领域目录中实现真实执行。
+3. 给 `backend/src/app/services/tools/toolboxes.py` 的官方 Agent 工具箱加权限。
+4. 如果需要文件能力，优先复用 `services/tools/builtins/file/` 和 `services/files/`。
 5. 前端工具目录会通过 `/tools` 自动展示。
 6. 补 `tests/test_tools_files.py`。
 
 ### 新增一个文件格式
 
-1. 在 `backend/src/app/services/file_tools.py` 增加提取、预览或生成逻辑。
+1. 在 `backend/src/app/services/tools/builtins/file/` 或 `backend/src/app/services/files/` 增加提取、预览或生成逻辑。
 2. 在 `backend/src/app/api/files.py` 接入到对应接口。
-3. 如果需要作为产物导出，修改 `artifact_exports.py`。
+3. 如果需要作为产物导出，修改 `backend/src/app/services/tools/builtins/artifact/export.py`。
 4. 前端预览逻辑在 `PreviewPanel` 和附件预览处补展示。
 5. 补文件工具测试。
 
@@ -166,8 +166,8 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 相关入口：
 
 - 后端过滤：`backend/src/app/services/output_filter.py`
-- 前端过滤：`frontend/src/App.tsx` 中的 `stripInternalAgentOutput`
-- 编排生成：`backend/src/app/services/runtime_service.py`、`backend/src/agent_runtime/`
+- 前端过滤：`frontend/src/lib/message.ts`
+- 编排生成：`backend/src/app/services/agents/function_loop.py`、`backend/src/app/services/workflows/`
 
 ## 7. 数据流速查
 
@@ -190,7 +190,7 @@ frontend Workbench.send
 frontend uploadFile
   -> /files/upload
   -> save_upload
-  -> file_tools.extract_text_from_path
+  -> services/tools/builtins/file/extractors
   -> FileAsset 入库
   -> 发送消息时 attachments 进入消息上下文
 ```
@@ -199,7 +199,7 @@ frontend uploadFile
 
 ```text
 Agent / tool
-  -> tool_registry.invoke_builtin_tool
+  -> services.tools.executor.invoke_tool
   -> artifacts.create_artifact
   -> Message preview_card
   -> 用户点击卡片
@@ -225,5 +225,5 @@ send message
 - 模型无响应：查 `LLM_PROVIDER`、`ARK_API_KEY`、`ARK_ENDPOINT_ID`，再看 `backend/src/app/services/ark.py`。
 - 消息一直显示正在回答：查 `localRunningConversationIds` 清理逻辑和 `runtime_service.run` / `conversation_session_manager` 是否抛错。
 - 工作流节点配置丢失：查 `conversations.py` normalize 是否保留 `type/config`。
-- 产物打不开：查 `Artifact.content`、`artifact_exports.py` 和 `PreviewPanel`。
+- 产物打不开：查 `Artifact.content`、`services/tools/builtins/artifact/export.py` 和 `PreviewPanel`。
 - MCP 调用失败：先 probe，再看 `McpToolInvocation` 记录。

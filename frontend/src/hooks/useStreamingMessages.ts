@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useMessageStore } from "@/store";
-import type { ChatMessage } from "@/types";
-import { StreamAssistantHandlers } from "@/types/messages";
-import { makeMessage, stripInternalAgentOutput } from "@/lib";
+import { makeMessage, stripInternalAgentOutput } from "../lib";
+import { useMessageStore } from "../store";
+import type { ChatMessage } from "../types";
+import { StreamAssistantHandlers } from "../types/messages";
 
 export type StreamState = "idle" | "streaming" | "done" | "error";
 
@@ -75,9 +75,16 @@ export function useStreamingMessages(conversationId?: string) {
       if (!existing) return prev;
 
       const next = new Map(prev);
+      const rawThinking =
+        String(existing.rawContent?._streamRawThinking || existing.thinking || "") +
+        thinking;
       next.set(agentId, {
         ...existing,
-        thinking: (existing.thinking || "") + thinking,
+        thinking: stripInternalAgentOutput(rawThinking),
+        rawContent: {
+          ...(existing.rawContent || {}),
+          _streamRawThinking: rawThinking,
+        },
       });
       return next;
     });

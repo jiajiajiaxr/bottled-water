@@ -80,16 +80,19 @@ agenthub/
 
 - `backend/src/app/services/runtime_service.py`：统一编排入口。负责创建 AgentSession、选择调度策略（单 Agent / TechLead / Workflow）。
 - `backend/src/agent_runtime/`：核心运行时。包含 Session、Scheduler、AgentLoop、Workflow 图遍历等。
-- `backend/src/app/services/agentic_runtime.py`：Agent 小循环。根据 Agent 权限选择并执行工具、Skill、MCP，然后汇总回复。
+- `backend/src/app/services/agents/function_loop.py`：Agent Function Calling Loop。根据 Agent 权限暴露 Tool、Skill、MCP，执行 tool_calls 并把结果回填模型。
+- `backend/src/app/services/agents/tool_loop.py`：工具 schema 构造、授权校验、Tool / Skill / MCP 执行分发。
+- `backend/src/app/services/agentic_runtime.py`：旧运行时兼容入口，保留给 `runtime_service.py` 和迁移期测试，不作为新功能入口。
 - `backend/src/app/services/ark.py`：火山方舟和 OpenAI-compatible 模型适配，包括普通调用、流式调用和 mock fallback。
 - `backend/src/app/services/llm_gateway.py`：模型配置测试和模型调用统一入口。
-- `backend/src/app/services/tool_registry.py`：内置工具目录、官方 Agent 工具箱、自定义工具调用、工具权限归一化。
-- `backend/src/app/services/file_tools.py`：文件解析、预览、摘要、向量入口、PDF/DOCX/XLSX/PPTX/HTML/Markdown/ZIP 生成和转换。
+- `backend/src/app/services/tool_registry.py`：兼容 shim。新代码使用 `backend/src/app/services/tools/catalog.py`、`executor.py`、`permissions.py`。
+- `backend/src/app/services/tools/builtins/`：内置工具真实实现，按 artifact、file、sandbox 等复杂能力拆分目录。
+- `backend/src/app/services/file_tools.py`：文件工具兼容入口，核心能力已迁到 `services/tools/builtins/file/` 和 `services/files/`。
 - `backend/src/app/services/files/`：工作区文件树、文件引用解析、Office 预览和文件类 Tool 支撑。
 - `backend/src/app/services/document_model/`：结构化文档模型、Markdown 解析、模板、PDF/DOCX 渲染和 HTML 预览。
 - `backend/src/app/services/artifacts.py`：产物对象创建和基础内容组织。
-- `backend/src/app/services/artifact_exports.py`：产物导出为不同格式。
-- `backend/src/app/services/mcp_runtime.py`：HTTP/stdio MCP 调用、超时、环境变量过滤、调用记录。
+- `backend/src/app/services/artifact_exports.py`：产物导出兼容入口，核心导出在 `services/tools/builtins/artifact/export.py`。
+- `backend/src/app/services/mcp_runtime.py`：MCP 兼容入口，核心目录、发现、transport 和调用在 `services/mcp/`。
 - `backend/src/app/services/knowledge.py`：轻量知识库切片、索引、检索和上下文片段构造。
 - `backend/src/app/services/realtime/event_bus.py`：事件总线，优先 Redis PubSub，缺省使用内存队列；用于 SSE/实时状态。
 - `backend/src/app/services/queue.py`：后台任务队列，优先 Redis，缺省使用内存队列。
@@ -106,7 +109,9 @@ agenthub/
 ## 前端入口
 
 - `frontend/src/main.tsx`：React 应用挂载入口。
-- `frontend/src/App.tsx`：当前前端主文件，包含登录页、工作台、会话列表、聊天区、Agent 广场、成员管理、会话设置、工作流画布、全局设置、平台控制、产物预览等组件。
+- `frontend/src/App.tsx`：React Router 外壳入口。
+- `frontend/src/router/`：登录、工作台、文档等顶层路由。
+- `frontend/src/pages/WorkbenchPage/`：工作台状态中心和布局，组合会话、聊天、预览、Agent 广场、设置和平台控制等模块。
 - `frontend/src/api/`：前端 API SDK，统一封装 token、请求、fallback、SSE 流、文件下载和 mock 数据兜底。
 - `frontend/src/types/`：前端领域类型定义。
 - `frontend/src/styles/`：布局、IM 工作台、消息、侧边栏、画布、抽屉、产物预览等样式。

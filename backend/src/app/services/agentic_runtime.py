@@ -19,17 +19,37 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Agent, Conversation, McpServer, Skill, User
+from db.models import Agent, Conversation, McpServer, Skill, ToolDefinition, User
 from app.events import app_event_bus as event_bus
 from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
-from app.services.tool_registry import BUILTIN_TOOLS, invoke_tool, normalize_tool_names
 from app.services.model_config_resolver import create_provider_from_db
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.catalog import sync_builtin_tool_definitions
+from app.services.tools.executor import invoke_tool as invoke_tool_sync
+from app.services.tools.permissions import normalize_tool_names
 
 
 TOOL_INTENT_PATTERN = re.compile(
     r"(skill|mcp|工具|调用|读取|文件|沙箱|命令|运行|检索|搜索|部署|分析|生成|代码|测试)",
     re.I,
 )
+
+
+def _is_async_session(db: Any) -> bool:
+    return isinstance(db, AsyncSession)
+
+
+async def _invoke_catalog_tool(
+    db: AsyncSession,
+    user: User,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if _is_async_session(db):
+        return await db.run_sync(
+            lambda session: invoke_tool_sync(session, user, tool_name, arguments)
+        )
+    return invoke_tool_sync(db, user, tool_name, arguments)
 
 
 def _workspace_id(conversation: Conversation) -> str | None:
@@ -318,7 +338,12 @@ async def execute_builtin_tool_action(
     if not user:
         user = await db.get(User, conversation.creator_id)
     try:
-        payload = await invoke_tool(db, user, name, _builtin_tool_args(conversation, prompt, name))
+        payload = await _invoke_catalog_tool(
+            db,
+            user,
+            name,
+            _builtin_tool_args(conversation, prompt, name),
+        )
         result = {
             "type": "tool",
             "agent_id": agent.id,
@@ -414,17 +439,48 @@ async def run_agentic_tool_loop(
 
 async def build_tools_for_agent(db: AsyncSession, agent: Agent) -> list[dict[str, Any]]:
     """将 Agent 配置的 tools/skills/mcp 转为 OpenAI Function Calling 格式。"""
-    from app.services.tool_registry import BUILTIN_TOOLS
 
     tools: list[dict[str, Any]] = []
     config = agent.config or {}
 
-    # 内置工具
+    # Tool 目录：内置和自定义工具都优先从数据库 ToolDefinition 读取。
     allowed_tool_names = normalize_tool_names(config.get("tools") or [])
-    for name in allowed_tool_names:
-        if name not in BUILTIN_TOOLS:
+    tool_rows: list[ToolDefinition] = []
+    if allowed_tool_names and _is_async_session(db):
+        try:
+            await db.run_sync(sync_builtin_tool_definitions)
+            tool_query = select(ToolDefinition).where(
+                ToolDefinition.deleted_at.is_(None),
+                ToolDefinition.status == "active",
+                (ToolDefinition.name.in_(allowed_tool_names))
+                | (ToolDefinition.id.in_(allowed_tool_names)),
+            )
+            tool_rows = [
+                item
+                for item in (await db.scalars(tool_query)).all()
+                if isinstance(item, ToolDefinition)
+            ]
+        except Exception:
+            tool_rows = []
+    seen_tool_names: set[str] = set()
+    for tool in tool_rows:
+        if tool.name in seen_tool_names:
             continue
-        builtin = BUILTIN_TOOLS[name]
+        seen_tool_names.add(tool.name)
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description or tool.display_name or tool.name,
+                "parameters": tool.input_schema or {"type": "object", "properties": {}},
+            },
+        })
+    for name in allowed_tool_names:
+        if name in seen_tool_names:
+            continue
+        builtin = BUILTIN_TOOLS.get(name)
+        if not builtin:
+            continue
         tools.append({
             "type": "function",
             "function": {
@@ -494,15 +550,33 @@ async def execute_tool_by_name(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     """根据 tool_name 路由到内置工具/Skill/MCP 执行器。"""
-    from app.services.tool_registry import BUILTIN_TOOLS, invoke_builtin_tool
 
     # 内置工具
     if tool_name in BUILTIN_TOOLS:
-        return await invoke_builtin_tool(db, user, tool_name, {**arguments, "conversation_id": conversation.id})
+        if tool_name not in normalize_tool_names((agent.config or {}).get("tools") or []):
+            return _unauthorized_tool_result(tool_name)
+        if not user:
+            user = await db.get(User, conversation.creator_id)
+        payload = await _invoke_catalog_tool(
+            db,
+            user,
+            tool_name,
+            {**arguments, "conversation_id": conversation.id},
+        )
+        result = payload.get("result") or {}
+        return {
+            "type": "tool",
+            "tool_name": tool_name,
+            "status": result.get("status", "succeeded"),
+            "output": result,
+            "invocation_id": payload.get("invocation_id"),
+        }
 
     # Skill
     if tool_name.startswith("skill."):
         skill_id = tool_name.removeprefix("skill.")
+        if skill_id not in {str(item) for item in (agent.config or {}).get("skill_ids") or [] if item}:
+            return _unauthorized_tool_result(tool_name, result_type="skill", extra={"skill_id": skill_id})
         skill = await db.get(Skill, skill_id)
         if not skill or skill.deleted_at is not None or skill.status != "active":
             return {"type": "skill", "skill_id": skill_id, "status": "failed", "output": "Skill 不存在或未启用"}
@@ -514,9 +588,87 @@ async def execute_tool_by_name(
         if len(parts) >= 3:
             server_id = parts[1]
             actual_tool_name = ".".join(parts[2:])
+            if server_id not in {str(item) for item in (agent.config or {}).get("mcp_server_ids") or [] if item}:
+                return _unauthorized_tool_result(
+                    tool_name,
+                    result_type="mcp",
+                    extra={"server_id": server_id, "tool_name": actual_tool_name},
+                )
             server = await db.get(McpServer, server_id)
             if not server or server.deleted_at is not None or not server.enabled:
                 return {"type": "mcp", "server_id": server_id, "tool_name": actual_tool_name, "status": "failed", "output": "MCP server 不存在或未启用"}
             return await execute_mcp_action(db, server=server, name=actual_tool_name, user=user, conversation=conversation, prompt=arguments.get("prompt", ""))
 
+    authorized_tool = await _resolve_authorized_db_tool(db, agent, tool_name)
+    if authorized_tool:
+        if not user:
+            user = await db.get(User, conversation.creator_id)
+        payload = await _invoke_catalog_tool(
+            db,
+            user,
+            authorized_tool.name,
+            {**arguments, "conversation_id": conversation.id},
+        )
+        result = payload.get("result") or {}
+        return {
+            "type": "tool",
+            "tool_name": authorized_tool.name,
+            "status": result.get("status", "succeeded"),
+            "output": result,
+            "invocation_id": payload.get("invocation_id"),
+        }
+
+    if await _db_tool_exists(db, tool_name):
+        return _unauthorized_tool_result(tool_name)
+
     return {"type": "unknown", "tool_name": tool_name, "status": "failed", "output": f"未知工具: {tool_name}"}
+
+
+def _unauthorized_tool_result(
+    tool_name: str,
+    *,
+    result_type: str = "tool",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": result_type,
+        "tool_name": tool_name,
+        "status": "failed",
+        "output": f"Agent 未授权调用工具: {tool_name}",
+        **(extra or {}),
+    }
+
+
+async def _resolve_authorized_db_tool(
+    db: AsyncSession,
+    agent: Agent,
+    tool_name: str,
+) -> ToolDefinition | None:
+    allowed_tool_names = normalize_tool_names((agent.config or {}).get("tools") or [])
+    if not allowed_tool_names or not _is_async_session(db):
+        return None
+    tool = await db.scalar(
+        select(ToolDefinition).where(
+            ToolDefinition.deleted_at.is_(None),
+            ToolDefinition.status == "active",
+            (ToolDefinition.name == tool_name) | (ToolDefinition.id == tool_name),
+            (ToolDefinition.name.in_(allowed_tool_names))
+            | (ToolDefinition.id.in_(allowed_tool_names)),
+        )
+    )
+    if not tool or tool.is_builtin or tool.type == "builtin":
+        return None
+    return tool
+
+
+async def _db_tool_exists(db: AsyncSession, tool_name: str) -> bool:
+    if not _is_async_session(db):
+        return False
+    value = await db.scalar(
+        select(ToolDefinition.id).where(
+            ToolDefinition.deleted_at.is_(None),
+            ToolDefinition.status == "active",
+            (ToolDefinition.name == tool_name) | (ToolDefinition.id == tool_name),
+        )
+    )
+    return isinstance(value, str) and bool(value)

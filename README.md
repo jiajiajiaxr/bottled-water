@@ -99,10 +99,11 @@ Python 3.11 + FastAPI + SQLAlchemy (async) + Alembic + Pydantic。
 - `backend/src/app/api/`：REST、SSE、WebSocket API。
 - `backend/src/app/services/`：业务服务层。
   - `runtime_service.py`：统一编排入口，创建 AgentSession 并选择调度策略。
-  - `agentic_runtime.py`：Agent 小循环，按权限执行工具、Skill、MCP。
-  - `tool_registry.py`：统一工具目录与权限归一化。
-  - `file_tools.py`：文件解析、预览、转换、摘要。
-  - `mcp_runtime.py`：MCP 调用与记录。
+  - `agents/function_loop.py` / `agents/tool_loop.py`：Agent Function Calling Loop、能力暴露、工具结果回填。
+  - `tools/catalog.py` / `tools/executor.py` / `tools/permissions.py`：工具目录、权限、参数校验和执行记录。
+  - `tools/builtins/`：内置 Tool 真实实现，按 artifact、file、sandbox 等领域拆分。
+  - `skills/` / `mcp/`：Skill 包运行时与 MCP 服务管理、发现、调用记录。
+  - `files/` / `document_model/`：工作区文件树、Office 预览和结构化文档渲染。
   - `llm_gateway.py` / `ark.py`：模型调用网关。
 - `backend/src/db/models/`：按领域拆分的数据库模型。
 - `backend/src/agent_runtime/`：多智能体运行时引擎（Session、Scheduler、AgentLoop、Workflow）。
@@ -258,6 +259,7 @@ pnpm format
 - `docs/file-map.md`：目录、后端 API、service、前端组件和测试文件职责。
 - `docs/development-guide.md`：本地开发、迁移、测试和常见改动路径。
 - `docs/agent-workflow-runtime.md`：Agentic Loop、群聊画布优先编排和工作流运行态。
+- `docs/implementation-status.md`：文档承诺与当前实现的对照表，区分已完成能力和 roadmap。
 
 ## 当前边界
 

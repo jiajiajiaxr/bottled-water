@@ -17,18 +17,25 @@ export function toolEventsFromMessage(message: ChatMessage): ToolEventRecord[] {
   );
 }
 
-export function mergeToolEvents(...groups: ToolEventRecord[][]): ToolEventRecord[] {
+export function mergeToolEvents(
+  ...groups: ToolEventRecord[][]
+): ToolEventRecord[] {
   const byKey = new Map<string, ToolEventRecord>();
   groups.flat().forEach((event, index) => {
     if (!event.toolName) return;
-    const key = event.toolCallId || `${event.toolName}:${event.status || ""}:${index}`;
+    const key =
+      event.toolCallId || `${event.toolName}:${event.status || ""}:${index}`;
     byKey.set(key, { ...(byKey.get(key) ?? {}), ...event });
   });
   return Array.from(byKey.values());
 }
 
-export function summarizeToolEvents(events: ToolEventRecord[]): ToolSummary | undefined {
-  const completed = events.filter((event) => String(event.status || "").toLowerCase() !== "running");
+export function summarizeToolEvents(
+  events: ToolEventRecord[],
+): ToolSummary | undefined {
+  const completed = events.filter(
+    (event) => String(event.status || "").toLowerCase() !== "running",
+  );
   if (!completed.length) return undefined;
   const finalFailed = finalFailedToolEvents(completed);
   if (finalFailed.length) {
@@ -103,14 +110,20 @@ function formatToolNames(events: ToolEventRecord[], maxTools: number) {
   const visible = names.slice(0, maxTools).map(([name, count]) =>
     count > 1 ? `${name} ×${count}` : name,
   );
-  const hiddenCount = names.slice(maxTools).reduce((sum, [, count]) => sum + count, 0);
+  const hiddenCount = names
+    .slice(maxTools)
+    .reduce((sum, [, count]) => sum + count, 0);
   return {
-    text: hiddenCount ? `${visible.join(" · ")} · 等 ${hiddenCount} 项` : visible.join(" · "),
+    text: hiddenCount
+      ? `${visible.join(" · ")} · 等 ${hiddenCount} 项`
+      : visible.join(" · "),
   };
 }
 
 function primitiveValue(value: unknown) {
-  return typeof value === "string" || typeof value === "number" ? value : undefined;
+  return typeof value === "string" || typeof value === "number"
+    ? value
+    : undefined;
 }
 
 function stringValue(value: unknown) {

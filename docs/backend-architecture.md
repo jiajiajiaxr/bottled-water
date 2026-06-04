@@ -69,16 +69,17 @@ AgentHub 后端采用经典的分层架构，自上而下分为六层：
 | `conversation_session_manager.py` | **Conversation 级会话管理器**（进程内单例）。管理每个 conversation 的长期运行 `AgentSession`，负责创建/复用、用户输入发送、generation 取消、Session 清理 |
 | `runtime_service.py` | **统一编排入口**。根据 Agent 数量自动选择调度器（单 Agent → `SingleAgentScheduler`，多 Agent → `TechLeadScheduler`），创建 `AgentSession` |
 | `runtime_adapter.py` | **适配器层**。将 `agent_runtime` 的 `ToolExecutor` 接口桥接到 app 层的 `build_tools_for_agent` / `execute_tool_by_name` |
-| `agentic_runtime.py` | 旧版工具注册与执行系统，被 `runtime_adapter.py` 复用 |
-| `tool_registry.py` | 工具定义注册表 |
+| `agents/function_loop.py` / `agents/tool_loop.py` | Agent Function Calling Loop、工具 schema 构造、权限过滤和工具结果回填 |
+| `tools/catalog.py` / `tools/executor.py` / `tools/permissions.py` | 工具目录、数据库同步、参数校验、权限检查和调用记录 |
+| `tool_registry.py` | 已废弃兼容 shim，新代码不要依赖 |
 | `runtime_service.py` | 统一编排入口，创建 `AgentSession` 并选择调度策略 |
 | `llm_gateway.py` / `ark.py` | LLM 调用网关（旧版兼容） |
-| `artifacts.py` / `file_tools.py` | 产物与文件相关业务逻辑 |
-| `mcp_runtime.py` | MCP 工具运行时管理 |
+| `tools/builtins/artifact/` / `files/` / `document_model/` | 产物、工作区文件、Office 预览和结构化文档渲染 |
+| `mcp/` | MCP 目录、发现、transport、调用和审计 |
 
 **关键设计**：
 - `ConversationSessionManager` 是进程内单例，多进程部署时需配合 sticky session
-- `OrchestratorService.create_session()` 是创建 `AgentSession` 的唯一入口
+- `OrchestratorService.create_session()` 是 V2 运行时创建 `AgentSession` 的入口；当前主产品群聊仍以 `app/services/workflows/` 为事实来源。
 
 ---
 
@@ -293,7 +294,7 @@ EventDispatcher.dispatch(event)
 
 ### 4.4 适配器模式：运行时与业务层解耦
 
-`ToolExecutorAdapter`（`runtime_adapter.py`）和 `_ToolExecutorAdapter`（`runtime_service.py`）实现 `agent_runtime.core.interfaces.ToolExecutor` 接口，内部将调用转发到 app 层的 `execute_tool_by_name`。这种设计使得：
+`ToolExecutorAdapter`（`runtime_adapter.py`）和 `_ToolExecutorAdapter`（`runtime_service.py`）实现 `agent_runtime.core.interfaces.ToolExecutor` 接口，内部将调用转发到 app 层的 `agents/tool_loop.execute_tool_by_name`。这种设计使得：
 - `agent_runtime` 保持纯运行时，不依赖业务层代码
 - 业务层工具注册表无需改动即可被运行时复用
 

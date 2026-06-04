@@ -30,6 +30,7 @@ import { formatTime } from "@/lib/format";
 import { useConversationStore } from "@/store";
 import type { ChatMessage, MessageAttachment } from "@/types";
 import ThinkingBlock from "./ThinkingBlock";
+import { ToolCallSummary } from "./ToolCallSummary";
 
 const { Text, Paragraph } = Typography;
 
@@ -252,6 +253,7 @@ function MessageBubbleComponent({
                 }
               />
             </Tooltip>
+            <ToolCallSummary message={message} />
           </Space>
         </div>
       </div>

@@ -70,6 +70,35 @@ def visible_tool_query(user: User, workspace_id: str | None = None):
     return query
 
 
+def _prefer_tool_item(current: dict | None, candidate: dict) -> dict:
+    """按工具名合并目录项，内置工具优先使用系统同步后的记录。"""
+
+    if current is None:
+        return candidate
+    name = str(candidate.get("name") or "")
+    if name in BUILTIN_TOOLS:
+        current_builtin = bool(current.get("is_builtin") or current.get("type") == "builtin")
+        candidate_builtin = bool(candidate.get("is_builtin") or candidate.get("type") == "builtin")
+        if candidate_builtin and not current_builtin:
+            return candidate
+        return current
+    current_owner = current.get("owner_id")
+    candidate_owner = candidate.get("owner_id")
+    if candidate_owner and not current_owner:
+        return candidate
+    return current
+
+
+def _dedupe_tool_items(items: list[dict]) -> list[dict]:
+    by_name: dict[str, dict] = {}
+    for item in items:
+        name = str(item.get("name") or "")
+        if not name:
+            continue
+        by_name[name] = _prefer_tool_item(by_name.get(name), item)
+    return list(by_name.values())
+
+
 def list_tools(
     db: Session,
     user: User,
@@ -83,6 +112,7 @@ def list_tools(
         tool_definition_to_dict(item)
         for item in db.scalars(visible_tool_query(user, workspace_id)).all()
     ]
+    items = _dedupe_tool_items(items)
     if q:
         needle = q.lower()
         items = [

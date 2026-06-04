@@ -277,6 +277,7 @@ async def _run_direct_agent_without_function_calling(
         else:
             event_stream = ark_client.stream_chat(messages, purpose=f"agent:{agent.type}", thinking=thinking)
         stream_filter = InternalOutputStreamFilter()
+        reasoning_filter = InternalOutputStreamFilter()
         async for event in event_stream:
             if event.type == "delta":
                 if event.text:
@@ -295,11 +296,18 @@ async def _run_direct_agent_without_function_calling(
                         )
                 if event.reasoning:
                     reasoning_text += event.reasoning
-                    await event_bus.publish(
-                        channel,
-                        "content_block_delta",
-                        {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "reasoning_delta", "text": event.reasoning}},
-                    )
+                    visible_reasoning = reasoning_filter.push(event.reasoning)
+                    if visible_reasoning:
+                        await event_bus.publish(
+                            channel,
+                            "content_block_delta",
+                            {
+                                "agent_message_id": assistant.id,
+                                "agent_id": agent.id,
+                                "agent_name": agent.name,
+                                "delta": {"type": "reasoning_delta", "text": visible_reasoning},
+                            },
+                        )
             elif event.type == "error":
                 stream_text += f"\n模型调用异常，已降级：{event.error}"
     except Exception as exc:

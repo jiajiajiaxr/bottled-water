@@ -36,10 +36,10 @@ export function GlobalSettingsDrawer({
   const { message } = AntApp.useApp();
 
   useEffect(() => {
-    if (!open) return;
+    if (!open && !asPage) return;
     profileForm.setFieldsValue({ display_name: user.name });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, user.id]);
+  }, [asPage, open, user.id]);
 
   const content = (
     <Tabs

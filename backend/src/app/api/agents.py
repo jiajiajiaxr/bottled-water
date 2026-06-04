@@ -36,8 +36,8 @@ from app.schemas.requests import (
     UpdateAgentRequest,
 )
 from app.services.serialization import agent_to_dict
-from app.services.tool_registry import normalize_tool_names
 from app.services.model_config_resolver import create_provider_from_db
+from app.services.tools.permissions import normalize_tool_names
 from app.services.llm_gateway import test_model_config
 from model_provider.core.interfaces import ChatMessage
 

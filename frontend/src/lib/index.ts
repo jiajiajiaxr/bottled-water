@@ -14,6 +14,8 @@ export {
   stripInternalAgentOutput,
   isTaskRunning,
   isLikelyArtifactRequest,
+  isSuccessfulToolRunnerMessage,
+  isVisibleChatMessage,
   participantName,
 } from "./message";
 

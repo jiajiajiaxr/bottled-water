@@ -15,9 +15,13 @@ def test_tool_catalog_create_invoke_and_artifact_tool(
     listed = client.get("/api/v1/tools", headers=auth_headers)
     assert listed.status_code == 200, listed.text
     tools = unwrap(listed.json())["items"]
-    names = {item["name"] for item in tools}
+    names = [item["name"] for item in tools]
+    assert len(names) == len(set(names))
     assert "file.extract_text" in names
+    assert "file.preview" in names
+    assert "file.summarize" in names
     assert "artifact.create_pdf" in names
+    assert "sandbox.run" in names
 
     tool_name = f"custom_echo_acceptance_{uuid.uuid4().hex[:8]}"
     created = client.post(

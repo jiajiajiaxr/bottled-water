@@ -407,6 +407,7 @@ async def run_agent_function_call_loop(
     messages: list[dict[str, Any]] = context_bundle.messages
     stream_text = ""
     stream_filter = InternalOutputStreamFilter()
+    reasoning_filter = InternalOutputStreamFilter()
     reasoning_text = ""
     tool_results: list[dict[str, Any]] = []
     thinking_enabled = (user_message.extra or {}).get("thinking_enabled") is True
@@ -447,11 +448,12 @@ async def run_agent_function_call_loop(
                             )
                     if event.reasoning:
                         reasoning_text += event.reasoning
+                        visible_reasoning = reasoning_filter.push(event.reasoning)
                         await _publish_text_delta(
                             channel=channel,
                             assistant=assistant,
                             agent=agent,
-                            text=event.reasoning,
+                            text=visible_reasoning,
                             delta_type="reasoning_delta",
                             emit_message=emit_message,
                         )

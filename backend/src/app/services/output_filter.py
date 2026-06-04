@@ -15,6 +15,17 @@ _FINAL_SECTION_TITLES = {
 _STATUS_REPORT_FENCE = "```status_report"
 
 
+def _can_become_status_report_fence(value: str) -> bool:
+    """Return True for an in-flight fence prefix that should stay hidden."""
+    if not value:
+        return False
+    return (
+        _STATUS_REPORT_FENCE.startswith(value)
+        or re.match(r"^```\s*status_report\b", value, flags=re.IGNORECASE) is not None
+        or re.match(r"^```\s*status\b", value, flags=re.IGNORECASE) is not None
+    )
+
+
 def _section_title(line: str) -> tuple[str | None, str]:
     clean = re.sub(r"^\s*(?:#{1,6}\s*)?(?:\d+[.、)]\s*)?", "", line).strip()
     clean = clean.strip("* ")
@@ -106,8 +117,14 @@ def _strip_internal_fenced_blocks(text: str) -> tuple[str, bool]:
                 skipping = False
             continue
 
-        if lowered.startswith(_STATUS_REPORT_FENCE):
+        if lowered.startswith(_STATUS_REPORT_FENCE) or re.match(
+            r"^```\s*status_report\b", lowered, flags=re.IGNORECASE
+        ):
             skipping = True
+            removed = True
+            continue
+
+        if index == len(lines) - 1 and _can_become_status_report_fence(lowered):
             removed = True
             continue
 

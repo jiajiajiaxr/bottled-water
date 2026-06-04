@@ -34,6 +34,7 @@
 | `app.services.tools.artifact_executor` | `app.services.tools.builtins.artifact.executor` |
 | `app.services.tools.builtin_executor` | `app.services.tools.builtins.executor` |
 | `app.services.tools.sandbox_runner` | `app.services.tools.builtins.sandbox.executor` |
+| `app.services.tool_registry` | `app.services.tools.catalog/executor/permissions` |
 | `app.services.tools.registry` | `app.services.tools.catalog/executor/permissions` |
 | `app.services.mcp_runtime` | `app.services.mcp.*` |
 | `app.services.skills.execution` | `app.services.skills.runners.*` |

@@ -60,11 +60,12 @@ export function useWorkbenchActions(
   const createConversation = async (payload: {
     title?: string;
     agentIds: string[];
+    group?: boolean;
     masterEnabled: boolean;
     folder: string;
   }) => {
     const created = await api.createConversationWithAgents({
-      chat_type: "group",
+      chat_type: payload.group ? "group" : "single",
       title: payload.title,
       participant_agent_ids: payload.agentIds,
       master_enabled: payload.masterEnabled,

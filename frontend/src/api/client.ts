@@ -210,13 +210,9 @@ export async function requestFile(path: string): Promise<{
   const contentType =
     response.headers.get("content-type") ?? "application/octet-stream";
   const disposition = response.headers.get("content-disposition") ?? "";
-  const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+  const filename = parseContentDispositionFilename(disposition);
 
-  if (
-    contentType.startsWith("text/") ||
-    contentType.includes("json") ||
-    contentType.includes("xml")
-  ) {
+  if (isTextualResponse(contentType)) {
     return { previewText: await response.text(), contentType, filename };
   }
 
@@ -225,6 +221,31 @@ export async function requestFile(path: string): Promise<{
     contentType,
     filename,
   };
+}
+
+function isTextualResponse(contentType: string) {
+  const value = contentType.toLowerCase();
+  if (value.includes("openxmlformats-officedocument")) return false;
+  if (value.includes("application/pdf")) return false;
+  if (value.includes("application/zip")) return false;
+  if (value.includes("application/octet-stream")) return false;
+  return (
+    value.startsWith("text/") ||
+    value.includes("json") ||
+    value.includes("xml")
+  );
+}
+
+function parseContentDispositionFilename(disposition: string) {
+  const encoded = /filename\*\s*=\s*([^']*)''([^;]+)/i.exec(disposition);
+  if (encoded?.[2]) {
+    try {
+      return decodeURIComponent(encoded[2].trim().replace(/^"|"$/g, ""));
+    } catch {
+      return encoded[2].trim().replace(/^"|"$/g, "");
+    }
+  }
+  return /filename\s*=\s*"?([^";]+)"?/i.exec(disposition)?.[1];
 }
 
 export const wait = (ms: number) =>

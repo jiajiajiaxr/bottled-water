@@ -128,6 +128,11 @@ function stripInternalFencedBlocks(text: string) {
   let skippingFence = false;
   let removed = false;
   const statusFence = "```status_report";
+  const canBecomeStatusFence = (value: string) =>
+    Boolean(value) &&
+    (statusFence.startsWith(value) ||
+      /^```\s*status_report\b/i.test(value) ||
+      /^```\s*status\b/i.test(value));
 
   for (const [index, line] of lines.entries()) {
     const trimmed = line.trim();
@@ -141,6 +146,11 @@ function stripInternalFencedBlocks(text: string) {
 
     if (skippingFence) {
       if (trimmed.startsWith("```")) skippingFence = false;
+      continue;
+    }
+
+    if (index === lines.length - 1 && canBecomeStatusFence(lowered)) {
+      removed = true;
       continue;
     }
 
@@ -190,6 +200,33 @@ export function isLikelyArtifactRequest(text: string) {
     "代码",
     "项目",
   ].some((keyword) => value.includes(keyword));
+}
+
+export function isSuccessfulToolRunnerMessage(message: ChatMessage) {
+  const author = String(message.author || "").toLowerCase();
+  const raw = message.rawContent || {};
+  const output = (raw.output || raw.result || {}) as Record<string, unknown>;
+  const hasToolName = Boolean(raw.tool_name || raw.toolName || output.tool_name || output.toolName);
+  const looksLikeToolRunner =
+    message.role === "tool" ||
+    author === "tool runner" ||
+    author.includes("tool runner") ||
+    hasToolName;
+  if (!looksLikeToolRunner) return false;
+
+  const status = String(raw.status || output.status || "").toLowerCase();
+  if (["failed", "error", "cancelled", "timeout"].includes(status)) return false;
+  if (["succeeded", "success", "completed", "ok"].includes(status)) return true;
+
+  const exitCode = Number(output.exit_code ?? output.exitCode ?? raw.exit_code ?? raw.exitCode);
+  if (Number.isFinite(exitCode)) return exitCode === 0;
+
+  if (output.error || raw.error) return false;
+  return hasToolName && Boolean(output.stdout || output.summary || output.result);
+}
+
+export function isVisibleChatMessage(message: ChatMessage) {
+  return !isSuccessfulToolRunnerMessage(message);
 }
 
 export function participantName(

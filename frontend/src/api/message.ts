@@ -1,6 +1,6 @@
 import type { StreamAssistantHandlers, MessageBody } from "@/types/messages";
 import type { ChatMessage } from "@/types";
-import { get, post, sse } from "./client";
+import { API_BASE, get, post, sse } from "./client";
 import { getConversationWS } from "./websocket";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
@@ -125,6 +125,10 @@ function dispatchStreamEvent(
     }
     case "message_stop":
       handlers.onMessageEnd?.(data as Record<string, unknown>);
+      handlers.onMessageStop?.(data as Record<string, unknown>);
+      break;
+    case "task:status_changed":
+      handlers.onTaskStatusChanged?.(data as Record<string, unknown>);
       break;
     case "generation_finished":
     case "generation:cancelled":
@@ -256,6 +260,64 @@ export async function sendMessage(
   handlers.onDone?.();
 
   return "ok";
+}
+
+export function streamAssistantReply(
+  conversationId: string,
+  handlers: StreamAssistantHandlers,
+): Promise<string> {
+  let accumulated = "";
+  let settled = false;
+  const source = new EventSource(
+    `${API_BASE}/conversations/${conversationId}/stream`,
+  );
+  const finish = (payload?: Record<string, unknown>) => {
+    if (settled) return;
+    settled = true;
+    source.close();
+    handlers.onDone?.(payload);
+  };
+
+  return new Promise((resolve) => {
+    const complete = (payload?: Record<string, unknown>) => {
+      finish(payload);
+      resolve(accumulated || "ok");
+    };
+    const handle = (eventName: string) => (event: MessageEvent) => {
+      const data = event.data ? JSON.parse(event.data) : {};
+      if (eventName === "content_block_delta") {
+        const payload = data as Record<string, unknown>;
+        const delta = payload.delta as Record<string, unknown> | undefined;
+        const text = String(delta?.text || "");
+        accumulated += text;
+      }
+      if (
+        eventName === "generation_finished" ||
+        eventName === "generation:cancelled" ||
+        eventName === "cancelled" ||
+        eventName === "failed" ||
+        eventName === "system.session_error"
+      ) {
+        complete(data as Record<string, unknown>);
+        return;
+      }
+      dispatchStreamEvent(eventName, data, handlers);
+    };
+
+    [
+      "message_start",
+      "content_block_delta",
+      "message_stop",
+      "task:status_changed",
+      "workflow:completed",
+      "generation_finished",
+      "generation:cancelled",
+      "cancelled",
+      "failed",
+      "system.session_error",
+    ].forEach((eventName) => source.addEventListener(eventName, handle(eventName)));
+    source.onerror = () => complete({ reason: "event_source_error" });
+  });
 }
 
 export async function cancelAssistantReply(
