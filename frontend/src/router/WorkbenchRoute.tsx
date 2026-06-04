@@ -2,13 +2,15 @@ import { useLocation, useNavigate, useParams, useSearchParams, Navigate } from "
 import { Workbench } from "@/pages/WorkbenchPage/Workbench";
 import type { User } from "@/types";
 import { normalizeMainTab } from "./utils";
+import type { MainTab } from "./utils";
 
 interface WorkbenchRouteProps {
   user?: User;
   onLogout: () => void;
+  forcedTab?: MainTab;
 }
 
-export function WorkbenchRoute({ user, onLogout }: WorkbenchRouteProps) {
+export function WorkbenchRoute({ user, onLogout, forcedTab }: WorkbenchRouteProps) {
   const params = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -16,7 +18,7 @@ export function WorkbenchRoute({ user, onLogout }: WorkbenchRouteProps) {
 
   if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
 
-  const routeTab = normalizeMainTab(searchParams.get("tab"));
+  const routeTab = forcedTab ?? normalizeMainTab(searchParams.get("tab"));
   const routeWorkspaceId = params.workspaceId
     ? decodeURIComponent(params.workspaceId)
     : undefined;
@@ -42,7 +44,15 @@ export function WorkbenchRoute({ user, onLogout }: WorkbenchRouteProps) {
         navigate(`${path}${buildSearch()}`, { replace: options?.replace });
       }}
       onRouteTabChange={(tab, options) => {
-        navigate(`${location.pathname}${buildSearch(tab)}`, {
+        const targetPath =
+          tab === "files" && routeWorkspaceId
+            ? `/workspaces/${encodeURIComponent(routeWorkspaceId)}/files`
+            : location.pathname.startsWith("/workspaces/")
+              ? routeConversationId
+                ? `/app/${encodeURIComponent(routeWorkspaceId ?? "")}/c/${encodeURIComponent(routeConversationId)}`
+                : `/app/${encodeURIComponent(routeWorkspaceId ?? "")}`
+              : location.pathname;
+        navigate(`${targetPath}${tab === "files" ? "" : buildSearch(tab)}`, {
           replace: options?.replace,
         });
       }}

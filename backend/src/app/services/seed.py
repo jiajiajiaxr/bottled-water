@@ -296,6 +296,7 @@ async def ensure_seed_data(db: AsyncSession) -> User:
                 continue
             existing_config = dict(agent.config or {})
             configured_tools = normalize_tool_names(existing_config.get("tools") or [])
+            default_tools = normalize_tool_names(spec["tools"])
             config = {
                 "supports_streaming": True,
                 "supports_tool_use": True,
@@ -305,7 +306,7 @@ async def ensure_seed_data(db: AsyncSession) -> User:
                 "tools": spec["tools"],
                 **existing_config,
             }
-            config["tools"] = configured_tools or normalize_tool_names(spec["tools"])
+            config["tools"] = normalize_tool_names([*default_tools, *configured_tools])
             agent.description = spec["description"]
             agent.capabilities = spec["capabilities"]
             agent.config = config

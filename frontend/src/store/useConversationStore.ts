@@ -105,6 +105,10 @@ interface ConversationState {
     modelConfigId: string | undefined,
   ) => void;
   getSelectedModelConfigId: (conversationId: string) => string | undefined;
+
+  draftSnippets: Map<string, string>;
+  appendDraftSnippet: (conversationId: string, snippet: string) => void;
+  consumeDraftSnippet: (conversationId: string) => string;
 }
 
 export const useConversationStore = create<ConversationState>((set, get) => ({
@@ -116,6 +120,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   loadingMessages: false,
   thinkingEnabled: loadThinkingEnabled(),
   selectedModelConfigIds: loadSelectedModelConfigIds(),
+  draftSnippets: new Map(),
   localRunningConversationIds: new Set(),
 
   setConversations: (conversations) => set({ conversations }),
@@ -202,4 +207,22 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   getSelectedModelConfigId: (conversationId) =>
     get().selectedModelConfigIds.get(conversationId),
+
+  appendDraftSnippet: (conversationId, snippet) =>
+    set((state) => {
+      const next = new Map(state.draftSnippets);
+      next.set(conversationId, `${next.get(conversationId) ?? ""}${snippet}`);
+      return { draftSnippets: next };
+    }),
+
+  consumeDraftSnippet: (conversationId) => {
+    const value = get().draftSnippets.get(conversationId) ?? "";
+    if (!value) return "";
+    set((state) => {
+      const next = new Map(state.draftSnippets);
+      next.delete(conversationId);
+      return { draftSnippets: next };
+    });
+    return value;
+  },
 }));

@@ -12,6 +12,7 @@ import {
   BranchesOutlined,
   CommentOutlined,
   FileTextOutlined,
+  FolderOpenOutlined,
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
@@ -35,7 +36,7 @@ export interface WorkbenchLayoutProps {
   activeWorkspace: Workspace | undefined;
   activeWorkspaceId: string | undefined;
   selectWorkspace: (workspaceId?: string, replace?: boolean) => void;
-  openMainTab: (tab: "agents" | "workspace" | "settings") => void;
+  openMainTab: (tab: "agents" | "workspace" | "settings" | "files") => void;
 
   // Conversations
   conversations: Conversation[];
@@ -164,6 +165,13 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
               data-testid="workspace-panel"
             >
               工作区
+            </Button>
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={() => openMainTab("files")}
+              data-testid="workspace-files"
+            >
+              工作区文件
             </Button>
           </Space>
           <Space>

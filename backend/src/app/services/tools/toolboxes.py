@@ -24,7 +24,14 @@ TOOLBOXES = {
         "artifact.create_pptx",
         "document.review",
     ],
-    "chat": ["file.extract_text", "file.preview", "file.summarize"],
+    "chat": [
+        "file.extract_text",
+        "file.preview",
+        "file.summarize",
+        "artifact.create_pdf",
+        "artifact.create_docx",
+        "artifact.create_html",
+    ],
 }
 
 

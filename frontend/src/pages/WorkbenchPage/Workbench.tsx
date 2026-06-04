@@ -18,7 +18,9 @@ import { PlatformControlDrawer } from "@/features/platform/components/PlatformCo
 import { ChatPanel } from "@/features/chat/components/ChatPanel";
 import { PreviewPanel } from "@/features/preview/components/PreviewPanel";
 import { WorkflowStudioContent } from "@/features/workflow/WorkflowStudioContent";
+import { WorkspaceFilesContent } from "@/features/workspaceFiles/WorkspaceFilesContent";
 import type { User } from "@/types";
+import type { MainTab } from "@/router/utils";
 import {
   useConversationCategories,
   useBackgroundTaskPolling,
@@ -46,7 +48,7 @@ export function Workbench({
     options?: { replace?: boolean },
   ) => void;
   onRouteTabChange: (
-    tab: "chat" | "agents" | "workspace" | "settings",
+    tab: MainTab,
     options?: { replace?: boolean },
   ) => void;
 }) {
@@ -139,7 +141,7 @@ export function Workbench({
     navigateToConversation(workspaceId, conversationId, replace);
   };
 
-  const openMainTab = (tab: "agents" | "workspace" | "settings") => {
+  const openMainTab = (tab: "agents" | "workspace" | "settings" | "files") => {
     setAgentDrawerOpen(tab === "agents");
     setWorkspacesOpen(tab === "workspace");
     setGlobalSettingsOpen(tab === "settings");
@@ -153,7 +155,7 @@ export function Workbench({
     }
   };
 
-  const closeMainTab = (tab: "agents" | "workspace" | "settings") => {
+  const closeMainTab = (tab: "agents" | "workspace" | "settings" | "files") => {
     if (tab === "agents") setAgentDrawerOpen(false);
     if (tab === "workspace") setWorkspacesOpen(false);
     if (tab === "settings") setGlobalSettingsOpen(false);
@@ -268,6 +270,7 @@ export function Workbench({
     if (!nextConversation) return;
     if (activeId !== nextConversation.id) setActiveId(nextConversation.id);
     const workspaceId = nextConversation.workspace_id || activeWorkspaceId;
+    if (routeTab === "files" && !routeConversationId) return;
     if (
       routeWorkspaceId !== workspaceId ||
       routeConversationId !== nextConversation.id
@@ -422,6 +425,21 @@ export function Workbench({
             onSaveProjectFile={async (projectId, payload) => {
               await api.saveProjectFile(projectId, payload);
               message.success("项目文件版本已保存");
+            }}
+          />
+        ) : routeTab === "files" ? (
+          <WorkspaceFilesContent
+            workspaceId={activeWorkspaceId}
+            onBack={() => onRouteTabChange("chat")}
+            onAttachReference={(snippet) => {
+              if (active?.id) {
+                useConversationStore.getState().appendDraftSnippet(active.id, snippet);
+                onRouteTabChange("chat");
+                message.success("文件引用已加入当前会话输入框");
+              } else {
+                void navigator.clipboard.writeText(snippet);
+                message.info("当前没有会话，文件引用已复制到剪贴板");
+              }
             }}
           />
         ) : null}

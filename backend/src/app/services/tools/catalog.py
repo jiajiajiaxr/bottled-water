@@ -70,35 +70,6 @@ def visible_tool_query(user: User, workspace_id: str | None = None):
     return query
 
 
-def _prefer_tool_item(current: dict | None, candidate: dict) -> dict:
-    """按工具名合并目录项，内置工具优先使用系统同步后的记录。"""
-
-    if current is None:
-        return candidate
-    name = str(candidate.get("name") or "")
-    if name in BUILTIN_TOOLS:
-        current_builtin = bool(current.get("is_builtin") or current.get("type") == "builtin")
-        candidate_builtin = bool(candidate.get("is_builtin") or candidate.get("type") == "builtin")
-        if candidate_builtin and not current_builtin:
-            return candidate
-        return current
-    current_owner = current.get("owner_id")
-    candidate_owner = candidate.get("owner_id")
-    if candidate_owner and not current_owner:
-        return candidate
-    return current
-
-
-def _dedupe_tool_items(items: list[dict]) -> list[dict]:
-    by_name: dict[str, dict] = {}
-    for item in items:
-        name = str(item.get("name") or "")
-        if not name:
-            continue
-        by_name[name] = _prefer_tool_item(by_name.get(name), item)
-    return list(by_name.values())
-
-
 def list_tools(
     db: Session,
     user: User,
@@ -142,3 +113,58 @@ def get_tool_definition(db: Session, user: User, tool_id_or_name: str) -> ToolDe
     if not tool:
         raise NotFoundError("Tool not found")
     return tool
+
+
+def _dedupe_tool_items(items: list[dict]) -> list[dict]:
+    by_key: dict[str, dict] = {}
+    for item in items:
+        key = _dedupe_key(item)
+        if not key:
+            continue
+        by_key[key] = _prefer_tool_item(by_key.get(key), item, key=key)
+    return list(by_key.values())
+
+
+def _dedupe_key(item: dict) -> str:
+    return _canonical_builtin_name(item) or str(item.get("name") or "")
+
+
+def _canonical_builtin_name(item: dict) -> str | None:
+    name = str(item.get("name") or "")
+    if name in BUILTIN_TOOLS:
+        return name
+    handler = str(
+        item.get("builtin_handler")
+        or (item.get("implementation") or {}).get("builtin_handler")
+        or ""
+    )
+    if handler in BUILTIN_TOOLS:
+        return handler
+    display_name = str(item.get("display_name") or "").strip()
+    category = str(item.get("category") or "").strip()
+    for builtin_name, builtin in BUILTIN_TOOLS.items():
+        if display_name == builtin.display_name and category == builtin.category:
+            return builtin_name
+    return None
+
+
+def _prefer_tool_item(current: dict | None, candidate: dict, *, key: str) -> dict:
+    if current is None:
+        return candidate
+    if key in BUILTIN_TOOLS:
+        current_builtin = _is_builtin_item(current, canonical_name=key)
+        candidate_builtin = _is_builtin_item(candidate, canonical_name=key)
+        if candidate_builtin and not current_builtin:
+            return candidate
+        return current
+    current_owner = current.get("created_by")
+    candidate_owner = candidate.get("created_by")
+    if candidate_owner and not current_owner:
+        return candidate
+    return current
+
+
+def _is_builtin_item(item: dict, *, canonical_name: str | None = None) -> bool:
+    if bool(item.get("is_builtin") or item.get("type") == "builtin"):
+        return True
+    return bool(canonical_name and str(item.get("name") or "") == canonical_name)

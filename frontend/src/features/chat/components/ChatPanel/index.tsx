@@ -75,6 +75,13 @@ export function ChatPanel({
     [active],
   );
 
+  useEffect(() => {
+    if (!active?.id) return;
+    const snippet = useConversationStore.getState().consumeDraftSnippet(active.id);
+    if (!snippet) return;
+    setText((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${snippet}`);
+  }, [active?.id]);
+
   // 历史消息从 Store 读取
   const historyMessages = useMessageStore((s) => s.historyMessages);
   const messageVersions = useMessageStore((s) => s.messageVersions);

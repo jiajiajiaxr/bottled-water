@@ -156,9 +156,10 @@ export function AgentDirectoryDrawer({
   );
 
   const toolOptions = useMemo(() => {
-    const known = new Set(toolCatalog.map((tool) => tool.name));
+    const dedupedCatalog = dedupeToolCatalog(toolCatalog);
+    const known = new Set(dedupedCatalog.map((tool) => tool.name));
     return [
-      ...toolCatalog.map((tool) => ({
+      ...dedupedCatalog.map((tool) => ({
         label: `${tool.display_name ?? tool.name} · ${tool.name}`,
         value: tool.name,
       })),
@@ -882,4 +883,32 @@ export function AgentDirectoryDrawer({
       </Modal>
     </>
   );
+}
+
+function dedupeToolCatalog(catalog: ToolDefinition[]) {
+  const byName = new Map<string, ToolDefinition>();
+  const byBuiltinDisplay = new Map<string, ToolDefinition>();
+
+  for (const tool of catalog) {
+    const existing = byName.get(tool.name);
+    if (!existing || preferTool(tool, existing)) {
+      byName.set(tool.name, tool);
+    }
+  }
+
+  for (const tool of byName.values()) {
+    const key = `${tool.display_name ?? tool.name}::${tool.category ?? ""}`;
+    const existing = byBuiltinDisplay.get(key);
+    if (!existing || preferTool(tool, existing)) {
+      byBuiltinDisplay.set(key, tool);
+    }
+  }
+
+  return [...byBuiltinDisplay.values()];
+}
+
+function preferTool(candidate: ToolDefinition, current: ToolDefinition) {
+  if (candidate.is_builtin && !current.is_builtin) return true;
+  if (!candidate.created_by && current.created_by) return true;
+  return false;
 }
