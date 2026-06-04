@@ -27,9 +27,11 @@ def test_legacy_capability_imports_are_reexport_shims() -> None:
     from app.services.llm import ark as llm_ark
     from app.services.llm import gateway as llm_gateway_impl
     from app.services.tools import builtin_executor
+    from app.services.tools.builtins import file as builtin_file
 
     assert artifact_exports.export_artifact
-    assert file_tools.extract_text_from_path
+    assert file_tools.extract_text_from_path is builtin_file.extract_text_from_path
+    assert file_tools.convert_file is builtin_file.convert_file
     assert agentic_runtime.build_tools_for_agent is async_tool_loop.build_tools_for_agent
     assert agentic_runtime.execute_tool_by_name is async_tool_loop.execute_tool_by_name
     assert ark.ArkClient is llm_ark.ArkClient
