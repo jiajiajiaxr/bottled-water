@@ -20,18 +20,23 @@ def test_domain_service_imports_are_direct() -> None:
 
 
 def test_legacy_capability_imports_are_reexport_shims() -> None:
-    from app.services import artifact_exports, file_tools
+    from app.services import artifact_exports, file_tools, mcp_runtime
     from app.services import agentic_runtime
     from app.services import ark, llm_gateway
     from app.services.agents import async_tool_loop
     from app.services.llm import ark as llm_ark
     from app.services.llm import gateway as llm_gateway_impl
+    from app.services.mcp import invoke_mcp_tool_recorded, tool_name
     from app.services.tools import builtin_executor
+    from app.services.tools.builtins.artifact import export as artifact_export
     from app.services.tools.builtins import file as builtin_file
 
-    assert artifact_exports.export_artifact
+    assert artifact_exports.export_artifact is artifact_export.export_artifact
+    assert artifact_exports.default_export_format is artifact_export.default_export_format
     assert file_tools.extract_text_from_path is builtin_file.extract_text_from_path
     assert file_tools.convert_file is builtin_file.convert_file
+    assert mcp_runtime.invoke_mcp_tool_recorded is invoke_mcp_tool_recorded
+    assert mcp_runtime.tool_name is tool_name
     assert agentic_runtime.build_tools_for_agent is async_tool_loop.build_tools_for_agent
     assert agentic_runtime.execute_tool_by_name is async_tool_loop.execute_tool_by_name
     assert ark.ArkClient is llm_ark.ArkClient

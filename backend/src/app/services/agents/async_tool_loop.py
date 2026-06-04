@@ -25,7 +25,7 @@ from app.services.agents.async_tool_selection import (
     select_mcp_action,
     select_skills,
 )
-from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
+from app.services.mcp import invoke_mcp_tool_recorded, tool_name
 from app.services.model_config_resolver import create_provider_from_db
 from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.catalog import sync_builtin_tool_definitions

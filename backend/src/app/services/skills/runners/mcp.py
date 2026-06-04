@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, McpServer, Skill, User
-from app.services.mcp_runtime import invoke_mcp_tool_recorded
+from app.services.mcp import invoke_mcp_tool_recorded
 from app.services.skills.runners.prompt import input_text
 
 

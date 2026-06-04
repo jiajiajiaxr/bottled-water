@@ -33,7 +33,6 @@ from app.services.artifacts import (
     create_artifact,
     update_artifact_files,
 )
-from app.services.artifact_exports import default_export_format, export_artifact
 from app.services.files.previewers.office import build_office_preview, is_office_file
 from app.services.files import attachment_path, ensure_extension_tables, save_upload
 from app.services.knowledge import index_document, retrieve
@@ -43,6 +42,7 @@ from app.services.serialization import (
     knowledge_base_to_dict,
     knowledge_document_to_dict,
 )
+from app.services.tools.builtins.artifact.export import default_export_format, export_artifact
 
 
 router = APIRouter(tags=["artifacts"])

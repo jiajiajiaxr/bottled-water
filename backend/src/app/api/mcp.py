@@ -18,8 +18,8 @@ from app.schemas.requests import (
     ImportMcpServerRequest,
     InvokeMcpToolRequest,
 )
+from app.services.mcp import invoke_mcp_tool_recorded, tool_allowed
 from app.services.mcp.discovery import probe_server_async
-from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_allowed
 from app.services.serialization import mcp_invocation_to_dict, mcp_server_to_dict
 
 

@@ -7,7 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Agent, Conversation, McpServer, Skill
-from app.services.mcp_runtime import tool_name
+from app.services.mcp import tool_name
 from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.permissions import normalize_tool_names
 

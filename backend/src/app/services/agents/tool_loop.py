@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, McpServer, Skill, ToolDefinition, User
 from app.services.realtime.event_bus import event_bus
-from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_name
+from app.services.mcp import invoke_mcp_tool_recorded, tool_name
 from app.services.skills.runtime import SkillRuntime
 from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.executor import invoke_tool, invoke_tool_async
