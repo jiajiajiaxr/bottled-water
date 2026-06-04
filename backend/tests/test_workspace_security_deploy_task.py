@@ -6,6 +6,14 @@ def unwrap(body: dict[str, Any]) -> Any:
     return body.get("data", body)
 
 
+def _demo_headers(client: Any) -> dict[str, str]:
+    login = client.post("/api/v1/auth/demo")
+    assert login.status_code == 200, login.text
+    token = unwrap(login.json()).get("access_token") or unwrap(login.json()).get("token")
+    assert token
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_workspace_project_permissions_and_audit(client: Any, auth_headers: dict[str, str]) -> None:
     permissions = client.get("/api/v1/permissions/me", headers=auth_headers)
     assert permissions.status_code == 200, permissions.text
@@ -56,6 +64,42 @@ def test_workspace_project_permissions_and_audit(client: Any, auth_headers: dict
     stats = client.get("/api/v1/audit-logs/stats", headers=auth_headers)
     assert stats.status_code == 200, stats.text
     assert "total" in unwrap(stats.json())
+
+
+def test_security_user_role_update_syncs_rbac_mapping_and_audit(client: Any) -> None:
+    admin_headers = _demo_headers(client)
+    email = f"rbac-{uuid.uuid4().hex[:8]}@example.com"
+    signup = client.post(
+        "/auth/signup",
+        json={"email": email, "password": "Acceptance123!", "name": "RBAC User"},
+    )
+    assert signup.status_code in {200, 201, 409}, signup.text
+    target_user = unwrap(signup.json())["user"]
+
+    updated = client.patch(
+        f"/api/v1/security/users/{target_user['id']}/role",
+        json={"role": "developer"},
+        headers=admin_headers,
+    )
+    assert updated.status_code == 200, updated.text
+    updated_body = unwrap(updated.json())
+    assert updated_body["role"] == "developer"
+    assert updated_body["roles"] == ["ROLE_USER", "ROLE_DEVELOPER"]
+
+    users = client.get("/api/v1/security/users", headers=admin_headers)
+    assert users.status_code == 200, users.text
+    listed = next(item for item in unwrap(users.json())["items"] if item["id"] == target_user["id"])
+    assert listed["role"] == "developer"
+    assert listed["roles"] == ["ROLE_USER", "ROLE_DEVELOPER"]
+
+    logs = client.get(
+        "/api/v1/audit-logs?action=security.user.role.update",
+        headers=admin_headers,
+    )
+    assert logs.status_code == 200, logs.text
+    matching = [item for item in unwrap(logs.json())["items"] if item["target_id"] == target_user["id"]]
+    assert matching
+    assert matching[0]["detail"]["role_codes"] == ["ROLE_USER", "ROLE_DEVELOPER"]
 
 
 def test_task_approval_and_deployment_operations(

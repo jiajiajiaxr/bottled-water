@@ -352,3 +352,9 @@ agent_runtime/（零业务依赖）
 - `app.services.mcp.invocation` 是 MCP 调用记录和错误收敛入口；它负责创建 `McpToolInvocation`、执行 allowlist/schema 预检、分发 transport、写入 `error_code` 与审计日志。
 - `app.services.mcp.transports.common` 只负责通用 allowlist/env 规则；`http.py`、`stdio.py`、`sse_ws.py` 分别承载 transport 细节。
 - 失败调用分为配置/权限错误和连接/transport 错误：前者不会把 MCP Server 健康误判为离线，后者会更新为 offline，便于管理页提示真实故障。
+
+### RBAC 与审计边界
+
+- `app.api.security_ops` 负责安全运营 API，包括角色、权限、用户角色和审计查询。
+- 用户角色更新必须同时维护 `users.role` 兼容字段和 `user_roles` 关系表；默认用户始终保留 `ROLE_USER`，提升角色以额外 `UserRole` 记录表示。
+- 高风险安全操作通过 `write_audit_log()` 写入 `AuditLog`，前端安全页读取 `/audit-logs` 和 `/audit-logs/stats` 展示。

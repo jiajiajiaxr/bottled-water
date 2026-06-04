@@ -360,6 +360,8 @@ MCP 服务用于接入外部工具和上下文服务。
 - 数据模型：`Role`、`Permission`、`UserRole`、`RolePermission`、`AuditLog`
 - 前端入口：`frontend/src/features/platform/`、`frontend/src/features/settings/`
 
+用户角色更新会同时写入 `users.role` 和 `user_roles` 关系表。系统默认保留 `ROLE_USER`，当用户被提升为 developer/admin 等角色时，会追加对应角色关系，并记录 `security.user.role.update` 审计事件。
+
 
 ### MCP 调用失败与诊断语义
 

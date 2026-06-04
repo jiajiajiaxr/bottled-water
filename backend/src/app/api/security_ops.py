@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ForbiddenError
+from app.core.errors import ForbiddenError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from db import get_db
@@ -66,6 +66,34 @@ def _permission_to_dict(permission: Permission) -> dict:
         "created_at": iso(permission.created_at),
         "updated_at": iso(permission.updated_at),
     }
+
+
+def _role_code_for_user_role(value: str) -> tuple[str, str]:
+    raw = str(value or "member").strip()
+    if not raw:
+        raw = "member"
+    code = raw.upper() if raw.upper().startswith("ROLE_") else f"ROLE_{raw.upper()}"
+    if code == "ROLE_MEMBER":
+        code = "ROLE_USER"
+    role_value = code.removeprefix("ROLE_").lower()
+    if role_value == "user":
+        role_value = "member"
+    return code, role_value
+
+
+async def _roles_for_user_value(db: AsyncSession, role_value: str) -> tuple[str, list[Role]]:
+    code, normalized_role = _role_code_for_user_role(role_value)
+    role_codes = ["ROLE_USER"] if code == "ROLE_USER" else ["ROLE_USER", code]
+    roles = (
+        await db.scalars(
+            select(Role).where(Role.code.in_(role_codes), Role.deleted_at.is_(None))
+        )
+    ).all()
+    by_code = {role.code: role for role in roles}
+    missing = [role_code for role_code in role_codes if role_code not in by_code]
+    if missing:
+        raise ValidationAppError(f"Role not found: {', '.join(missing)}")
+    return normalized_role, [by_code[item] for item in role_codes]
 
 
 @router.get("/permissions/me", response_model=ApiResponse[dict])
@@ -243,19 +271,39 @@ async def update_user_role(
     target = await db.get(User, target_user_id)
     if not target or target.deleted_at is not None:
         raise ForbiddenError("User not found")
-    target.role = payload.role
+    previous_role = target.role
+    normalized_role, roles = await _roles_for_user_value(db, payload.role)
+    target.role = normalized_role
     target.updated_at = utcnow()
+    for row in (
+        await db.scalars(select(UserRole).where(UserRole.user_id == target.id))
+    ).all():
+        await db.delete(row)
+    await db.flush()
+    for role in roles:
+        db.add(UserRole(user_id=target.id, role_id=role.id, assigned_by=user.id))
     await write_audit_log(
         db,
         user=user,
         action="security.user.role.update",
         target_type="user",
         target_id=target.id,
-        detail={"role": payload.role},
+        detail={
+            "previous_role": previous_role,
+            "role": normalized_role,
+            "role_codes": [role.code for role in roles],
+        },
         risk_score=0.55,
     )
     await db.commit()
-    return ok({"id": target.id, "role": target.role}, "User role updated")
+    return ok(
+        {
+            "id": target.id,
+            "role": target.role,
+            "roles": [role.code for role in roles],
+        },
+        "User role updated",
+    )
 
 
 @router.get("/audit-logs", response_model=ApiResponse[dict])
