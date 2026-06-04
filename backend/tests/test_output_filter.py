@@ -39,6 +39,20 @@ def test_strip_status_report_fence_with_spacing() -> None:
     assert strip_internal_agent_output(text) == "visible answer\nlater answer"
 
 
+def test_strip_status_fence_alias() -> None:
+    text = "\n".join(
+        [
+            "visible answer",
+            "```status",
+            '{"state":"completed"}',
+            "```",
+            "later answer",
+        ]
+    )
+
+    assert strip_internal_agent_output(text) == "visible answer\nlater answer"
+
+
 def test_internal_output_stream_filter_only_emits_visible_delta() -> None:
     stream_filter = InternalOutputStreamFilter()
 

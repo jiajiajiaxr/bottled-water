@@ -129,6 +129,9 @@ function stripInternalFencedBlocks(text: string) {
   let removed = false;
   const statusFence = "```status_report";
   const statusFenceNames = ["status_report", "status"];
+  const isStatusFence = (value: string) =>
+    /^```\s*(?:status_report|status)\b/i.test(value.trim());
+  const isClosingFence = (value: string) => value.trim().startsWith("```");
   const canBecomeStatusFence = (value: string) =>
     Boolean(value) &&
     (statusFence.startsWith(value) ||
@@ -145,14 +148,14 @@ function stripInternalFencedBlocks(text: string) {
     const trimmed = line.trim();
     const lowered = trimmed.toLowerCase();
 
-    if (!skippingFence && /^```\s*status_report\b/i.test(trimmed)) {
+    if (!skippingFence && isStatusFence(trimmed)) {
       skippingFence = true;
       removed = true;
       continue;
     }
 
     if (skippingFence) {
-      if (trimmed.startsWith("```")) skippingFence = false;
+      if (isClosingFence(trimmed)) skippingFence = false;
       continue;
     }
 

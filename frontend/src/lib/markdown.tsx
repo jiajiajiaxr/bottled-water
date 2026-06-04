@@ -21,12 +21,20 @@ function MarkdownContentComponent({ text }: { text: string }) {
       const line = lines[index];
       if (line.trim().startsWith("```")) {
         flushParagraph();
+        const fenceName = line
+          .trim()
+          .replace(/^```\s*/, "")
+          .split(/\s+/)[0]
+          ?.toLowerCase();
+        const isInternalFence =
+          fenceName === "status_report" || fenceName === "status";
         const code: string[] = [];
         index += 1;
         while (index < lines.length && !lines[index].trim().startsWith("```")) {
           code.push(lines[index]);
           index += 1;
         }
+        if (isInternalFence) continue;
         result.push(
           <pre key={`code-${result.length}`}>
             <code>{code.join("\n")}</code>

@@ -23,4 +23,16 @@ describe("stripInternalAgentOutput", () => {
       "visible answer",
     );
   });
+
+  it("removes status fence aliases", () => {
+    const text = [
+      "visible answer",
+      "```status",
+      '{"state":"completed"}',
+      "```",
+      "final answer",
+    ].join("\n");
+
+    expect(stripInternalAgentOutput(text)).toBe("visible answer\nfinal answer");
+  });
 });

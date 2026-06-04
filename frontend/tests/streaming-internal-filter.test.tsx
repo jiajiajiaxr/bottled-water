@@ -33,4 +33,41 @@ describe("useStreamingMessages internal block filtering", () => {
       "visible thinking\nvisible conclusion",
     );
   });
+
+  it("filters status_report fragments from streamed answer text", () => {
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onMessageStart({
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+
+    act(() => {
+      result.current.streamHandlers.onDelta?.("可见回答\n``", {
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+      });
+    });
+
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
+      "可见回答",
+    );
+
+    act(() => {
+      result.current.streamHandlers.onDelta?.(
+        '`status_report\n{"state":"completed","rationale":"done"}\n```\n继续说明',
+        {
+          agent_id: "agent-1",
+          agent_message_id: "message-1",
+        },
+      );
+    });
+
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
+      "可见回答\n继续说明",
+    );
+  });
 });

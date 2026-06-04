@@ -14,6 +14,7 @@ _FINAL_SECTION_TITLES = {
 }
 _STATUS_REPORT_FENCE = "```status_report"
 _STATUS_REPORT_NAMES = ("status_report", "status")
+_STATUS_REPORT_FENCE_RE = re.compile(r"^```\s*(?:status_report|status)\b", re.IGNORECASE)
 
 
 def _can_become_status_report_fence(value: str) -> bool:
@@ -123,9 +124,7 @@ def _strip_internal_fenced_blocks(text: str) -> tuple[str, bool]:
                 skipping = False
             continue
 
-        if lowered.startswith(_STATUS_REPORT_FENCE) or re.match(
-            r"^```\s*status_report\b", lowered, flags=re.IGNORECASE
-        ):
+        if _STATUS_REPORT_FENCE_RE.match(trimmed):
             skipping = True
             removed = True
             continue
