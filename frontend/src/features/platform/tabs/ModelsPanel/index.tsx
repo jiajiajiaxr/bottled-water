@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   App as AntApp,
   Avatar,
@@ -25,6 +25,24 @@ export function ModelsPanel() {
   const [modelProviders, setModelProviders] = useState<ModelProvider[]>([]);
   const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
   const [modelTestResult, setModelTestResult] = useState("");
+
+  const load = async () => {
+    try {
+      const [providers, configs] = await Promise.all([
+        api.modelProviders().catch(() => [] as ModelProvider[]),
+        api.modelConfigs().catch(() => [] as ModelConfig[]),
+      ]);
+      setModelProviders(providers);
+      setModelConfigs(configs);
+    } catch {
+      message.error("加载模型数据失败");
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="workspace-grid">

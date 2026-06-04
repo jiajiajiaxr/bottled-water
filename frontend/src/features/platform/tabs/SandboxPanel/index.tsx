@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   App as AntApp,
   Avatar,
@@ -39,6 +39,24 @@ export function SandboxPanel({ activeWorkspace }: SandboxPanelProps) {
     RemoteConnection[]
   >([]);
   const [sandboxResult, setSandboxResult] = useState<SandboxCommandResult>();
+
+  const load = async () => {
+    try {
+      const [items, remotes] = await Promise.all([
+        api.sandboxes().catch(() => [] as SandboxSession[]),
+        api.remoteConnections().catch(() => [] as RemoteConnection[]),
+      ]);
+      setSandboxes(items);
+      setRemoteConnections(remotes);
+    } catch {
+      message.error("加载沙箱与远程连接数据失败");
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="workspace-grid">
