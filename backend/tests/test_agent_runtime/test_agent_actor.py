@@ -4,7 +4,7 @@ import pytest
 from model_provider import ChatResponse
 
 from agent_runtime.context.blackboard import BlackboardManager
-from agent_runtime.core.protocol import AGENT_REPORT, CONTROL_ASSIGN
+from agent_runtime.core.protocol import AGENT_REPORT, CONTROL_ASSIGN, CONTROL_COMPLETE
 from agent_runtime.core.types import AgentConfig, AgentState, Event
 from agent_runtime.runtime.agent_actor import AgentActor
 from agent_runtime.runtime.event_dispatcher import EventDispatcher
@@ -50,6 +50,37 @@ async def test_agent_actor_runs_assignment_and_publishes_report(mock_provider, m
     assert any(item.get("type") == "agent_work" for item in stored["raw_history"])
 
 
+@pytest.mark.asyncio
+async def test_agent_actor_exits_on_control_complete(mock_provider, mock_tool_executor):
+    bus = EventDispatcher()
+    events: list[Event] = []
+    bus.subscribe("*", lambda event: _append(events, event), target="*")
+    actor = AgentActor(
+        session_id="sess_complete",
+        agent_config=AgentConfig(id="reviewer", name="Reviewer", system_prompt="You review."),
+        model_provider=mock_provider,
+        event_bus=bus,
+        tool_executor=mock_tool_executor,
+        use_streaming=False,
+    )
+    task = actor.start()
+
+    await bus.publish(
+        Event(
+            type=CONTROL_COMPLETE,
+            payload={"reason": "workflow_done"},
+            source="scheduler",
+            target="reviewer",
+        )
+    )
+    report_event = await _wait_for(events, AGENT_REPORT)
+    await asyncio.wait_for(task, timeout=1)
+    actor.mailbox.close()
+
+    assert report_event.payload["agent_id"] == "reviewer"
+    assert report_event.payload["report"]["state"] == AgentState.COMPLETED.value
+
+
 async def _append(target: list[Event], event: Event) -> None:
     target.append(event)
 
@@ -61,4 +92,3 @@ async def _wait_for(events: list[Event], event_type: str) -> Event:
                 return event
         await asyncio.sleep(0.02)
     raise AssertionError(f"event {event_type} was not published")
-

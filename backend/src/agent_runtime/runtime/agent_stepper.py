@@ -34,6 +34,10 @@ class StepResult:
     interrupted: bool = False
 
 
+class AgentControlInterrupt(Exception):
+    """Raised when a control event interrupts the current assignment."""
+
+
 class AgentStepper:
     """Runs one Agent assignment with control checkpoints."""
 
@@ -61,25 +65,45 @@ class AgentStepper:
             return StepResult(
                 task=self.current_task,
                 output={},
-                report=self._terminal_report(),
+                report=self.terminal_report(),
                 interrupted=True,
             )
 
         self.state = AgentState.RUNNING
-        output = await self.agent_loop.run(
-            self.current_task,
-            blackboard_view,
-            tool_executor=tool_executor,
-            agent_ctx=agent_ctx,
-            emit_event=emit_event,
-        )
+        try:
+            output = await self.agent_loop.run(
+                self.current_task,
+                blackboard_view,
+                tool_executor=tool_executor,
+                agent_ctx=agent_ctx,
+                emit_event=self._checkpoint_emitter(emit_event),
+            )
+        except AgentControlInterrupt:
+            return StepResult(
+                task=self.current_task,
+                output={},
+                report=self.terminal_report(),
+                interrupted=True,
+            )
         await asyncio.sleep(0)
         await self._apply_pending_controls()
         report = output.get("status_report")
         if not isinstance(report, AgentReport):
-            report = self._terminal_report()
+            report = self.terminal_report()
         self.state = report.state
         return StepResult(task=self.current_task, output=output, report=report)
+
+    def _checkpoint_emitter(self, emit_event):
+        async def _emit(event: Event) -> None:
+            if emit_event:
+                await emit_event(event)
+            await asyncio.sleep(0)
+            await self._apply_pending_controls()
+            await self._wait_if_paused()
+            if self.cancel_requested or self.complete_requested:
+                raise AgentControlInterrupt()
+
+        return _emit
 
     async def _apply_pending_controls(self) -> None:
         for event in self.mailbox.drain():
@@ -109,7 +133,7 @@ class AgentStepper:
             event = await self.mailbox.recv()
             await self.apply_control(event)
 
-    def _terminal_report(self) -> AgentReport:
+    def terminal_report(self) -> AgentReport:
         if self.cancel_requested:
             return AgentReport(
                 agent_id=self.agent_loop.agent.id,
@@ -125,4 +149,3 @@ class AgentStepper:
             rationale="Agent completed by control event",
             confidence=1.0,
         )
-

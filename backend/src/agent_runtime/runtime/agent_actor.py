@@ -17,6 +17,7 @@ from ..core.protocol import (
     AGENT_STATE_CHANGED,
     CONTROL_ASSIGN,
     CONTROL_CANCEL,
+    CONTROL_COMPLETE,
     CONTROL_SHUTDOWN,
 )
 from ..core.types import AgentConfig, AgentReport, AgentState, AgentWill, Event
@@ -85,6 +86,12 @@ class AgentActor:
                 await self.stepper.apply_control(event)
                 await self._set_state(AgentState.FAILED, reason=event.type)
                 break
+            if event.type == CONTROL_COMPLETE:
+                await self.stepper.apply_control(event)
+                report = self.stepper.terminal_report()
+                await self._publish_report(report, work_product="", task=None)
+                await self._set_state(AgentState.COMPLETED, reason=event.type)
+                break
             if event.type != CONTROL_ASSIGN:
                 await self.stepper.apply_control(event)
                 await self._set_state(self.stepper.state, reason=event.type)
@@ -105,7 +112,8 @@ class AgentActor:
                 continue
             await self._execute_assignment(str(task), event)
 
-        await self._set_state(AgentState.COMPLETED if not self.stepper.cancel_requested else AgentState.FAILED, reason="actor_stopped")
+        final_state = AgentState.FAILED if self.stepper.cancel_requested else AgentState.COMPLETED
+        await self._set_state(final_state, reason="actor_stopped")
 
     async def _execute_assignment(self, task: str, source_event: Event) -> None:
         await self._set_state(AgentState.RUNNING, reason="assignment_started", task=task)
@@ -129,13 +137,15 @@ class AgentActor:
             output = result.output
             report = result.report
             work_product = str(output.get("work_product") or "")
+            history_type = "agent_control" if result.interrupted else "agent_work"
             await self.blackboard_mgr.append_history(
                 self.session_id,
                 {
-                    "type": "agent_work",
+                    "type": history_type,
                     "agent_id": self.config.id,
                     "task": task,
                     "content": work_product,
+                    "interrupted": result.interrupted,
                     "report": _report_payload(report),
                 },
             )
@@ -226,4 +236,3 @@ def _report_payload(report: AgentReport) -> dict[str, Any]:
         "rationale": report.rationale,
         "expected_duration": report.expected_duration,
     }
-
