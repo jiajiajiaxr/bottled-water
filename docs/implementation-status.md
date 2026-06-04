@@ -43,7 +43,7 @@
 | 上下文系统支持真实 role history、附件、工具结果、会话状态 | `services/context/`、`services/agents/function_messages.py` | 已完成 | 工作区长期记忆只在用户明确要求时写入，不自动跨会话保存闲聊。 | P0 |
 | 多智能体 V2：ConversationSessionManager、TechLeadScheduler、Watchdog 最小闭环 | `backend/src/app/services/conversation_session_manager.py`、`backend/src/app/services/runtime/generation_records.py`、`backend/src/agent_runtime/`、`backend/src/app/persistence/sqlalchemy_backend.py` | 已实现，需持续加固 | 运行时骨架、调度器、看门狗、状态报告解析和测试存在；Generation / AgentRun 历史已写入 `Conversation.extra.runtime`，Blackboard / Agent Context 可通过 SQLAlchemyBackend 持久化恢复；消息、SSE 和 WebSocket 路径统一解析 `workflow/tech_lead` 调度策略，Session 复用会感知策略变化。 | P1 |
 | 完整 Actor 化、Blackboard 协商式调度、分布式多 Agent 生命周期 | `docs/architecture/multi-agent-v2-design.md` | Roadmap | 属于长期架构计划，不应作为当前已交付功能承诺；当前只保留最小闭环和适配层。 | P2 |
-| RBAC / 审计后台 | `api/security_ops.py`、`services/audit.py`、`db/models/security.py` | 部分完成 | 权限和审计表/API 存在；用户角色更新已同步 `User.role` 与 `UserRole` 关系并写入审计；细粒度后台运营界面仍偏基础。 | P2 |
+| RBAC / 审计后台 | `api/security_ops.py`、`services/audit.py`、`db/models/security.py`、`frontend/src/features/platform/components/SecurityOpsPanel.tsx` | 已实现，需持续加固 | 权限和审计表/API 存在；用户角色更新已同步 `User.role` 与 `UserRole` 关系并写入审计；平台控制台已支持审计详情查看和用户角色变更。企业级权限审批流、复杂审计检索仍是后续增强。 | P2 |
 | 部署 / 远程控制生产级能力 | `api/deployments.py`、`api/sandbox.py`、`services/tools/builtins/sandbox/` | 部分完成 | 演示级部署记录、预览和回滚接口存在；生产级远程控制、容器隔离和云部署仍是 roadmap。 | P2 |
 
 ## 本轮收敛项
@@ -61,7 +61,7 @@
 - WebSocket V2 runtime 启动 generation 时会创建可恢复运行记录，消费 runtime 事件时更新 AgentRun 状态、调度决策和 watchdog 事件，完成/失败/取消后收敛到终态。
 - WorkflowRun 的 `node_states` 新增 `retry_count`，工作流引擎支持节点级 `stop/retry/skip` 失败策略，并用测试覆盖失败结果重试、异常重试和跳过后继续下游。
 - 消息入口、SSE 兼容入口和 WebSocket 入口统一使用 `services/chat/scheduling.py` 解析调度策略；有 workflow 的群聊默认走 `workflow`，显式切换 `tech_lead` 会重建对应 Session，避免复用旧调度器。
-- 安全后台的用户角色更新会同步 `users.role` 与 `user_roles`，默认保留 `ROLE_USER` 并追加提升角色，同时写入 `security.user.role.update` 审计日志。
+- 安全后台的用户角色更新会同步 `users.role` 与 `user_roles`，默认保留 `ROLE_USER` 并追加提升角色，同时写入 `security.user.role.update` 审计日志；前端安全运营面板已支持直接变更用户角色并展开审计详情。
 
 ## Roadmap 边界
 
@@ -71,7 +71,7 @@
 - 分布式 Blackboard 与跨进程 Agent 私有上下文同步。
 - 多 Agent 协商式调度和冲突仲裁。
 - 生产级远程控制、容器沙箱和云端部署平台。
-- 完整权限后台运营台和企业级审计检索。
+- 企业级权限审批流、复杂审计检索和组织级权限策略。
 
 这些方向可以继续演进，但新增实现应保持当前模块边界：`chat -> workflows/agents -> tools/skills/mcp -> llm/files/artifacts/sandbox`，避免把新逻辑重新堆回旧 shim。
 

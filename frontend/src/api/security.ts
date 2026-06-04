@@ -1,4 +1,4 @@
-import { get } from "./client";
+import { get, patch } from "./client";
 import type { AuditLog, SecurityPermission, SecurityRole, SecurityUser } from "@/types";
 
 export async function auditLogs(): Promise<AuditLog[]> {
@@ -37,4 +37,11 @@ export async function securityPermissions(): Promise<SecurityPermission[]> {
 export async function securityUsers(): Promise<SecurityUser[]> {
   const result = await get<{ items: SecurityUser[] }>("/security/users");
   return result.items;
+}
+
+export async function updateSecurityUserRole(
+  userId: string,
+  role: string,
+): Promise<SecurityUser> {
+  return await patch<SecurityUser>(`/security/users/${userId}/role`, { role });
 }

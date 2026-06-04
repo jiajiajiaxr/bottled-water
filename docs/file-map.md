@@ -128,6 +128,7 @@ agenthub/
 - `CreateConversationModal`：新建单聊或群聊。
 - `GlobalSettingsDrawer`：全局设置，包含模型、MCP、工具、Skills、用户设置。
 - `PlatformControlDrawer`：平台控制，包含工作区、沙箱、远程连接、安全审计等。
+- `frontend/src/features/platform/components/SecurityOpsPanel.tsx`：安全运营面板，展示审计统计/详情、角色目录，并支持用户角色变更。
 - `PreviewPanel`：产物预览、编辑、Diff、导出。
 - `BackgroundTasksButton`：后台任务入口。
 

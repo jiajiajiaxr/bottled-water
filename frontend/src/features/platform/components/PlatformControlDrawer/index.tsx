@@ -16,8 +16,6 @@ import {
   Segmented,
   Select,
   Space,
-  Statistic,
-  Table,
   Tabs,
   Tag,
   Typography,
@@ -57,7 +55,7 @@ import type {
   WorkflowRun,
   Workspace,
 } from "@/types";
-import { formatTime } from "@/lib/format";
+import { SecurityOpsPanel } from "../SecurityOpsPanel";
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -1722,80 +1720,13 @@ export function PlatformControlDrawer({
             key: "security",
             label: "Security",
             children: (
-              <div className="workspace-grid">
-                <Card title="Audit">
-                  <Space className="mb-8" wrap>
-                    <Statistic
-                      title="Events"
-                      value={auditStats?.total ?? auditLogs.length}
-                    />
-                    <Statistic
-                      title="High risk"
-                      value={auditStats?.high_risk ?? 0}
-                    />
-                  </Space>
-                  <Table
-                    size="small"
-                    rowKey="id"
-                    dataSource={auditLogs}
-                    pagination={{ pageSize: 6 }}
-                    columns={[
-                      { title: "Action", dataIndex: "action" },
-                      {
-                        title: "Target",
-                        render: (_, row: AuditLog) =>
-                          `${row.target_type}:${row.target_id ?? "-"}`,
-                      },
-                      { title: "Risk", dataIndex: "risk_score" },
-                      {
-                        title: "Time",
-                        dataIndex: "created_at",
-                        render: (value?: string) => formatTime(value),
-                      },
-                    ]}
-                  />
-                </Card>
-                <Card title="Roles and users">
-                  <List
-                    size="small"
-                    dataSource={securityRoles}
-                    renderItem={(role) => (
-                      <List.Item>
-                        <List.Item.Meta
-                          title={
-                            <Space>
-                              <strong>{role.code}</strong>
-                              <Tag>{role.permissions.length} perms</Tag>
-                            </Space>
-                          }
-                          description={role.description}
-                        />
-                      </List.Item>
-                    )}
-                  />
-                  <Divider />
-                  <List
-                    size="small"
-                    dataSource={securityUsers}
-                    renderItem={(item) => (
-                      <List.Item>
-                        <List.Item.Meta
-                          avatar={
-                            <Avatar>{item.display_name.slice(0, 1)}</Avatar>
-                          }
-                          title={
-                            <Space>
-                              <strong>{item.display_name}</strong>
-                              <Tag>{item.role}</Tag>
-                            </Space>
-                          }
-                          description={`${item.email} · ${item.roles.join(", ") || "ROLE_USER"}`}
-                        />
-                      </List.Item>
-                    )}
-                  />
-                </Card>
-              </div>
+              <SecurityOpsPanel
+                auditLogs={auditLogs}
+                auditStats={auditStats}
+                roles={securityRoles}
+                users={securityUsers}
+                onRefresh={loadPlatformResources}
+              />
             ),
           },
           {

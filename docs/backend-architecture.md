@@ -358,3 +358,4 @@ agent_runtime/（零业务依赖）
 - `app.api.security_ops` 负责安全运营 API，包括角色、权限、用户角色和审计查询。
 - 用户角色更新必须同时维护 `users.role` 兼容字段和 `user_roles` 关系表；默认用户始终保留 `ROLE_USER`，提升角色以额外 `UserRole` 记录表示。
 - 高风险安全操作通过 `write_audit_log()` 写入 `AuditLog`，前端安全页读取 `/audit-logs` 和 `/audit-logs/stats` 展示。
+- 前端 `SecurityOpsPanel` 通过 `/security/users/{id}/role` 调整用户角色，更新后刷新安全用户列表和审计日志，避免只展示静态 RBAC 目录。

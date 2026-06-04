@@ -349,7 +349,8 @@ MCP 服务用于接入外部工具和上下文服务。
 主要能力：
 
 - 角色、权限、用户列表。
-- 审计日志记录。
+- 在平台控制台直接更新用户角色。
+- 审计日志记录与详情展开。
 - 高权限操作落审计。
 - 工具、MCP、沙箱、远程连接等敏感能力由后端统一控制。
 
@@ -358,9 +359,9 @@ MCP 服务用于接入外部工具和上下文服务。
 - 审计服务：`backend/src/app/services/audit.py`
 - 安全 API：`backend/src/app/api/security_ops.py`
 - 数据模型：`Role`、`Permission`、`UserRole`、`RolePermission`、`AuditLog`
-- 前端入口：`frontend/src/features/platform/`、`frontend/src/features/settings/`
+- 前端入口：`frontend/src/features/platform/components/SecurityOpsPanel.tsx`、`frontend/src/features/settings/`
 
-用户角色更新会同时写入 `users.role` 和 `user_roles` 关系表。系统默认保留 `ROLE_USER`，当用户被提升为 developer/admin 等角色时，会追加对应角色关系，并记录 `security.user.role.update` 审计事件。
+用户角色更新会同时写入 `users.role` 和 `user_roles` 关系表。系统默认保留 `ROLE_USER`，当用户被提升为 developer/admin 等角色时，会追加对应角色关系，并记录 `security.user.role.update` 审计事件。前端角色下拉会调用同一后端接口，更新后刷新用户列表和审计数据。
 
 
 ### MCP 调用失败与诊断语义

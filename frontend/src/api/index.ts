@@ -160,6 +160,7 @@ export {
   securityRoles,
   securityPermissions,
   securityUsers,
+  updateSecurityUserRole,
 } from "./security";
 
 // 兼容旧版 api 对象用法
