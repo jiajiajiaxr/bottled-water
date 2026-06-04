@@ -13,6 +13,7 @@ from app.services.context.memory import (
     load_conversation_memory,
     maybe_capture_workspace_memory,
 )
+from app.services.context.runtime import build_runtime_context_view
 from app.services.context.state import conversation_state, conversation_state_text
 from app.services.context.task import build_task_context, summarize_tool_result
 from app.services.context.workspace import build_workspace_context
@@ -56,9 +57,11 @@ class ContextBuilder:
         )
         workspace = build_workspace_context(self.db, conversation, agent=agent)
         runtime = build_task_context(self.db, conversation, task=task, workflow_run=workflow_run)
+        runtime_context = build_runtime_context_view(conversation, agent)
         attachments = attachment_context(user_message)
         context_sections = [
             ("群聊成员与身份规则", group_context.text),
+            *runtime_context.to_sections(),
             ("会话摘要", memory.summary),
             ("conversation_state / conversation_variables", conversation_state_text(conversation)),
             ("recent_turns_digest：辅助省略指代线索，不作为事实主来源", memory.recent_turns_digest),
@@ -92,6 +95,7 @@ class ContextBuilder:
                     "recent_messages_text": memory.recent_messages_text,
                     "conversation_state": conversation_state(conversation),
                 },
+                "runtime_context": runtime_context.to_dict(),
                 "group": {
                     "enabled": bool(group_context.text),
                     "member_context": group_context.text,

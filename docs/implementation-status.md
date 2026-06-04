@@ -40,7 +40,7 @@
 | 文件系统像云盘/IDE 一样展示工作区文件 | `backend/src/app/api/workspace_files.py`、`services/files/workspace_*`、`frontend/src/features/workspaceFiles/` | 已实现，需持续加固 | 上传、产物、沙箱、项目文件聚合已实现；Office 预览依赖 LibreOffice，缺失时降级并提示。 | P1 |
 | 产物生成真实 PDF/DOCX/PPTX/XLSX/HTML，支持预览和主格式下载 | `services/tools/builtins/artifact/`、`services/document_model/`、`api/artifacts.py`、`features/preview/` | 已实现，需持续加固 | PDF/DOCX 已使用 DocumentModel 渲染；Office 在线预览走转 PDF 缓存，环境未安装 LibreOffice 时降级。 | P0 |
 | 沙箱真实受控执行，工作区隔离 | `services/tools/builtins/sandbox/`、`services/workspaces/filesystem.py`、`api/sandbox.py` | 已完成 | 本地执行有命令白名单、cwd 限制、超时和输出截断；生产容器隔离策略由部署环境承载。 | P0 |
-| 上下文系统支持真实 role history、附件、工具结果、会话状态 | `services/context/`、`services/agents/function_messages.py` | 已完成 | 工作区长期记忆只在用户明确要求时写入，不自动跨会话保存闲聊。 | P0 |
+| 上下文系统支持真实 role history、附件、工具结果、会话状态，并严格接入 Blackboard + Agent Context | `services/context/`、`services/context/runtime.py`、`services/agents/function_messages.py`、`backend/src/agent_runtime/context/` | 已完成 | ContextBuilder 现在读取 `Conversation.extra.blackboard` 作为全局共享事实，并只注入当前 Agent 的 `Conversation.extra.agent_contexts[agent_id]` 私有帧；旧 `conversation.extra.context.summary/state` 仅作为会话摘要和短期变量缓存，不另起独立记忆体系。工作区长期记忆只在用户明确要求时写入，不自动跨会话保存闲聊。 | P0 |
 | 多智能体 V2：ConversationSessionManager、TechLeadScheduler、Watchdog 最小闭环 | `backend/src/app/services/conversation_session_manager.py`、`backend/src/app/services/runtime/generation_records.py`、`backend/src/agent_runtime/`、`backend/src/app/persistence/sqlalchemy_backend.py` | 已实现，需持续加固 | 运行时骨架、调度器、看门狗、状态报告解析和测试存在；Generation / AgentRun 历史已写入 `Conversation.extra.runtime`，Blackboard / Agent Context 可通过 SQLAlchemyBackend 持久化恢复；消息、SSE 和 WebSocket 路径统一解析 `workflow/tech_lead` 调度策略，Session 复用会感知策略变化。 | P1 |
 | 完整 Actor 化、Blackboard 协商式调度、分布式多 Agent 生命周期 | `docs/architecture/multi-agent-v2-design.md` | Roadmap | 属于长期架构计划，不应作为当前已交付功能承诺；当前只保留最小闭环和适配层。 | P2 |
 | RBAC / 审计后台 | `api/security_ops.py`、`services/audit.py`、`db/models/security.py`、`frontend/src/features/platform/components/SecurityOpsPanel.tsx` | 已实现，需持续加固 | 权限和审计表/API 存在；用户角色更新已同步 `User.role` 与 `UserRole` 关系并写入审计；平台控制台已支持审计详情查看和用户角色变更。企业级权限审批流、复杂审计检索仍是后续增强。 | P2 |
@@ -57,6 +57,7 @@
 - `tool_registry.py` 降级为兼容 shim，真实逻辑迁移到 `services/tools/*`。
 - 工作流内嵌画布“返回聊天”切换状态和路由同步，悬浮按钮点击不再冒泡给 React Flow。
 - SQLAlchemy 持久化后端改为替换 `Conversation.extra` JSON，确保 Blackboard 版本、结构化摘要、KV 状态和 Agent 私有上下文栈能跨 Session 恢复。
+- `services/context/runtime.py` 将已持久化的 Blackboard 和当前 Agent 私有上下文桥接进 ContextBuilder；群聊 Agent 能看到共享事实、成员身份和自己的私有帧，但不会读取其他 Agent 的私有思考/草稿。
 - Workflow Artifact 节点不再使用旧 demo HTML 路径，改为通过 `execute_tool_by_name()` 调用真实 `artifact.create_pdf/docx/xlsx/pptx/html/web_app`，并发布真实产物和预览消息事件。
 - WebSocket V2 runtime 启动 generation 时会创建可恢复运行记录，消费 runtime 事件时更新 AgentRun 状态、调度决策和 watchdog 事件，完成/失败/取消后收敛到终态。
 - WorkflowRun 的 `node_states` 新增 `retry_count`，工作流引擎支持节点级 `stop/retry/skip` 失败策略，并用测试覆盖失败结果重试、异常重试和跳过后继续下游。
