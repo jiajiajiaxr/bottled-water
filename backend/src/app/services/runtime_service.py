@@ -21,6 +21,7 @@ from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatR
 from db.models import Agent, Conversation, Message, User
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink
+from app.services.model_config_resolver import normalize_provider_type
 from common.logger import get_logger
 
 logger = get_logger("app.services.runtime_service")
@@ -126,7 +127,7 @@ class OrchestratorService:
             return create_provider_from_env_fallback()
 
         return create_provider(MPModelConfig(
-            provider=provider.provider_type or "ark",
+            provider=normalize_provider_type(provider.provider_type),
             model=config.model_id,
             api_key=api_key,
             base_url=provider.base_url or None,
@@ -151,9 +152,20 @@ class OrchestratorService:
         user = await db.get(User, conversation.creator_id)
         agent_count = len(agents)
 
-        # 构建统一的模型提供者
-        if model_config_id:
-            model_provider = await OrchestratorService.create_provider_from_config(db, model_config_id)
+        primary_agent = agents[0] if agents else None
+        agent_model_config_id = (
+            (primary_agent.config or {}).get("model_config_id")
+            if primary_agent is not None
+            else None
+        )
+        selected_model_config_id = model_config_id or agent_model_config_id
+
+        # 构建统一的模型提供者。优先级：聊天框选择 > Agent 绑定模型 > 用户默认/环境默认。
+        if selected_model_config_id:
+            model_provider = await OrchestratorService.create_provider_from_config(
+                db,
+                str(selected_model_config_id),
+            )
         else:
             from app.services.model_config_resolver import create_provider_from_db
             default_id = (user.extra or {}).get("default_model_config_id") if user else None
@@ -182,7 +194,6 @@ class OrchestratorService:
             and isinstance(conversation.extra.get("workflow"), dict)
         )
 
-        primary_agent = agents[0] if agents else None
         tool_executor = _ToolExecutorAdapter(
             db, primary_agent, user, conversation
         ) if primary_agent else None

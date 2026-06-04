@@ -438,7 +438,6 @@ class ModelProviderOut(ORMModel):
     provider_type: str
     base_url: str
     api_key_set: bool
-    api_key_ref: str | None = None
     default_model: str
     status: str
     supports_streaming: bool
@@ -558,6 +557,7 @@ class MessageResponse(BaseModel):
 
 class OkResponse(BaseModel):
     ok: bool
+    changed: bool | None = None
 
 
 class IdDeletedOut(BaseModel):

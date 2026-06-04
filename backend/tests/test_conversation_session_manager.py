@@ -1,11 +1,8 @@
 """测试 ConversationSessionManager"""
 
-import pytest
 
 from app.services.conversation_session_manager import (
     ConversationSessionManager,
-    SessionNotFoundError,
-    SessionAlreadyRunningError,
 )
 
 

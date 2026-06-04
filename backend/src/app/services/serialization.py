@@ -22,7 +22,11 @@ from db.models import (
     PromptTemplate,
     ShortcutCommand,
     Skill,
+    SkillRun,
+    Subtask,
+    Task,
     ToolDefinition,
+    ToolInvocation,
     SandboxSession,
     RemoteConnection,
     User,
@@ -281,6 +285,40 @@ def message_to_dict(message: Message) -> dict[str, Any]:
     }
 
 
+def task_to_dict(task: Task) -> dict[str, Any]:
+    return {
+        "id": task.id,
+        "task_id": task.id,
+        "conversation_id": task.conversation_id,
+        "title": task.title,
+        "description": task.description,
+        "status": task.status,
+        "priority": task.priority,
+        "progress": task.progress,
+        "plan": task.plan,
+        "output": task.output,
+        "created_at": iso(task.created_at),
+        "updated_at": iso(task.updated_at),
+    }
+
+
+def subtask_to_dict(subtask: Subtask) -> dict[str, Any]:
+    return {
+        "id": subtask.id,
+        "subtask_id": subtask.id,
+        "parent_task_id": subtask.parent_task_id,
+        "title": subtask.title,
+        "description": subtask.description,
+        "status": subtask.status,
+        "order_index": subtask.order_index,
+        "agent_id": subtask.agent_id,
+        "agent_name": subtask.agent.name if subtask.agent else None,
+        "output": subtask.output,
+        "created_at": iso(subtask.created_at),
+        "updated_at": iso(subtask.updated_at),
+    }
+
+
 def artifact_to_dict(artifact: Artifact) -> dict[str, Any]:
     files = artifact.content.get("files") or {}
     html = files.get("index.html") or artifact.content.get("html") or ""
@@ -522,6 +560,26 @@ def skill_to_dict(skill: Skill) -> dict[str, Any]:
     }
 
 
+def skill_run_to_dict(run: SkillRun) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "skill_id": run.skill_id,
+        "owner_id": run.owner_id,
+        "conversation_id": run.conversation_id,
+        "runtime_type": run.runtime_type,
+        "status": run.status,
+        "input": redact_sensitive(run.input or {}),
+        "output": redact_sensitive(run.output or {}),
+        "error_message": run.error_message,
+        "duration_ms": run.duration_ms,
+        "started_at": iso(run.started_at),
+        "completed_at": iso(run.completed_at),
+        "metadata": redact_sensitive(run.extra or {}),
+        "created_at": iso(run.created_at),
+        "updated_at": iso(run.updated_at),
+    }
+
+
 def tool_definition_to_dict(tool: ToolDefinition) -> dict[str, Any]:
     return {
         "id": tool.id,
@@ -546,6 +604,28 @@ def tool_definition_to_dict(tool: ToolDefinition) -> dict[str, Any]:
         "created_by": tool.owner_id,
         "created_at": iso(tool.created_at),
         "updated_at": iso(tool.updated_at),
+    }
+
+
+def tool_invocation_to_dict(invocation: ToolInvocation) -> dict[str, Any]:
+    return {
+        "id": invocation.id,
+        "tool_id": invocation.tool_id,
+        "owner_id": invocation.owner_id,
+        "workspace_id": invocation.workspace_id,
+        "conversation_id": invocation.conversation_id,
+        "tool_name": invocation.tool_name,
+        "tool_type": invocation.tool_type,
+        "arguments": redact_sensitive(invocation.arguments or {}),
+        "result": redact_sensitive(invocation.result or {}),
+        "status": invocation.status,
+        "error_message": invocation.error_message,
+        "duration_ms": invocation.duration_ms,
+        "started_at": iso(invocation.started_at),
+        "completed_at": iso(invocation.completed_at),
+        "metadata": redact_sensitive(invocation.extra or {}),
+        "created_at": iso(invocation.created_at),
+        "updated_at": iso(invocation.updated_at),
     }
 
 

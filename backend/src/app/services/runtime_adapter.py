@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.logger import get_logger
 from agent_runtime.core.interfaces import ToolExecutor
-from agent_runtime.core.types import Event, ToolCall
+from agent_runtime.core.types import ToolCall
 
 from db.models import Agent, Conversation
 

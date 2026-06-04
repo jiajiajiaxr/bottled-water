@@ -45,6 +45,7 @@ class ConversationSessionManager:
 
     def __init__(self):
         self._sessions: dict[str, AgentSession] = {}
+        self._session_model_config_ids: dict[str, str | None] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}
 
@@ -73,10 +74,17 @@ class ConversationSessionManager:
         如果 Session 已存在，直接返回。否则创建新 Session 并缓存。
         """
         conversation_id = str(conversation.id)
+        requested_model_config_id = str(model_config_id) if model_config_id else None
 
         async with self._get_lock(conversation_id):
             if conversation_id in self._sessions:
-                return self._sessions[conversation_id]
+                task = self._running_tasks.get(conversation_id)
+                if task and not task.done():
+                    return self._sessions[conversation_id]
+                if self._session_model_config_ids.get(conversation_id) == requested_model_config_id:
+                    return self._sessions[conversation_id]
+                self._sessions.pop(conversation_id, None)
+                self._session_model_config_ids.pop(conversation_id, None)
 
             agents = await OrchestratorService._get_conversation_agents(db, conversation)
             if not agents:
@@ -90,6 +98,7 @@ class ConversationSessionManager:
                 event_sink=event_sink,
             )
             self._sessions[conversation_id] = session
+            self._session_model_config_ids[conversation_id] = requested_model_config_id
 
             # 更新数据库状态
             conversation.generation_status = "idle"
@@ -208,6 +217,7 @@ class ConversationSessionManager:
         """
         await self.cancel_generation(conversation_id)
         session = self._sessions.pop(conversation_id, None)
+        self._session_model_config_ids.pop(conversation_id, None)
         self._locks.pop(conversation_id, None)
 
         if session:

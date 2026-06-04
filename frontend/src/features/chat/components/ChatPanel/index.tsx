@@ -11,6 +11,7 @@ import {
   Flex,
   Input,
   Layout,
+  Select,
   Space,
   Spin,
   Tag,
@@ -19,28 +20,33 @@ import {
   Upload,
 } from "antd";
 import type { UploadProps } from "antd";
+import { api } from "@/api";
 import { MessageBubble } from "@/features/chat/components/MessageBubble";
 import { useMessageStore, useConversationStore } from "@/store";
 import { useMessageOperations } from "@/hooks";
-import type { ChatMessage, Conversation, UploadedFile } from "@/types";
+import type { ChatMessage, Conversation, ModelConfig, UploadedFile } from "@/types";
 
 const { Content } = Layout;
 const { TextArea } = Input;
 const { Text } = Typography;
+const AGENT_MODEL_SENTINEL = "__agent_model__";
 
 export function ChatPanel({
   active,
   loading,
   userName,
+  defaultModelConfigId,
 }: {
   active?: Conversation;
   loading: boolean;
   userName?: string;
+  defaultModelConfigId?: string;
 }) {
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
   const [awaitingResponse, setAwaitingResponse] = useState(false);
+  const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
   const { message } = AntApp.useApp();
   const { send, streamingMessages, displayOrder } = useMessageOperations(userName);
 
@@ -56,6 +62,17 @@ export function ChatPanel({
     },
     [active],
   );
+  const selectedModelConfigId = useConversationStore((s) =>
+    active ? s.getSelectedModelConfigId(active.id) : undefined,
+  );
+  const setSelectedModelConfigId = useCallback(
+    (value: string) => {
+      if (active) {
+        useConversationStore.getState().setSelectedModelConfigId(active.id, value);
+      }
+    },
+    [active],
+  );
 
   // 历史消息从 Store 读取
   const historyMessages = useMessageStore((s) => s.historyMessages);
@@ -66,13 +83,34 @@ export function ChatPanel({
     () => [...historyMessages, ...streamingMessages.values()],
     [historyMessages, streamingMessages],
   );
+  const chatDefaultModelConfigId =
+    defaultModelConfigId ||
+    modelConfigs.find((item) => item.status === "active")?.id ||
+    modelConfigs[0]?.id;
+  const chatModelSelectValue =
+    selectedModelConfigId || chatDefaultModelConfigId || AGENT_MODEL_SENTINEL;
+  const runtimeModelConfigId =
+    chatModelSelectValue === AGENT_MODEL_SENTINEL ? undefined : chatModelSelectValue;
+  const modelOptions = useMemo(
+    () => [
+      ...modelConfigs.map((item) => ({
+        label: `${item.name || item.model_id} · ${item.provider_name || item.model_id}`,
+        value: item.id,
+      })),
+      {
+        label: "跟随 Agent 绑定模型",
+        value: AGENT_MODEL_SENTINEL,
+      },
+    ],
+    [modelConfigs],
+  );
 
   const submit = () => {
     const value =
       text.trim() || (pendingFiles.length ? "请结合上传附件继续处理。" : "");
     if (!value || !active) return;
     setAwaitingResponse(true);
-    send(value, quoted, pendingFiles, thinkingEnabled);
+    send(value, quoted, pendingFiles, thinkingEnabled, runtimeModelConfigId);
     setText("");
     setQuoted(undefined);
     setPendingFiles([]);
@@ -130,6 +168,24 @@ export function ChatPanel({
     const el = messageListRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [active?.id, loading]);
+
+  useEffect(() => {
+    let alive = true;
+    api.modelConfigs()
+      .then((items) => {
+        if (alive) {
+          setModelConfigs(items);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setModelConfigs([]);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 智能体开始回复后，隐藏思考中指示器
   useEffect(() => {
@@ -239,6 +295,16 @@ export function ChatPanel({
                 上传文件
               </Button>
             </Upload>
+            <Select
+              className="composer-model-select"
+              size="middle"
+              value={chatModelSelectValue}
+              options={modelOptions}
+              onChange={setSelectedModelConfigId}
+              disabled={!active || modelOptions.length === 0}
+              popupMatchSelectWidth={280}
+              data-testid="composer-model-select"
+            />
           </Space>
           <Space>
             <Tooltip title={thinkingEnabled ? "已开启思考模式" : "思考模式"}>

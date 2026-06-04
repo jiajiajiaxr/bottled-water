@@ -1,18 +1,19 @@
-"""pytest 全局配置"""
-
-import sys
-from pathlib import Path
-
-# 将 src/ 加入 Python 路径，确保可以导入 agent_runtime 等模块
-_SRC_DIR = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(_SRC_DIR))
+"""pytest 全局配置。"""
 
 import importlib
 import os
+import sys
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
+
+# 将 src/ 加入 Python 路径，确保可以导入 agent_runtime 等模块。
+_SRC_DIR = Path(__file__).parent.parent / "src"
+_TESTS_DIR = Path(__file__).parent
+sys.path.insert(0, str(_SRC_DIR))
+sys.path.insert(0, str(_TESTS_DIR))
 
 
 DEFAULT_APP_CANDIDATES = ("app:app",)

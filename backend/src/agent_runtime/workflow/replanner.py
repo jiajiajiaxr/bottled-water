@@ -13,7 +13,7 @@ from typing import Any
 
 from common.logger import get_logger
 
-from .nodes import WORKFLOW_NODE_TYPES, node_config, workflow_node_type
+from .nodes import node_config, workflow_node_type
 
 logger = get_logger(__name__)
 

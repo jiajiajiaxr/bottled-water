@@ -10,18 +10,20 @@ from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
-from db.models import Artifact, Conversation, Deployment, FileAsset, SandboxSession, ToolDefinition, User, utcnow
-from app.services.artifacts import build_demo_html, create_artifact, create_preview_message, update_artifact_files
+from db.models import Artifact, Conversation, Deployment, FileAsset, ToolDefinition, User, utcnow
+from app.services.artifacts import update_artifact_files
 from app.services.artifact_exports import default_export_format
 from app.services.file_tools import (
     convert_file,
     embed_text,
     extract_text_from_path,
-    generate_file,
     preview_payload,
     summarize_text,
 )
 from app.services.serialization import artifact_to_dict, tool_definition_to_dict
+from app.services.tools.builtins.artifact.executor import (
+    make_artifact_from_content as make_real_artifact_from_content,
+)
 
 
 @dataclass(frozen=True)
@@ -473,54 +475,22 @@ async def _make_artifact_from_content(
     body: str,
     format_name: str,
     html_content: str | None = None,
+    content_model: dict[str, Any] | None = None,
+    template: str | None = None,
 ) -> dict[str, Any]:
-    conversation = await _get_conversation(db, user, conversation_id)
-    artifact_type = {
-        "pdf": "document",
-        "docx": "document",
-        "xlsx": "spreadsheet",
-        "pptx": "slides",
-        "html": "web_app",
-        "web_app": "web_app",
-    }.get(format_name, "document")
-    generated = None
-    if format_name in {"pdf", "docx", "xlsx", "pptx", "html"}:
-        generated = generate_file("html" if format_name == "web_app" else format_name, title=title, body=body)
-    html_preview = html_content or build_demo_html(title, body[:500], artifact_type=artifact_type)
-    artifact = await create_artifact(
-        db,
-        conversation,
-        task=None,
-        name=title,
-        html=html_preview,
-        artifact_type=artifact_type,
-        description=f"由工具 artifact.create_{format_name} 生成。",
+    return await db.run_sync(
+        lambda session: make_real_artifact_from_content(
+            session,
+            user,
+            conversation_id=conversation_id,
+            title=title,
+            body=body,
+            format_name=format_name,
+            html_content=html_content,
+            content_model=content_model,
+            template=template,
+        )
     )
-    content = dict(artifact.content or {})
-    content["tool_output"] = {
-        "tool": f"artifact.create_{format_name}",
-        "format": format_name,
-        "filename": generated.filename if generated else None,
-        "media_type": generated.media_type if generated else None,
-        "size": len(generated.content) if generated else len(html_preview),
-    }
-    artifact.content = content
-    preview = await create_preview_message(db, conversation, artifact)
-    conversation.last_message_preview = "工具已生成产物卡片，可点击预览。"
-    conversation.last_message_sender = "Artifact Tool"
-    conversation.last_message_at = utcnow()
-    conversation.message_count += 1
-    await db.commit()
-    await db.refresh(artifact)
-    await db.refresh(preview)
-    export_format = "html" if format_name in {"html", "web_app"} else format_name
-    return {
-        "artifact": artifact_to_dict(artifact),
-        "preview_message_id": preview.id,
-        "preview_url": f"/api/v1/artifacts/{artifact.id}/preview",
-        "export_url": f"/api/v1/artifacts/{artifact.id}/export?format={export_format}",
-        "format": export_format,
-    }
 
 
 def _run_custom_python(tool: ToolDefinition, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -599,6 +569,8 @@ async def invoke_builtin_tool(db: AsyncSession, user: User, name: str, arguments
         title = str(arguments.get("title") or "AgentHub 产物")
         body = str(arguments.get("body") or arguments.get("content") or title)
         html_content = arguments.get("html") if isinstance(arguments.get("html"), str) else None
+        content_model = arguments.get("content_model") if isinstance(arguments.get("content_model"), dict) else None
+        template = arguments.get("template") if isinstance(arguments.get("template"), str) else None
         return await _make_artifact_from_content(
             db,
             user,
@@ -607,6 +579,8 @@ async def invoke_builtin_tool(db: AsyncSession, user: User, name: str, arguments
             body=body,
             format_name=fmt,
             html_content=html_content,
+            content_model=content_model,
+            template=template,
         )
     if name == "artifact.export":
         artifact = await _artifact(db, user, str(arguments.get("artifact_id") or ""))

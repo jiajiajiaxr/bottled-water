@@ -1,5 +1,7 @@
 # AgentHub Docs
 
+> 当前后端主架构位于 `backend/src/`；`backend/app-old/` 仅作为历史实现和迁移参考保留，不再作为新功能开发目录。
+
 这个目录放项目的补充说明，主要服务三类人：
 
 - 演示者：快速知道系统有哪些功能、怎么走完整链路。
@@ -21,9 +23,9 @@
 
 如果要排查问题，优先看：
 
-- 消息不流式：`frontend/src/api.ts`、`backend/app/api/messages.py`、`backend/app/services/events.py`、`backend/app/services/runtime_service.py`、`backend/agent_runtime/`
-- Agent 不按权限调用工具：`backend/app/services/agentic_runtime.py`、`backend/app/services/tool_registry.py`、`backend/db/models/`
-- 工作流画布保存或运行异常：`backend/app/api/conversations.py`、`backend/app/services/runtime_service.py`、`backend/agent_runtime/`、`frontend/src/App.tsx`
-- 文件/产物异常：`backend/app/api/files.py`、`backend/app/services/file_tools.py`、`backend/app/api/artifacts.py`、`backend/app/services/artifact_exports.py`
-- 模型调用失败：`backend/app/core/config.py`、`backend/app/services/ark.py`、`backend/app/services/llm_gateway.py`
+- 消息不流式：`frontend/src/api/`、`backend/src/app/api/messages.py`、`backend/src/app/services/realtime/event_bus.py`、`backend/src/app/services/runtime_service.py`、`backend/src/agent_runtime/`
+- Agent 不按权限调用工具：`backend/src/app/services/agentic_runtime.py`、`backend/src/app/services/tool_registry.py`、`backend/src/db/models/`
+- 工作流画布保存或运行异常：`backend/src/app/api/conversations.py`、`backend/src/app/services/runtime_service.py`、`backend/src/agent_runtime/`、`frontend/src/App.tsx`
+- 文件/产物异常：`backend/src/app/api/files.py`、`backend/src/app/services/file_tools.py`、`backend/src/app/api/artifacts.py`、`backend/src/app/services/artifact_exports.py`
+- 模型调用失败：`backend/src/app/core/config.py`、`backend/src/app/services/ark.py`、`backend/src/app/services/llm_gateway.py`
 

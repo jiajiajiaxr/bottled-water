@@ -85,7 +85,7 @@ React 18 + TypeScript + Vite + pnpm + Ant Design。
 - `frontend/src/types/`：领域类型定义。
 - `frontend/src/store/`：Zustand 状态管理。
 - `frontend/src/features/`：功能模块组件（聊天、预览、平台控制等）。
-- `frontend/tests/`：Vitest 基础渲染测试。
+- `frontend/src/**/*.test.tsx`：Vitest 基础渲染测试。
 - `e2e/`：Playwright 端到端验收链路。
 
 ## 后端
@@ -94,20 +94,28 @@ Python 3.11 + FastAPI + SQLAlchemy (async) + Alembic + Pydantic。
 
 主要模块：
 
-- `backend/app/main.py`：FastAPI 应用入口和路由注册。
-- `backend/app/core/`：配置、安全、日志、错误处理和统一响应。
-- `backend/app/api/`：REST、SSE、WebSocket API。
-- `backend/app/services/`：业务服务层。
+- `backend/src/app/main.py`：FastAPI 应用入口和路由注册。
+- `backend/src/app/core/`：配置、安全、日志、错误处理和统一响应。
+- `backend/src/app/api/`：REST、SSE、WebSocket API。
+- `backend/src/app/services/`：业务服务层。
   - `runtime_service.py`：统一编排入口，创建 AgentSession 并选择调度策略。
   - `agentic_runtime.py`：Agent 小循环，按权限执行工具、Skill、MCP。
   - `tool_registry.py`：统一工具目录与权限归一化。
   - `file_tools.py`：文件解析、预览、转换、摘要。
   - `mcp_runtime.py`：MCP 调用与记录。
   - `llm_gateway.py` / `ark.py`：模型调用网关。
-- `backend/db/models/`：按领域拆分的数据库模型。
-- `backend/agent_runtime/`：多智能体运行时引擎（Session、Scheduler、AgentLoop、Workflow）。
+- `backend/src/db/models/`：按领域拆分的数据库模型。
+- `backend/src/agent_runtime/`：多智能体运行时引擎（Session、Scheduler、AgentLoop、Workflow）。
 - `backend/model_provider/`：大模型提供者抽象。
 - `backend/alembic/`：数据库迁移。
+
+`backend/src/` 是当前主架构入口；`backend/app-old/` 仅作为历史实现和迁移参考保留，不再作为新功能开发路径。新增或修复能力时应优先落在 `backend/src/app/api/`、`backend/src/app/services/`、`backend/src/db/models/` 等新结构下。
+
+与本轮迁移相关的核心实现位置：
+
+- 工作区文件系统：`backend/src/app/api/workspace_files.py`、`backend/src/app/services/files/workspace_tree.py`、`frontend/src/features/workspaceFiles/`。
+- Office 转 PDF 预览：`backend/src/app/services/files/previewers/office.py`，对外接口为 `/api/v1/artifacts/{artifact_id}/preview-pdf` 和 `/api/v1/workspaces/{workspace_id}/files/preview-pdf`。
+- 结构化文档模型：`backend/src/app/services/document_model/`，PDF、Word、PPT/Excel 等产物工具通过 `content_model` 生成真实文件和 HTML/PDF 预览。
 
 后端详情见 `backend/README.md`。
 

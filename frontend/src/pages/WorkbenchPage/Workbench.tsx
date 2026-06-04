@@ -330,7 +330,12 @@ export function Workbench({
             />
           ) : (
             <>
-              <ChatPanel active={active} loading={loadingMessages} userName={currentUser.name} />
+              <ChatPanel
+                active={active}
+                loading={loadingMessages}
+                userName={currentUser.name}
+                defaultModelConfigId={currentUser.default_model_config_id}
+              />
               {artifactPanelOpen && artifact && (
                 <PreviewPanel
                   artifact={artifact}

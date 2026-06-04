@@ -28,11 +28,11 @@ User message
 
 关键文件：
 
-- `backend/app/services/runtime_service.py`：统一编排入口，判断会话类型，选择单聊或群聊路径，创建 AgentSession。
-- `backend/agent_runtime/`：核心运行时，包含 Session、Scheduler、AgentLoop。
-- `backend/app/services/agentic_runtime.py`：执行 Agent 的小循环。
-- `backend/app/services/tool_registry.py`：执行工具。
-- `backend/app/services/mcp_runtime.py`：执行 MCP。
+- `backend/src/app/services/runtime_service.py`：统一编排入口，判断会话类型，选择单聊或群聊路径，创建 AgentSession。
+- `backend/src/agent_runtime/`：核心运行时，包含 Session、Scheduler、AgentLoop。
+- `backend/src/app/services/agentic_runtime.py`：执行 Agent 的小循环。
+- `backend/src/app/services/tool_registry.py`：执行工具。
+- `backend/src/app/services/mcp_runtime.py`：执行 MCP。
 
 ## 3. Agentic Loop
 
@@ -291,10 +291,10 @@ Master / Planner 理解任务
 
 产物相关文件：
 
-- `backend/app/services/file_tools.py`
-- `backend/app/services/artifacts.py`
-- `backend/app/services/artifact_exports.py`
-- `backend/app/api/artifacts.py`
+- `backend/src/app/services/file_tools.py`
+- `backend/src/app/services/artifacts.py`
+- `backend/src/app/services/artifact_exports.py`
+- `backend/src/app/api/artifacts.py`
 - `frontend/src/App.tsx` 中的 `PreviewPanel`
 
 ## 10. 演示链路

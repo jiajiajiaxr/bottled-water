@@ -4,7 +4,7 @@
 
 ## 1. 环境变量
 
-后端配置集中在 `backend/app/core/config.py`。当前只读取：
+后端配置集中在 `backend/src/app/core/config.py`。当前只读取：
 
 - 项目根目录 `.env`
 - `backend/.env`
@@ -56,10 +56,10 @@ uv run --project backend --directory backend alembic upgrade head
 
 新增表或字段时：
 
-1. 修改 `backend/db/models/` 下对应领域模型文件。
+1. 修改 `backend/src/db/models/` 下对应领域模型文件。
 2. 新增 Alembic migration。
-3. 更新 `backend/app/services/serialization.py` 里的输出结构。
-4. 更新 `frontend/src/types.ts`。
+3. 更新 `backend/src/app/services/serialization.py` 里的输出结构。
+4. 更新 `frontend/src/types/`。
 5. 补 API 和测试。
 
 ## 4. 启动开发服务
@@ -107,36 +107,36 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 
 ### 新增一个 API
 
-1. 在 `backend/app/api` 下选择已有领域文件或新建文件。
-2. 在 `backend/app/main.py` 注册 router。
-3. 如果涉及数据库，修改 `backend/db/models/` 下对应领域模型文件和迁移。
-4. 在 `backend/app/services/serialization.py` 增加输出转换。
-5. 在 `frontend/src/api.ts` 增加 SDK 方法。
-6. 在 `frontend/src/types.ts` 增加类型。
+1. 在 `backend/src/app/api` 下选择已有领域文件或新建文件。
+2. 在 `backend/src/app/main.py` 注册 router。
+3. 如果涉及数据库，修改 `backend/src/db/models/` 下对应领域模型文件和迁移。
+4. 在 `backend/src/app/services/serialization.py` 增加输出转换。
+5. 在 `frontend/src/api/` 增加 SDK 方法。
+6. 在 `frontend/src/types/` 增加类型。
 7. 在对应测试文件里补测试。
 
 ### 新增一个 Agent 字段
 
-1. 修改 `backend/db/models/agents.py` 中 `Agent` 模型。
+1. 修改 `backend/src/db/models/agents.py` 中 `Agent` 模型。
 2. 增加 migration。
 3. 修改 `agent_to_dict`。
-4. 修改 `frontend/src/types.ts` 的 `Agent` / `AgentConfig`。
+4. 修改 `frontend/src/types/` 的 `Agent` / `AgentConfig`。
 5. 修改 Agent 创建、编辑表单。
-6. 修改 `backend/app/api/agents.py` 的创建和更新逻辑。
+6. 修改 `backend/src/app/api/agents.py` 的创建和更新逻辑。
 7. 如果影响执行，修改 `agentic_runtime.py` 或 `runtime_service.py` / `agent_runtime/`。
 
 ### 新增一个工作流节点类型
 
-1. 修改 `frontend/src/types.ts` 的 `WorkflowNode` 约定。
+1. 修改 `frontend/src/types/` 的 `WorkflowNode` 约定。
 2. 修改 `frontend/src/App.tsx` 的节点类型选项、创建默认配置、编辑表单。
-3. 修改 `backend/app/api/conversations.py` 的 normalize 逻辑，确保 `type/config` 不丢失。
-4. 修改 `backend/agent_runtime/workflow/` 或 `backend/app/services/runtime_service.py` 的执行逻辑。
+3. 修改 `backend/src/app/api/conversations.py` 的 normalize 逻辑，确保 `type/config` 不丢失。
+4. 修改 `backend/src/agent_runtime/workflow/` 或 `backend/src/app/services/runtime_service.py` 的执行逻辑。
 5. 修改 `conversation.extra.workflow_runtime` 输出。
 6. 增加 `tests/test_conversation.py` 和相关工作流测试。
 
 ### 新增一个内置工具
 
-1. 在 `backend/app/services/tool_registry.py` 增加工具定义。
+1. 在 `backend/src/app/services/tool_registry.py` 增加工具定义。
 2. 在 `invoke_builtin_tool` 中实现真实执行。
 3. 给官方 Agent 工具箱加权限。
 4. 如果需要文件能力，优先复用 `file_tools.py`。
@@ -145,17 +145,17 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 
 ### 新增一个文件格式
 
-1. 在 `backend/app/services/file_tools.py` 增加提取、预览或生成逻辑。
-2. 在 `backend/app/api/files.py` 接入到对应接口。
+1. 在 `backend/src/app/services/file_tools.py` 增加提取、预览或生成逻辑。
+2. 在 `backend/src/app/api/files.py` 接入到对应接口。
 3. 如果需要作为产物导出，修改 `artifact_exports.py`。
 4. 前端预览逻辑在 `PreviewPanel` 和附件预览处补展示。
 5. 补文件工具测试。
 
 ### 调整模型供应商
 
-1. 修改 `backend/app/services/ark.py` 或新增 provider service。
-2. 修改 `backend/app/services/llm_gateway.py`。
-3. 修改 `backend/app/api/models.py` 的配置和测试接口。
+1. 修改 `backend/src/app/services/ark.py` 或新增 provider service。
+2. 修改 `backend/src/app/services/llm_gateway.py`。
+3. 修改 `backend/src/app/api/models.py` 的配置和测试接口。
 4. 修改全局设置表单。
 5. 不要把 API Key 暴露到 `frontend/src`。
 
@@ -165,9 +165,9 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 
 相关入口：
 
-- 后端过滤：`backend/app/services/output_filter.py`
+- 后端过滤：`backend/src/app/services/output_filter.py`
 - 前端过滤：`frontend/src/App.tsx` 中的 `stripInternalAgentOutput`
-- 编排生成：`backend/app/services/runtime_service.py`、`backend/agent_runtime/`
+- 编排生成：`backend/src/app/services/runtime_service.py`、`backend/src/agent_runtime/`
 
 ## 7. 数据流速查
 
@@ -176,7 +176,7 @@ corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
 ```text
 frontend Workbench.send
   -> api.sendMessage
-  -> backend/app/api/messages.py
+  -> backend/src/app/api/messages.py
   -> Message 入库
   -> runtime_service.run / conversation_session_manager
   -> events 发布流式事件
@@ -221,8 +221,8 @@ send message
 ## 8. 排障建议
 
 - 页面空白：先跑 `corepack pnpm exec tsc --noEmit --pretty false`。
-- 登录失败：查 `backend/app/api/auth.py` 和 `.env` 的 `SECRET_KEY`。
-- 模型无响应：查 `LLM_PROVIDER`、`ARK_API_KEY`、`ARK_ENDPOINT_ID`，再看 `backend/app/services/ark.py`。
+- 登录失败：查 `backend/src/app/api/auth.py` 和 `.env` 的 `SECRET_KEY`。
+- 模型无响应：查 `LLM_PROVIDER`、`ARK_API_KEY`、`ARK_ENDPOINT_ID`，再看 `backend/src/app/services/ark.py`。
 - 消息一直显示正在回答：查 `localRunningConversationIds` 清理逻辑和 `runtime_service.run` / `conversation_session_manager` 是否抛错。
 - 工作流节点配置丢失：查 `conversations.py` normalize 是否保留 `type/config`。
 - 产物打不开：查 `Artifact.content`、`artifact_exports.py` 和 `PreviewPanel`。

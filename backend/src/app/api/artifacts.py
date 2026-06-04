@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, UploadFile
-from fastapi.responses import FileResponse
+from pathlib import Path
+
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -32,6 +34,7 @@ from app.services.artifacts import (
     update_artifact_files,
 )
 from app.services.artifact_exports import default_export_format, export_artifact
+from app.services.files.previewers.office import build_office_preview, is_office_file
 from app.services.files import attachment_path, ensure_extension_tables, save_upload
 from app.services.knowledge import index_document, retrieve
 from app.services.serialization import (
@@ -47,6 +50,14 @@ compat_router = APIRouter(tags=["artifacts-compat"])
 
 
 async def _owned_artifact(db: AsyncSession, user: User, artifact_id: str) -> Artifact:
+    if not hasattr(db, "run_sync"):
+        artifact = db.get(Artifact, artifact_id)
+        if not artifact:
+            raise NotFoundError("产物不存在")
+        conversation = db.get(Conversation, artifact.conversation_id)
+        if not conversation or conversation.creator_id != user.id:
+            raise NotFoundError("产物不存在")
+        return artifact
     artifact = await db.get(Artifact, artifact_id)
     if not artifact:
         raise NotFoundError("产物不存在")
@@ -224,14 +235,44 @@ async def download_artifact_export(
         exported = export_artifact(artifact, format)
     except ValueError as exc:
         raise ValidationAppError(str(exc)) from exc
-    # Note: audit log still needs request; we keep it as a special case
-    # since Response return type doesn't fit ApiResponse pattern
-    return ok(
-        {
-            "content": exported.content,
-            "media_type": exported.media_type,
-            "filename": exported.filename,
-        }
+    return Response(
+        content=exported.content,
+        media_type=exported.media_type,
+        headers={"Content-Disposition": _attachment_header(exported.filename)},
+    )
+
+
+@router.get("/artifacts/{artifact_id}/preview-pdf")
+async def download_artifact_preview_pdf(
+    artifact_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    artifact = await _owned_artifact(db, user, artifact_id)
+    exported = export_artifact(artifact, default_export_format(artifact))
+    filename = exported.filename
+    media_type = exported.media_type
+    if media_type == "application/pdf" or Path(filename).suffix.lower() == ".pdf":
+        return Response(
+            content=exported.content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": _inline_header(filename)},
+        )
+    if not is_office_file(media_type, filename):
+        raise ValidationAppError("当前产物不是可转换的 Office 文件")
+    result = build_office_preview(
+        workspace_id=_artifact_workspace_id(artifact),
+        node_id=f"artifact:{artifact.id}",
+        target={"kind": "artifact", "artifact": artifact, "bytes": exported.content},
+        filename=filename,
+        mime_type=media_type,
+    )
+    if not result.preview_pdf_path:
+        raise ValidationAppError(result.error or "Office PDF 预览生成失败")
+    return FileResponse(
+        str(result.preview_pdf_path),
+        media_type="application/pdf",
+        filename=f"{Path(filename).stem or artifact.name}.preview.pdf",
     )
 
 
@@ -251,7 +292,7 @@ async def save_artifact(
         files = payload.content["files"]
     if not files:
         raise ValidationAppError("产物文件不能为空")
-    artifact = update_artifact_files(
+    artifact = await update_artifact_files(
         db, artifact_id, files, payload.change_summary or "在线编辑保存"
     )
     return ok(artifact_to_dict(artifact), "产物已保存")
@@ -510,7 +551,8 @@ async def artifact_preview(artifact_id: str, db: AsyncSession = Depends(get_db))
     if not artifact:
         raise NotFoundError("产物不存在")
     html = (
-        (artifact.content.get("files") or {}).get("index.html")
+        artifact.content.get("preview_html")
+        or (artifact.content.get("files") or {}).get("index.html")
         or artifact.content.get("html")
         or ""
     )
@@ -519,16 +561,42 @@ async def artifact_preview(artifact_id: str, db: AsyncSession = Depends(get_db))
     return Response(content=html, media_type="text/html; charset=utf-8")
 
 
+def _attachment_header(filename: str) -> str:
+    from urllib.parse import quote
+
+    return f"attachment; filename*=UTF-8''{quote(filename)}"
+
+
+def _inline_header(filename: str) -> str:
+    from urllib.parse import quote
+
+    return f"inline; filename*=UTF-8''{quote(filename)}"
+
+
+def _artifact_workspace_id(artifact: Artifact) -> str:
+    content = artifact.content or {}
+    source = content.get("source_file") if isinstance(content.get("source_file"), dict) else {}
+    path_value = str(source.get("storage_path") or "")
+    marker = f"{Path('workspaces')}"
+    if marker in path_value:
+        parts = Path(path_value).parts
+        if "workspaces" in parts:
+            index = parts.index("workspaces")
+            if len(parts) > index + 1:
+                return parts[index + 1]
+    return "default"
+
+
 # ----- compat routes -----
 
 
-@compat_router.post("/artifacts", response_model=ApiResponse[ArtifactOut])
+@compat_router.post("/artifacts", response_model=ArtifactOut)
 async def compat_create_artifact(
     payload: CreateArtifactRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return ok(artifact_to_dict(await _create_from_payload(db, user, payload)))
+    return artifact_to_dict(await _create_from_payload(db, user, payload))
 
 
 @compat_router.post("/files", response_model=ApiResponse[FileAssetOut])

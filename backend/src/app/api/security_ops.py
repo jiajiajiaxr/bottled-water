@@ -131,7 +131,7 @@ async def create_role(
     )
     db.add(role)
     await db.flush()
-    write_audit_log(
+    await write_audit_log(
         db,
         user=user,
         action="security.role.create",
@@ -173,7 +173,7 @@ async def update_role_permissions(
     await db.flush()
     for permission in permissions:
         db.add(RolePermission(role_id=role.id, permission_id=permission.id))
-    write_audit_log(
+    await write_audit_log(
         db,
         user=user,
         action="security.role.permissions.update",
@@ -245,7 +245,7 @@ async def update_user_role(
         raise ForbiddenError("User not found")
     target.role = payload.role
     target.updated_at = utcnow()
-    write_audit_log(
+    await write_audit_log(
         db,
         user=user,
         action="security.user.role.update",

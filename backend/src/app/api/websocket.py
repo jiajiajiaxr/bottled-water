@@ -133,6 +133,7 @@ async def _save_user_message(
         extra={
             "thinking_enabled": bool(data.get("thinking_enabled")),
             "scheduling_strategy": scheduling_strategy,
+            "model_config_id": data.get("model_config_id"),
         },
     )
 

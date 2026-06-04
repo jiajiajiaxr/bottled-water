@@ -137,7 +137,13 @@ def _fallback_skill_spec(payload: GenerateSkillRequest, reason: str) -> dict:
         "output_schema": {"type": "object", "properties": {"result": {"type": "string"}}},
         "tags": list(dict.fromkeys([*payload.tags, "ai-generated"])),
         "tools": [],
-        "config": {"generation": {"status": "mock_fallback", "reason": reason}},
+        "config": {
+            "generation": {
+                "status": "mock_fallback",
+                "provider_status": f"mock_fallback:{reason}",
+                "reason": reason,
+            }
+        },
     }
 
 
@@ -200,7 +206,11 @@ async def _generate_skill_spec(payload: GenerateSkillRequest, db: AsyncSession) 
     config = {
         **(payload.config or {}),
         **config,
-        "generation": {"status": "ok", "model": result.model or "unknown"},
+        "generation": {
+            "status": "ok",
+            "provider_status": getattr(result, "provider_status", "ok"),
+            "model": result.model or "unknown",
+        },
     }
     return {
         "name": str(data.get("name") or fallback["name"])[:160],

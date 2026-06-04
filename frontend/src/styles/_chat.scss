@@ -227,6 +227,18 @@
   background: #f8fbff;
 }
 
+.composer-model-select {
+  min-width: 220px;
+  max-width: 300px;
+}
+
+@media (max-width: 768px) {
+  .composer-model-select {
+    min-width: 160px;
+    max-width: 45vw;
+  }
+}
+
 .participant-strip {
   margin-top: $spacing-sm;
 }

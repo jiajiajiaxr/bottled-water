@@ -3,8 +3,11 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class LoginRequest(BaseModel):
-    username: str = "demo"
+    username: str | None = None
+    email: str | None = None
+    name: str | None = None
     password: str = "agenthub"
+    demo: bool = False
 
 
 class RegisterRequest(BaseModel):

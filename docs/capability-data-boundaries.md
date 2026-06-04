@@ -15,13 +15,13 @@ AgentHub 将 Tool、MCP、Skill 拆成两层职责：
 - `builtin_handler=<tool name>`
 - `implementation.builtin_handler=<tool name>`
 
-内置工具的真实执行仍在 `backend/app/services/tools/builtin_executor.py`。自定义 Python 工具走 `backend/app/services/tools/custom.py`。统一入口是 `backend/app/services/tools/executor.py`，执行前会读取 `ToolDefinition`、校验参数、检查权限并写入 `tool_invocations`。
+内置工具的真实执行仍在 `backend/src/app/services/tools/builtin_executor.py`。自定义 Python 工具走 `backend/src/app/services/tools/custom.py`。统一入口是 `backend/src/app/services/tools/executor.py`，执行前会读取 `ToolDefinition`、校验参数、检查权限并写入 `tool_invocations`。
 
-旧入口 `backend/app/services/tools/registry.py` 保留为 shim，方便旧代码继续导入。
+旧入口 `backend/src/app/services/tools/registry.py` 保留为 shim，方便旧代码继续导入。
 
 ## MCP
 
-`mcp_servers` 只保存外部服务器配置、工具发现结果、启停状态和归属关系。真实连接与调用逻辑在 `backend/app/services/mcp/`：
+`mcp_servers` 只保存外部服务器配置、工具发现结果、启停状态和归属关系。真实连接与调用逻辑在 `backend/src/app/services/mcp/`：
 
 - `catalog.py`：server 可见性、权限、表初始化
 - `discovery.py`：manifest 导入、工具发现、健康探测
@@ -29,13 +29,13 @@ AgentHub 将 Tool、MCP、Skill 拆成两层职责：
 - `schema.py`：MCP tool 参数校验
 - `invocation.py`：调用、错误回填、审计日志
 
-调用记录写入 `mcp_tool_invocations`。旧入口 `backend/app/services/mcp_runtime.py` 保留为 shim。
+调用记录写入 `mcp_tool_invocations`。旧入口 `backend/src/app/services/mcp_runtime.py` 保留为 shim。
 
 ## Skill
 
 `skills` 是 Skill 包目录，兼容旧 prompt Skill，同时支持 `SKILL.md + manifest + scripts/references/assets` 的包化结构。Skill 不承载具体工具实现，只声明 prompt、依赖、权限和运行策略。
 
-`backend/app/services/skills/` 的职责：
+`backend/src/app/services/skills/` 的职责：
 
 - `manifest.py`：manifest 标准化和校验
 - `package.py`：包解析、安装、删除
