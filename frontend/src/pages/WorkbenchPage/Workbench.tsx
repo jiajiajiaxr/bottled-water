@@ -325,6 +325,7 @@ export function Workbench({
               workspaceId={activeWorkspaceId || ""}
               conversationId={active.id}
               embedded
+              onBack={() => setScheduleMode("chat")}
               onError={(value) => message.error(value)}
               onSuccess={(value) => message.success(value)}
             />
