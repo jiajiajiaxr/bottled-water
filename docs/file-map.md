@@ -79,6 +79,7 @@ agenthub/
 ## 后端 services
 
 - `backend/src/app/services/runtime_service.py`：统一编排入口。负责创建 AgentSession、选择调度策略（单 Agent / TechLead / Workflow）。
+- `backend/src/app/services/chat/scheduling.py`：消息级、会话级和 workflow 默认策略的统一解析入口，供 SSE、WebSocket 和 RuntimeService 复用。
 - `backend/src/agent_runtime/`：核心运行时。包含 Session、Scheduler、AgentLoop、Workflow 图遍历等。
 - `backend/src/app/services/agents/function_loop.py`：Agent Function Calling Loop。根据 Agent 权限暴露 Tool、Skill、MCP，执行 tool_calls 并把结果回填模型。
 - `backend/src/app/services/agents/tool_loop.py`：工具 schema 构造、授权校验、Tool / Skill / MCP 执行分发。

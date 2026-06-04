@@ -26,6 +26,7 @@ from app.services.runtime.generation_records import (
     finish_generation_record,
     record_generation_event,
 )
+from app.services.chat.scheduling import resolve_scheduling_strategy
 from app.services.runtime_service import OrchestratorService
 from common.logger import get_logger
 
@@ -52,6 +53,7 @@ class ConversationSessionManager:
     def __init__(self, session_factory: Any = None):
         self._sessions: dict[str, AgentSession] = {}
         self._session_model_config_ids: dict[str, str | None] = {}
+        self._session_scheduling_strategies: dict[str, str] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._generation_ids: dict[str, str] = {}
@@ -83,16 +85,21 @@ class ConversationSessionManager:
         """
         conversation_id = str(conversation.id)
         requested_model_config_id = str(model_config_id) if model_config_id else None
+        requested_strategy = resolve_scheduling_strategy(conversation)
 
         async with self._get_lock(conversation_id):
             if conversation_id in self._sessions:
                 task = self._running_tasks.get(conversation_id)
                 if task and not task.done():
                     return self._sessions[conversation_id]
-                if self._session_model_config_ids.get(conversation_id) == requested_model_config_id:
+                if (
+                    self._session_model_config_ids.get(conversation_id) == requested_model_config_id
+                    and self._session_scheduling_strategies.get(conversation_id) == requested_strategy
+                ):
                     return self._sessions[conversation_id]
                 self._sessions.pop(conversation_id, None)
                 self._session_model_config_ids.pop(conversation_id, None)
+                self._session_scheduling_strategies.pop(conversation_id, None)
 
             agents = await OrchestratorService._get_conversation_agents(db, conversation)
             if not agents:
@@ -104,9 +111,11 @@ class ConversationSessionManager:
                 agents,
                 model_config_id,
                 event_sink=event_sink,
+                scheduling_strategy=requested_strategy,
             )
             self._sessions[conversation_id] = session
             self._session_model_config_ids[conversation_id] = requested_model_config_id
+            self._session_scheduling_strategies[conversation_id] = requested_strategy
 
             # 更新数据库状态
             conversation.generation_status = "idle"
@@ -258,6 +267,7 @@ class ConversationSessionManager:
         await self.cancel_generation(conversation_id)
         session = self._sessions.pop(conversation_id, None)
         self._session_model_config_ids.pop(conversation_id, None)
+        self._session_scheduling_strategies.pop(conversation_id, None)
         self._generation_ids.pop(conversation_id, None)
         self._locks.pop(conversation_id, None)
 

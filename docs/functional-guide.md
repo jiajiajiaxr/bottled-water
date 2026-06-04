@@ -86,12 +86,13 @@
 
 ## 5. 群聊与多 Agent 协作
 
-群聊以工作流画布为事实来源。Master Agent 不再是隐藏最高调度者，而是一个擅长规划、补全、总结的官方 Agent。
+群聊可以在 `workflow` 和 `tech_lead` 两种调度策略之间切换。默认群聊会生成并使用工作流画布，`tech_lead` 则走多智能体 V2 的 Team Leader 调度链路。Master Agent 不再是隐藏最高调度者，而是一个擅长规划、补全、总结的官方 Agent。
 
 默认行为：
 
 - 群聊创建后会生成默认并行工作流。
-- 如果用户没有要求重新规划，则按 `conversation.extra.workflow` 执行。
+- 如果用户没有指定调度策略，且当前群聊有 `conversation.extra.workflow`，则按 `workflow` 策略执行。
+- 如果会话或消息明确选择 `tech_lead`，则由 TechLeadScheduler 记录调度决策、AgentRun 和 watchdog 事件。
 - 如果用户明确让 Agent 规划，具备权限的 Agent 可以生成或修改 workflow，后端 normalize 后写回当前会话。
 - Agent 节点会真正调用对应 Agent 的小循环。
 
@@ -99,6 +100,8 @@
 
 - 工作流保存：`backend/src/app/api/conversations.py`
 - 工作流执行：`backend/src/app/services/workflows/engine.py`、`backend/src/app/services/workflows/nodes/`
+- 调度策略解析：`backend/src/app/services/chat/scheduling.py`
+- V2 Session 运行：`backend/src/app/services/conversation_session_manager.py`、`backend/src/app/services/runtime_service.py`
 - 工作流类型：`frontend/src/types/`
 
 WebSocket V2 运行时会在每次 generation 启动时写入 `conversation.extra.runtime.generations[]`。该记录保存本轮 prompt 摘要、模型配置、调度决策、watchdog 事件和每个 Agent 的运行状态，取消或失败也会落库，便于刷新后排查和后续做运行历史界面。

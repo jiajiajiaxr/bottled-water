@@ -21,6 +21,7 @@ from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatR
 from db.models import Agent, Conversation, Message, User
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink
+from app.services.chat.scheduling import resolve_scheduling_strategy
 from app.services.model_config_resolver import normalize_provider_type
 from common.logger import get_logger
 
@@ -140,6 +141,7 @@ class OrchestratorService:
         agents: list[Agent],
         model_config_id: str | None = None,
         event_sink=None,
+        scheduling_strategy: str | None = None,
     ) -> AgentSession:
         """创建 AgentSession（不运行）。
 
@@ -184,9 +186,7 @@ class OrchestratorService:
         ]
 
         # 判断调度策略
-        scheduling_strategy = ""
-        if conversation.extra and isinstance(conversation.extra, dict):
-            scheduling_strategy = conversation.extra.get("scheduling_strategy", "")
+        resolved_strategy = resolve_scheduling_strategy(conversation, scheduling_strategy)
 
         has_workflow = (
             conversation.extra
@@ -199,8 +199,8 @@ class OrchestratorService:
         ) if primary_agent else None
 
         # ---- Workflow 模式 ----
-        # 仅当显式指定 workflow 或未指定策略但存在 workflow 定义时才使用 workflow
-        if scheduling_strategy == "workflow" or (not scheduling_strategy and has_workflow):
+        # Strategy resolution is centralized in services.chat.scheduling.
+        if resolved_strategy == "workflow":
             from agent_runtime.workflow.replanner import _fallback_workflow
 
             if has_workflow:
@@ -280,12 +280,28 @@ class OrchestratorService:
             logger.warning(f"会话没有可用 Agent conversation_id={conversation.id}")
             return
 
-        agent_count = len(agents)
-
-        if agent_count == 1:
-            await SingleAgentOrchestrator(db, conversation, message, str(conversation.id), agents, model_config_id).run()
-        else:
-            await TechLeadOrchestrator(db, conversation, message, str(conversation.id), agents, model_config_id).run()
+        session = await OrchestratorService.create_session(
+            db,
+            conversation,
+            agents,
+            model_config_id,
+            event_sink=SseSink(conversation_id=str(conversation.id)),
+            scheduling_strategy=strategy,
+        )
+        prompt = (
+            message.content.get("text", "")
+            if isinstance(message.content, dict)
+            else str(message.content)
+        )
+        resolved_strategy = resolve_scheduling_strategy(conversation, strategy)
+        logger.info(
+            "OrchestratorService run",
+            conversation_id=str(conversation.id),
+            strategy=resolved_strategy,
+            agent_count=len(agents),
+        )
+        async for event in session.run(prompt):
+            logger.debug("OrchestratorService event", type=event.type)
 
 
 class _ToolExecutorAdapter(ToolExecutor):

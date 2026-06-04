@@ -16,6 +16,7 @@ from app.schemas.common import ApiResponse
 from app.schemas.requests import SendMessagePayload
 from app.events import SseSink
 from app.events import app_event_bus as event_bus
+from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
 from app.services.runtime_service import OrchestratorService
 from app.services.serialization import message_to_dict
 from app.services.files.references import resolve_file_reference_attachments
@@ -110,23 +111,12 @@ async def _send_async(
             )
         )
         normalized_attachments.extend(referenced)
-    # 调度策略：消息级 > 会话级 > 默认 tech_lead
-    scheduling_strategy = payload.get("scheduling_strategy", "")
-    if not scheduling_strategy and conversation.extra:
-        scheduling_strategy = (conversation.extra or {}).get("scheduling_strategy", "tech_lead")
-    scheduling_strategy = (
-        scheduling_strategy if scheduling_strategy in ("tech_lead", "workflow") else "tech_lead"
-    )
+    # 调度策略：消息级 > 会话级 > workflow 群聊默认 > tech_lead
+    scheduling_strategy = resolve_scheduling_strategy(conversation, payload.get("scheduling_strategy"))
 
     # 如果消息指定了新策略，持久化到会话
-    if payload.get("scheduling_strategy") and conversation.extra != {
-        **(conversation.extra or {}),
-        "scheduling_strategy": scheduling_strategy,
-    }:
-        conversation.extra = {
-            **(conversation.extra or {}),
-            "scheduling_strategy": scheduling_strategy,
-        }
+    if payload.get("scheduling_strategy"):
+        persist_scheduling_strategy(conversation, scheduling_strategy)
 
     message = Message(
         client_message_id=payload.get("client_message_id") or str(uuid.uuid4()),
@@ -234,12 +224,9 @@ def _send_sync(db, user: User, conversation_id: str, payload: dict, *, trigger_a
             )
         )
 
-    scheduling_strategy = payload.get("scheduling_strategy", "")
-    if not scheduling_strategy and conversation.extra:
-        scheduling_strategy = (conversation.extra or {}).get("scheduling_strategy", "tech_lead")
-    scheduling_strategy = (
-        scheduling_strategy if scheduling_strategy in ("tech_lead", "workflow") else "tech_lead"
-    )
+    scheduling_strategy = resolve_scheduling_strategy(conversation, payload.get("scheduling_strategy"))
+    if payload.get("scheduling_strategy"):
+        persist_scheduling_strategy(conversation, scheduling_strategy)
     message = Message(
         client_message_id=payload.get("client_message_id") or str(uuid.uuid4()),
         conversation_id=conversation.id,
