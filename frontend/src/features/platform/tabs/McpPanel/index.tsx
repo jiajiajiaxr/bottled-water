@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   App as AntApp,
   Avatar,
@@ -38,6 +38,24 @@ export function McpPanel({ activeWorkspace, activeConversation }: McpPanelProps)
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpInvocations, setMcpInvocations] = useState<McpInvocation[]>([]);
   const [mcpInvocationResult, setMcpInvocationResult] = useState("");
+
+  const load = async () => {
+    try {
+      const [servers, invocations] = await Promise.all([
+        api.mcpServers(activeWorkspace?.id).catch(() => [] as McpServer[]),
+        api.mcpInvocations().catch(() => [] as McpInvocation[]),
+      ]);
+      setMcpServers(servers);
+      setMcpInvocations(invocations);
+    } catch {
+      message.error("加载 MCP 数据失败");
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspace?.id]);
 
   return (
     <div className="workspace-grid">
