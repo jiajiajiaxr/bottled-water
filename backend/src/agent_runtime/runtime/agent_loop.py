@@ -23,6 +23,59 @@ from ..context.agent_ctx import AgentContext
 logger = get_logger(__name__)
 
 
+class _StatusReportStreamFilter:
+    """Hide status_report fenced blocks while preserving the raw final response."""
+
+    _fence = "```status_report"
+
+    def __init__(self) -> None:
+        self._raw = ""
+        self._visible = ""
+
+    def push(self, delta: str) -> str:
+        if not delta:
+            return ""
+        self._raw += delta
+        visible = self._strip_status_report(self._raw)
+        if not visible:
+            self._visible = ""
+            return ""
+        if visible.startswith(self._visible):
+            new_text = visible[len(self._visible) :]
+        else:
+            new_text = ""
+        self._visible = visible
+        return new_text
+
+    @classmethod
+    def _strip_status_report(cls, text: str) -> str:
+        lines = text.splitlines()
+        visible: list[str] = []
+        skipping = False
+        removed = False
+        for index, line in enumerate(lines):
+            trimmed = line.strip()
+            lowered = trimmed.lower()
+            if skipping:
+                if lowered.startswith("```"):
+                    skipping = False
+                continue
+            if lowered.startswith(cls._fence):
+                skipping = True
+                removed = True
+                continue
+            if lowered == "```" and index == len(lines) - 1:
+                removed = True
+                continue
+            if lowered.startswith("```") and lowered != "```" and cls._fence.startswith(lowered):
+                skipping = True
+                removed = True
+                continue
+            visible.append(line)
+        cleaned = "\n".join(visible).strip()
+        return cleaned if cleaned or not removed else ""
+
+
 class AgentLoop:
     """Agent 执行循环
 
@@ -501,6 +554,7 @@ class AgentLoop:
     ) -> ChatResponse:
         """流式对话，emit agent.token 事件，组装成 ChatResponse"""
         content_parts: List[str] = []
+        token_filter = _StatusReportStreamFilter()
         # tool_calls 在流式中可能分散在多个 chunk，需要积累
         tool_calls_acc: Dict[int, Dict[str, Any]] = {}
 
@@ -514,13 +568,15 @@ class AgentLoop:
             # 1. 文本内容
             if chunk.content:
                 content_parts.append(chunk.content)
-                await _emit(
-                    "agent.token",
-                    {
-                        "agent_id": self.agent.id,
-                        "token": chunk.content,
-                    },
-                )
+                visible_delta = token_filter.push(chunk.content)
+                if visible_delta:
+                    await _emit(
+                        "agent.token",
+                        {
+                            "agent_id": self.agent.id,
+                            "token": visible_delta,
+                        },
+                    )
 
             # 1.5 思考过程
             if chunk.reasoning:

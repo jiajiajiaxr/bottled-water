@@ -26,4 +26,10 @@ describe("stripInternalAgentOutput", () => {
 
     expect(stripInternalAgentOutput(text)).toBe("");
   });
+
+  it("hides split status_report fence prefixes while streaming", () => {
+    expect(stripInternalAgentOutput("```")).toBe("");
+    expect(stripInternalAgentOutput("```sta")).toBe("");
+    expect(stripInternalAgentOutput("可见回答\n```status")).toBe("可见回答");
+  });
 });

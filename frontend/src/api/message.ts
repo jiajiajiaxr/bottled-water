@@ -108,6 +108,31 @@ function dispatchStreamEvent(
   handlers: StreamAssistantHandlers,
 ): void {
   switch (event) {
+    case "message_start":
+      handlers.onMessageStart?.(data as Record<string, unknown>);
+      break;
+    case "content_block_delta": {
+      const payload = data as Record<string, unknown>;
+      const delta = payload.delta as Record<string, unknown> | undefined;
+      const text = String(delta?.text || "");
+      if (!text) break;
+      if (delta?.type === "reasoning_delta") {
+        handlers.onReasoningDelta?.(text, payload);
+      } else {
+        handlers.onDelta?.(text, payload);
+      }
+      break;
+    }
+    case "message_stop":
+      handlers.onMessageEnd?.(data as Record<string, unknown>);
+      break;
+    case "generation_finished":
+    case "generation:cancelled":
+    case "cancelled":
+    case "failed":
+      handlers.onDone?.(data as Record<string, unknown>);
+      break;
+
     // 运行时事件：Session 生命周期
     case "system.session_started":
     case "system.session_completed":
@@ -278,11 +303,16 @@ export async function sendMessageWs(
     const unsubscribe = ws.onMessage((event, data) => {
       switch (event) {
         case "system.session_completed":
+        case "generation_finished":
+        case "generation:cancelled":
           window.clearTimeout(timeout);
           if (!resolved) {
             resolved = true;
             unsubscribe();
-            handlers.onDone?.();
+            dispatchStreamEvent(event, data, handlers);
+            if (event === "system.session_completed") {
+              handlers.onDone?.();
+            }
             resolve("ok");
           }
           break;

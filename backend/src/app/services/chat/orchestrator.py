@@ -12,7 +12,7 @@ from app.services.agents.direct import _run_direct_agent
 from app.services.ark import ArkProviderError, ark_client
 from app.services.chat.artifacts import _publish_tool_artifacts
 from app.services.chat.finalizer import fail_generation, finalize_streaming_agent_messages
-from app.services.output_filter import strip_internal_agent_output
+from app.services.output_filter import InternalOutputStreamFilter, strip_internal_agent_output
 from app.services.queue import queue_service
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import message_to_dict, subtask_to_dict, task_to_dict
@@ -388,15 +388,21 @@ async def _stream_master_response(
     thinking = {"type": "enabled", "budget_tokens": 1024} if thinking_enabled else None
     stream_text = ""
     reasoning_text = ""
+    stream_filter = InternalOutputStreamFilter()
     async for event in ark_client.stream_chat(messages, purpose="chat", thinking=thinking):
         if event.type == "delta":
             if event.text:
                 stream_text += event.text
-                await event_bus.publish(
-                    channel,
-                    "content_block_delta",
-                    {"agent_message_id": assistant.id, "delta": {"type": "text_delta", "text": event.text}},
-                )
+                visible_delta = stream_filter.push(event.text)
+                if visible_delta:
+                    await event_bus.publish(
+                        channel,
+                        "content_block_delta",
+                        {
+                            "agent_message_id": assistant.id,
+                            "delta": {"type": "text_delta", "text": visible_delta},
+                        },
+                    )
             if event.reasoning:
                 reasoning_text += event.reasoning
                 await event_bus.publish(

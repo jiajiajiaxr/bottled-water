@@ -20,7 +20,7 @@ from app.services.context.state import update_conversation_state_after_turn
 from app.services.llm.tool_calls import artifact_arguments, detect_artifact_tool
 from app.services.llm.html_artifacts import HTML_ARTIFACT_TOOLS, normalize_html_artifact_arguments
 from app.services.llm_gateway import stream_model_config_chat
-from app.services.output_filter import strip_internal_agent_output
+from app.services.output_filter import InternalOutputStreamFilter, strip_internal_agent_output
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import message_to_dict, task_to_dict
 from app.services.skills.context import activated_skill_context
@@ -406,6 +406,7 @@ async def run_agent_function_call_loop(
         )
     messages: list[dict[str, Any]] = context_bundle.messages
     stream_text = ""
+    stream_filter = InternalOutputStreamFilter()
     reasoning_text = ""
     tool_results: list[dict[str, Any]] = []
     thinking_enabled = (user_message.extra or {}).get("thinking_enabled") is True
@@ -436,11 +437,12 @@ async def run_agent_function_call_loop(
                         current_text += event.text
                         if not buffer_text_delta:
                             stream_text += event.text
+                            visible_delta = stream_filter.push(event.text)
                             await _publish_text_delta(
                                 channel=channel,
                                 assistant=assistant,
                                 agent=agent,
-                                text=event.text,
+                                text=visible_delta,
                                 emit_message=emit_message,
                             )
                     if event.reasoning:
@@ -512,11 +514,12 @@ async def run_agent_function_call_loop(
         if not current_tool_calls:
             if buffer_text_delta and current_text and not _looks_like_tool_argument_fragment(current_text):
                 stream_text += current_text
+                visible_delta = stream_filter.push(current_text)
                 await _publish_text_delta(
                     channel=channel,
                     assistant=assistant,
                     agent=agent,
-                    text=current_text,
+                    text=visible_delta,
                     emit_message=emit_message,
                 )
 

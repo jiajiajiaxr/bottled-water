@@ -127,9 +127,11 @@ function stripInternalFencedBlocks(text: string) {
   const visible: string[] = [];
   let skippingFence = false;
   let removed = false;
+  const statusFence = "```status_report";
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const trimmed = line.trim();
+    const lowered = trimmed.toLowerCase();
 
     if (!skippingFence && /^```\s*status_report\b/i.test(trimmed)) {
       skippingFence = true;
@@ -139,6 +141,21 @@ function stripInternalFencedBlocks(text: string) {
 
     if (skippingFence) {
       if (trimmed.startsWith("```")) skippingFence = false;
+      continue;
+    }
+
+    if (lowered === "```" && index === lines.length - 1) {
+      removed = true;
+      continue;
+    }
+
+    if (
+      lowered.startsWith("```") &&
+      lowered !== "```" &&
+      statusFence.startsWith(lowered)
+    ) {
+      skippingFence = true;
+      removed = true;
       continue;
     }
 

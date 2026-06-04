@@ -14,7 +14,7 @@ from app.services.chat.finalizer import finalize_streaming_agent_messages
 from app.services.context.builder import ContextBuilder
 from app.services.context.state import update_conversation_state_after_turn
 from app.services.llm_gateway import stream_model_config_chat
-from app.services.output_filter import strip_internal_agent_output
+from app.services.output_filter import InternalOutputStreamFilter, strip_internal_agent_output
 from app.services.queue import queue_service
 from app.services.realtime.event_bus import event_bus
 from app.services.serialization import message_to_dict, subtask_to_dict, task_to_dict
@@ -276,15 +276,23 @@ async def _run_direct_agent_without_function_calling(
             event_stream = stream_model_config_chat(db, str(model_config_id), messages)
         else:
             event_stream = ark_client.stream_chat(messages, purpose=f"agent:{agent.type}", thinking=thinking)
+        stream_filter = InternalOutputStreamFilter()
         async for event in event_stream:
             if event.type == "delta":
                 if event.text:
                     stream_text += event.text
-                    await event_bus.publish(
-                        channel,
-                        "content_block_delta",
-                        {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name, "delta": {"type": "text_delta", "text": event.text}},
-                    )
+                    visible_delta = stream_filter.push(event.text)
+                    if visible_delta:
+                        await event_bus.publish(
+                            channel,
+                            "content_block_delta",
+                            {
+                                "agent_message_id": assistant.id,
+                                "agent_id": agent.id,
+                                "agent_name": agent.name,
+                                "delta": {"type": "text_delta", "text": visible_delta},
+                            },
+                        )
                 if event.reasoning:
                     reasoning_text += event.reasoning
                     await event_bus.publish(
