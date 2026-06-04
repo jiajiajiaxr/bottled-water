@@ -33,7 +33,12 @@ export function WorkflowFloatingButton({
           disabled={disabled}
           loading={loading}
           icon={icon}
-          onClick={onClick}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClick();
+          }}
         />
       </Badge>
     </Tooltip>

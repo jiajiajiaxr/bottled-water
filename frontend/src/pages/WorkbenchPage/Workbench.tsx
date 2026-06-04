@@ -146,6 +146,13 @@ export function Workbench({
     onRouteTabChange(tab);
   };
 
+  const returnFromWorkflowToChat = () => {
+    setScheduleMode("chat");
+    if (activeWorkspaceId && active?.id) {
+      navigateToConversation(activeWorkspaceId, active.id, true);
+    }
+  };
+
   const closeMainTab = (tab: "agents" | "workspace" | "settings") => {
     if (tab === "agents") setAgentDrawerOpen(false);
     if (tab === "workspace") setWorkspacesOpen(false);
@@ -325,7 +332,7 @@ export function Workbench({
               workspaceId={activeWorkspaceId || ""}
               conversationId={active.id}
               embedded
-              onBack={() => setScheduleMode("chat")}
+              onBack={returnFromWorkflowToChat}
               onError={(value) => message.error(value)}
               onSuccess={(value) => message.success(value)}
             />
