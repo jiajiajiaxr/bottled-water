@@ -82,8 +82,9 @@ agenthub/
 - `backend/src/app/services/chat/scheduling.py`：消息级、会话级和 workflow 默认策略的统一解析入口，供 SSE、WebSocket 和 RuntimeService 复用。
 - `backend/src/agent_runtime/`：核心运行时。包含 Session、Scheduler、AgentLoop、Workflow 图遍历等。
 - `backend/src/app/services/agents/function_loop.py`：Agent Function Calling Loop。根据 Agent 权限暴露 Tool、Skill、MCP，执行 tool_calls 并把结果回填模型。
-- `backend/src/app/services/agents/tool_loop.py`：工具 schema 构造、授权校验、Tool / Skill / MCP 执行分发。
-- `backend/src/app/services/agentic_runtime.py`：旧运行时兼容入口，保留给 `runtime_service.py` 和迁移期测试，不作为新功能入口。
+- `backend/src/app/services/agents/tool_loop.py`：同步 Function Call 工具 schema 构造、授权校验、Tool / Skill / MCP 执行分发。
+- `backend/src/app/services/agents/async_tool_loop.py`、`async_tool_selection.py`：AsyncSession-backed V2 runtime adapter 的工具暴露、选择和执行分发。
+- `backend/src/app/services/agentic_runtime.py`：旧运行时兼容 shim，纯 re-export 到 `agents/async_tool_loop.py`，不包含业务逻辑。
 - `backend/src/app/services/ark.py`：火山方舟和 OpenAI-compatible 模型适配，包括普通调用、流式调用和 mock fallback。
 - `backend/src/app/services/llm_gateway.py`：模型配置测试和模型调用统一入口。
 - `backend/src/app/services/tool_registry.py`：兼容 shim。新代码使用 `backend/src/app/services/tools/catalog.py`、`executor.py`、`permissions.py`。

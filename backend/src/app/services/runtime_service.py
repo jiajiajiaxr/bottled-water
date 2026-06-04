@@ -314,11 +314,11 @@ class _ToolExecutorAdapter(ToolExecutor):
         self.conversation = conversation
 
     async def list_tools(self) -> list[dict]:
-        from app.services.agentic_runtime import build_tools_for_agent
+        from app.services.agents.async_tool_loop import build_tools_for_agent
         return await build_tools_for_agent(self.db, self.agent)
 
     async def execute(self, tool_call: ToolCall) -> Any:
-        from app.services.agentic_runtime import execute_tool_by_name
+        from app.services.agents.async_tool_loop import execute_tool_by_name
         return await execute_tool_by_name(
             self.db,
             agent=self.agent,

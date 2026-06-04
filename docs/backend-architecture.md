@@ -70,7 +70,7 @@ AgentHub 后端采用经典的分层架构，自上而下分为六层：
 | `runtime/generation_records.py` | V2 运行记录服务。把 generation、AgentRun、调度决策和 watchdog 事件折叠写入 `Conversation.extra.runtime`，为刷新恢复和后续迁移独立表提供结构化数据 |
 | `runtime_service.py` | **统一编排入口**。根据消息/会话调度策略创建 `AgentSession`；支持 `workflow`、`tech_lead`，单 Agent 会话自动退化为 `SingleAgentScheduler` |
 | `runtime_adapter.py` | **适配器层**。将 `agent_runtime` 的 `ToolExecutor` 接口桥接到 app 层的 `build_tools_for_agent` / `execute_tool_by_name` |
-| `agents/function_loop.py` / `agents/tool_loop.py` | Agent Function Calling Loop、工具 schema 构造、权限过滤和工具结果回填 |
+| `agents/function_loop.py` / `agents/tool_loop.py` / `agents/async_tool_loop.py` | Agent Function Calling Loop、工具 schema 构造、权限过滤和工具结果回填；`async_tool_loop.py` 仅服务 AsyncSession-backed V2 runtime adapter |
 | `tools/catalog.py` / `tools/executor.py` / `tools/permissions.py` | 工具目录、数据库同步、参数校验、权限检查和调用记录 |
 | `tool_registry.py` | 已废弃兼容 shim，新代码不要依赖 |
 | `runtime_service.py` | 统一编排入口，创建 `AgentSession` 并选择调度策略 |
@@ -301,7 +301,7 @@ EventDispatcher.dispatch(event)
 
 ### 4.4 适配器模式：运行时与业务层解耦
 
-`ToolExecutorAdapter`（`runtime_adapter.py`）和 `_ToolExecutorAdapter`（`runtime_service.py`）实现 `agent_runtime.core.interfaces.ToolExecutor` 接口，内部将调用转发到 app 层的 `agents/tool_loop.execute_tool_by_name`。这种设计使得：
+`ToolExecutorAdapter`（`runtime_adapter.py`）和 `_ToolExecutorAdapter`（`runtime_service.py`）实现 `agent_runtime.core.interfaces.ToolExecutor` 接口，内部将调用转发到 app 层的 `agents/async_tool_loop.execute_tool_by_name`；普通单聊 / 工作流 Function Calling 仍使用同步 `agents/tool_loop.py`。这种设计使得：
 - `agent_runtime` 保持纯运行时，不依赖业务层代码
 - 业务层工具注册表无需改动即可被运行时复用
 

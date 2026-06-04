@@ -28,7 +28,7 @@
 
 | 文档承诺 | 当前代码位置 | 状态 | 缺口 / 说明 | 优先级 |
 | --- | --- | --- | --- | --- |
-| Tool 目录统一展示内置和自定义工具，Agent Function Calling 暴露与执行一致 | `backend/src/app/services/tools/catalog.py`、`executor.py`、`builtins/`、`backend/src/app/services/agents/tool_loop.py`、`backend/src/app/api/tools.py` | 已完成 | 本轮已将 `/api/v1/tools`、seed 和旧 `agentic_runtime.py` 收敛到新版 catalog/executor；顶层 `tool_registry.py` 仅保留 shim。 | P0 |
+| Tool 目录统一展示内置和自定义工具，Agent Function Calling 暴露与执行一致 | `backend/src/app/services/tools/catalog.py`、`executor.py`、`builtins/`、`backend/src/app/services/agents/tool_loop.py`、`async_tool_loop.py`、`backend/src/app/api/tools.py` | 已完成 | 本轮已将 `/api/v1/tools`、seed 和旧 `agentic_runtime.py` 收敛到新版 catalog/executor；`agentic_runtime.py` 和顶层 `tool_registry.py` 仅保留 shim。 | P0 |
 | 内置 Tool 同步到 `tool_definitions`，目录去重，执行写入 `tool_invocations` | `services/tools/catalog.py`、`services/tools/runs.py`、`db/models/capabilities.py` | 已完成 | 本轮增加按 name 去重，避免内置工具重复显示；执行仍由代码 handler 完成。 | P0 |
 | Agent 可配置工具、Skill、MCP 权限，并在页面模式正常加载 | `frontend/src/features/agents/components/AgentDirectoryDrawer/` | 已完成 | 本轮修复 `asPage` 模式不加载模型/工具/Skill/MCP 目录；旧授权工具会显示为 disabled legacy 选项，避免保存时丢配置。 | P0 |
 | Skill 包化能力：manifest、runtime、测试、版本、依赖 | `backend/src/app/services/skills/` | 已实现，需持续加固 | `prompt/agent/mcp/script` runner 和 legacy adapter 已拆分；`mcp_skill` 走记录化 MCP 调用，`script_skill` 必须声明 `file.write` + `sandbox.run` 依赖并通过受控工具链执行，不应宣称生产级插件沙箱。 | P1 |

@@ -21,10 +21,14 @@ def test_domain_service_imports_are_direct() -> None:
 
 def test_legacy_capability_imports_are_reexport_shims() -> None:
     from app.services import artifact_exports, file_tools
+    from app.services import agentic_runtime
+    from app.services.agents import async_tool_loop
     from app.services.tools import builtin_executor
 
     assert artifact_exports.export_artifact
     assert file_tools.extract_text_from_path
+    assert agentic_runtime.build_tools_for_agent is async_tool_loop.build_tools_for_agent
+    assert agentic_runtime.execute_tool_by_name is async_tool_loop.execute_tool_by_name
     assert builtin_executor.invoke_builtin_tool
 
 

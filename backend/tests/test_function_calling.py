@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.ark import LLMStreamEvent, ArkClient
-from app.services.agentic_runtime import build_tools_for_agent, execute_tool_by_name
+from app.services.agents.async_tool_loop import build_tools_for_agent, execute_tool_by_name
 
 
 class TestArkClientToolCalls:
@@ -156,7 +156,7 @@ class TestExecuteToolByName:
         conversation.id = "conv-1"
 
         with patch(
-            "app.services.agentic_runtime._invoke_catalog_tool",
+            "app.services.agents.async_tool_loop._invoke_catalog_tool",
             new_callable=AsyncMock,
         ) as mock_invoke:
             mock_invoke.return_value = {
