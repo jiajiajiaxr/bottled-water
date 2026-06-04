@@ -12,8 +12,10 @@ def tool_name(tool: dict[str, Any]) -> str:
 
 def tool_allowed(server: McpServer, name: str) -> bool:
     tools = server.tools or []
-    if any(item.get("name") == name and item.get("enabled", True) for item in tools if isinstance(item, dict)):
-        return True
+    for item in tools:
+        if not isinstance(item, dict) or item.get("name") != name:
+            continue
+        return bool(item.get("enabled", True))
     return any(fnmatch.fnmatch(name, pattern) for pattern in (server.tool_filter or []))
 
 

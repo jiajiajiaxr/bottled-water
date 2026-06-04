@@ -156,3 +156,11 @@ agenthub/
 - `var/frontend.log`、`var/frontend.err.log`：前端运行日志。
 
 `var` 是本地运行数据目录，里面的内容不属于核心源码。
+
+## MCP 调用链路文件
+
+- `backend/src/app/services/mcp/invocation.py`：MCP 调用记录、allowlist/schema 预检、transport 分发、错误码归一和审计。
+- `backend/src/app/services/mcp/transports/common.py`：工具名、allowlist 和安全环境变量处理；显式 disabled 工具优先于通配符。
+- `backend/src/app/services/mcp/transports/http.py`：HTTP JSON-RPC MCP 调用，包含 timeout、request error 和鉴权错误诊断。
+- `backend/src/app/services/mcp/transports/stdio.py`：受控 stdio MCP 子进程调用。
+- `backend/src/app/services/mcp/transports/sse_ws.py`：SSE/WebSocket MCP transport 占位降级入口，当前返回清晰未启用错误并写入调用记录。

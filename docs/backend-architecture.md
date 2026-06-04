@@ -346,3 +346,9 @@ agent_runtime/（零业务依赖）
 | 配置 | Pydantic Settings |
 | 测试 | pytest + pytest-asyncio |
 | 代码规范 | Ruff |
+
+### MCP 调用链路边界
+
+- `app.services.mcp.invocation` 是 MCP 调用记录和错误收敛入口；它负责创建 `McpToolInvocation`、执行 allowlist/schema 预检、分发 transport、写入 `error_code` 与审计日志。
+- `app.services.mcp.transports.common` 只负责通用 allowlist/env 规则；`http.py`、`stdio.py`、`sse_ws.py` 分别承载 transport 细节。
+- 失败调用分为配置/权限错误和连接/transport 错误：前者不会把 MCP Server 健康误判为离线，后者会更新为 offline，便于管理页提示真实故障。

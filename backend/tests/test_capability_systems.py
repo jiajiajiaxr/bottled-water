@@ -4,6 +4,7 @@ import io
 import zipfile
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from docx import Document
@@ -20,6 +21,7 @@ from db.models import (
     Conversation,
     FileAsset,
     McpServer,
+    McpToolInvocation,
     Skill,
     ToolDefinition,
     ToolInvocation,
@@ -30,6 +32,7 @@ from app.services.tools.builtins.artifact.export import default_export_format, e
 from app.services.artifacts import update_artifact_files
 from app.services.demo_cleanup import cleanup_acceptance_residue
 from app.services.mcp.discovery import discover_server_tools, import_server_manifest, probe_server
+from app.services.mcp.invocation import invoke_mcp_tool_recorded
 from app.services.mcp.schema import validate_mcp_arguments
 from app.services.mcp.transports.common import tool_allowed
 from app.services.skills.context import activated_skill_context
@@ -533,6 +536,147 @@ def test_mcp_argument_schema_validation() -> None:
     )
 
     validate_mcp_arguments(server, "echo.ping", {"input": "hello"})
+
+
+@pytest.mark.asyncio
+async def test_mcp_allowlist_denial_is_recorded_and_not_executed() -> None:
+    db = _memory_session()
+    user = _user()
+    server = McpServer(
+        owner_id=user.id,
+        name="Allowlist MCP",
+        transport="httpStream",
+        url="http://127.0.0.1:9876",
+        enabled=True,
+        tools=[{"name": "echo.secret", "enabled": False}],
+        tool_filter=["echo.*"],
+    )
+    db.add_all([user, server])
+    db.commit()
+
+    with patch("app.services.mcp.invocation.call_http_mcp", new_callable=AsyncMock) as call:
+        result = await invoke_mcp_tool_recorded(
+            db,
+            server=server,
+            tool_name_value="echo.secret",
+            arguments={"input": "hello"},
+            user=user,
+        )
+
+    invocation = db.scalar(select(McpToolInvocation).where(McpToolInvocation.server_id == server.id))
+    assert result["status"] == "failed"
+    assert result["error_code"] == "mcp_tool_not_allowed"
+    assert invocation.status == "failed"
+    assert invocation.extra["error_code"] == "mcp_tool_not_allowed"
+    assert server.health_status == "online"
+    call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_argument_validation_failure_is_recorded() -> None:
+    db = _memory_session()
+    user = _user()
+    server = McpServer(
+        owner_id=user.id,
+        name="Schema MCP",
+        transport="httpStream",
+        url="http://127.0.0.1:9876",
+        enabled=True,
+        tools=[
+            {
+                "name": "echo.ping",
+                "enabled": True,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"input": {"type": "string"}},
+                    "required": ["input"],
+                },
+            }
+        ],
+    )
+    db.add_all([user, server])
+    db.commit()
+
+    with patch("app.services.mcp.invocation.call_http_mcp", new_callable=AsyncMock) as call:
+        result = await invoke_mcp_tool_recorded(
+            db,
+            server=server,
+            tool_name_value="echo.ping",
+            arguments={},
+            user=user,
+        )
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "mcp_argument_validation_failed"
+    assert db.scalar(select(McpToolInvocation)).result["error_code"] == "mcp_argument_validation_failed"
+    assert server.health_status == "online"
+    call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_transport_timeout_is_recorded_with_error_code() -> None:
+    db = _memory_session()
+    user = _user()
+    server = McpServer(
+        owner_id=user.id,
+        name="Timeout MCP",
+        transport="httpStream",
+        url="http://127.0.0.1:9876",
+        enabled=True,
+        tools=[{"name": "echo.ping", "enabled": True}],
+        timeout_ms=5,
+    )
+    db.add_all([user, server])
+    db.commit()
+
+    with patch(
+        "app.services.mcp.invocation.call_http_mcp",
+        new=AsyncMock(side_effect=ValidationAppError("MCP HTTP tool invocation timed out after 5ms")),
+    ):
+        result = await invoke_mcp_tool_recorded(
+            db,
+            server=server,
+            tool_name_value="echo.ping",
+            arguments={"input": "hello"},
+            user=user,
+            timeout_ms=5,
+        )
+
+    invocation = db.scalar(select(McpToolInvocation).where(McpToolInvocation.server_id == server.id))
+    assert result["status"] == "failed"
+    assert result["error_code"] == "mcp_timeout"
+    assert "timed out" in result["error_message"]
+    assert invocation.duration_ms >= 0
+    assert server.health_status == "offline"
+
+
+@pytest.mark.asyncio
+async def test_mcp_sse_ws_transport_returns_clear_degraded_invocation() -> None:
+    db = _memory_session()
+    user = _user()
+    server = McpServer(
+        owner_id=user.id,
+        name="Stream MCP",
+        transport="sse",
+        url="http://127.0.0.1:9876",
+        enabled=True,
+        tools=[{"name": "echo.stream", "enabled": True}],
+    )
+    db.add_all([user, server])
+    db.commit()
+
+    result = await invoke_mcp_tool_recorded(
+        db,
+        server=server,
+        tool_name_value="echo.stream",
+        arguments={"input": "hello"},
+        user=user,
+    )
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "mcp_transport_unsupported"
+    assert "SSE/WebSocket MCP transport" in result["error_message"]
+    assert db.scalar(select(McpToolInvocation)).extra["error_code"] == "mcp_transport_unsupported"
 
 
 def test_import_server_manifest_from_json() -> None:

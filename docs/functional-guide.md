@@ -360,3 +360,10 @@ MCP 服务用于接入外部工具和上下文服务。
 - 数据模型：`Role`、`Permission`、`UserRole`、`RolePermission`、`AuditLog`
 - 前端入口：`frontend/src/features/platform/`、`frontend/src/features/settings/`
 
+
+### MCP 调用失败与诊断语义
+
+- MCP 工具调用会先写入 `McpToolInvocation`，再执行 allowlist、schema 和 transport 检查，成功或失败都会留下审计记录。
+- `error_code` 目前包含 `mcp_tool_not_allowed`、`mcp_argument_validation_failed`、`mcp_timeout`、`mcp_authentication_failed`、`mcp_transport_unsupported`、`mcp_transport_error`，前端可以据此展示明确提示。
+- `server.tools` 中显式禁用的工具优先级高于 `tool_filter` 通配符；被拒绝的调用不会触发真实 transport。
+- HTTP MCP 会明确区分 timeout、request error 和 401/403 鉴权问题；SSE/WebSocket MCP 暂未启用真实 transport 时会返回可读降级错误，并保留原文件/配置下载与调用记录。

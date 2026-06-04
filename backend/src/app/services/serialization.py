@@ -700,6 +700,7 @@ def mcp_invocation_to_dict(invocation: McpToolInvocation) -> dict[str, Any]:
         "status": invocation.status,
         "result": redact_sensitive(invocation.result or {}),
         "error_message": invocation.error_message,
+        "error_code": (invocation.extra or {}).get("error_code"),
         "duration_ms": invocation.duration_ms,
         "started_at": iso(invocation.started_at),
         "completed_at": iso(invocation.completed_at),

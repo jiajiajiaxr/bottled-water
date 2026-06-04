@@ -73,3 +73,11 @@
 - 完整权限后台运营台和企业级审计检索。
 
 这些方向可以继续演进，但新增实现应保持当前模块边界：`chat -> workflows/agents -> tools/skills/mcp -> llm/files/artifacts/sandbox`，避免把新逻辑重新堆回旧 shim。
+
+## 2026-06-04 MCP 调用链路加固
+
+- `services/mcp/invocation.py` 在 allowlist 拒绝、参数 schema 校验失败、transport 超时、鉴权失败和不支持的 SSE/WebSocket transport 降级时，都会创建并完成 `McpToolInvocation`，调用结果包含稳定 `error_code` 和可读 `error_message`。
+- `services/mcp/transports/common.py` 明确规则：`server.tools` 中显式禁用的工具优先于 `tool_filter` 通配符，避免 `echo.*` 重新放开 `echo.secret` 这类禁用工具。
+- `services/mcp/transports/http.py` 对 HTTP timeout、request error、401/403 鉴权错误返回清晰诊断；SSE/WebSocket transport 目前走显式降级入口，不伪装成 HTTP 调用。
+- 服务健康状态只在真实连接/transport 失败时标记 offline；allowlist 或参数错误不会误判 MCP Server 离线。
+- 覆盖测试：`tests/test_capability_systems.py` 中新增 allowlist、schema failure、timeout、SSE/WebSocket 降级记录用例。
