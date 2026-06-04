@@ -44,7 +44,7 @@
 | 多智能体 V2：ConversationSessionManager、TechLeadScheduler、Watchdog 最小闭环 | `backend/src/app/services/conversation_session_manager.py`、`backend/src/app/services/runtime/generation_records.py`、`backend/src/agent_runtime/`、`backend/src/app/persistence/sqlalchemy_backend.py` | 已实现，需持续加固 | 运行时骨架、调度器、看门狗、状态报告解析和测试存在；Generation / AgentRun 历史已写入 `Conversation.extra.runtime`，Blackboard / Agent Context 可通过 SQLAlchemyBackend 持久化恢复；消息、SSE 和 WebSocket 路径统一解析 `workflow/tech_lead` 调度策略，Session 复用会感知策略变化。 | P1 |
 | 完整 Actor 化、Blackboard 协商式调度、分布式多 Agent 生命周期 | `docs/architecture/multi-agent-v2-design.md` | Roadmap | 属于长期架构计划，不应作为当前已交付功能承诺；当前只保留最小闭环和适配层。 | P2 |
 | RBAC / 审计后台 | `api/security_ops.py`、`services/audit.py`、`db/models/security.py`、`frontend/src/features/platform/components/SecurityOpsPanel.tsx` | 已实现，需持续加固 | 权限和审计表/API 存在；用户角色更新已同步 `User.role` 与 `UserRole` 关系并写入审计；平台控制台已支持审计详情查看和用户角色变更。企业级权限审批流、复杂审计检索仍是后续增强。 | P2 |
-| 部署 / 远程控制生产级能力 | `api/deployments.py`、`api/sandbox.py`、`services/tools/builtins/sandbox/` | 部分完成 | 演示级部署记录、预览和回滚接口存在；生产级远程控制、容器隔离和云部署仍是 roadmap。 | P2 |
+| 部署 / 远程控制生产级能力 | `api/deployments.py`、`services/deployments.py`、`api/sandbox.py`、`services/tools/builtins/sandbox/` | 已实现，需持续加固 | 预览部署、回滚、日志、健康检查和审计已闭环；容器/云部署在本地环境会返回明确降级失败。生产级远程控制、容器隔离和云部署仍是 roadmap。 | P2 |
 
 ## 本轮收敛项
 
@@ -62,6 +62,7 @@
 - WorkflowRun 的 `node_states` 新增 `retry_count`，工作流引擎支持节点级 `stop/retry/skip` 失败策略，并用测试覆盖失败结果重试、异常重试和跳过后继续下游。
 - 消息入口、SSE 兼容入口和 WebSocket 入口统一使用 `services/chat/scheduling.py` 解析调度策略；有 workflow 的群聊默认走 `workflow`，显式切换 `tech_lead` 会重建对应 Session，避免复用旧调度器。
 - 安全后台的用户角色更新会同步 `users.role` 与 `user_roles`，默认保留 `ROLE_USER` 并追加提升角色，同时写入 `security.user.role.update` 审计日志；前端安全运营面板已支持直接变更用户角色并展开审计详情。
+- 预览部署迁入 `services/deployments.py`，创建和 `deploy.preview` 工具调用都执行产物可访问性健康检查；容器部署无运行时时会以 failed 状态和清晰错误降级，并写入部署审计。
 
 ## Roadmap 边界
 

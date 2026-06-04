@@ -149,15 +149,36 @@ def test_task_approval_and_deployment_operations(
         headers=auth_headers,
     )
     assert deployment.status_code == 200, deployment.text
-    deployment_id = unwrap(deployment.json())["id"]
+    deployment_body = unwrap(deployment.json())
+    deployment_id = deployment_body["id"]
+    assert deployment_body["status"] == "deployed"
+    assert deployment_body["health_status"] == "healthy"
+    assert deployment_body["health"]["checks"]
 
     logs = client.get(f"/api/v1/deployments/{deployment_id}/logs", headers=auth_headers)
     assert logs.status_code == 200, logs.text
-    assert unwrap(logs.json())["items"]
+    log_items = unwrap(logs.json())["items"]
+    assert log_items
+    assert any("访问入口" in item["message"] for item in log_items)
+
+    health = client.post(f"/api/v1/deployments/{deployment_id}/health", headers=auth_headers)
+    assert health.status_code == 200, health.text
+    assert unwrap(health.json())["health_status"] == "healthy"
 
     parsed = client.post("/api/v1/deployments/parse-command", json={"message": "请部署到预览链接"}, headers=auth_headers)
     assert parsed.status_code == 200, parsed.text
     assert unwrap(parsed.json())["recognized"] is True
+
+    container_deployment = client.post(
+        "/api/v1/deployments",
+        json={"artifact_id": artifact_id, "mode": "container"},
+        headers=auth_headers,
+    )
+    assert container_deployment.status_code == 200, container_deployment.text
+    container_body = unwrap(container_deployment.json())
+    assert container_body["status"] == "failed"
+    assert container_body["health_status"] == "failed"
+    assert "未启用 container 部署运行时" in container_body["error_message"]
 
     rollback = client.post(f"/api/v1/deployments/{deployment_id}/rollback", json={}, headers=auth_headers)
     assert rollback.status_code == 200, rollback.text

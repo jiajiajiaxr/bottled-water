@@ -359,3 +359,9 @@ agent_runtime/（零业务依赖）
 - 用户角色更新必须同时维护 `users.role` 兼容字段和 `user_roles` 关系表；默认用户始终保留 `ROLE_USER`，提升角色以额外 `UserRole` 记录表示。
 - 高风险安全操作通过 `write_audit_log()` 写入 `AuditLog`，前端安全页读取 `/audit-logs` 和 `/audit-logs/stats` 展示。
 - 前端 `SecurityOpsPanel` 通过 `/security/users/{id}/role` 调整用户角色，更新后刷新安全用户列表和审计日志，避免只展示静态 RBAC 目录。
+
+### 部署与远程控制边界
+
+- `app.services.deployments` 是预览部署的业务入口，负责根据产物生成访问 URL、执行轻量健康检查、写入部署步骤、日志和错误原因。
+- `deploy.preview` 内置工具和 `/deployments` API 使用同一套部署服务，避免工具链和 API 返回不同部署语义。
+- 当前本地环境只承载预览链接、静态站点和源码下载三类可验证部署；容器/云部署没有运行时时会返回 `failed` 和清晰错误，而不是伪造生产发布成功。

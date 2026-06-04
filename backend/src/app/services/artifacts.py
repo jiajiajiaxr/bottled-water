@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -418,52 +417,8 @@ def _checksum_from_files(files: dict[str, Any]) -> str:
 
 
 async def create_deployment(db: AsyncSession, artifact_id: str, mode: str = "preview_link") -> Deployment:
-    artifact = await db.get(Artifact, artifact_id)
-    if not artifact:
-        raise NotFoundError("产物不存在")
-    deployment = Deployment(
-        artifact_id=artifact.id,
-        artifact_version_id=await db.scalar(
-            select(ArtifactVersion.id)
-            .where(ArtifactVersion.artifact_id == artifact.id)
-            .order_by(ArtifactVersion.version.desc())
-        ),
-        mode=mode,
-        status="deployed",
-        access_url=f"{get_settings().artifact_base_url}/api/v1/artifacts/{artifact.id}/preview?deployment=1",
-        deploy_log=(
-            "准备部署环境\n"
-            "写入静态文件\n"
-            "生成预览访问地址\n"
-            "健康检查通过"
-        ),
-        steps=[
-            {"name": "准备", "status": "completed", "duration_ms": 400},
-            {"name": "构建", "status": "completed", "duration_ms": 1200},
-            {"name": "发布", "status": "completed", "duration_ms": 600},
-        ],
-        deployed_at=utcnow(),
-    )
-    db.add(deployment)
-    await db.flush()
-    db.add(
-        Message(
-            conversation_id=artifact.conversation_id,
-            sender_type="agent",
-            sender_name="Deploy Agent",
-            content_type="deploy_status_card",
-            content={
-                "deployment_id": deployment.id,
-                "artifact_name": artifact.name,
-                "deploy_mode": deployment.mode,
-                "status": deployment.status,
-                "progress": 100,
-                "deploy_url": deployment.access_url,
-                "steps": deployment.steps,
-            },
-            status="completed",
-        )
-    )
-    await db.commit()
-    await db.refresh(deployment)
-    return deployment
+    """Deprecated shim: use app.services.deployments.create_deployment."""
+
+    from app.services.deployments import create_deployment as create_preview_deployment
+
+    return await create_preview_deployment(db, artifact_id, mode)

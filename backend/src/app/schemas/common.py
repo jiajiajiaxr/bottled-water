@@ -256,6 +256,9 @@ class DeploymentOut(ORMModel):
     deploy_log: str
     steps: list[dict[str, Any]]
     error_message: str | None = None
+    health: dict[str, Any] = Field(default_factory=dict)
+    health_status: str | None = None
+    last_health_check_at: str | None = None
     deployed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

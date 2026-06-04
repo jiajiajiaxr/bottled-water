@@ -321,12 +321,14 @@ MCP 服务用于接入外部工具和上下文服务。
 - 记录命令结果。
 - 创建远程连接配置。
 - 连接、检查和删除远程连接。
-- 产物部署预览和回滚记录。
+- 产物部署预览、健康检查、回滚记录和审计。
+- 未启用容器/云部署运行时时，返回明确失败原因，不伪造生产发布成功。
 
 相关代码：
 
 - 沙箱 API：`backend/src/app/api/sandbox.py`
 - 部署 API：`backend/src/app/api/deployments.py`
+- 部署服务：`backend/src/app/services/deployments.py`
 - 数据模型：`SandboxSession`、`RemoteConnection`、`Deployment`
 - 前端入口：`frontend/src/features/platform/components/PlatformControlDrawer/`
 - 测试：`tests/test_workspace_security_deploy_task.py`、`tests/test_deployment.py`

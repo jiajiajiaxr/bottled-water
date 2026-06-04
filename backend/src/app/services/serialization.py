@@ -353,6 +353,7 @@ def artifact_to_dict(artifact: Artifact) -> dict[str, Any]:
 
 
 def deployment_to_dict(deployment: Deployment) -> dict[str, Any]:
+    health = (deployment.extra or {}).get("health") or {}
     return {
         "id": deployment.id,
         "deployment_id": deployment.id,
@@ -364,6 +365,9 @@ def deployment_to_dict(deployment: Deployment) -> dict[str, Any]:
         "deploy_log": deployment.deploy_log,
         "steps": deployment.steps or [],
         "error_message": deployment.error_message,
+        "health": health,
+        "health_status": health.get("status"),
+        "last_health_check_at": health.get("checked_at"),
         "commit": deployment.id[:8],
         "deployed_at": iso(deployment.deployed_at),
         "updatedAt": iso(deployment.updated_at),

@@ -7,8 +7,9 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
-from app.models import Artifact, Conversation, Deployment, User, utcnow
+from app.models import Artifact, Conversation, User
 from app.services.artifacts import update_artifact_files
+from app.services.deployments import create_sync_deployment
 from app.services.serialization import artifact_to_dict
 from app.services.tools.api_probe import run_api_test
 from app.services.tools.browser_probe import run_browser_preview
@@ -153,18 +154,18 @@ def _document_review(arguments: dict[str, Any]) -> dict[str, Any]:
 
 def _deploy_preview(db: Session, user: User, arguments: dict[str, Any]) -> dict[str, Any]:
     artifact = _artifact(db, user, str(arguments.get("artifact_id") or ""))
-    deployment = Deployment(
-        artifact_id=artifact.id,
-        mode="preview_link",
-        status="deployed",
-        access_url=f"/api/v1/artifacts/{artifact.id}/preview?deployment=1",
-        deploy_log="工具 deploy.preview 已创建预览部署。",
-        steps=[{"name": "preview", "status": "completed", "duration_ms": 120}],
-        deployed_at=utcnow(),
+    deployment = create_sync_deployment(
+        db,
+        artifact,
+        str(arguments.get("mode") or "preview_link"),
     )
-    db.add(deployment)
-    db.commit()
     return {
-        "status": "succeeded",
-        "deployment": {"id": deployment.id, "url": deployment.access_url, "status": deployment.status},
+        "status": "succeeded" if deployment.status == "deployed" else "failed",
+        "deployment": {
+            "id": deployment.id,
+            "url": deployment.access_url,
+            "status": deployment.status,
+            "health": (deployment.extra or {}).get("health"),
+            "error_message": deployment.error_message,
+        },
     }
