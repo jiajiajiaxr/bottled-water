@@ -26,8 +26,11 @@ from app.schemas.requests import (
     TestSkillRequest,
     UpdateSkillRequest,
 )
+from app.core.database import SessionLocal
 from app.services.serialization import redact_sensitive, skill_to_dict
 from app.services.model_config_resolver import create_provider_from_db
+from app.services.skills.testing import run_skill_test
+from app.services.skills.versions import set_skill_manifest
 
 router = APIRouter(tags=["skills"])
 
@@ -162,6 +165,73 @@ def _parse_json_object(text: str) -> dict | None:
         return None
 
 
+def _manifest_from_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(config, dict):
+        return None
+    manifest = config.get("manifest")
+    return manifest if isinstance(manifest, dict) else None
+
+
+def _apply_manifest_if_present(skill: Skill, config: dict[str, Any] | None, user: User) -> None:
+    manifest = _manifest_from_config(config)
+    if manifest:
+        set_skill_manifest(skill, manifest, user=user)
+
+
+def _runtime_payload(payload: TestSkillRequest) -> dict[str, Any] | str:
+    if payload.message:
+        return {"prompt": payload.message, "input": payload.message}
+    if isinstance(payload.input, dict):
+        return payload.input
+    if isinstance(payload.input, str):
+        return {"prompt": payload.input, "input": payload.input}
+    return {"input": payload.input}
+
+
+async def _run_skill_runtime_test(
+    skill_id: str,
+    user_id: str,
+    payload: TestSkillRequest,
+) -> dict[str, Any]:
+    runtime_payload = _runtime_payload(payload)
+    with SessionLocal() as sync_db:
+        skill = sync_db.get(Skill, skill_id)
+        user = sync_db.get(User, user_id)
+        if not skill or skill.deleted_at is not None:
+            raise NotFoundError("Skill not found")
+        if not user:
+            raise NotFoundError("User not found")
+        if skill.owner_id not in {None, user.id} and user.role != "admin":
+            raise ForbiddenError("No permission for this skill")
+
+        report = await run_skill_test(
+            sync_db,
+            skill=skill,
+            user=user,
+            payload=runtime_payload,
+            context=payload.context,
+        )
+        sync_db.commit()
+        sync_db.refresh(skill)
+        result = report["result"]
+        response = result.get("output")
+        if not isinstance(response, str):
+            response = json.dumps(response, ensure_ascii=False, default=str)
+        return {
+            "skill": skill_to_dict(skill),
+            "status": report["status"],
+            "response": response,
+            "model": result.get("model"),
+            "usage": result.get("usage") or {},
+            "provider_status": result.get("provider_status") or result.get("status"),
+            "run_id": result.get("run_id"),
+            "runtime": result.get("runtime"),
+            "result": result,
+            "assertion": report.get("assertion"),
+            "duration_ms": report.get("duration_ms"),
+        }
+
+
 async def _generate_skill_spec(payload: GenerateSkillRequest, db: AsyncSession) -> dict:
     provider = await _model_provider(db)
     if not provider:
@@ -280,6 +350,7 @@ async def create_skill(
         tags=payload.tags,
         config=redact_sensitive(payload.config),
     )
+    _apply_manifest_if_present(skill, payload.config, user)
     db.add(skill)
     await db.commit()
     await db.refresh(skill)
@@ -327,6 +398,7 @@ async def import_mcp_skill(
             }
         ),
     )
+    _apply_manifest_if_present(skill, skill.config, user)
     db.add(skill)
     await db.commit()
     await db.refresh(skill)
@@ -360,6 +432,7 @@ async def generate_skill(
         tags=spec["tags"],
         config=redact_sensitive(spec["config"]),
     )
+    _apply_manifest_if_present(skill, spec["config"], user)
     db.add(skill)
     await db.commit()
     await db.refresh(skill)
@@ -386,10 +459,13 @@ async def update_skill(
     data = payload.model_dump(exclude_unset=True)
     if "workspace_id" in data:
         await _validate_workspace(db, user, data["workspace_id"])
+    raw_manifest = _manifest_from_config(data.get("config"))
     for key, value in data.items():
         if key in {"tools", "config"} and value is not None:
             value = redact_sensitive(value)
         setattr(skill, key, value)
+    if raw_manifest:
+        set_skill_manifest(skill, raw_manifest, user=user)
     await db.commit()
     await db.refresh(skill)
     return ok(skill_to_dict(skill), "Skill updated")
@@ -415,66 +491,6 @@ async def test_skill(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    skill = await _get_skill(db, user, skill_id)
-    input_text = payload.message or (
-        payload.input
-        if isinstance(payload.input, str)
-        else json.dumps(payload.input, ensure_ascii=False)
-    )
-    system_prompt = skill.prompt or skill.content or f"You are the skill {skill.name}."
-    provider = await _model_provider(db)
-    if not provider:
-        response = f"[mock] {skill.name} received: {input_text[:160]}"
-        return ok(
-            {
-                "skill": skill_to_dict(skill),
-                "status": "passed",
-                "response": response,
-                "model": "mock",
-                "usage": {},
-            },
-            "Skill test completed",
-        )
-
-    try:
-        result = await provider.chat(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": input_text},
-            ],
-            temperature=0.2,
-            max_tokens=800,
-        )
-        response = result.content
-        model = result.model or "unknown"
-        usage = result.usage or {}
-        provider_status = "ok"
-    except Exception as exc:
-        response = f"[error] {exc}"
-        model = "error"
-        usage = {}
-        provider_status = f"error:{exc.__class__.__name__}"
-
-    skill.extra = {
-        **(skill.extra or {}),
-        "last_test": {
-            "status": "passed",
-            "input_preview": input_text[:160],
-            "provider_status": provider_status,
-            "model": model,
-            "tested_at": utcnow().isoformat(),
-        },
-    }
-    await db.commit()
-    await db.refresh(skill)
-    return ok(
-        {
-            "skill": skill_to_dict(skill),
-            "status": "passed",
-            "response": response,
-            "model": model,
-            "usage": usage,
-            "provider_status": provider_status,
-        },
-        "Skill test completed",
-    )
+    await _get_skill(db, user, skill_id)
+    result = await _run_skill_runtime_test(skill_id, user.id, payload)
+    return ok(result, "Skill test completed")

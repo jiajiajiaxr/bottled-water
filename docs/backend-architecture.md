@@ -362,6 +362,7 @@ agent_runtime/（零业务依赖）
 - `script_skill` 必须在 manifest 中声明 `file.write` 与 `sandbox.run` 依赖，运行时通过统一 Tool Executor 写入脚本/输入文件并调用受控沙箱，因此会同时产生 `SkillRun` 和 `ToolInvocation`。
 - `services/skills/versions.py` 为每次 manifest 更新生成稳定 SHA-256 指纹，并把前一版完整 manifest 快照、变更字段、操作者和替换目标写入 `skills.metadata.versions`，用于回滚和审计。
 - `services/skills/testing.py` 通过 `SkillRuntime` 运行 manifest tests，保存 suite/case 级测试报告、依赖解析结果、断言结果和 `SkillRun.run_id`，不再只记录一条不可追溯的 last_test 摘要。
+- `/api/v1/skills/{id}/test` 也统一委托 `services/skills/testing.py::run_skill_test`，因此手动测试、脚本 Skill、MCP Skill 和 Agent Skill 都会走同一条 `SkillRuntime -> SkillRun` 审计链路，API 层不再绕过 runtime 直接调用模型。
 - `services/skills/dependencies.py` 的 Tool 依赖检查以数据库 `tool_definitions` 为目录来源，返回 Tool / MCP / Skill 的 resolved 明细；内置 Tool 仍由代码 executor 执行，但目录和授权以数据库为准。
 
 ### RBAC 与审计边界

@@ -67,7 +67,7 @@ agenthub/
 - `backend/src/app/api/artifacts.py`：产物创建、获取、预览、保存版本、Diff、导出、兼容附件接口、知识库兼容接口。
 - `backend/src/app/api/workspace_files.py`：工作区文件树、预览、下载、Office PDF 预览、删除、重命名、新建目录、移动、收藏和批量删除。
 - `backend/src/app/api/knowledge.py`：知识库、文档导入、上传和检索。
-- `backend/src/app/api/skills.py`：Skill 创建、AI 生成、MCP 导入、测试、删除。
+- `backend/src/app/api/skills.py`：Skill 创建、AI 生成、MCP 导入、测试、删除；测试入口统一调用 `SkillRuntime` 并写入 `SkillRun`。
 - `backend/src/app/api/mcp.py`：MCP 注册、导入、更新、探测、工具列表、工具调用、调用记录、删除。
 - `backend/src/app/api/tools.py`：工具目录、创建工具、AI 生成工具、编辑、删除、调用。
 - `backend/src/app/api/sandbox.py`：沙箱和远程连接管理。
