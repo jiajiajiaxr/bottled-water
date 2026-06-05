@@ -111,3 +111,14 @@
 - 本地演示 `agenthub-mcp-filesystem` stdio 命令保留受控内置适配目录，缺少外部二进制时以 degraded probe 记录降级原因，避免把普通第三方 MCP 误判为在线。
 - 服务健康状态只在真实连接/transport 失败时标记 offline；allowlist 或参数错误不会误判 MCP Server 离线。
 - 覆盖测试：`tests/test_capability_systems.py` 中新增 allowlist、schema failure、timeout、SSE/WebSocket 降级记录、HTTP tools/list 探测和 probe 失败诊断用例。
+# 2026-06-05 External Coding Agent 完成状态
+
+| 能力 | 当前状态 | 代码位置 | 说明 |
+| --- | --- | --- | --- |
+| Codex / Claude Code Adapter 层 | 已完成 | `backend/src/app/services/external_agents/` | Provider 注册、probe、start、cancel、stream events、workspace cwd 约束已落地。 |
+| 运行记录 | 已完成 | `ExternalAgentRun`、`9f1c2d3e4a5b_external_agent_runs.py` | 记录 provider、状态、命令、cwd、stdout/stderr、changed_files、exit_code、duration 和错误。 |
+| Tool 映射 | 已完成 | `services/tools/builtins/external_agent.py`、`tools/builtins/registry.py` | 新增 `external_agent.probe/run_codex/run_claude_code/cancel/status`，同步到 ToolDefinition 并写 ToolInvocation。 |
+| Function Call / Workflow 接入 | 已完成 | `agents/tool_loop.py`、`workflows/nodes/tool.py` | Agent 授权后才能暴露；Workflow Tool 节点复用同一 executor。 |
+| 前端管理入口 | 已完成 | `frontend/src/features/settings/components/ExternalAgentsPanel/` | 展示 installed/degraded、命令来源、setup hint 和最近运行记录，不展示敏感配置。 |
+| 真实 CLI 缺失降级 | 已完成 | `adapters/_cli.py` | 缺失时返回 degraded，测试使用 fake executable。 |
+| 生产级长任务监控 | 需继续加固 | `process_manager.py` | 已支持同步等待、后台 start/cancel；跨进程恢复、分布式 worker 和更细粒度文件事件可后续增强。 |

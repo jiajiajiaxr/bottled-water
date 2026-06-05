@@ -52,3 +52,21 @@ AgentHub 将 Tool、MCP、Skill 拆成两层职责：
 pytest 会设置 `AGENTHUB_TESTING=1`，并使用 `backend/var/test/agenthub_pytest_<pid>.db` 作为独立 SQLite 测试库。测试结束后会尝试删除该文件，避免 Acceptance MCP、`custom_echo_acceptance`、测试 Skill 等数据污染开发/演示数据库。
 
 应用启动 seed 会执行 `cleanup_acceptance_residue()`，软删除历史误写入演示库的验收测试残留，包括 Acceptance MCP、`custom_echo_acceptance`、重复 `Release Notes Skill` 和 `Filesystem Read Skill`。
+# 2026-06-05 External Coding Agent 数据边界
+
+Codex / Claude Code 在 AgentHub 中不是一次性 sandbox 命令，而是外部长任务 Coding Agent。平台通过 `services/external_agents/` 的 Adapter 层接入，再映射为 Tool / MCP / Skill 可调用能力。
+
+数据职责划分：
+
+- 数据库 `external_agent_runs`：保存运行目录、provider、状态、命令 argv（已脱敏）、stdout/stderr tail、变更文件、退出码、耗时和错误。
+- `tool_definitions`：登记 `external_agent.probe`、`external_agent.run_codex`、`external_agent.run_claude_code`、`external_agent.cancel`、`external_agent.status`，用于目录、授权和 Function Calling 暴露。
+- `tool_invocations`：每次通过 Tool 执行外部 Agent 时写入统一工具调用记录。
+- 代码执行层：`process_manager.py` 负责 `shell=False`、数组 argv、超时、取消和输出流；`workspace.py` 负责 workspace/conversation/agent 目录隔离。
+- 前端：只展示 installed/degraded、命令来源、最近运行记录和脱敏输出摘要，不展示 API Key、token 或 CLI 登录态。
+
+安全边界：
+
+- CLI 路径来自 `CODEX_CLI_PATH` / `CLAUDE_CODE_CLI_PATH` 或 PATH 探测；缺失时返回 degraded。
+- 运行目录必须在当前 workspace root 内；禁止绝对路径逃逸和 `..`。
+- stdout/stderr、命令参数和错误信息都经过 secret redaction。
+- Skill/MCP 如需调用外部 Agent，仍必须走 `external_agent.*` Tool 权限和运行记录，不能绕过 executor。

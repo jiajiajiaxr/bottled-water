@@ -178,3 +178,16 @@ agenthub/
 - `backend/src/app/services/mcp/transports/http.py`：HTTP JSON-RPC MCP 调用，包含 timeout、request error 和鉴权错误诊断。
 - `backend/src/app/services/mcp/transports/stdio.py`：受控 stdio MCP 子进程调用。
 - `backend/src/app/services/mcp/transports/sse_ws.py`：SSE/WebSocket MCP transport 占位降级入口，当前返回清晰未启用错误并写入调用记录。
+## 2026-06-05 External Coding Agent 文件地图
+
+- `backend/src/app/services/external_agents/base.py`：定义 Codex / Claude Code 等外部 Coding Agent 的统一 Adapter 协议，包括探测、启动、取消和事件流。
+- `backend/src/app/services/external_agents/registry.py`：注册 `codex` 与 `claude_code` adapter，后续接入其他长任务 Coding Agent 时从这里扩展。
+- `backend/src/app/services/external_agents/process_manager.py`：受控子进程执行器，强制 `shell=False`、数组 argv、超时、取消、stdout/stderr 流读取和密钥脱敏。
+- `backend/src/app/services/external_agents/workspace.py`：把运行目录限制在当前 workspace/conversation/agent 的 `tools/` 子目录内，并只返回相对变更文件。
+- `backend/src/app/services/external_agents/adapters/codex.py`、`adapters/claude_code.py`：CLI 适配器。真实 CLI 缺失时返回 degraded，不假装成功。
+- `backend/src/app/services/tools/builtins/external_agent.py`：把外部 Agent 映射为内置 Tool：`external_agent.probe/run_codex/run_claude_code/cancel/status`。
+- `backend/src/app/api/external_agents.py`：前端管理页使用的探测与运行记录 API，不返回 API Key、token 或本地登录态。
+- `backend/alembic/versions/9f1c2d3e4a5b_external_agent_runs.py`：新增 `external_agent_runs` 运行记录表。
+- `frontend/src/features/settings/components/ExternalAgentsPanel/`：全局设置中的“外部 Agent”管理卡片，展示安装/降级状态与最近运行记录。
+- `frontend/src/api/externalAgent.ts`、`frontend/src/types/externalAgent.ts`：前端 API SDK 与类型定义。
+- `backend/tests/test_external_agents.py`、`frontend/tests/external-agents-panel.test.tsx`：fake executable 与管理卡片测试，不依赖真实 Codex / Claude Code CLI。

@@ -24,7 +24,7 @@ export function mergeToolEvents(
   groups.flat().forEach((event, index) => {
     if (!event.toolName) return;
     const key =
-      event.toolCallId || `${event.toolName}:${event.status || ""}:${index}`;
+      event.toolCallId || event.run_id || `${event.toolName}:${event.status || ""}:${index}`;
     byKey.set(key, { ...(byKey.get(key) ?? {}), ...event });
   });
   return Array.from(byKey.values());
@@ -64,7 +64,12 @@ export function isFailedToolEvent(event: ToolEventRecord) {
 export function toolEventDetailLines(event: ToolEventRecord): string[] {
   return [
     `tool: ${event.toolName}`,
+    event.provider ? `provider: ${event.provider}` : "",
+    event.run_id ? `run_id: ${event.run_id}` : "",
     `status: ${event.status || "unknown"}`,
+    event.changed_files_count !== undefined
+      ? `changed_files: ${event.changed_files_count}`
+      : "",
     event.exit_code !== undefined ? `exit_code: ${event.exit_code}` : "",
     event.duration_ms !== undefined ? `duration_ms: ${event.duration_ms}` : "",
     event.stdout ? `stdout: ${shortText(event.stdout)}` : "",
@@ -85,6 +90,11 @@ function normalizeToolEvent(value: unknown): ToolEventRecord {
   return {
     toolName: stringValue(record.toolName ?? record.tool_name),
     toolCallId: stringValue(record.toolCallId ?? record.tool_call_id),
+    run_id: stringValue(record.run_id ?? record.runId),
+    provider: stringValue(record.provider),
+    changed_files_count: primitiveValue(
+      record.changed_files_count ?? record.changedFilesCount,
+    ),
     status: stringValue(record.status),
     exit_code: primitiveValue(record.exit_code ?? record.exitCode),
     duration_ms: primitiveValue(record.duration_ms ?? record.durationMs),

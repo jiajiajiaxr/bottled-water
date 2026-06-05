@@ -383,3 +383,20 @@ MCP 服务用于接入外部工具和上下文服务。
 - `server.tools` 中显式禁用的工具优先级高于 `tool_filter` 通配符；被拒绝的调用不会触发真实 transport。
 - HTTP MCP 会明确区分 timeout、request error 和 401/403 鉴权问题；SSE/WebSocket MCP 暂未启用真实 transport 时会返回可读降级错误，并保留原文件/配置下载与调用记录。
 - MCP 服务探测和工具列表不再由路由硬编码默认工具；`/mcp-servers/{id}/probe` 复用 `services/mcp/discovery.py`，HTTP/stdio 优先真实 `tools/list`，失败时显示 `last_probe` 诊断。
+# 2026-06-05 外部 Coding Agent 使用说明
+
+AgentHub 支持把 Codex / Claude Code 作为外部长任务 Coding Agent 接入，用于在当前工作区内执行代码修改、生成文件、运行命令并回传结果。
+
+使用方式：
+
+- 在“设置 -> 外部 Agent”查看 Codex / Claude Code 安装状态。
+- 后端通过 `CODEX_CLI_PATH`、`CLAUDE_CODE_CLI_PATH` 指定命令路径；如真实 CLI 未安装，页面显示 degraded 和安装提示。
+- 在 Agent 编辑页给目标 Agent 授权 `external_agent.run_codex` 或 `external_agent.run_claude_code`。
+- 对话中模型可通过 Function Calling 自主调用外部 Agent；工作流 Tool 节点也可选择这些工具。
+- 运行记录会写入 `ExternalAgentRun` 和 `ToolInvocation`，聊天气泡底部工具摘要会显示 provider、run_id、状态、变更文件数量和错误摘要。
+
+安全说明：
+
+- 外部 Agent 的 cwd 被限制在当前 workspace 的 `tools/conversations/.../agents/.../` 子目录中。
+- 后端不会把 API Key、token、CLI 登录态或 `.env` 内容返回前端。
+- stdout/stderr 会脱敏；命令用 argv 数组启动，不使用 shell 拼接。

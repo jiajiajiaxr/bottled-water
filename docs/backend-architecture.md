@@ -395,3 +395,33 @@ agent_runtime/（零业务依赖）
 - `app.services.deployments` 是预览部署的业务入口，负责根据产物生成访问 URL、执行轻量健康检查、写入部署步骤、日志和错误原因。
 - `deploy.preview` 内置工具和 `/deployments` API 使用同一套部署服务，避免工具链和 API 返回不同部署语义。
 - 当前本地环境只承载预览链接、静态站点和源码下载三类可验证部署；容器/云部署没有运行时时会返回 `failed` 和清晰错误，而不是伪造生产发布成功。
+# 2026-06-05 External Coding Agent 架构补充
+
+外部 Coding Agent 位于 Tool / MCP / Skill 能力体系下方，但不属于普通一次性工具实现：
+
+```text
+Agent Function Call / Workflow Tool Node
+  -> tools.executor
+  -> tools.builtins.external_agent
+  -> external_agents.registry
+  -> external_agents.adapters.codex / claude_code
+  -> external_agents.process_manager
+  -> workspace scoped cwd
+  -> ExternalAgentRun + ToolInvocation
+```
+
+模块边界：
+
+- `services/external_agents/base.py`：Adapter 协议。
+- `services/external_agents/registry.py`：provider 注册。
+- `services/external_agents/process_manager.py`：受控子进程生命周期，不使用 `shell=True`。
+- `services/external_agents/workspace.py`：workspace/conversation/agent 运行目录解析与变更文件快照。
+- `services/external_agents/adapters/codex.py` / `claude_code.py`：具体 CLI adapter。真实参数可通过后端环境变量 command template 调整，测试使用 fake executable。
+- `services/tools/builtins/external_agent.py`：Tool 映射层，保持 ToolDefinition / ToolInvocation / Function Calling 链路兼容。
+
+调用策略：
+
+- Agent 被授权 `external_agent.run_codex` 或 `external_agent.run_claude_code` 后，模型才能看到对应 function schema。
+- 工作流 Tool 节点也通过同一 executor 调用，不直接启动子进程。
+- 取消响应时可通过 `external_agent.cancel` 收敛运行记录；后续可继续把 generation cancel 与 active external run 绑定得更紧。
+- CLI 缺失时返回 degraded，前端管理页显示 setup hint；平台不伪造成功。

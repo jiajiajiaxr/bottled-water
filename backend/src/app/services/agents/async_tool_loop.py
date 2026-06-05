@@ -500,5 +500,6 @@ async def _db_tool_exists(db: AsyncSession, tool_name: str) -> bool:
 
 def _allowed_tool_names(agent: Agent) -> list[str]:
     configured = list(normalize_tool_names((agent.config or {}).get("tools") or []))
-    official = [] if agent.type == "custom" else get_official_toolbox(agent.type or "chat")
+    agent_type = agent.type if isinstance(getattr(agent, "type", None), str) else "custom"
+    official = [] if agent_type == "custom" else get_official_toolbox(agent_type or "chat")
     return list(dict.fromkeys([*configured, *official]))

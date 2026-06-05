@@ -455,9 +455,9 @@ async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: di
             action = "pin" if payload["pinned"] else "unpin"
         elif payload.get("archived") is not None:
             action = "archive" if payload["archived"] else "unarchive"
-        elif any(k in payload for k in ("scheduling_strategy", "runtime_mode", "workflow_enabled")):
+        elif any(payload.get(k) is not None for k in ("scheduling_strategy", "runtime_mode", "workflow_enabled")):
             action = "runtime"
-        elif any(k in payload for k in ("title", "description", "remark", "category", "folder")):
+        elif any(payload.get(k) is not None for k in ("title", "description", "remark", "category", "folder")):
             action = "rename"
     if action == "pin":
         conversation.is_pinned = True
@@ -472,7 +472,7 @@ async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: di
     elif action == "rename":
         title = payload.get("title")
         if title is None and any(
-            k in payload for k in ("description", "remark", "category", "folder")
+            payload.get(k) is not None for k in ("description", "remark", "category", "folder")
         ):
             title = conversation.title
         if not title:
@@ -482,7 +482,7 @@ async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: di
             conversation.description = str(payload.get("description") or "")[:1000]
         extra = dict(conversation.extra or {})
         for key in ("remark", "category", "folder"):
-            if key in payload:
+            if payload.get(key) is not None:
                 value = str(payload.get(key) or "").strip()
                 extra[key] = (
                     value[:120] if value else ("Default" if key in {"category", "folder"} else "")

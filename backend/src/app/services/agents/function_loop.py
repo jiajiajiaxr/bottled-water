@@ -514,7 +514,11 @@ async def run_agent_function_call_loop(
             current_text = ""
 
         if not current_tool_calls:
-            if buffer_text_delta and current_text and not _looks_like_tool_argument_fragment(current_text):
+            if (
+                buffer_text_delta
+                and current_text
+                and (not requested_artifact_tool or not _looks_like_tool_argument_fragment(current_text))
+            ):
                 stream_text += current_text
                 visible_delta = stream_filter.push(current_text)
                 await _publish_text_delta(

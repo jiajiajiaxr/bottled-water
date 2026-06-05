@@ -116,6 +116,9 @@ export interface MessageAttachment {
 export interface ToolEventRecord {
   toolName: string;
   toolCallId?: string;
+  run_id?: string;
+  provider?: string;
+  changed_files_count?: number | string;
   status?: string;
   exit_code?: number | string;
   duration_ms?: number | string;

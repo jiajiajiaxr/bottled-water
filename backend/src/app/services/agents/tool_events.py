@@ -87,6 +87,11 @@ def _merge_output_fields(event: dict[str, Any], output: Any) -> None:
     event["error"] = _short(
         _first(output, "error", "error_message") or _first(nested, "error", "error_message")
     )
+    event["run_id"] = _first(output, "run_id") or _first(nested, "run_id")
+    event["provider"] = _first(output, "provider") or _first(nested, "provider")
+    changed_files = _first(output, "changed_files") or _first(nested, "changed_files")
+    if isinstance(changed_files, list):
+        event["changed_files_count"] = len(changed_files)
 
 
 def _first(data: dict[str, Any], *keys: str) -> Any:

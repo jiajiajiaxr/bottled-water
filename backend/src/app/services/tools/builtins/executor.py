@@ -15,6 +15,7 @@ from app.services.tools.api_probe import run_api_test
 from app.services.tools.browser_probe import run_browser_preview
 from app.services.tools.builtins.artifact.executor import make_artifact_from_content
 from app.services.tools.builtins.artifact.export import default_export_format
+from app.services.tools.builtins.external_agent import invoke_external_agent_tool
 from app.services.tools.builtins.file import invoke_file_tool
 from app.services.tools.builtins.sandbox.executor import run_sandbox_command, run_test_command
 
@@ -24,6 +25,8 @@ def invoke_builtin_tool(db: Session, user: User, name: str, arguments: dict[str,
         return invoke_file_tool(db, user, name, arguments)
     if name.startswith("artifact."):
         return _invoke_artifact_tool(db, user, name, arguments)
+    if name.startswith("external_agent."):
+        return invoke_external_agent_tool(db, user, name, arguments)
     if name == "db.inspect":
         inspector = inspect(db.get_bind())
         return {

@@ -12,3 +12,4 @@ export * from "./security";
 export * from "./skill";
 export * from "./tool";
 export * from "./sandbox";
+export * from "./externalAgent";

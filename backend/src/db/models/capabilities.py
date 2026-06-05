@@ -101,6 +101,30 @@ class ToolInvocation(Base, TimestampMixin):
     extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 
 
+class ExternalAgentRun(Base, TimestampMixin):
+    __tablename__ = "external_agent_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), nullable=True, index=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True, index=True)
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
+    command: Mapped[list] = mapped_column(JSON, default=list)
+    cwd: Mapped[str] = mapped_column(Text, default="")
+    input_prompt: Mapped[str] = mapped_column(Text, default="")
+    stdout_tail: Mapped[str] = mapped_column(Text, default="")
+    stderr_tail: Mapped[str] = mapped_column(Text, default="")
+    changed_files: Mapped[list] = mapped_column(JSON, default=list)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+
+
 class ModelProvider(Base, TimestampMixin):
     __tablename__ = "model_providers"
 
