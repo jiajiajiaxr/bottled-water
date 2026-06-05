@@ -85,7 +85,7 @@ React 18 + TypeScript + Vite + pnpm + Ant Design。
 - `frontend/src/types/`：领域类型定义。
 - `frontend/src/store/`：Zustand 状态管理。
 - `frontend/src/features/`：功能模块组件（聊天、预览、平台控制等）。
-- `frontend/tests/`：Vitest 基础渲染测试。
+- `frontend/src/**/*.test.tsx`：Vitest 基础渲染测试。
 - `e2e/`：Playwright 端到端验收链路。
 
 ## 后端
@@ -94,20 +94,29 @@ Python 3.11 + FastAPI + SQLAlchemy (async) + Alembic + Pydantic。
 
 主要模块：
 
-- `backend/app/main.py`：FastAPI 应用入口和路由注册。
-- `backend/app/core/`：配置、安全、日志、错误处理和统一响应。
-- `backend/app/api/`：REST、SSE、WebSocket API。
-- `backend/app/services/`：业务服务层。
+- `backend/src/app/main.py`：FastAPI 应用入口和路由注册。
+- `backend/src/app/core/`：配置、安全、日志、错误处理和统一响应。
+- `backend/src/app/api/`：REST、SSE、WebSocket API。
+- `backend/src/app/services/`：业务服务层。
   - `runtime_service.py`：统一编排入口，创建 AgentSession 并选择调度策略。
-  - `agentic_runtime.py`：Agent 小循环，按权限执行工具、Skill、MCP。
-  - `tool_registry.py`：统一工具目录与权限归一化。
-  - `file_tools.py`：文件解析、预览、转换、摘要。
-  - `mcp_runtime.py`：MCP 调用与记录。
-  - `llm_gateway.py` / `ark.py`：模型调用网关。
-- `backend/db/models/`：按领域拆分的数据库模型。
-- `backend/agent_runtime/`：多智能体运行时引擎（Session、Scheduler、AgentLoop、Workflow）。
+  - `agents/function_loop.py` / `agents/tool_loop.py`：Agent Function Calling Loop、能力暴露、工具结果回填。
+  - `tools/catalog.py` / `tools/executor.py` / `tools/permissions.py`：工具目录、权限、参数校验和执行记录。
+  - `tools/builtins/`：内置 Tool 真实实现，按 artifact、file、sandbox 等领域拆分。
+  - `skills/` / `mcp/`：Skill 包运行时与 MCP 服务管理、发现、调用记录。
+  - `files/` / `document_model/`：工作区文件树、Office 预览和结构化文档渲染。
+  - `llm/ark.py` / `llm/gateway.py`：模型调用网关；`ark.py` / `llm_gateway.py` 仅保留旧导入 shim。
+- `backend/src/db/models/`：按领域拆分的数据库模型。
+- `backend/src/agent_runtime/`：多智能体运行时引擎（Session、Scheduler、AgentLoop、Workflow）。
 - `backend/model_provider/`：大模型提供者抽象。
 - `backend/alembic/`：数据库迁移。
+
+`backend/src/` 是当前主架构入口；`backend/app-old/` 仅作为历史实现和迁移参考保留，不再作为新功能开发路径。新增或修复能力时应优先落在 `backend/src/app/api/`、`backend/src/app/services/`、`backend/src/db/models/` 等新结构下。
+
+与本轮迁移相关的核心实现位置：
+
+- 工作区文件系统：`backend/src/app/api/workspace_files.py`、`backend/src/app/services/files/workspace_tree.py`、`frontend/src/features/workspaceFiles/`。
+- Office 转 PDF 预览：`backend/src/app/services/files/previewers/office.py`，对外接口为 `/api/v1/artifacts/{artifact_id}/preview-pdf` 和 `/api/v1/workspaces/{workspace_id}/files/preview-pdf`。
+- 结构化文档模型：`backend/src/app/services/document_model/`，PDF、Word、PPT/Excel 等产物工具通过 `content_model` 生成真实文件和 HTML/PDF 预览。
 
 后端详情见 `backend/README.md`。
 
@@ -250,6 +259,7 @@ pnpm format
 - `docs/file-map.md`：目录、后端 API、service、前端组件和测试文件职责。
 - `docs/development-guide.md`：本地开发、迁移、测试和常见改动路径。
 - `docs/agent-workflow-runtime.md`：Agentic Loop、群聊画布优先编排和工作流运行态。
+- `docs/implementation-status.md`：文档承诺与当前实现的对照表，区分已完成能力和 roadmap。
 
 ## 当前边界
 

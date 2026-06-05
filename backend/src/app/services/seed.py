@@ -25,7 +25,9 @@ from db.models import (
     WorkspaceMember,
     utcnow,
 )
-from app.services.tool_registry import get_official_toolbox, ensure_tool_tables
+from app.services.tools.catalog import sync_builtin_tool_definitions
+from app.services.tools.permissions import normalize_tool_names
+from app.services.tools.toolboxes import get_official_toolbox
 
 
 DEFAULT_AGENTS = [
@@ -221,7 +223,7 @@ async def ensure_seed_data(db: AsyncSession) -> User:
         await db.flush()
         db.add(UserSettings(user_id=user.id, theme="light"))
 
-    await ensure_tool_tables(db)
+    await db.run_sync(sync_builtin_tool_definitions)
 
     agents = (await db.scalars(select(Agent))).all()
     if not agents:
@@ -292,17 +294,19 @@ async def ensure_seed_data(db: AsyncSession) -> User:
             spec = spec_by_name.get(agent.name) or spec_by_type.get(agent.type)
             if not spec:
                 continue
-            config = dict(agent.config or {})
-            config.update(
-                {
-                    "supports_streaming": True,
-                    "supports_tool_use": True,
-                    "supports_file_upload": True,
-                    "agentic_loop": {"enabled": True, "max_steps": 2, "tool_policy": "short_safe_loop"},
-                    "system_prompt": config.get("system_prompt") or spec["system_prompt"],
-                    "tools": spec["tools"],
-                }
-            )
+            existing_config = dict(agent.config or {})
+            configured_tools = normalize_tool_names(existing_config.get("tools") or [])
+            default_tools = normalize_tool_names(spec["tools"])
+            config = {
+                "supports_streaming": True,
+                "supports_tool_use": True,
+                "supports_file_upload": True,
+                "agentic_loop": {"enabled": True, "max_steps": 2, "tool_policy": "short_safe_loop"},
+                "system_prompt": spec["system_prompt"],
+                "tools": spec["tools"],
+                **existing_config,
+            }
+            config["tools"] = normalize_tool_names([*default_tools, *configured_tools])
             agent.description = spec["description"]
             agent.capabilities = spec["capabilities"]
             agent.config = config

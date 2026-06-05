@@ -10,6 +10,7 @@ from .tasks import Subtask, Task, TaskDependency
 from .artifacts import Artifact, ArtifactVersion, Deployment
 from .files import FileAsset, KnowledgeBase, KnowledgeDocument
 from .capabilities import (
+    ExternalAgentRun,
     McpServer,
     McpToolInvocation,
     ModelConfig,
@@ -56,6 +57,7 @@ __all__ = [
     "SkillRun",
     "ToolDefinition",
     "ToolInvocation",
+    "ExternalAgentRun",
     "ModelProvider",
     "ModelConfig",
     "McpServer",

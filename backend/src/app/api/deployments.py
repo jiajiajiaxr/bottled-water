@@ -13,8 +13,9 @@ from db import get_db
 from db.models import Artifact, Conversation, Deployment, User, utcnow
 from app.schemas.common import ApiResponse, DeploymentOut
 from app.schemas.requests import CreateDeploymentRequest
-from app.services.artifacts import create_deployment
 from app.events import app_event_bus as event_bus
+from app.services.audit import write_audit_log
+from app.services.deployments import create_deployment, rerun_deployment_health
 from app.services.serialization import deployment_to_dict
 
 
@@ -45,6 +46,14 @@ async def _check_artifact_owner(db: AsyncSession, user: User, artifact_id: str) 
     return artifact
 
 
+async def _check_deployment_owner(db: AsyncSession, user: User, deployment_id: str) -> Deployment:
+    deployment = await db.get(Deployment, deployment_id)
+    if not deployment:
+        raise NotFoundError("部署不存在")
+    await _check_artifact_owner(db, user, deployment.artifact_id)
+    return deployment
+
+
 async def _create(db: AsyncSession, user: User, payload: dict) -> Deployment:
     artifact_id = payload.get("artifact_id")
     if not artifact_id and payload.get("conversationId"):
@@ -66,6 +75,22 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Deployment:
     deployment = await create_deployment(
         db, artifact.id, payload.get("mode") or payload.get("environment") or "preview_link"
     )
+    await write_audit_log(
+        db,
+        user=user,
+        action="deployment.create",
+        target_type="deployment",
+        target_id=deployment.id,
+        detail={
+            "artifact_id": artifact.id,
+            "mode": deployment.mode,
+            "status": deployment.status,
+            "health_status": (deployment.extra or {}).get("health", {}).get("status"),
+        },
+        risk_score=0.2 if deployment.status == "deployed" else 0.5,
+    )
+    await db.commit()
+    await db.refresh(deployment)
     return deployment
 
 
@@ -88,11 +113,9 @@ async def create_deployment_endpoint(
 async def get_deployment(
     deployment_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    deployment = await db.get(Deployment, deployment_id)
-    if not deployment:
-        raise NotFoundError("部署不存在")
+    deployment = await _check_deployment_owner(db, user, deployment_id)
     return ok(deployment_to_dict(deployment))
 
 
@@ -103,11 +126,9 @@ async def get_deployment_logs(
     page: int = 1,
     page_size: int = 100,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    deployment = await db.get(Deployment, deployment_id)
-    if not deployment:
-        raise NotFoundError("部署不存在")
+    deployment = await _check_deployment_owner(db, user, deployment_id)
     lines = [line for line in (deployment.deploy_log or "").splitlines() if line.strip()]
     records = [
         {
@@ -137,11 +158,9 @@ async def cancel_deployment(
     deployment_id: str,
     payload: CancelDeploymentRequest,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    deployment = await db.get(Deployment, deployment_id)
-    if not deployment:
-        raise NotFoundError("部署不存在")
+    deployment = await _check_deployment_owner(db, user, deployment_id)
     if deployment.status in {"deployed", "failed", "cancelled", "rolled_back"}:
         raise ValidationAppError("已完成的部署不可取消，请使用回滚或重新部署")
     deployment.status = "cancelled"
@@ -149,6 +168,15 @@ async def cancel_deployment(
     deployment.error_message = payload.reason or "用户取消部署"
     deployment.deploy_log = (
         f"{deployment.deploy_log}\n用户取消部署：{deployment.error_message}".strip()
+    )
+    await write_audit_log(
+        db,
+        user=user,
+        action="deployment.cancel",
+        target_type="deployment",
+        target_id=deployment.id,
+        detail={"reason": deployment.error_message},
+        risk_score=0.3,
     )
     await db.commit()
     return ok(deployment_to_dict(deployment), "部署已取消")
@@ -161,12 +189,12 @@ async def rollback_deployment(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    deployment = await db.get(Deployment, deployment_id)
-    if not deployment:
-        raise NotFoundError("部署不存在")
+    deployment = await _check_deployment_owner(db, user, deployment_id)
     artifact = await _check_artifact_owner(db, user, deployment.artifact_id)
     target_id = payload.target_deployment_id
     target = await db.get(Deployment, target_id) if target_id else None
+    if target and target.artifact_id != deployment.artifact_id:
+        raise ValidationAppError("只能回滚到同一产物的部署记录")
     rollback = Deployment(
         artifact_id=artifact.id,
         artifact_version_id=(target or deployment).artifact_version_id,
@@ -187,9 +215,44 @@ async def rollback_deployment(
     )
     deployment.status = "rolled_back"
     db.add(rollback)
+    await write_audit_log(
+        db,
+        user=user,
+        action="deployment.rollback",
+        target_type="deployment",
+        target_id=deployment.id,
+        detail={"rollback_id": rollback.id, "target_deployment_id": target_id},
+        risk_score=0.4,
+    )
     await db.commit()
     await db.refresh(rollback)
     return ok(deployment_to_dict(rollback), "部署已回滚")
+
+
+@router.post("/deployments/{deployment_id}/health", response_model=ApiResponse[DeploymentOut])
+async def check_deployment_health(
+    deployment_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    deployment = await _check_deployment_owner(db, user, deployment_id)
+    deployment = await rerun_deployment_health(db, deployment)
+    await write_audit_log(
+        db,
+        user=user,
+        action="deployment.health_check",
+        target_type="deployment",
+        target_id=deployment.id,
+        detail={"health": (deployment.extra or {}).get("health")},
+        risk_score=0.1 if deployment.status == "deployed" else 0.3,
+    )
+    await db.commit()
+    await event_bus.publish(
+        f"deployment:{deployment.id}",
+        "deployment:status_changed",
+        deployment_to_dict(deployment),
+    )
+    return ok(deployment_to_dict(deployment), "部署健康检查完成")
 
 
 @router.get("/artifacts/{artifact_id}/deployments", response_model=ApiResponse[dict])

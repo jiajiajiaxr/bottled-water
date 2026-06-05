@@ -27,6 +27,7 @@ from db.session import AsyncSessionLocal
 from app.services.conversation_session_manager import (
     ConversationSessionManager,
 )
+from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
 from common.logger import get_logger
 
 logger = get_logger("app.api.websocket")
@@ -113,12 +114,9 @@ async def _save_user_message(
             )
 
     # 调度策略
-    scheduling_strategy = data.get("scheduling_strategy", "")
-    if not scheduling_strategy and conversation.extra:
-        scheduling_strategy = (conversation.extra or {}).get("scheduling_strategy", "tech_lead")
-    scheduling_strategy = (
-        scheduling_strategy if scheduling_strategy in ("tech_lead", "workflow") else "tech_lead"
-    )
+    scheduling_strategy = resolve_scheduling_strategy(conversation, data.get("scheduling_strategy"))
+    if data.get("scheduling_strategy"):
+        persist_scheduling_strategy(conversation, scheduling_strategy)
 
     message = Message(
         client_message_id=data.get("client_message_id") or str(uuid.uuid4()),
@@ -133,6 +131,7 @@ async def _save_user_message(
         extra={
             "thinking_enabled": bool(data.get("thinking_enabled")),
             "scheduling_strategy": scheduling_strategy,
+            "model_config_id": data.get("model_config_id"),
         },
     )
 

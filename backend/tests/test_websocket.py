@@ -4,7 +4,6 @@
 注意：WebSocket 测试需要模拟整个握手和消息流程。
 """
 
-import pytest
 
 
 class TestWebSocketEndpointRegistered:

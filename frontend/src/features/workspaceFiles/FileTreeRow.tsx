@@ -2,14 +2,20 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
-  StarFilled,
-  StarOutlined,
   LinkOutlined,
   PlusCircleOutlined,
+  StarFilled,
+  StarOutlined,
 } from "@ant-design/icons";
 import { Button, Tag, Tooltip, Typography } from "antd";
 import type { WorkspaceFileNode } from "../../types";
-import { displayNodeName, displayNodePath, formatDate, formatSize, sourceLabel } from "./workspaceFileUtils";
+import {
+  displayNodeName,
+  displayNodePath,
+  formatDate,
+  formatSize,
+  sourceLabel,
+} from "./workspaceFileUtils";
 
 const { Text } = Typography;
 
@@ -22,7 +28,13 @@ export type FileRowActions = {
   onFavorite: (node: WorkspaceFileNode) => void;
 };
 
-export function FileTreeRow({ node, actions }: { node: WorkspaceFileNode; actions: FileRowActions }) {
+export function FileTreeRow({
+  node,
+  actions,
+}: {
+  node: WorkspaceFileNode;
+  actions: FileRowActions;
+}) {
   const isFile = node.type === "file";
   return (
     <div className={`workspace-file-row ${isFile ? "is-file" : "is-dir"}`}>
@@ -36,7 +48,9 @@ export function FileTreeRow({ node, actions }: { node: WorkspaceFileNode; action
           </Text>
         )}
       </div>
-      <div>{isFile && <Tag className="workspace-file-source">{sourceLabel(node.source)}</Tag>}</div>
+      <div className="workspace-file-source-cell">
+        {isFile && <Tag className="workspace-file-source">{sourceLabel(node.source)}</Tag>}
+      </div>
       <Text type="secondary" className="workspace-file-size">
         {isFile ? formatSize(node.size ?? 0) : ""}
       </Text>
@@ -50,7 +64,13 @@ export function FileTreeRow({ node, actions }: { node: WorkspaceFileNode; action
   );
 }
 
-function FileActions({ node, actions }: { node: WorkspaceFileNode; actions: FileRowActions }) {
+function FileActions({
+  node,
+  actions,
+}: {
+  node: WorkspaceFileNode;
+  actions: FileRowActions;
+}) {
   const isFile = node.type === "file";
   return (
     <>
@@ -64,7 +84,12 @@ function FileActions({ node, actions }: { node: WorkspaceFileNode; actions: File
       </Tooltip>
       {isFile && (
         <Tooltip title="加入聊天上下文">
-          <Button size="small" type="text" icon={<PlusCircleOutlined />} onClick={() => actions.onAttach(node)} />
+          <Button
+            size="small"
+            type="text"
+            icon={<PlusCircleOutlined />}
+            onClick={() => actions.onAttach(node)}
+          />
         </Tooltip>
       )}
       <Tooltip title="复制路径">
@@ -76,7 +101,12 @@ function FileActions({ node, actions }: { node: WorkspaceFileNode; actions: File
         />
       </Tooltip>
       <Tooltip title="重命名">
-        <Button size="small" type="text" icon={<EditOutlined />} onClick={() => actions.onRename(node)} />
+        <Button
+          size="small"
+          type="text"
+          icon={<EditOutlined />}
+          onClick={() => actions.onRename(node)}
+        />
       </Tooltip>
       {isFile && (
         <>
@@ -84,12 +114,23 @@ function FileActions({ node, actions }: { node: WorkspaceFileNode; actions: File
             预览
           </Button>
           <Tooltip title="下载">
-            <Button size="small" type="text" icon={<DownloadOutlined />} onClick={() => actions.onDownload(node)} />
+            <Button
+              size="small"
+              type="text"
+              icon={<DownloadOutlined />}
+              onClick={() => actions.onDownload(node)}
+            />
           </Tooltip>
         </>
       )}
       <Tooltip title="删除">
-        <Button danger size="small" type="text" icon={<DeleteOutlined />} onClick={() => actions.onDelete(node)} />
+        <Button
+          danger
+          size="small"
+          type="text"
+          icon={<DeleteOutlined />}
+          onClick={() => actions.onDelete(node)}
+        />
       </Tooltip>
     </>
   );

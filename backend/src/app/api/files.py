@@ -14,7 +14,7 @@ from db import get_db
 from db.models import FileAsset, User, utcnow
 from app.schemas.common import ApiResponse, FileAssetOut
 from app.services.files import save_upload
-from app.services.file_tools import (
+from app.services.tools.builtins.file import (
     convert_file,
     embed_text,
     extract_text_from_path,

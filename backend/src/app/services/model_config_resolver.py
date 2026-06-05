@@ -184,6 +184,13 @@ def create_provider_from_env_fallback() -> BaseModelProvider | None:
     )
 
 
+def normalize_provider_type(provider_type: str | None) -> str:
+    normalized = (provider_type or "ark").strip().lower().replace("-", "_")
+    if normalized in {"openai_compatible", "openai"}:
+        return normalized
+    return normalized or "ark"
+
+
 async def create_provider_from_db(
     db: AsyncSession, prefer_config_id: str | None = None,
 ) -> BaseModelProvider | None:
@@ -204,7 +211,7 @@ async def create_provider_from_db(
 
     return create_provider(
         MPModelConfig(
-            provider=provider.provider_type or "ark",
+            provider=normalize_provider_type(provider.provider_type),
             model=config.model_id,
             api_key=api_key,
             base_url=provider.base_url or None,

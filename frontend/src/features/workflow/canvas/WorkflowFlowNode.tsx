@@ -87,9 +87,14 @@ export function WorkflowFlowNode({
           <Text strong className="xy-workflow-node-title">
             {node.title}
           </Text>
-          <Tag className="xy-workflow-node-type" color={data.statusColor}>
-            {WORKFLOW_NODE_TYPE_LABEL[data.nodeType] ?? data.nodeType}
-          </Tag>
+          <div className="xy-workflow-node-badges">
+            <Tag className="xy-workflow-node-type">
+              {WORKFLOW_NODE_TYPE_LABEL[data.nodeType] ?? data.nodeType}
+            </Tag>
+            <Tag className="xy-workflow-node-state">
+              {data.status}
+            </Tag>
+          </div>
         </div>
         <Text className="xy-workflow-node-meta" type="secondary">
           {data.message}
@@ -100,7 +105,6 @@ export function WorkflowFlowNode({
             className="xy-workflow-node-status"
             type={data.status === "failed" ? "danger" : "secondary"}
           >
-            {data.status}
             {typeof data.progress === "number" ? ` / ${data.progress}%` : ""}
           </Text>
         </div>

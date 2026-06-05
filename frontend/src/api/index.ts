@@ -146,7 +146,18 @@ export {
   deleteTool,
 } from "./tool";
 
-export { sandboxes, createSandbox, runSandboxCommand } from "./sandbox";
+export {
+  sandboxes,
+  createSandbox,
+  runSandboxCommand,
+  runMessageCodeBlock,
+} from "./sandbox";
+
+export {
+  externalAgentProbe,
+  reprobeExternalAgent,
+  externalAgentRuns,
+} from "./externalAgent";
 
 export {
   remoteConnections,
@@ -160,6 +171,7 @@ export {
   securityRoles,
   securityPermissions,
   securityUsers,
+  updateSecurityUserRole,
 } from "./security";
 
 // 兼容旧版 api 对象用法
@@ -179,6 +191,7 @@ import * as mcp from "./mcp";
 import * as skill from "./skill";
 import * as tool from "./tool";
 import * as sandbox from "./sandbox";
+import * as externalAgent from "./externalAgent";
 import * as remote from "./remote";
 import * as security from "./security";
 import * as workspaceFile from "./workspaceFile";
@@ -205,6 +218,7 @@ export const api = {
   ...skill,
   ...tool,
   ...sandbox,
+  ...externalAgent,
   ...remote,
   ...security,
 };

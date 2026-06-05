@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import io
+import json
+import threading
 import zipfile
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from docx import Document
@@ -20,6 +25,7 @@ from db.models import (
     Conversation,
     FileAsset,
     McpServer,
+    McpToolInvocation,
     Skill,
     ToolDefinition,
     ToolInvocation,
@@ -29,7 +35,8 @@ from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by
 from app.services.tools.builtins.artifact.export import default_export_format, export_artifact
 from app.services.artifacts import update_artifact_files
 from app.services.demo_cleanup import cleanup_acceptance_residue
-from app.services.mcp.discovery import discover_server_tools, import_server_manifest, probe_server
+from app.services.mcp.discovery import discover_server_tools, import_server_manifest, probe_server, probe_server_async
+from app.services.mcp.invocation import invoke_mcp_tool_recorded
 from app.services.mcp.schema import validate_mcp_arguments
 from app.services.mcp.transports.common import tool_allowed
 from app.services.skills.context import activated_skill_context
@@ -37,6 +44,55 @@ from app.services.skills.package import parse_skill_package
 from app.services.document_model import normalize_document_model, parse_markdown_blocks
 from app.services.tools.executor import invoke_tool
 from app.services.tools.catalog import sync_builtin_tool_definitions
+
+
+@contextmanager
+def _mcp_tools_list_server() -> Any:
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            if body.get("method") != "tools/list":
+                self.send_response(404)
+                self.end_headers()
+                return
+            data = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": body.get("id"),
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "echo.ping",
+                                "description": "Echo input",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {"input": {"type": "string"}},
+                                    "required": ["input"],
+                                },
+                            }
+                        ]
+                    },
+                }
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *_args: Any) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
 
 
 def test_tool_invocation_records_builtin_run() -> None:
@@ -511,6 +567,58 @@ def test_mcp_catalog_discovery_and_probe() -> None:
     assert server.health_status == "online"
 
 
+@pytest.mark.asyncio
+async def test_mcp_http_probe_discovers_tools_list_and_records_metadata() -> None:
+    with _mcp_tools_list_server() as url:
+        server = McpServer(
+            owner_id="user-1",
+            name="HTTP MCP",
+            transport="httpStream",
+            url=url,
+            enabled=True,
+        )
+
+        await probe_server_async(server, timeout_ms=1000)
+
+    assert server.health_status == "online"
+    assert server.tools == [
+        {
+            "name": "echo.ping",
+            "description": "Echo input",
+            "enabled": True,
+            "input_schema": {
+                "type": "object",
+                "properties": {"input": {"type": "string"}},
+                "required": ["input"],
+            },
+        }
+    ]
+    assert server.extra["last_probe"]["status"] == "ok"
+    assert server.extra["last_probe"]["source"] == "http_tools_list"
+
+
+@pytest.mark.asyncio
+async def test_mcp_probe_failure_records_diagnostic_metadata() -> None:
+    server = McpServer(
+        owner_id="user-1",
+        name="Broken MCP",
+        transport="httpStream",
+        url="http://127.0.0.1:9876",
+        enabled=True,
+    )
+
+    with patch(
+        "app.services.mcp.discovery.list_http_mcp_tools",
+        new=AsyncMock(side_effect=ValidationAppError("MCP HTTP tools/list timed out after 5ms")),
+    ):
+        await probe_server_async(server, timeout_ms=5)
+
+    assert server.health_status == "offline"
+    assert server.extra["last_probe"]["status"] == "failed"
+    assert server.extra["last_probe"]["source"] == "ValidationAppError"
+    assert "timed out" in server.extra["last_probe"]["error"]
+
+
 def test_mcp_argument_schema_validation() -> None:
     server = McpServer(
         id="server-schema",
@@ -533,6 +641,147 @@ def test_mcp_argument_schema_validation() -> None:
     )
 
     validate_mcp_arguments(server, "echo.ping", {"input": "hello"})
+
+
+@pytest.mark.asyncio
+async def test_mcp_allowlist_denial_is_recorded_and_not_executed() -> None:
+    db = _memory_session()
+    user = _user()
+    server = McpServer(
+        owner_id=user.id,
+        name="Allowlist MCP",
+        transport="httpStream",
+        url="http://127.0.0.1:9876",
+        enabled=True,
+        tools=[{"name": "echo.secret", "enabled": False}],
+        tool_filter=["echo.*"],
+    )
+    db.add_all([user, server])
+    db.commit()
+
+    with patch("app.services.mcp.invocation.call_http_mcp", new_callable=AsyncMock) as call:
+        result = await invoke_mcp_tool_recorded(
+            db,
+            server=server,
+            tool_name_value="echo.secret",
+            arguments={"input": "hello"},
+            user=user,
+        )
+
+    invocation = db.scalar(select(McpToolInvocation).where(McpToolInvocation.server_id == server.id))
+    assert result["status"] == "failed"
+    assert result["error_code"] == "mcp_tool_not_allowed"
+    assert invocation.status == "failed"
+    assert invocation.extra["error_code"] == "mcp_tool_not_allowed"
+    assert server.health_status == "online"
+    call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_argument_validation_failure_is_recorded() -> None:
+    db = _memory_session()
+    user = _user()
+    server = McpServer(
+        owner_id=user.id,
+        name="Schema MCP",
+        transport="httpStream",
+        url="http://127.0.0.1:9876",
+        enabled=True,
+        tools=[
+            {
+                "name": "echo.ping",
+                "enabled": True,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"input": {"type": "string"}},
+                    "required": ["input"],
+                },
+            }
+        ],
+    )
+    db.add_all([user, server])
+    db.commit()
+
+    with patch("app.services.mcp.invocation.call_http_mcp", new_callable=AsyncMock) as call:
+        result = await invoke_mcp_tool_recorded(
+            db,
+            server=server,
+            tool_name_value="echo.ping",
+            arguments={},
+            user=user,
+        )
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "mcp_argument_validation_failed"
+    assert db.scalar(select(McpToolInvocation)).result["error_code"] == "mcp_argument_validation_failed"
+    assert server.health_status == "online"
+    call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_transport_timeout_is_recorded_with_error_code() -> None:
+    db = _memory_session()
+    user = _user()
+    server = McpServer(
+        owner_id=user.id,
+        name="Timeout MCP",
+        transport="httpStream",
+        url="http://127.0.0.1:9876",
+        enabled=True,
+        tools=[{"name": "echo.ping", "enabled": True}],
+        timeout_ms=5,
+    )
+    db.add_all([user, server])
+    db.commit()
+
+    with patch(
+        "app.services.mcp.invocation.call_http_mcp",
+        new=AsyncMock(side_effect=ValidationAppError("MCP HTTP tool invocation timed out after 5ms")),
+    ):
+        result = await invoke_mcp_tool_recorded(
+            db,
+            server=server,
+            tool_name_value="echo.ping",
+            arguments={"input": "hello"},
+            user=user,
+            timeout_ms=5,
+        )
+
+    invocation = db.scalar(select(McpToolInvocation).where(McpToolInvocation.server_id == server.id))
+    assert result["status"] == "failed"
+    assert result["error_code"] == "mcp_timeout"
+    assert "timed out" in result["error_message"]
+    assert invocation.duration_ms >= 0
+    assert server.health_status == "offline"
+
+
+@pytest.mark.asyncio
+async def test_mcp_sse_ws_transport_returns_clear_degraded_invocation() -> None:
+    db = _memory_session()
+    user = _user()
+    server = McpServer(
+        owner_id=user.id,
+        name="Stream MCP",
+        transport="sse",
+        url="http://127.0.0.1:9876",
+        enabled=True,
+        tools=[{"name": "echo.stream", "enabled": True}],
+    )
+    db.add_all([user, server])
+    db.commit()
+
+    result = await invoke_mcp_tool_recorded(
+        db,
+        server=server,
+        tool_name_value="echo.stream",
+        arguments={"input": "hello"},
+        user=user,
+    )
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "mcp_transport_unsupported"
+    assert "SSE/WebSocket MCP transport" in result["error_message"]
+    assert db.scalar(select(McpToolInvocation)).extra["error_code"] == "mcp_transport_unsupported"
 
 
 def test_import_server_manifest_from_json() -> None:

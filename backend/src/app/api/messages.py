@@ -13,11 +13,14 @@ from app.deps import get_current_user
 from db import get_db
 from db.models import Conversation, FileAsset, Message, User, utcnow
 from app.schemas.common import ApiResponse
-from app.schemas.requests import SendMessagePayload
+from app.schemas.requests import RunMessageCodeRequest, SendMessagePayload
 from app.events import SseSink
 from app.events import app_event_bus as event_bus
+from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
 from app.services.runtime_service import OrchestratorService
 from app.services.serialization import message_to_dict
+from app.services.files.references import resolve_file_reference_attachments
+from app.services.chat.code_runner import run_message_code_block
 
 
 router = APIRouter(tags=["messages"])
@@ -59,7 +62,7 @@ async def _list_messages(db: AsyncSession, user: User, conversation_id: str) -> 
     return [message_to_dict(message) for message in messages]
 
 
-async def _send(
+async def _send_async(
     db: AsyncSession, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True
 ) -> Message:
     conversation = await _get_conversation(db, user, conversation_id)
@@ -97,23 +100,24 @@ async def _send(
                     "extracted_text": file_asset.extracted_text[:12000],
                 }
             )
-    # 调度策略：消息级 > 会话级 > 默认 tech_lead
-    scheduling_strategy = payload.get("scheduling_strategy", "")
-    if not scheduling_strategy and conversation.extra:
-        scheduling_strategy = (conversation.extra or {}).get("scheduling_strategy", "tech_lead")
-    scheduling_strategy = (
-        scheduling_strategy if scheduling_strategy in ("tech_lead", "workflow") else "tech_lead"
-    )
+    existing_file_ids = {str(item.get("file_id") or "") for item in normalized_attachments}
+    if "@file(" in text:
+        referenced = await db.run_sync(
+            lambda session: resolve_file_reference_attachments(
+                session,
+                user=user,
+                conversation=conversation,
+                text=text,
+                existing_file_ids=existing_file_ids,
+            )
+        )
+        normalized_attachments.extend(referenced)
+    # 调度策略：消息级 > 会话级 > workflow 群聊默认 > tech_lead
+    scheduling_strategy = resolve_scheduling_strategy(conversation, payload.get("scheduling_strategy"))
 
     # 如果消息指定了新策略，持久化到会话
-    if payload.get("scheduling_strategy") and conversation.extra != {
-        **(conversation.extra or {}),
-        "scheduling_strategy": scheduling_strategy,
-    }:
-        conversation.extra = {
-            **(conversation.extra or {}),
-            "scheduling_strategy": scheduling_strategy,
-        }
+    if payload.get("scheduling_strategy"):
+        persist_scheduling_strategy(conversation, scheduling_strategy)
 
     message = Message(
         client_message_id=payload.get("client_message_id") or str(uuid.uuid4()),
@@ -128,6 +132,7 @@ async def _send(
         extra={
             "thinking_enabled": bool(payload.get("thinking_enabled")),
             "scheduling_strategy": scheduling_strategy,
+            "model_config_id": payload.get("model_config_id"),
         },
     )
 
@@ -161,6 +166,97 @@ async def _send(
     return message
 
 
+def _send(
+    db, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True
+):
+    if hasattr(db, "run_sync"):
+        return _send_async(db, user, conversation_id, payload, trigger_agent=trigger_agent)
+    return _send_sync(db, user, conversation_id, payload, trigger_agent=trigger_agent)
+
+
+def _send_sync(db, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True) -> Message:
+    conversation = db.scalar(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.creator_id == user.id,
+            Conversation.deleted_at.is_(None),
+        )
+    )
+    if not conversation:
+        raise NotFoundError("会话不存在")
+    text = _message_text(payload).strip()
+    if not text:
+        raise ValidationAppError("消息内容不能为空")
+
+    raw_content = payload.get("content") if isinstance(payload.get("content"), dict) else {}
+    attachments = raw_content.get("attachments") or payload.get("attachments") or []
+    normalized_attachments: list[dict] = []
+    for item in attachments:
+        file_id = item.get("file_id") or item.get("id") if isinstance(item, dict) else str(item)
+        if not file_id:
+            continue
+        file_asset = db.scalar(
+            select(FileAsset).where(
+                FileAsset.id == file_id,
+                FileAsset.owner_id == user.id,
+                FileAsset.deleted_at.is_(None),
+            )
+        )
+        if file_asset:
+            normalized_attachments.append(
+                {
+                    "file_id": file_asset.id,
+                    "filename": file_asset.original_filename,
+                    "content_type": file_asset.content_type,
+                    "size": file_asset.size,
+                    "parse_status": file_asset.parse_status,
+                    "extracted_text": file_asset.extracted_text[:12000],
+                }
+            )
+    existing_file_ids = {str(item.get("file_id") or "") for item in normalized_attachments}
+    if "@file(" in text:
+        normalized_attachments.extend(
+            resolve_file_reference_attachments(
+                db,
+                user=user,
+                conversation=conversation,
+                text=text,
+                existing_file_ids=existing_file_ids,
+            )
+        )
+
+    scheduling_strategy = resolve_scheduling_strategy(conversation, payload.get("scheduling_strategy"))
+    if payload.get("scheduling_strategy"):
+        persist_scheduling_strategy(conversation, scheduling_strategy)
+    message = Message(
+        client_message_id=payload.get("client_message_id") or str(uuid.uuid4()),
+        conversation_id=conversation.id,
+        sender_type="user",
+        sender_id=user.id,
+        sender_name=user.display_name,
+        content_type=payload.get("content_type") or "text",
+        content={"text": text, "attachments": normalized_attachments},
+        status="sent",
+        reply_to_message_id=payload.get("reply_to_message_id") or payload.get("quotedMessageId"),
+        extra={
+            "thinking_enabled": bool(payload.get("thinking_enabled")),
+            "scheduling_strategy": scheduling_strategy,
+            "model_config_id": payload.get("model_config_id"),
+        },
+    )
+    conversation.last_message_preview = text[:300]
+    conversation.last_message_sender = user.display_name
+    conversation.last_message_at = utcnow()
+    conversation.activity_score = min(100, conversation.activity_score + 5)
+    conversation.message_count += 1
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    if trigger_agent:
+        raise ValidationAppError("同步 _send 仅用于不触发 Agent 的测试路径")
+    return message
+
+
 @router.get("/conversations/{conversation_id}/messages", response_model=ApiResponse[dict])
 async def list_messages(
     conversation_id: str,
@@ -174,6 +270,23 @@ async def list_messages(
             "has_more": False,
         }
     )
+
+
+@router.post("/conversations/{conversation_id}/messages", response_model=ApiResponse[dict])
+async def create_message(
+    conversation_id: str,
+    payload: SendMessagePayload,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    message = await _send(
+        db,
+        user,
+        conversation_id,
+        payload.model_dump(),
+        trigger_agent=False,
+    )
+    return ok(message_to_dict(message), "消息已保存")
 
 
 @router.post("/conversations/{conversation_id}/stream")
@@ -264,6 +377,32 @@ async def cancel_stream(
         {"conversation_id": conversation.id, "cancelled": cancelled},
     )
     return ok({"conversation_id": conversation.id, "cancelled": cancelled}, "Generation cancelled")
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/code-runs",
+    response_model=ApiResponse[dict],
+)
+async def run_message_code(
+    conversation_id: str,
+    message_id: str,
+    payload: RunMessageCodeRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.run_sync(
+        lambda session: run_message_code_block(
+            session,
+            user=user,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            language=payload.language,
+            code=payload.code,
+            index=payload.index,
+            timeout_seconds=payload.timeout_seconds,
+        )
+    )
+    return ok(result, "代码已在会话沙箱中执行")
 
 
 # ---- compat routes ----

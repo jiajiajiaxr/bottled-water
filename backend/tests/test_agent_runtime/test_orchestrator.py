@@ -7,9 +7,11 @@
 import pytest
 
 from agent_runtime.runtime.orchestrator import Orchestrator
+from agent_runtime.runtime.agent_loop import AgentLoop
 from agent_runtime.runtime.watchdog import WatchdogConfig
 from agent_runtime.core.types import (
     AgentConfig,
+    AgentState,
     SchedulingDecision,
 )
 from agent_runtime.strategies.base import Scheduler
@@ -134,6 +136,94 @@ class TestOrchestratorRun:
         bb = mock_persistence.blackboards["sess_1"]
         assert bb["conversation_id"] == "sess_1"
         assert len(bb["raw_history"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_scheduling_decisions_are_archived_to_blackboard(
+        self, sample_agents, mock_provider, mock_persistence
+    ):
+        scheduler = SimpleScheduler(
+            [
+                SchedulingDecision(
+                    decision_type="assign",
+                    target_agent_id="coder",
+                    task_description="实现登录接口",
+                    rationale="需要程序员先执行",
+                ),
+                SchedulingDecision(decision_type="complete", rationale="任务完成"),
+            ]
+        )
+        orch = Orchestrator(
+            session_id="sess_1",
+            agents=sample_agents,
+            scheduler=scheduler,
+            model_provider=mock_provider,
+            persistence=mock_persistence,
+        )
+        mock_provider.responses = [
+            ChatResponse(
+                content='完成。\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            ),
+        ]
+
+        async for _event in orch.run("任务"):
+            pass
+
+        bb = mock_persistence.blackboards["sess_1"]
+        archived = [item for item in bb["raw_history"] if item.get("type") == "scheduling_decision"]
+        assert archived
+        assert archived[0]["decision"]["decision_type"] == "assign"
+        assert archived[0]["decision"]["target_agent_id"] == "coder"
+        assert archived[0]["decision"]["task_description"] == "实现登录接口"
+
+    @pytest.mark.asyncio
+    async def test_agent_failure_is_reported_and_archived_to_blackboard(
+        self, sample_agents, mock_provider, mock_persistence, monkeypatch
+    ):
+        class CaptureScheduler(SimpleScheduler):
+            def __init__(self):
+                super().__init__(
+                    [
+                        SchedulingDecision(
+                            decision_type="assign",
+                            target_agent_id="coder",
+                            task_description="执行会失败的任务",
+                        ),
+                        SchedulingDecision(decision_type="complete"),
+                    ]
+                )
+                self.report_states = []
+
+            async def make_decision(self, blackboard, agent_reports, conversation_context):
+                self.report_states.append({item.agent_id: item.state for item in agent_reports})
+                return await super().make_decision(blackboard, agent_reports, conversation_context)
+
+        scheduler = CaptureScheduler()
+        orch = Orchestrator(
+            session_id="sess_1",
+            agents=sample_agents,
+            scheduler=scheduler,
+            model_provider=mock_provider,
+            persistence=mock_persistence,
+        )
+
+        async def fail_coder(self, *_args, **_kwargs):
+            if self.agent.id == "coder":
+                raise RuntimeError("sandbox unavailable")
+            return {}
+
+        monkeypatch.setattr(AgentLoop, "run", fail_coder)
+
+        events = []
+        async for event in orch.run("任务"):
+            events.append(event)
+
+        assert any(event.type == "system.agent_failed" for event in events)
+        assert any(states.get("coder") == AgentState.FAILED for states in scheduler.report_states)
+        bb = mock_persistence.blackboards["sess_1"]
+        errors = [item for item in bb["raw_history"] if item.get("type") == "agent_error"]
+        assert errors
+        assert errors[0]["agent_id"] == "coder"
+        assert "sandbox unavailable" in errors[0]["error"]
 
     @pytest.mark.asyncio
     async def test_run_watchdog_max_rounds(self, sample_agents, mock_provider):

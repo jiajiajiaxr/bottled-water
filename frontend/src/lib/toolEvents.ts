@@ -17,18 +17,25 @@ export function toolEventsFromMessage(message: ChatMessage): ToolEventRecord[] {
   );
 }
 
-export function mergeToolEvents(...groups: ToolEventRecord[][]): ToolEventRecord[] {
+export function mergeToolEvents(
+  ...groups: ToolEventRecord[][]
+): ToolEventRecord[] {
   const byKey = new Map<string, ToolEventRecord>();
   groups.flat().forEach((event, index) => {
     if (!event.toolName) return;
-    const key = event.toolCallId || `${event.toolName}:${event.status || ""}:${index}`;
+    const key =
+      event.toolCallId || event.run_id || `${event.toolName}:${event.status || ""}:${index}`;
     byKey.set(key, { ...(byKey.get(key) ?? {}), ...event });
   });
   return Array.from(byKey.values());
 }
 
-export function summarizeToolEvents(events: ToolEventRecord[]): ToolSummary | undefined {
-  const completed = events.filter((event) => String(event.status || "").toLowerCase() !== "running");
+export function summarizeToolEvents(
+  events: ToolEventRecord[],
+): ToolSummary | undefined {
+  const completed = events.filter(
+    (event) => String(event.status || "").toLowerCase() !== "running",
+  );
   if (!completed.length) return undefined;
   const finalFailed = finalFailedToolEvents(completed);
   if (finalFailed.length) {
@@ -57,7 +64,12 @@ export function isFailedToolEvent(event: ToolEventRecord) {
 export function toolEventDetailLines(event: ToolEventRecord): string[] {
   return [
     `tool: ${event.toolName}`,
+    event.provider ? `provider: ${event.provider}` : "",
+    event.run_id ? `run_id: ${event.run_id}` : "",
     `status: ${event.status || "unknown"}`,
+    event.changed_files_count !== undefined
+      ? `changed_files: ${event.changed_files_count}`
+      : "",
     event.exit_code !== undefined ? `exit_code: ${event.exit_code}` : "",
     event.duration_ms !== undefined ? `duration_ms: ${event.duration_ms}` : "",
     event.stdout ? `stdout: ${shortText(event.stdout)}` : "",
@@ -78,6 +90,11 @@ function normalizeToolEvent(value: unknown): ToolEventRecord {
   return {
     toolName: stringValue(record.toolName ?? record.tool_name),
     toolCallId: stringValue(record.toolCallId ?? record.tool_call_id),
+    run_id: stringValue(record.run_id ?? record.runId),
+    provider: stringValue(record.provider),
+    changed_files_count: primitiveValue(
+      record.changed_files_count ?? record.changedFilesCount,
+    ),
     status: stringValue(record.status),
     exit_code: primitiveValue(record.exit_code ?? record.exitCode),
     duration_ms: primitiveValue(record.duration_ms ?? record.durationMs),
@@ -103,14 +120,20 @@ function formatToolNames(events: ToolEventRecord[], maxTools: number) {
   const visible = names.slice(0, maxTools).map(([name, count]) =>
     count > 1 ? `${name} ×${count}` : name,
   );
-  const hiddenCount = names.slice(maxTools).reduce((sum, [, count]) => sum + count, 0);
+  const hiddenCount = names
+    .slice(maxTools)
+    .reduce((sum, [, count]) => sum + count, 0);
   return {
-    text: hiddenCount ? `${visible.join(" · ")} · 等 ${hiddenCount} 项` : visible.join(" · "),
+    text: hiddenCount
+      ? `${visible.join(" · ")} · 等 ${hiddenCount} 项`
+      : visible.join(" · "),
   };
 }
 
 function primitiveValue(value: unknown) {
-  return typeof value === "string" || typeof value === "number" ? value : undefined;
+  return typeof value === "string" || typeof value === "number"
+    ? value
+    : undefined;
 }
 
 function stringValue(value: unknown) {

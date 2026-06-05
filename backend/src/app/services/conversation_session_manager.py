@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,13 @@ from agent_runtime import Session as AgentSession
 from agent_runtime.core.types import Event as RuntimeEvent
 from app.events import WebSocketSink
 from db.models import Conversation
+from db.session import AsyncSessionLocal
+from app.services.runtime.generation_records import (
+    create_generation_record,
+    finish_generation_record,
+    record_generation_event,
+)
+from app.services.chat.scheduling import resolve_scheduling_strategy, runtime_mode, workflow_enabled
 from app.services.runtime_service import OrchestratorService
 from common.logger import get_logger
 
@@ -43,10 +50,16 @@ class ConversationSessionManager:
 
     _instance: ClassVar[Optional["ConversationSessionManager"]] = None
 
-    def __init__(self):
+    def __init__(self, session_factory: Any = None):
         self._sessions: dict[str, AgentSession] = {}
+        self._session_model_config_ids: dict[str, str | None] = {}
+        self._session_scheduling_strategies: dict[str, str] = {}
+        self._session_runtime_modes: dict[str, str] = {}
+        self._session_workflow_enabled: dict[str, bool] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}
+        self._generation_ids: dict[str, str] = {}
+        self._session_factory = session_factory or AsyncSessionLocal
 
     @classmethod
     def get_instance(cls) -> "ConversationSessionManager":
@@ -73,10 +86,28 @@ class ConversationSessionManager:
         如果 Session 已存在，直接返回。否则创建新 Session 并缓存。
         """
         conversation_id = str(conversation.id)
+        requested_model_config_id = str(model_config_id) if model_config_id else None
+        requested_strategy = resolve_scheduling_strategy(conversation)
+        requested_runtime_mode = runtime_mode(conversation)
+        requested_workflow_enabled = workflow_enabled(conversation)
 
         async with self._get_lock(conversation_id):
             if conversation_id in self._sessions:
-                return self._sessions[conversation_id]
+                task = self._running_tasks.get(conversation_id)
+                if task and not task.done():
+                    return self._sessions[conversation_id]
+                if (
+                    self._session_model_config_ids.get(conversation_id) == requested_model_config_id
+                    and self._session_scheduling_strategies.get(conversation_id) == requested_strategy
+                    and self._session_runtime_modes.get(conversation_id) == requested_runtime_mode
+                    and self._session_workflow_enabled.get(conversation_id) == requested_workflow_enabled
+                ):
+                    return self._sessions[conversation_id]
+                self._sessions.pop(conversation_id, None)
+                self._session_model_config_ids.pop(conversation_id, None)
+                self._session_scheduling_strategies.pop(conversation_id, None)
+                self._session_runtime_modes.pop(conversation_id, None)
+                self._session_workflow_enabled.pop(conversation_id, None)
 
             agents = await OrchestratorService._get_conversation_agents(db, conversation)
             if not agents:
@@ -88,8 +119,13 @@ class ConversationSessionManager:
                 agents,
                 model_config_id,
                 event_sink=event_sink,
+                scheduling_strategy=requested_strategy,
             )
             self._sessions[conversation_id] = session
+            self._session_model_config_ids[conversation_id] = requested_model_config_id
+            self._session_scheduling_strategies[conversation_id] = requested_strategy
+            self._session_runtime_modes[conversation_id] = requested_runtime_mode
+            self._session_workflow_enabled[conversation_id] = requested_workflow_enabled
 
             # 更新数据库状态
             conversation.generation_status = "idle"
@@ -123,24 +159,31 @@ class ConversationSessionManager:
             if not task.done():
                 raise SessionAlreadyRunningError(f"Conversation {conversation_id} 已有运行中的 generation")
 
+        generation_id = await self._create_generation_record(conversation_id, session, content)
         task = asyncio.create_task(
-            self._run_generation(session, content),
+            self._run_generation(session, conversation_id, generation_id, content),
             name=f"generation-{conversation_id}",
         )
         self._running_tasks[conversation_id] = task
         task.add_done_callback(
-            lambda t, cid=conversation_id: self._on_generation_done(cid, t)
+            lambda t, cid=conversation_id, gid=generation_id: self._on_generation_done(cid, gid, t)
         )
 
         logger.info("Generation 启动", conversation_id=conversation_id, content_preview=content[:50])
 
-    async def _run_generation(self, session: AgentSession, content: str) -> None:
+    async def _run_generation(
+        self,
+        session: AgentSession,
+        conversation_id: str,
+        generation_id: str,
+        content: str,
+    ) -> None:
         """在后台运行 Session generation。
 
         事件已通过 EventDispatcher 分发到各 Sink，这里只需消费迭代器。
         """
-        async for _event in session.run(content):
-            pass
+        async for event in session.run(content):
+            await self._record_generation_event(conversation_id, generation_id, event)
 
     async def send_user_input(
         self,
@@ -161,8 +204,10 @@ class ConversationSessionManager:
         if status == "running":
             # 运行中：通过 send_message 插队
             logger.info("用户输入插队", conversation_id=conversation_id, content_preview=content[:50])
-            async for _event in session.send_message(content):
-                pass
+            generation_id = self._generation_ids.get(conversation_id)
+            async for event in session.send_message(content):
+                if generation_id:
+                    await self._record_generation_event(conversation_id, generation_id, event)
         else:
             # 已完成：重新启动 generation
             logger.info("用户输入重启 generation", conversation_id=conversation_id, content_preview=content[:50])
@@ -175,6 +220,10 @@ class ConversationSessionManager:
         """
         task = self._running_tasks.get(conversation_id)
         if task and not task.done():
+            session = self._sessions.get(conversation_id)
+            cancel = getattr(session, "cancel", None) if session else None
+            if cancel:
+                await cancel("user_cancelled")
             task.cancel()
             logger.info("Generation 取消", conversation_id=conversation_id)
 
@@ -185,21 +234,46 @@ class ConversationSessionManager:
             )
             ws_sink = WebSocketSink(conversation_id)
             await ws_sink.emit(cancel_event)
+            generation_id = self._generation_ids.pop(conversation_id, None)
+            if generation_id:
+                await self._record_generation_event(conversation_id, generation_id, cancel_event)
+                await self._finish_generation(
+                    conversation_id,
+                    generation_id,
+                    status="cancelled",
+                    error="user_cancelled",
+                )
 
             return True
         return False
 
-    def _on_generation_done(self, conversation_id: str, task: asyncio.Task) -> None:
+    def _on_generation_done(self, conversation_id: str, generation_id: str, task: asyncio.Task) -> None:
         """Generation 任务完成回调。"""
         self._running_tasks.pop(conversation_id, None)
 
         try:
             task.result()
             logger.info("Generation 完成", conversation_id=conversation_id)
+            status = "completed"
+            error = None
         except asyncio.CancelledError:
             logger.info("Generation 被取消", conversation_id=conversation_id)
+            status = "cancelled"
+            error = "cancelled"
         except Exception as e:
             logger.error("Generation 异常", conversation_id=conversation_id, error=str(e))
+            status = "failed"
+            error = str(e)
+
+        if self._generation_ids.get(conversation_id) != generation_id:
+            return
+        self._generation_ids.pop(conversation_id, None)
+        try:
+            asyncio.create_task(
+                self._finish_generation(conversation_id, generation_id, status=status, error=error)
+            )
+        except RuntimeError:
+            logger.warning("Generation 终态持久化任务创建失败", conversation_id=conversation_id)
 
     async def close_session(self, conversation_id: str) -> None:
         """关闭并清理 Session。
@@ -208,6 +282,11 @@ class ConversationSessionManager:
         """
         await self.cancel_generation(conversation_id)
         session = self._sessions.pop(conversation_id, None)
+        self._session_model_config_ids.pop(conversation_id, None)
+        self._session_scheduling_strategies.pop(conversation_id, None)
+        self._session_runtime_modes.pop(conversation_id, None)
+        self._session_workflow_enabled.pop(conversation_id, None)
+        self._generation_ids.pop(conversation_id, None)
         self._locks.pop(conversation_id, None)
 
         if session:
@@ -224,3 +303,50 @@ class ConversationSessionManager:
         """检查是否有运行中的 generation。"""
         task = self._running_tasks.get(conversation_id)
         return task is not None and not task.done()
+
+    async def _create_generation_record(
+        self,
+        conversation_id: str,
+        session: AgentSession,
+        content: str,
+    ) -> str:
+        async with self._session_factory() as db:
+            generation_id = await create_generation_record(
+                db,
+                conversation_id,
+                session_id=session.session_id,
+                agents=session.agents.values(),
+                prompt=content,
+                model_config_id=self._session_model_config_ids.get(conversation_id),
+                scheduling_strategy=self._session_scheduling_strategies.get(conversation_id),
+                runtime_mode=self._session_runtime_modes.get(conversation_id),
+                workflow_enabled=self._session_workflow_enabled.get(conversation_id),
+            )
+        self._generation_ids[conversation_id] = generation_id
+        return generation_id
+
+    async def _record_generation_event(
+        self,
+        conversation_id: str,
+        generation_id: str,
+        event: RuntimeEvent,
+    ) -> None:
+        async with self._session_factory() as db:
+            await record_generation_event(db, conversation_id, generation_id, event)
+
+    async def _finish_generation(
+        self,
+        conversation_id: str,
+        generation_id: str,
+        *,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        async with self._session_factory() as db:
+            await finish_generation_record(
+                db,
+                conversation_id,
+                generation_id,
+                status=status,
+                error=error,
+            )

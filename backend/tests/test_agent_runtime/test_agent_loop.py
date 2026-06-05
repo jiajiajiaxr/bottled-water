@@ -10,7 +10,7 @@
 import pytest
 
 from model_provider import ChatResponse
-from agent_runtime.runtime.agent_loop import AgentLoop
+from agent_runtime.runtime.agent_loop import AgentLoop, _StatusReportStreamFilter
 from agent_runtime.core.types import AgentConfig, AgentState, AgentWill
 
 import logging
@@ -224,6 +224,31 @@ class TestAgentLoopStatusParsing:
         assert report.state == AgentState.UNKNOWN
         assert report.will == AgentWill.WAIT
 
+    def test_extract_status_report_normalizes_aliases_and_bounds(self, loop):
+        content = "\n".join(
+            [
+                "done",
+                "```status_report",
+                '{"state": "done", "will": "finish", "blockers": "none", "priority": 99, "confidence": 1.5}',
+                "```",
+            ]
+        )
+        report = loop._extract_status_report(content)
+
+        assert report.state == AgentState.COMPLETED
+        assert report.will == AgentWill.COMPLETE
+        assert report.blockers == ["none"]
+        assert report.priority == 10
+        assert report.confidence == 1.0
+
+    def test_extract_status_report_from_plain_json_object(self, loop):
+        content = 'work result {"state": "error", "will": "blocked", "rationale": "tool failed"}'
+        report = loop._extract_status_report(content)
+
+        assert report.state == AgentState.FAILED
+        assert report.will == AgentWill.BLOCKED
+        assert report.rationale == "tool failed"
+
     def test_extract_missing_block(self, loop):
         content = "没有任何状态报告"
         report = loop._extract_status_report(content)
@@ -234,3 +259,24 @@ class TestAgentLoopStatusParsing:
         cleaned = loop._remove_status_report(content)
         assert "工作成果" in cleaned
         assert "status_report" not in cleaned
+
+    def test_stream_filter_hides_generic_status_report_fence(self):
+        stream_filter = _StatusReportStreamFilter()
+
+        assert stream_filter.push("visible answer\n") == "visible answer"
+        assert stream_filter.push("```\n") == ""
+        assert stream_filter.push('status_report\n{"state":"completed","will":"complete"}\n') == ""
+        assert stream_filter.push("```\n") == ""
+        assert stream_filter.push("final answer") == "\nfinal answer"
+
+    def test_remove_status_report_shaped_json_block(self, loop):
+        content = "\n".join(
+            [
+                "work product",
+                "```json",
+                '{"state":"completed","will":"complete","confidence":0.95}',
+                "```",
+            ]
+        )
+
+        assert loop._remove_status_report(content) == "work product"

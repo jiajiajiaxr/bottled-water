@@ -122,7 +122,9 @@ export function layoutWorkflowCanvasNodes(
       focusable: true,
       className: [
         "xy-workflow-node",
+        `xy-workflow-node-type-${type}`,
         `xy-workflow-node-${status}`,
+        selectedNodeIds.includes(nodeId) ? "xy-workflow-node-selected" : "",
         invalidNodeIds.has(nodeId) ? "xy-workflow-node-invalid" : "",
         warningNodeIds.has(nodeId) ? "xy-workflow-node-warning" : "",
       ]

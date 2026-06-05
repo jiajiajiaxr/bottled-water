@@ -18,7 +18,8 @@ from app.schemas.requests import (
     ImportMcpServerRequest,
     InvokeMcpToolRequest,
 )
-from app.services.mcp_runtime import invoke_mcp_tool_recorded, tool_allowed
+from app.services.mcp import invoke_mcp_tool_recorded, tool_allowed
+from app.services.mcp.discovery import probe_server_async
 from app.services.serialization import mcp_invocation_to_dict, mcp_server_to_dict
 
 
@@ -199,17 +200,7 @@ async def probe_mcp_server(
     user: User = Depends(get_current_user),
 ):
     server = await _get_server(db, user, server_id)
-    server.health_status = "online" if server.enabled else "disabled"
-    server.last_checked_at = utcnow()
-    server.tools = server.tools or [
-        {"name": "file.read", "description": "读取工作区文件", "enabled": True},
-        {
-            "name": "browser.open",
-            "description": "打开浏览器页面",
-            "enabled": server.transport != "stdio",
-        },
-        {"name": "sandbox.run", "description": "在沙箱执行命令", "enabled": True},
-    ]
+    await probe_server_async(server)
     await db.commit()
     return ok(mcp_server_to_dict(server), "MCP服务探测完成")
 

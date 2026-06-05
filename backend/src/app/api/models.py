@@ -17,7 +17,8 @@ from app.schemas.requests import (
     TestModelRequest,
     UpdateModelConfigRequest,
 )
-from app.services.llm_gateway import test_model_config
+from app.services.llm.gateway import test_model_config
+from app.services.model_config_resolver import normalize_provider_type
 from app.services.serialization import model_config_to_dict, model_provider_to_dict
 from model_provider import get_builtin_providers
 
@@ -388,7 +389,7 @@ async def list_available_models(
                 from model_provider.core.config import ModelConfig as MPModelConfig
 
                 mp_config = MPModelConfig(
-                    provider=provider.provider_type or "ark",
+                    provider=normalize_provider_type(provider.provider_type),
                     model=provider.default_model or "gpt-4o",
                     api_key=api_key,
                     base_url=provider.base_url or None,

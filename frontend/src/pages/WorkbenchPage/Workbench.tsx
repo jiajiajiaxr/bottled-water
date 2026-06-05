@@ -18,7 +18,9 @@ import { PlatformControlDrawer } from "@/features/platform/components/PlatformCo
 import { ChatPanel } from "@/features/chat/components/ChatPanel";
 import { PreviewPanel } from "@/features/preview/components/PreviewPanel";
 import { WorkflowStudioContent } from "@/features/workflow/WorkflowStudioContent";
+import { WorkspaceFilesContent } from "@/features/workspaceFiles/WorkspaceFilesContent";
 import type { User } from "@/types";
+import type { MainTab } from "@/router/utils";
 import {
   useConversationCategories,
   useBackgroundTaskPolling,
@@ -46,7 +48,7 @@ export function Workbench({
     options?: { replace?: boolean },
   ) => void;
   onRouteTabChange: (
-    tab: "chat" | "agents" | "workspace" | "settings",
+    tab: MainTab,
     options?: { replace?: boolean },
   ) => void;
 }) {
@@ -139,14 +141,43 @@ export function Workbench({
     navigateToConversation(workspaceId, conversationId, replace);
   };
 
-  const openMainTab = (tab: "agents" | "workspace" | "settings") => {
+  const openMainTab = (tab: "agents" | "workspace" | "settings" | "files") => {
     setAgentDrawerOpen(tab === "agents");
     setWorkspacesOpen(tab === "workspace");
     setGlobalSettingsOpen(tab === "settings");
     onRouteTabChange(tab);
   };
 
-  const closeMainTab = (tab: "agents" | "workspace" | "settings") => {
+  const returnFromWorkflowToChat = () => {
+    setScheduleMode("chat");
+    if (activeWorkspaceId && active?.id) {
+      navigateToConversation(activeWorkspaceId, active.id, true);
+    }
+  };
+
+  const changeScheduleMode = async (mode: "chat" | "workflow") => {
+    setScheduleMode(mode);
+    if (!active) return;
+    const isWorkflow = mode === "workflow";
+    try {
+      const updated = await api.updateConversation(active.id, {
+        scheduling_strategy: isWorkflow
+          ? "workflow"
+          : active.chat_type === "single"
+            ? "single_agent"
+            : "tech_lead",
+        runtime_mode: isWorkflow || active.chat_type === "single" ? "legacy" : "actor",
+        workflow_enabled: isWorkflow,
+      });
+      updateConversations((current) =>
+        current.map((item) => (item.id === active.id ? { ...item, ...updated } : item)),
+      );
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "调度模式切换失败");
+    }
+  };
+
+  const closeMainTab = (tab: "agents" | "workspace" | "settings" | "files") => {
     if (tab === "agents") setAgentDrawerOpen(false);
     if (tab === "workspace") setWorkspacesOpen(false);
     if (tab === "settings") setGlobalSettingsOpen(false);
@@ -159,6 +190,7 @@ export function Workbench({
     createConversation,
     saveArtifact,
     deploy,
+    openArtifactPreview,
   } = useWorkbenchActions(
     activeWorkspaceId,
     conversationCategories,
@@ -261,6 +293,7 @@ export function Workbench({
     if (!nextConversation) return;
     if (activeId !== nextConversation.id) setActiveId(nextConversation.id);
     const workspaceId = nextConversation.workspace_id || activeWorkspaceId;
+    if (routeTab === "files" && !routeConversationId) return;
     if (
       routeWorkspaceId !== workspaceId ||
       routeConversationId !== nextConversation.id
@@ -293,6 +326,11 @@ export function Workbench({
       .finally(() => setLoadingMessages(false));
   }, [activeId, setArtifactPanelOpen, setArtifact, setFiles, setLoadingMessages, setMessages]);
 
+  useEffect(() => {
+    if (!active) return;
+    setScheduleMode(active.workflow_enabled ? "workflow" : "chat");
+  }, [active?.id, active?.workflow_enabled, setScheduleMode]);
+
   return (
     <>
       <WorkbenchLayout
@@ -317,7 +355,7 @@ export function Workbench({
         agents={agents}
         routeTab={routeTab}
         scheduleMode={scheduleMode}
-        onScheduleModeChange={setScheduleMode}
+        onScheduleModeChange={changeScheduleMode}
       >
         {routeTab === "chat" ? (
           scheduleMode === "workflow" && active ? (
@@ -325,12 +363,19 @@ export function Workbench({
               workspaceId={activeWorkspaceId || ""}
               conversationId={active.id}
               embedded
+              onBack={returnFromWorkflowToChat}
               onError={(value) => message.error(value)}
               onSuccess={(value) => message.success(value)}
             />
           ) : (
             <>
-              <ChatPanel active={active} loading={loadingMessages} userName={currentUser.name} />
+              <ChatPanel
+                active={active}
+                loading={loadingMessages}
+                userName={currentUser.name}
+                defaultModelConfigId={currentUser.default_model_config_id}
+                onPreviewArtifact={openArtifactPreview}
+              />
               {artifactPanelOpen && artifact && (
                 <PreviewPanel
                   artifact={artifact}
@@ -409,6 +454,21 @@ export function Workbench({
             onSaveProjectFile={async (projectId, payload) => {
               await api.saveProjectFile(projectId, payload);
               message.success("项目文件版本已保存");
+            }}
+          />
+        ) : routeTab === "files" ? (
+          <WorkspaceFilesContent
+            workspaceId={activeWorkspaceId}
+            onBack={() => onRouteTabChange("chat")}
+            onAttachReference={(snippet) => {
+              if (active?.id) {
+                useConversationStore.getState().appendDraftSnippet(active.id, snippet);
+                onRouteTabChange("chat");
+                message.success("文件引用已加入当前会话输入框");
+              } else {
+                void navigator.clipboard.writeText(snippet);
+                message.info("当前没有会话，文件引用已复制到剪贴板");
+              }
             }}
           />
         ) : null}

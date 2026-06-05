@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import difflib
 import html as html_lib
+import hashlib
+import json
+from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import NotFoundError
+from app.services.tools.builtins.artifact.storage import regenerate_binary_from_preview
 from db.models import Artifact, ArtifactVersion, Conversation, Deployment, Message, Task, utcnow
 
 
@@ -156,7 +160,7 @@ async def create_artifact(
         name=name,
         description=description or "由多 Agent 协作生成的可预览产物。",
         status="published",
-        storage_url=f"/api/v1/artifacts/preview-pending",
+        storage_url="/api/v1/artifacts/preview-pending",
         content={
             "files": {"index.html": html},
             "previous_files": {"index.html": previous_html},
@@ -181,6 +185,10 @@ async def create_artifact(
 
 
 async def create_preview_message(db: AsyncSession, conversation: Conversation, artifact: Artifact) -> Message:
+    content = artifact.content if isinstance(artifact.content, dict) else {}
+    artifact_format = str(content.get("format") or artifact.type or "html")
+    filename = str(content.get("filename") or f"{artifact.name}.{artifact_format}")
+    media_type = str(content.get("media_type") or artifact.mime_type or "text/html")
     message = Message(
         conversation_id=conversation.id,
         sender_type="agent",
@@ -192,6 +200,10 @@ async def create_preview_message(db: AsyncSession, conversation: Conversation, a
             "title": artifact.name,
             "artifact_type": artifact.type,
             "preview_url": f"/api/v1/artifacts/{artifact.id}/preview",
+            "export_url": f"/api/v1/artifacts/{artifact.id}/export?format={artifact_format}",
+            "format": artifact_format,
+            "filename": filename,
+            "media_type": media_type,
             "file_count": len(artifact.content.get("files") or {}),
             "total_size": len((artifact.content.get("files") or {}).get("index.html", "")),
         },
@@ -222,18 +234,38 @@ def compute_artifact_diff(old: str, new: str) -> list[dict[str, Any]]:
     return entries
 
 
-async def update_artifact_files(db: AsyncSession, artifact_id: str, files: dict[str, str], summary: str) -> Artifact:
-    artifact = await db.get(Artifact, artifact_id)
+def update_artifact_files(
+    db: AsyncSession | Session,
+    artifact_id: str,
+    files: dict[str, str],
+    summary: str,
+):
+    if isinstance(db, AsyncSession):
+        return _update_artifact_files_async(db, artifact_id, files, summary)
+    return _update_artifact_files_sync(db, artifact_id, files, summary)
+
+
+def _update_artifact_files_sync(
+    db: Session,
+    artifact_id: str,
+    files: dict[str, str],
+    summary: str,
+) -> Artifact:
+    artifact = db.get(Artifact, artifact_id)
     if not artifact:
         raise NotFoundError("产物不存在")
-    current_files = artifact.content.get("files") or {}
+    current_content = artifact.content or {}
+    current_files = current_content.get("files") or {}
     next_version = artifact.current_version + 1
-    artifact.content = {
-        **artifact.content,
-        "previous_files": current_files,
-        "files": files,
-        "summary": summary,
-    }
+    artifact.content, checksum = _build_versioned_artifact_content(
+        db,
+        artifact,
+        current_content=current_content,
+        previous_files=current_files,
+        files=files,
+        summary=summary,
+        next_version=next_version,
+    )
     artifact.current_version = next_version
     artifact.updated_at = utcnow()
     db.add(
@@ -242,6 +274,46 @@ async def update_artifact_files(db: AsyncSession, artifact_id: str, files: dict[
             version=next_version,
             content=artifact.content,
             change_summary=summary,
+            checksum=checksum,
+        )
+    )
+    db.commit()
+    db.refresh(artifact)
+    return artifact
+
+
+async def _update_artifact_files_async(
+    db: AsyncSession,
+    artifact_id: str,
+    files: dict[str, str],
+    summary: str,
+) -> Artifact:
+    artifact = await db.get(Artifact, artifact_id)
+    if not artifact:
+        raise NotFoundError("产物不存在")
+    current_content = artifact.content or {}
+    current_files = current_content.get("files") or {}
+    next_version = artifact.current_version + 1
+    artifact.content, checksum = await db.run_sync(
+        lambda session: _build_versioned_artifact_content(
+            session,
+            artifact,
+            current_content=current_content,
+            previous_files=current_files,
+            files=files,
+            summary=summary,
+            next_version=next_version,
+        )
+    )
+    artifact.current_version = next_version
+    artifact.updated_at = utcnow()
+    db.add(
+        ArtifactVersion(
+            artifact_id=artifact.id,
+            version=next_version,
+            content=artifact.content,
+            change_summary=summary,
+            checksum=checksum,
         )
     )
     await db.commit()
@@ -249,53 +321,112 @@ async def update_artifact_files(db: AsyncSession, artifact_id: str, files: dict[
     return artifact
 
 
+def _build_versioned_artifact_content(
+    db: Session,
+    artifact: Artifact,
+    *,
+    current_content: dict[str, Any],
+    previous_files: dict[str, str],
+    files: dict[str, str],
+    summary: str,
+    next_version: int,
+) -> tuple[dict[str, Any], str]:
+    content = {
+        **current_content,
+        "previous_files": previous_files,
+        "files": files,
+        "summary": summary,
+    }
+    preview_html = files.get("index.html") or current_content.get("preview_html") or ""
+    if preview_html:
+        content["preview_html"] = preview_html
+
+    descriptor = _regenerate_or_copy_source_file(
+        db,
+        artifact,
+        current_content=current_content,
+        preview_html=preview_html,
+        next_version=next_version,
+    )
+    if descriptor:
+        content.update(descriptor)
+        checksum = descriptor["source_file"].get("checksum") or _checksum_from_files(files)
+        return content, checksum
+
+    return content, _checksum_from_files(files)
+
+
+def _regenerate_or_copy_source_file(
+    db: Session,
+    artifact: Artifact,
+    *,
+    current_content: dict[str, Any],
+    preview_html: str,
+    next_version: int,
+) -> dict[str, Any] | None:
+    source_file = current_content.get("source_file")
+    if not isinstance(source_file, dict):
+        return None
+
+    format_name = (
+        current_content.get("format")
+        or source_file.get("format")
+        or Path(str(source_file.get("filename") or "")).suffix.lstrip(".")
+    )
+    owner_id = _artifact_owner_id(db, artifact)
+    if owner_id and format_name and preview_html:
+        try:
+            return regenerate_binary_from_preview(
+                db,
+                owner_id=owner_id,
+                artifact=artifact,
+                format_name=str(format_name),
+                preview_html=preview_html,
+                version=next_version,
+            )
+        except Exception:
+            pass
+
+    copied = dict(source_file)
+    copied["version"] = next_version
+    checksum = _checksum_from_file(copied.get("storage_path")) or copied.get("checksum") or _checksum_from_files({})
+    copied["checksum"] = checksum
+    export_file = dict(current_content.get("export_file") or copied)
+    export_file.update({"version": next_version, "checksum": checksum})
+    return {
+        "source_file": copied,
+        "export_file": export_file,
+        "filename": copied.get("filename") or current_content.get("filename"),
+        "media_type": copied.get("media_type") or current_content.get("media_type"),
+        "file_size": copied.get("size") or current_content.get("file_size") or 0,
+    }
+
+
+def _artifact_owner_id(db: Session, artifact: Artifact) -> str | None:
+    conversation = db.get(Conversation, artifact.conversation_id)
+    return conversation.creator_id if conversation else None
+
+
+def _checksum_from_file(path: Any) -> str | None:
+    if not path:
+        return None
+    try:
+        file_path = Path(str(path))
+        if file_path.exists() and file_path.is_file():
+            return hashlib.sha256(file_path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+    return None
+
+
+def _checksum_from_files(files: dict[str, Any]) -> str:
+    raw = json.dumps(files, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 async def create_deployment(db: AsyncSession, artifact_id: str, mode: str = "preview_link") -> Deployment:
-    artifact = await db.get(Artifact, artifact_id)
-    if not artifact:
-        raise NotFoundError("产物不存在")
-    deployment = Deployment(
-        artifact_id=artifact.id,
-        artifact_version_id=await db.scalar(
-            select(ArtifactVersion.id)
-            .where(ArtifactVersion.artifact_id == artifact.id)
-            .order_by(ArtifactVersion.version.desc())
-        ),
-        mode=mode,
-        status="deployed",
-        access_url=f"{get_settings().artifact_base_url}/api/v1/artifacts/{artifact.id}/preview?deployment=1",
-        deploy_log=(
-            "准备部署环境\n"
-            "写入静态文件\n"
-            "生成预览访问地址\n"
-            "健康检查通过"
-        ),
-        steps=[
-            {"name": "准备", "status": "completed", "duration_ms": 400},
-            {"name": "构建", "status": "completed", "duration_ms": 1200},
-            {"name": "发布", "status": "completed", "duration_ms": 600},
-        ],
-        deployed_at=utcnow(),
-    )
-    db.add(deployment)
-    await db.flush()
-    db.add(
-        Message(
-            conversation_id=artifact.conversation_id,
-            sender_type="agent",
-            sender_name="Deploy Agent",
-            content_type="deploy_status_card",
-            content={
-                "deployment_id": deployment.id,
-                "artifact_name": artifact.name,
-                "deploy_mode": deployment.mode,
-                "status": deployment.status,
-                "progress": 100,
-                "deploy_url": deployment.access_url,
-                "steps": deployment.steps,
-            },
-            status="completed",
-        )
-    )
-    await db.commit()
-    await db.refresh(deployment)
-    return deployment
+    """Deprecated shim: use app.services.deployments.create_deployment."""
+
+    from app.services.deployments import create_deployment as create_preview_deployment
+
+    return await create_preview_deployment(db, artifact_id, mode)

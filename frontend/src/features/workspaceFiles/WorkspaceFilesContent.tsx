@@ -18,13 +18,17 @@ type Props = {
   onAttachReference: (snippet: string) => void;
 };
 
-export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }: Props) {
+export function WorkspaceFilesContent({
+  workspaceId,
+  onBack,
+  onAttachReference,
+}: Props) {
   const { message } = AntApp.useApp();
   const [loading, setLoading] = useState(false);
   const [nodes, setNodes] = useState<WorkspaceFileNode[]>([]);
   const [stats, setStats] = useState<{ file_count: number; total_size: number }>();
   const [query, setQuery] = useState("");
-  const [source, setSource] = useState<string>("all");
+  const [source, setSource] = useState("all");
   const [preview, setPreview] = useState<PreviewState>();
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
@@ -77,6 +81,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
   );
 
   const visibleNodes = useMemo(() => filterNodes(nodes, query, source), [nodes, query, source]);
+
   const sources = useMemo(() => {
     const values = new Set<string>();
     walk(nodes, (node) => {
@@ -84,11 +89,17 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
     });
     return [...values].sort();
   }, [nodes]);
+
   const directories = useMemo(() => {
-    const items: Array<{ label: string; value: string }> = [{ label: "文件区", value: "files" }];
+    const items: Array<{ label: string; value: string }> = [
+      { label: "文件区", value: "files" },
+    ];
     walk(nodes, (node) => {
       if (node.type === "directory" && node.path) {
-        items.push({ label: `${node.display_name ?? node.name} · ${node.path}`, value: node.path });
+        items.push({
+          label: `${node.display_name ?? node.name} · ${node.path}`,
+          value: node.path,
+        });
       }
     });
     return items;
@@ -102,7 +113,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
         node,
         payload: { mode: "loading", filename: node.display_name ?? node.name },
         loading: true,
-        loadingText: "正在生成 PDF 预览…",
+        loadingText: "正在生成 PDF 预览...",
       });
     }
     try {
@@ -110,6 +121,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
       let payload = { ...rawPayload, mode: normalizePreviewMode(rawPayload, node) };
       let objectUrl: string | undefined;
       let error: string | undefined;
+
       if (payload.mode === "pdf" || payload.mode === "image") {
         try {
           const file =
@@ -118,13 +130,20 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
               : await api.downloadWorkspaceFile(workspaceId, node.id);
           objectUrl = file.previewUrl;
           if (!objectUrl) {
-            error = payload.mode === "pdf" ? "PDF 文件下载失败，无法在线预览。" : "图片文件下载失败，无法在线预览。";
+            error =
+              payload.mode === "pdf"
+                ? "PDF 文件下载失败，无法在线预览。"
+                : "图片文件下载失败，无法在线预览。";
           }
         } catch (downloadError) {
           const detail = downloadError instanceof Error ? downloadError.message : "下载接口异常";
-          error = payload.mode === "pdf" ? `PDF 文件下载失败：${detail}` : `图片文件下载失败：${detail}`;
+          error =
+            payload.mode === "pdf"
+              ? `PDF 文件下载失败：${detail}`
+              : `图片文件下载失败：${detail}`;
         }
       }
+
       if (payload.mode === "html" && !previewText(payload)) {
         try {
           const file = await api.downloadWorkspaceFile(workspaceId, node.id);
@@ -144,6 +163,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
           error = `HTML 文件下载失败：${detail}`;
         }
       }
+
       setPreview({ node, payload, objectUrl, error });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "预览失败";
@@ -172,12 +192,20 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
     if (!workspaceId) return;
     let nextName = node.display_name ?? node.name;
     Modal.confirm({
-      title: "重命名文件",
-      content: <Input defaultValue={nextName} autoFocus onChange={(event) => { nextName = event.target.value; }} />,
+      title: "重命名",
+      content: (
+        <Input
+          defaultValue={nextName}
+          autoFocus
+          onChange={(event) => {
+            nextName = event.target.value;
+          }}
+        />
+      ),
       okText: "保存",
       onOk: async () => {
         await api.renameWorkspaceFile(workspaceId, node.id, nextName);
-        message.success("文件已重命名");
+        message.success("已重命名");
         await load();
       },
     });
@@ -192,7 +220,7 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
       okButtonProps: { danger: true },
       onOk: async () => {
         await api.deleteWorkspaceFile(workspaceId, node.id);
-        message.success("文件已删除");
+        message.success("已删除");
         await load();
       },
     });
@@ -202,8 +230,8 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
     if (node.type !== "file") return;
     const fileId = node.id.startsWith("file:") ? ` file_id=${node.id.slice(5)}` : "";
     onAttachReference(`@file(${node.path}${fileId}) `);
-    message.success("文件引用已加入输入框");
   };
+
   const favorite = async (node: WorkspaceFileNode) => {
     if (!workspaceId) return;
     await api.favoriteWorkspaceFile(workspaceId, node.id, !node.favorite);
@@ -218,8 +246,20 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
       title: "新建文件夹",
       content: (
         <Space direction="vertical" style={{ width: "100%" }}>
-          <Select defaultValue={parent} options={directories} onChange={(value) => { parent = value; }} />
-          <Input placeholder="文件夹名称" autoFocus onChange={(event) => { name = event.target.value; }} />
+          <Select
+            defaultValue={parent}
+            options={directories}
+            onChange={(value) => {
+              parent = value;
+            }}
+          />
+          <Input
+            placeholder="文件夹名称"
+            autoFocus
+            onChange={(event) => {
+              name = event.target.value;
+            }}
+          />
         </Space>
       ),
       okText: "创建",
@@ -236,7 +276,16 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
     let target = "files";
     Modal.confirm({
       title: "移动到",
-      content: <Select style={{ width: "100%" }} defaultValue={target} options={directories} onChange={(value) => { target = value; }} />,
+      content: (
+        <Select
+          style={{ width: "100%" }}
+          defaultValue={target}
+          options={directories}
+          onChange={(value) => {
+            target = value;
+          }}
+        />
+      ),
       okText: "移动",
       onOk: async () => {
         await api.moveWorkspaceFiles(workspaceId, checkedKeys, target);
@@ -300,7 +349,9 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
       </div>
       <div className="workspace-file-tree-host">
         {loading ? (
-          <div className="workspace-file-loading"><Spin /></div>
+          <div className="workspace-file-loading">
+            <Spin />
+          </div>
         ) : visibleNodes.length ? (
           <Tree
             blockNode
@@ -309,7 +360,10 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
             expandedKeys={expandedKeys}
             checkedKeys={checkedKeys}
             onExpand={handleExpand}
-            onCheck={(keys) => setCheckedKeys(Array.isArray(keys) ? keys.map(String) : keys.checked.map(String))}
+            onCheck={(keys) => {
+              if (Array.isArray(keys)) setCheckedKeys(keys.map(String));
+              else setCheckedKeys(keys.checked.map(String));
+            }}
             treeData={toTreeData(visibleNodes, {
               onPreview: handlePreview,
               onDownload: handleDownload,
@@ -324,16 +378,18 @@ export function WorkspaceFilesContent({ workspaceId, onBack, onAttachReference }
         )}
       </div>
       <Modal
-        title={preview && (
-          <Space>
-            <span>{preview.payload.filename ?? preview.node.display_name ?? preview.node.name}</span>
-            <a onClick={() => handleDownload(preview.node)}>下载原文件</a>
-          </Space>
-        )}
+        title={
+          preview && (
+            <Space>
+              <span>{preview.payload.filename ?? preview.node.display_name ?? preview.node.name}</span>
+              <a onClick={() => handleDownload(preview.node)}>下载原文件</a>
+            </Space>
+          )
+        }
         open={!!preview}
         onCancel={closePreview}
         footer={null}
-        width={900}
+        width={960}
       >
         {preview && <WorkspaceFilePreviewView preview={preview} />}
       </Modal>
@@ -350,7 +406,10 @@ function toTreeData(nodes: WorkspaceFileNode[], actions: FileRowActions): DataNo
   }));
 }
 
-function normalizePreviewMode(payload: { mode?: string; content_type?: string; filename?: string }, node: WorkspaceFileNode) {
+function normalizePreviewMode(
+  payload: { mode?: string; content_type?: string; filename?: string },
+  node: WorkspaceFileNode,
+) {
   const mode = String(payload.mode || "").toLowerCase();
   const contentType = String(payload.content_type || node.mime_type || "").toLowerCase();
   const filename = String(payload.filename || node.name || node.path || "").toLowerCase();

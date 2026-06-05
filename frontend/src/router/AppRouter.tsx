@@ -74,6 +74,18 @@ export function AppRouter() {
             />
           }
         />
+        <Route
+          path="/workspaces/:workspaceId/files"
+          element={
+            <WorkbenchRoute
+              user={user}
+              forcedTab="files"
+              onLogout={() => {
+                api.logout().finally(() => setUser(undefined));
+              }}
+            />
+          }
+        />
         <Route path="/docs" element={<DocsPage />} />
         <Route
           path="*"

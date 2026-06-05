@@ -1,13 +1,59 @@
-import React, { useMemo, type ReactNode } from "react";
+import React, { useMemo, useState, type ReactNode } from "react";
 import { stripInternalAgentOutput } from "./message";
 import { renderInlineMarkdown } from "./markdown-inline";
+import type { CodeRunRecord } from "@/types";
 
-function MarkdownContentComponent({ text }: { text: string }) {
+type RunCodeHandler = (
+  index: number,
+  language: string,
+  code: string,
+) => Promise<CodeRunRecord>;
+
+interface MarkdownContentProps {
+  text: string;
+  onRunCode?: RunCodeHandler;
+  codeRunResults?: Record<string, CodeRunRecord>;
+}
+
+const RUNNABLE_LANGUAGES = new Set([
+  "python",
+  "py",
+  "javascript",
+  "js",
+  "node",
+  "bash",
+  "sh",
+  "shell",
+]);
+
+function looksLikeInternalFence(
+  fenceName: string | undefined,
+  code: string[],
+): boolean {
+  if (fenceName === "status_report" || fenceName === "status") return true;
+  const firstMeaningful = code.find((line) => line.trim().length > 0);
+  if (!firstMeaningful) return false;
+  const first = firstMeaningful.trim().toLowerCase();
+  if (first === "status_report" || first === "status") return true;
+  const body = code.join("\n").toLowerCase();
+  return (
+    body.trim().startsWith("{") &&
+    /"state"\s*:/.test(body) &&
+    /"(?:will|rationale|blockers|priority|confidence)"\s*:/.test(body)
+  );
+}
+
+function MarkdownContentComponent({
+  text,
+  onRunCode,
+  codeRunResults,
+}: MarkdownContentProps) {
   const blocks = useMemo(() => {
     const result: ReactNode[] = [];
     const paragraph: string[] = [];
     const visibleText = stripInternalAgentOutput(text);
     const lines = visibleText.split(/\r?\n/);
+    let codeIndex = 0;
     const flushParagraph = () => {
       if (!paragraph.length) return;
       result.push(
@@ -21,16 +67,31 @@ function MarkdownContentComponent({ text }: { text: string }) {
       const line = lines[index];
       if (line.trim().startsWith("```")) {
         flushParagraph();
+        const fenceName = line
+          .trim()
+          .replace(/^```\s*/, "")
+          .split(/\s+/)[0]
+          ?.toLowerCase();
         const code: string[] = [];
         index += 1;
         while (index < lines.length && !lines[index].trim().startsWith("```")) {
           code.push(lines[index]);
           index += 1;
         }
+        const closed = index < lines.length;
+        if (looksLikeInternalFence(fenceName, code)) continue;
+        const currentCodeIndex = codeIndex;
+        codeIndex += 1;
         result.push(
-          <pre key={`code-${result.length}`}>
-            <code>{code.join("\n")}</code>
-          </pre>,
+          <CodeBlock
+            key={`code-${currentCodeIndex}`}
+            index={currentCodeIndex}
+            language={fenceName || "text"}
+            code={code.join("\n")}
+            streaming={!closed}
+            onRunCode={onRunCode}
+            result={codeRunResults?.[String(currentCodeIndex)]}
+          />,
         );
         continue;
       }
@@ -89,7 +150,7 @@ function MarkdownContentComponent({ text }: { text: string }) {
     }
     flushParagraph();
     return result;
-  }, [text]);
+  }, [codeRunResults, onRunCode, text]);
 
   return (
     <div className="markdown-content">
@@ -98,6 +159,81 @@ function MarkdownContentComponent({ text }: { text: string }) {
       ) : (
         <p className="typing-placeholder">正在组织语言...</p>
       )}
+    </div>
+  );
+}
+
+function CodeBlock({
+  index,
+  language,
+  code,
+  streaming,
+  onRunCode,
+  result,
+}: {
+  index: number;
+  language: string;
+  code: string;
+  streaming: boolean;
+  onRunCode?: RunCodeHandler;
+  result?: CodeRunRecord;
+}) {
+  const [running, setRunning] = useState(false);
+  const [localResult, setLocalResult] = useState<CodeRunRecord | undefined>();
+  const visibleResult = result ?? localResult;
+  const canRun = RUNNABLE_LANGUAGES.has(language) && Boolean(onRunCode);
+  const handleRun = async () => {
+    if (!onRunCode || running || !code.trim()) return;
+    setRunning(true);
+    try {
+      const next = await onRunCode(index, language, code);
+      setLocalResult(next);
+    } finally {
+      setRunning(false);
+    }
+  };
+  return (
+    <div className="markdown-code-block" data-testid="markdown-code-block">
+      <div className="markdown-code-head">
+        <span>{language || "text"}</span>
+        {streaming && <span className="markdown-code-streaming">生成中</span>}
+        {canRun && (
+          <button
+            type="button"
+            className="markdown-code-run"
+            disabled={running || !code.trim()}
+            onClick={handleRun}
+          >
+            {running ? "运行中..." : "运行"}
+          </button>
+        )}
+      </div>
+      <pre>
+        <code>{code}</code>
+      </pre>
+      {visibleResult && <CodeRunResultView result={visibleResult} />}
+    </div>
+  );
+}
+
+function CodeRunResultView({ result }: { result: CodeRunRecord }) {
+  const ok = String(result.status || "").toLowerCase() === "succeeded";
+  return (
+    <div
+      className={`markdown-code-result ${ok ? "succeeded" : "failed"}`}
+      data-testid="code-run-result"
+    >
+      <div className="markdown-code-result-meta">
+        <span>{ok ? "执行成功" : "执行失败"}</span>
+        <span>exit_code: {String(result.exit_code ?? -1)}</span>
+        <span>{String(result.duration_ms ?? 0)}ms</span>
+      </div>
+      {result.stdout ? (
+        <pre className="markdown-code-output">{result.stdout}</pre>
+      ) : null}
+      {result.stderr ? (
+        <pre className="markdown-code-error">{result.stderr}</pre>
+      ) : null}
     </div>
   );
 }

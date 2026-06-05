@@ -5,9 +5,13 @@
 """
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from agent_runtime.context.blackboard import BlackboardManager
 from agent_runtime.context.agent_ctx import AgentContextManager, AgentContext
+from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
+from db.base import Base
+from db.models import Conversation, User
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +143,65 @@ class TestBlackboardManager:
         assert await mgr.get_version("conv_1") == 0
         await mgr.append_history("conv_1", {"type": "test"})
         assert await mgr.get_version("conv_1") == 1
+
+    @pytest.mark.asyncio
+    async def test_sqlalchemy_backend_persists_blackboard_and_agent_context(self, tmp_path):
+        db_url = f"sqlite+aiosqlite:///{(tmp_path / 'runtime_context.db').as_posix()}"
+        engine = create_async_engine(db_url, future=True)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                user = User(
+                    id="runtime-user",
+                    email="runtime-context@example.com",
+                    username="runtime-context",
+                    password_hash="x",
+                    display_name="Runtime Tester",
+                )
+                conversation = Conversation(
+                    id="runtime-conversation",
+                    creator_id=user.id,
+                    chat_type="group",
+                    title="runtime context",
+                    extra={},
+                )
+                session.add_all([user, conversation])
+                await session.commit()
+                conversation_id = conversation.id
+
+                backend = SQLAlchemyBackend(session)
+                manager = BlackboardManager(persistence=backend)
+                await manager.create(conversation_id)
+                await manager.append_history(
+                    conversation_id,
+                    {"type": "user_message", "content": "build dashboard"},
+                )
+                await manager.update_kv(conversation_id, {"last_topic": "dashboard"})
+                await manager.add_summary(
+                    conversation_id,
+                    {"title": "Round 1", "content": "User asked for a dashboard."},
+                )
+                await backend.save_agent_context(
+                    "agent-frontend",
+                    conversation_id,
+                    [{"type": "task", "content": "Implement UI"}],
+                )
+
+            async with factory() as session:
+                backend = SQLAlchemyBackend(session)
+                blackboard = await backend.load_blackboard(conversation_id)
+                context = await backend.load_agent_context("agent-frontend", conversation_id)
+
+            assert blackboard["version"] == 3
+            assert blackboard["raw_history"][0]["content"] == "build dashboard"
+            assert blackboard["kv_state"]["last_topic"] == "dashboard"
+            assert blackboard["structured_summaries"][0]["title"] == "Round 1"
+            assert context == [{"type": "task", "content": "Implement UI"}]
+        finally:
+            await engine.dispose()
 
 
 # ---------------------------------------------------------------------------

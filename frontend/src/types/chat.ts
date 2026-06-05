@@ -48,6 +48,56 @@ export interface Conversation {
   lastMessage: string;
   workflow?: ConversationWorkflow;
   workflow_runtime?: WorkflowRun;
+  generation_status?: "idle" | "running" | "failed" | "cancelled" | string;
+  active_session_id?: string | null;
+  scheduling_strategy?: "workflow" | "tech_lead" | "single_agent" | string;
+  runtime_mode?: "actor" | "legacy" | string;
+  workflow_enabled?: boolean;
+  runtime?: ConversationRuntime;
+}
+
+export interface ConversationRuntimeAgentRun {
+  agent_id: string;
+  agent_name?: string;
+  role?: string;
+  status?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+  output_preview?: string;
+  rationale?: string;
+  current_task?: string;
+}
+
+export interface ConversationRuntimeDecision {
+  round?: number;
+  decision?: string;
+  target?: string;
+  task?: string;
+  rationale?: string;
+  target_agent_ids?: string[];
+  expected_outputs?: string[];
+  requires_review?: boolean;
+  fallback_reason?: string;
+  created_at?: string;
+}
+
+export interface ConversationRuntimeGeneration {
+  id: string;
+  session_id?: string;
+  status?: string;
+  started_at?: string;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
+  error?: string | null;
+  event_counts?: Record<string, number>;
+  decisions?: ConversationRuntimeDecision[];
+  agent_runs?: ConversationRuntimeAgentRun[];
+}
+
+export interface ConversationRuntime {
+  active_generation_id?: string | null;
+  generations?: ConversationRuntimeGeneration[];
 }
 
 export interface MessageAttachment {
@@ -66,6 +116,9 @@ export interface MessageAttachment {
 export interface ToolEventRecord {
   toolName: string;
   toolCallId?: string;
+  run_id?: string;
+  provider?: string;
+  changed_files_count?: number | string;
   status?: string;
   exit_code?: number | string;
   duration_ms?: number | string;
@@ -73,6 +126,18 @@ export interface ToolEventRecord {
   stderr?: string;
   summary?: string;
   error?: string;
+}
+
+export interface CodeRunRecord {
+  status?: string;
+  language?: string;
+  command?: string;
+  stdout?: string;
+  stderr?: string;
+  exit_code?: number | string;
+  duration_ms?: number | string;
+  filename?: string;
+  invocation_id?: string;
 }
 
 export interface ChatMessage {
