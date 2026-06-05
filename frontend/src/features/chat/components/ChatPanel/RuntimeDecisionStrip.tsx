@@ -11,21 +11,28 @@ const { Text } = Typography;
 const STATUS_COLOR: Record<string, string> = {
   queued: "default",
   idle: "default",
+  ready: "default",
   running: "processing",
   paused: "warning",
   waiting: "warning",
   completed: "success",
   failed: "error",
   cancelled: "default",
+  canceled: "default",
 };
 
-export function RuntimeDecisionStrip({ conversation }: { conversation?: Conversation }) {
+export function RuntimeDecisionStrip({
+  conversation,
+}: {
+  conversation?: Conversation;
+}) {
   const generation = latestGeneration(conversation);
   if (!generation) return null;
 
   const decision = latestDecision(generation);
   const agentRuns = generation.agent_runs || [];
   const status = effectiveGenerationStatus(conversation, generation);
+  const agentNameMap = buildAgentNameMap(conversation);
   const isVisible =
     decision ||
     agentRuns.some((item) => item.status && item.status !== "queued") ||
@@ -38,21 +45,36 @@ export function RuntimeDecisionStrip({ conversation }: { conversation?: Conversa
         <Tag color={status === "running" ? "processing" : "default"}>
           {modeLabel(conversation)} · {status}
         </Tag>
-        {decision && <DecisionTag decision={decision} />}
+        {decision && (
+          <DecisionTag decision={decision} agentNameMap={agentNameMap} />
+        )}
         {agentRuns.slice(0, 5).map((run) => (
-          <AgentRunTag key={run.agent_id} run={run} />
+          <AgentRunTag
+            key={run.agent_id}
+            run={run}
+            agentNameMap={agentNameMap}
+          />
         ))}
-        {agentRuns.length > 5 && <Text type="secondary">等 {agentRuns.length} 个 Agent</Text>}
+        {agentRuns.length > 5 && (
+          <Text type="secondary">等 {agentRuns.length} 个 Agent</Text>
+        )}
       </Space>
     </div>
   );
 }
 
-function DecisionTag({ decision }: { decision: ConversationRuntimeDecision }) {
-  const targets =
-    decision.target_agent_ids?.length
-      ? decision.target_agent_ids.map((item) => item.slice(0, 8)).join(", ")
-      : decision.target?.slice(0, 8);
+function DecisionTag({
+  decision,
+  agentNameMap,
+}: {
+  decision: ConversationRuntimeDecision;
+  agentNameMap: Map<string, string>;
+}) {
+  const targets = decision.target_agent_ids?.length
+    ? decision.target_agent_ids.map((item) => agentLabel(item, agentNameMap)).join(", ")
+    : decision.target
+      ? agentLabel(decision.target, agentNameMap)
+      : undefined;
   const label = [
     decision.round ? `第 ${decision.round} 轮` : "",
     decision.decision || "wait",
@@ -63,11 +85,14 @@ function DecisionTag({ decision }: { decision: ConversationRuntimeDecision }) {
   const detail = [
     decision.rationale ? `原因：${decision.rationale}` : "",
     decision.task ? `任务：${decision.task}` : "",
-    decision.expected_outputs?.length ? `期望：${decision.expected_outputs.join("、")}` : "",
+    decision.expected_outputs?.length
+      ? `期望：${decision.expected_outputs.join("、")}`
+      : "",
     decision.fallback_reason ? `回退：${decision.fallback_reason}` : "",
   ]
     .filter(Boolean)
     .join("\n");
+
   return (
     <Tooltip title={detail || "Team Leader 调度决策"}>
       <Tag color="blue">{label}</Tag>
@@ -75,9 +100,15 @@ function DecisionTag({ decision }: { decision: ConversationRuntimeDecision }) {
   );
 }
 
-function AgentRunTag({ run }: { run: ConversationRuntimeAgentRun }) {
+function AgentRunTag({
+  run,
+  agentNameMap,
+}: {
+  run: ConversationRuntimeAgentRun;
+  agentNameMap: Map<string, string>;
+}) {
   const status = String(run.status || "queued").toLowerCase();
-  const name = run.agent_name || run.agent_id.slice(0, 8);
+  const name = run.agent_name || agentLabel(run.agent_id, agentNameMap);
   const title = [
     run.current_task ? `任务：${run.current_task}` : "",
     run.rationale ? `说明：${run.rationale}` : "",
@@ -101,7 +132,34 @@ function modeLabel(conversation?: Conversation): string {
   return conversation?.workflow_enabled ? "画布执行" : "自动组织";
 }
 
-function latestGeneration(conversation?: Conversation): ConversationRuntimeGeneration | undefined {
+function buildAgentNameMap(conversation?: Conversation): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const participant of conversation?.participants || []) {
+    if (!participant.agent_id) continue;
+    map.set(
+      participant.agent_id,
+      participant.agent_name ||
+        participant.nickname ||
+        participant.agent_id.slice(0, 8),
+    );
+  }
+  return map;
+}
+
+function agentLabel(agentId: string, agentNameMap: Map<string, string>): string {
+  if (
+    agentId === "team_leader" ||
+    agentId === "scheduler" ||
+    agentId.startsWith("team_lea")
+  ) {
+    return "Team Leader";
+  }
+  return agentNameMap.get(agentId) || agentId.slice(0, 8);
+}
+
+function latestGeneration(
+  conversation?: Conversation,
+): ConversationRuntimeGeneration | undefined {
   const generations = conversation?.runtime?.generations || [];
   return generations.length ? generations[generations.length - 1] : undefined;
 }
@@ -122,7 +180,9 @@ function effectiveGenerationStatus(
   return generationStatus || "idle";
 }
 
-function latestDecision(generation: ConversationRuntimeGeneration): ConversationRuntimeDecision | undefined {
+function latestDecision(
+  generation: ConversationRuntimeGeneration,
+): ConversationRuntimeDecision | undefined {
   const decisions = generation.decisions || [];
   return decisions.length ? decisions[decisions.length - 1] : undefined;
 }

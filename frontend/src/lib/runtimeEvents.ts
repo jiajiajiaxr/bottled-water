@@ -42,6 +42,7 @@ export function applyRuntimeEvent(
     const agentId = agentIdFromPayload(payload);
     if (agentId) {
       const run = upsertAgentRun(generation, agentId);
+      run.agent_name = stringOrUndefined(payload.agent_name) || run.agent_name;
       run.status = stringOrUndefined(payload.state) || run.status;
       run.current_task = stringOrUndefined(payload.task) || run.current_task;
       if (run.status === "running") run.started_at ||= new Date().toISOString();
@@ -57,6 +58,8 @@ export function applyRuntimeEvent(
     const report = payload.report as Record<string, unknown> | undefined;
     if (agentId) {
       const run = upsertAgentRun(generation, agentId);
+      run.agent_name =
+        stringOrUndefined(payload.agent_name ?? report?.agent_name) || run.agent_name;
       run.status = stringOrUndefined(report?.state) || "completed";
       run.output_preview = stringOrUndefined(payload.work_product) || run.output_preview;
       run.rationale = stringOrUndefined(report?.rationale) || run.rationale;
@@ -68,6 +71,7 @@ export function applyRuntimeEvent(
     const agentId = agentIdFromPayload(payload);
     if (agentId) {
       const run = upsertAgentRun(generation, agentId);
+      run.agent_name = stringOrUndefined(payload.agent_name) || run.agent_name;
       run.status = "failed";
       run.error = stringOrUndefined(payload.error) || "Agent failed";
       run.completed_at ||= new Date().toISOString();

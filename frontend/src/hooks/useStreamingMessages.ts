@@ -24,9 +24,9 @@ function samePersistedMessage(left: ChatMessage, right: ChatMessage): boolean {
 
 function streamKey(payload: Record<string, unknown>): string {
   return String(
-    payload.agent_id ||
-      payload.agent_message_id ||
+    payload.agent_message_id ||
       payload.message_id ||
+      payload.agent_id ||
       payload.sender_id ||
       "",
   );
@@ -61,6 +61,41 @@ function isActiveConversation(conversationId: string) {
   return useConversationStore.getState().activeId === conversationId;
 }
 
+function agentDisplayName(
+  conversationId: string,
+  agentId: string,
+  payload: Record<string, unknown>,
+): string {
+  const explicit = String(payload.agent_name || payload.sender_name || payload.name || "");
+  if (explicit) return explicit;
+  const conversation = useConversationStore
+    .getState()
+    .conversations.find((item) => item.id === conversationId);
+  const participant = conversation?.participants.find(
+    (item) => item.agent_id === agentId,
+  );
+  return participant?.agent_name || participant?.nickname || "Agent";
+}
+
+function mergeStreamText(current: string, incoming: string): string {
+  if (!incoming) return current;
+  if (!current) return incoming;
+  if (incoming === current || current.endsWith(incoming)) return current;
+  if (incoming.startsWith(current)) return incoming;
+  return `${current}${incoming}`;
+}
+
+function sameTextMessage(left: ChatMessage, right: ChatMessage): boolean {
+  if (left.kind !== "text" || right.kind !== "text") return false;
+  if (left.conversationId !== right.conversationId) return false;
+  if (left.role !== right.role) return false;
+  const sameSender =
+    Boolean(left.sender_id && left.sender_id === right.sender_id) ||
+    Boolean(left.rawContent?.agent_id && left.rawContent.agent_id === right.sender_id) ||
+    left.author === right.author;
+  return sameSender && left.content.trim() === right.content.trim();
+}
+
 /**
  * 管理正在流式生成的 assistant 气泡。
  *
@@ -84,17 +119,32 @@ export function useStreamingMessages(conversationId?: string) {
     const next = new Map<string, ChatMessage>();
     for (const [key, message] of streamingMessages) {
       if (message.conversationId === conversationId) {
-        next.set(agentKeyFromScopedKey(key), message);
+        const visibleKey = agentKeyFromScopedKey(key);
+        next.set(visibleKey, message);
+
+        const agentId = String(message.rawContent?.agent_id || "");
+        if (agentId && !next.has(agentId)) {
+          next.set(agentId, message);
+        }
       }
     }
     return next;
   }, [conversationId, streamingMessages]);
 
   const activeDisplayOrder = useMemo(
-    () =>
-      displayOrder
-        .filter((key) => streamingMessages.get(key)?.conversationId === conversationId)
-        .map(agentKeyFromScopedKey),
+    () => {
+      const keys: string[] = [];
+      const seen = new Set<string>();
+      for (const key of displayOrder) {
+        const message = streamingMessages.get(key);
+        if (message?.conversationId !== conversationId) continue;
+        const visibleKey = agentKeyFromScopedKey(key);
+        if (seen.has(visibleKey)) continue;
+        seen.add(visibleKey);
+        keys.push(visibleKey);
+      }
+      return keys;
+    },
     [conversationId, displayOrder, streamingMessages],
   );
 
@@ -120,12 +170,7 @@ export function useStreamingMessages(conversationId?: string) {
     const agentId = streamKey(payload) || agentKeyFromScopedKey(scopedKeyValue);
     if (!targetConversationId || !agentId) return undefined;
 
-    const author = String(
-      payload.agent_name ||
-        payload.sender_name ||
-        payload.name ||
-        "Agent",
-    );
+    const author = agentDisplayName(targetConversationId, agentId, payload);
     const msg = makeMessage({
       conversationId: targetConversationId,
       role: "assistant",
@@ -155,9 +200,10 @@ export function useStreamingMessages(conversationId?: string) {
       if (!existing) return prev;
 
       const next = new Map(prev);
-      const rawText =
-        String(existing.rawContent?._streamRawText || existing.content || "") +
-        token;
+      const rawText = mergeStreamText(
+        String(existing.rawContent?._streamRawText || existing.content || ""),
+        token,
+      );
 
       next.set(key, {
         ...existing,
@@ -260,9 +306,8 @@ export function useStreamingMessages(conversationId?: string) {
     onMessageStart: (payload) => {
       const agentId = streamKey(payload);
       const key = scopedStreamKey(conversationId, payload);
-      const author = String(
-        payload.agent_name || payload.sender_name || "Agent",
-      );
+      const targetConversationId = conversationOf(conversationId, payload);
+      const author = agentDisplayName(targetConversationId, agentId, payload);
 
       if (!agentId || !key) return;
 
@@ -271,7 +316,7 @@ export function useStreamingMessages(conversationId?: string) {
 
         const next = new Map(prev);
         const msg = makeMessage({
-          conversationId: conversationOf(conversationId, payload),
+          conversationId: targetConversationId,
           role: "assistant",
           kind: "text",
           author,
@@ -374,7 +419,7 @@ export function useStreamingMessages(conversationId?: string) {
       if (!isActiveConversation(message.conversationId)) return;
       updateMessages((prev) => {
         const duplicateIndex = prev.findIndex((item) =>
-          samePersistedMessage(item, message),
+          samePersistedMessage(item, message) || sameTextMessage(item, message),
         );
         if (duplicateIndex >= 0) {
           const next = [...prev];

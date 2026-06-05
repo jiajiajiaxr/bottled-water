@@ -795,6 +795,7 @@ class AgentLoop:
                         "agent.token",
                         {
                             "agent_id": self.agent.id,
+                            "agent_name": self.agent.name,
                             "token": visible_delta,
                         },
                     )
@@ -805,6 +806,7 @@ class AgentLoop:
                     "agent.thinking",
                     {
                         "agent_id": self.agent.id,
+                        "agent_name": self.agent.name,
                         "thinking": chunk.reasoning,
                     },
                 )
