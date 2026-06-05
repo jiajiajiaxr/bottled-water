@@ -133,17 +133,14 @@ async def test_session_manager_recreates_cached_session_when_strategy_changes() 
 
 
 @pytest.mark.asyncio
-async def test_runtime_tool_executor_publishes_persisted_artifact_preview_message() -> None:
+async def test_runtime_tool_executor_publishes_artifact_created_and_defers_preview_card() -> None:
     emitted: list[object] = []
     artifact = SimpleNamespace(id="artifact-1", conversation_id="conv-1")
-    preview = SimpleNamespace(id="preview-1", conversation_id="conv-1", content_type="preview_card")
 
     class FakeToolDb:
         async def get(self, model, record_id: str):
             if record_id == "artifact-1":
                 return artifact
-            if record_id == "preview-1":
-                return preview
             return None
 
         async def scalar(self, _query):
@@ -172,9 +169,8 @@ async def test_runtime_tool_executor_publishes_persisted_artifact_preview_messag
 
     with patch("app.services.agents.async_tool_loop.execute_tool_by_name", new=fake_execute_tool_by_name):
         with patch("app.services.runtime_service.artifact_to_dict", return_value={"id": "artifact-1"}):
-            with patch("app.services.runtime_service.message_to_dict", return_value={"id": "preview-1", "kind": "preview_card"}):
-                with patch("app.services.runtime_service.WebSocketSink.emit", new=fake_emit):
-                    await adapter.execute(SimpleNamespace(tool_name="artifact.create_pdf", parameters={}))
+            with patch("app.services.runtime_service.WebSocketSink.emit", new=fake_emit):
+                await adapter.execute(SimpleNamespace(tool_name="artifact.create_pdf", parameters={}))
 
-    assert [event.type for event in emitted] == ["artifact:created", "message:new"]
-    assert emitted[-1].payload["id"] == "preview-1"
+    assert [event.type for event in emitted] == ["artifact:created"]
+    assert emitted[-1].payload["id"] == "artifact-1"

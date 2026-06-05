@@ -6,6 +6,21 @@ import { StreamAssistantHandlers } from "../types/messages";
 
 export type StreamState = "idle" | "streaming" | "done" | "error";
 
+function artifactIdOf(message: ChatMessage): string {
+  const raw = message.rawContent;
+  if (!raw || typeof raw !== "object") return "";
+  const value = raw.artifact_id || raw.artifactId;
+  return typeof value === "string" ? value : "";
+}
+
+function samePersistedMessage(left: ChatMessage, right: ChatMessage): boolean {
+  if (left.id === right.id) return true;
+  if (left.kind !== "preview_card" || right.kind !== "preview_card") return false;
+  const leftArtifactId = artifactIdOf(left);
+  const rightArtifactId = artifactIdOf(right);
+  return Boolean(leftArtifactId && leftArtifactId === rightArtifactId);
+}
+
 function streamKey(payload: Record<string, unknown>): string {
   return String(
     payload.agent_id ||
@@ -118,6 +133,12 @@ export function useStreamingMessages(conversationId?: string) {
     updateMessageVersions(() => new Map());
   };
 
+  const clearPendingStreams = () => {
+    setStreamingMessages(new Map());
+    setDisplayOrder([]);
+    updateMessageVersions(() => new Map());
+  };
+
   const streamHandlers: StreamAssistantHandlers = {
     onMessageStart: (payload) => {
       const agentId = streamKey(payload);
@@ -223,7 +244,14 @@ export function useStreamingMessages(conversationId?: string) {
         );
       }
       updateMessages((prev) => {
-        if (prev.some((item) => item.id === message.id)) return prev;
+        const duplicateIndex = prev.findIndex((item) =>
+          samePersistedMessage(item, message),
+        );
+        if (duplicateIndex >= 0) {
+          const next = [...prev];
+          next[duplicateIndex] = message;
+          return next;
+        }
         return [...prev, message];
       });
     },
@@ -236,5 +264,6 @@ export function useStreamingMessages(conversationId?: string) {
     streamingMessages,
     displayOrder,
     streamHandlers,
+    clearPendingStreams,
   };
 }

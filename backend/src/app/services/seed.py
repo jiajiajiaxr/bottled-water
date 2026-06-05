@@ -28,6 +28,7 @@ from db.models import (
 from app.services.tools.catalog import sync_builtin_tool_definitions
 from app.services.tools.permissions import normalize_tool_names
 from app.services.tools.toolboxes import get_official_toolbox
+from app.services.demo_cleanup import cleanup_acceptance_residue
 
 
 DEFAULT_AGENTS = [
@@ -224,8 +225,9 @@ async def ensure_seed_data(db: AsyncSession) -> User:
         db.add(UserSettings(user_id=user.id, theme="light"))
 
     await db.run_sync(sync_builtin_tool_definitions)
+    await db.run_sync(cleanup_acceptance_residue)
 
-    agents = (await db.scalars(select(Agent))).all()
+    agents = (await db.scalars(select(Agent).where(Agent.deleted_at.is_(None)))).all()
     if not agents:
         for spec in DEFAULT_AGENTS:
             db.add(
@@ -255,7 +257,7 @@ async def ensure_seed_data(db: AsyncSession) -> User:
                 )
             )
         await db.flush()
-        agents = (await db.scalars(select(Agent))).all()
+        agents = (await db.scalars(select(Agent).where(Agent.deleted_at.is_(None)))).all()
     else:
         existing_names = {agent.name for agent in agents}
         for spec in DEFAULT_AGENTS:
@@ -287,7 +289,7 @@ async def ensure_seed_data(db: AsyncSession) -> User:
                     )
                 )
         await db.flush()
-        agents = (await db.scalars(select(Agent))).all()
+        agents = (await db.scalars(select(Agent).where(Agent.deleted_at.is_(None)))).all()
         spec_by_type = {spec["type"]: spec for spec in DEFAULT_AGENTS}
         spec_by_name = {spec["name"]: spec for spec in DEFAULT_AGENTS}
         for agent in agents:

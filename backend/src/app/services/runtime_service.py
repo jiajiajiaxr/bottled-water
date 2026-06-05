@@ -25,7 +25,7 @@ from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink, WebSocketSink
 from app.services.chat.scheduling import resolve_scheduling_strategy
 from app.services.model_config_resolver import normalize_provider_type
-from app.services.serialization import artifact_to_dict, message_to_dict
+from app.services.serialization import artifact_to_dict
 from app.services.tools.permissions import normalize_tool_names
 from app.services.tools.toolboxes import get_official_toolbox
 from common.logger import get_logger
@@ -413,20 +413,10 @@ class _ToolExecutorAdapter(ToolExecutor):
         if artifact:
             await sink.emit(RuntimeEvent(type="artifact:created", payload=artifact_to_dict(artifact)))
 
-        preview_id = str(output.get("preview_message_id") or "")
-        preview = await db.get(Message, preview_id) if preview_id else None
-        if not preview and artifact:
-            preview = await db.scalar(
-                select(Message)
-                .where(
-                    Message.conversation_id == artifact.conversation_id,
-                    Message.content_type == "preview_card",
-                    Message.deleted_at.is_(None),
-                )
-                .order_by(Message.created_at.desc())
-            )
-        if preview:
-            await sink.emit(RuntimeEvent(type="message:new", payload=message_to_dict(preview)))
+        # The preview card is persisted by the artifact tool itself. Do not
+        # emit it here: agent_runtime will publish persisted preview cards
+        # after the agent report message so the chat order stays natural
+        # (assistant reply first, artifact card second).
 
 
 class SingleAgentOrchestrator:

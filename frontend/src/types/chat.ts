@@ -30,6 +30,7 @@ export interface Participant {
 export interface Conversation {
   id: string;
   chat_type?: "single" | "group";
+  group_number?: string | null;
   title: string;
   participants: Participant[];
   participant_count?: number;

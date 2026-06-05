@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from db.models import (
@@ -34,6 +35,7 @@ from db.models import (
     WorkspaceMember,
     WorkflowRun,
 )
+from app.services.conversation_identity import conversation_group_number
 
 
 def iso(value: datetime | None) -> str | None:
@@ -66,6 +68,7 @@ def user_to_dict(user: User) -> dict[str, Any]:
         "username": user.username,
         "name": user.display_name,
         "display_name": user.display_name,
+        "avatar": user.avatar_url,
         "avatar_url": user.avatar_url,
         "role": "demo" if user.username == "demo" else user.role,
         "default_model_config_id": extra.get("default_model_config_id"),
@@ -192,6 +195,7 @@ def conversation_to_dict(conversation: Conversation) -> dict[str, Any]:
         "conversation_id": conversation.id,
         "chat_type": conversation.chat_type,
         "type": conversation.chat_type,
+        "group_number": conversation_group_number(conversation),
         "title": conversation.title,
         "description": conversation.description,
         "workspace_id": conversation.extra.get("workspace_id") if isinstance(conversation.extra, dict) else None,
@@ -326,11 +330,35 @@ def subtask_to_dict(subtask: Subtask) -> dict[str, Any]:
 
 
 def artifact_to_dict(artifact: Artifact) -> dict[str, Any]:
-    files = artifact.content.get("files") or {}
-    html = files.get("index.html") or artifact.content.get("html") or ""
+    content = artifact.content if isinstance(artifact.content, dict) else {}
+    files = content.get("files") or {}
+    html = files.get("index.html") or content.get("preview_html") or content.get("html") or ""
     first_code = next(iter(files.values()), html)
-    previous_files = artifact.content.get("previous_files") or {}
-    previous_code = previous_files.get("index.html") or artifact.content.get("previous_html") or first_code
+    previous_files = content.get("previous_files") or {}
+    previous_code = previous_files.get("index.html") or content.get("previous_html") or first_code
+    source_file = content.get("export_file") or content.get("source_file")
+    source_file = source_file if isinstance(source_file, dict) else {}
+    source_filename = str(source_file.get("filename") or "")
+    artifact_format = str(
+        content.get("format")
+        or (content.get("tool_output") or {}).get("format")
+        or source_file.get("format")
+        or Path(source_filename).suffix.lstrip(".")
+        or ""
+    ).lower()
+    filename = str(
+        content.get("filename")
+        or (content.get("tool_output") or {}).get("filename")
+        or source_filename
+        or artifact.name
+    )
+    media_type = str(
+        content.get("media_type")
+        or (content.get("tool_output") or {}).get("media_type")
+        or source_file.get("media_type")
+        or artifact.mime_type
+        or ""
+    )
     return {
         "id": artifact.id,
         "artifact_id": artifact.id,
@@ -346,7 +374,11 @@ def artifact_to_dict(artifact: Artifact) -> dict[str, Any]:
         "status": artifact.status,
         "storage_url": artifact.storage_url,
         "preview_url": f"/api/v1/artifacts/{artifact.id}/preview",
-        "content": artifact.content,
+        "export_url": f"/api/v1/artifacts/{artifact.id}/export" + (f"?format={artifact_format}" if artifact_format else ""),
+        "format": artifact_format,
+        "filename": filename,
+        "media_type": media_type,
+        "content": content,
         "files": files,
         "code": html or first_code,
         "previousCode": previous_code,

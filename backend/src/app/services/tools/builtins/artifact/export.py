@@ -162,13 +162,22 @@ def _pptx_bytes(title: str, body: str) -> bytes:
 
 
 def default_export_format(artifact: Artifact) -> str:
-    content_format = _normalize_export_format((artifact.content or {}).get("format"))
+    content = artifact.content or {}
+    content_format = _normalize_export_format(content.get("format"))
     if content_format in DOWNLOAD_FORMATS:
         return content_format
-    tool_format = ((artifact.content or {}).get("tool_output") or {}).get("format")
+    tool_format = (content.get("tool_output") or {}).get("format")
     tool_format = _normalize_export_format(tool_format)
     if tool_format in DOWNLOAD_FORMATS:
         return tool_format
+    descriptor = content.get("export_file") or content.get("source_file")
+    if isinstance(descriptor, dict):
+        descriptor_format = _normalize_export_format(
+            descriptor.get("format")
+            or Path(str(descriptor.get("filename") or "")).suffix.lstrip(".")
+        )
+        if descriptor_format in DOWNLOAD_FORMATS:
+            return descriptor_format
     return {
         "document": "docx",
         "spreadsheet": "xlsx",
@@ -216,7 +225,13 @@ def _stored_artifact_export(artifact: Artifact, fmt: str) -> ArtifactExport | No
     if fmt not in BINARY_ARTIFACT_FORMATS and fmt != content.get("format"):
         return None
     descriptor = content.get("export_file") or content.get("source_file")
-    if not isinstance(descriptor, dict) or descriptor.get("format") != fmt:
+    if not isinstance(descriptor, dict):
+        return None
+    descriptor_format = _normalize_export_format(
+        descriptor.get("format")
+        or Path(str(descriptor.get("filename") or "")).suffix.lstrip(".")
+    )
+    if descriptor_format != fmt:
         return None
     path_value = descriptor.get("storage_path")
     if not path_value:

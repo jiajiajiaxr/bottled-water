@@ -316,14 +316,7 @@ export function useWorkflowStudio({
 
   const deleteSelection = async () => {
     if (!workflow || workflowGenerating) return;
-    const protectedIds = new Set(
-      workflow.nodes
-        .filter((node) => ["start", "end"].includes(workflowNodeType(node)))
-        .map((node) => node.id),
-    );
-    const removableNodeIds = new Set(
-      selectedNodeIds.filter((id) => !protectedIds.has(id)),
-    );
+    const removableNodeIds = new Set(selectedNodeIds);
     const edgeIds = new Set(selectedEdgeIds);
     const removedAgentIds = new Set<string>();
     for (const nodeId of removableNodeIds) {

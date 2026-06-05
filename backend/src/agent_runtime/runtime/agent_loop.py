@@ -249,12 +249,13 @@ class AgentLoop:
                     # tool_call 帧存储为 dict，尝试恢复
                     tc = frame.content
                     if isinstance(tc, dict):
+                        name = (
+                            tc.get("tool_name")
+                            or tc.get("function", {}).get("name")
+                            or "unknown"
+                        )
                         messages.append(
-                            ChatMessage(
-                                role="assistant",
-                                content="",
-                                tool_calls=[tc],
-                            )
+                            ChatMessage(role="assistant", content=f"历史工具调用：{name}")
                         )
                 elif frame.frame_type == "tool_result":
                     # tool_result 帧存储为 dict 或字符串
@@ -262,13 +263,12 @@ class AgentLoop:
                     if isinstance(tr, dict):
                         messages.append(
                             ChatMessage(
-                                role="tool",
-                                content=str(tr.get("result", "")),
-                                name=tr.get("tool", "unknown"),
+                                role="assistant",
+                                content=f"历史工具结果 {tr.get('tool', 'unknown')}：{tr.get('result', tr.get('error', ''))}",
                             )
                         )
                     else:
-                        messages.append(ChatMessage(role="tool", content=str(tr)))
+                        messages.append(ChatMessage(role="assistant", content=f"历史工具结果：{tr}"))
 
         # 构建用户提示词
         user_prompt = self._build_prompt(task, blackboard_view)
@@ -294,6 +294,7 @@ class AgentLoop:
         tool_events: List[Dict[str, Any]] = []
         tool_round = 0
         forced_artifact_tool_name: str | None = None
+        executed_artifact_tools: set[str] = set()
 
         while tool_round < self.MAX_TOOL_ROUNDS:
             tool_round += 1
@@ -318,6 +319,17 @@ class AgentLoop:
 
             content = response.content or ""
             tool_calls = response.tool_calls
+            if tool_calls and self._artifact_tool_succeeded(tool_results):
+                artifact_tool_name = self._artifact_tool_name(tool_results) or forced_artifact_tool_name
+                if self._only_artifact_create_calls(tool_calls):
+                    logger.info(
+                        "Agent skipped duplicate artifact tool calls",
+                        agent_id=self.agent.id,
+                        tool=artifact_tool_name,
+                    )
+                    tool_calls = None
+                    if not content.strip() or self._looks_like_artifact_argument_fragment(content):
+                        content = self._artifact_completion_message(artifact_tool_name)
             if not tool_calls:
                 forced_tool_call = (
                     self._forced_artifact_tool_call(task, tools)
@@ -338,6 +350,23 @@ class AgentLoop:
                 elif self._artifact_tool_succeeded(tool_results):
                     if not content.strip() or self._looks_like_artifact_argument_fragment(content):
                         content = self._artifact_completion_message(forced_artifact_tool_name)
+
+            if tool_calls:
+                tool_calls = self._dedupe_artifact_tool_calls(tool_calls)
+                tool_calls = self._drop_executed_artifact_tool_calls(
+                    tool_calls,
+                    executed_artifact_tools,
+                )
+                if not tool_calls:
+                    logger.info(
+                        "Agent skipped already executed artifact tool calls",
+                        agent_id=self.agent.id,
+                    )
+                    tool_calls = None
+                    if not content.strip() or self._looks_like_artifact_argument_fragment(content):
+                        content = self._artifact_completion_message(
+                            forced_artifact_tool_name or self._artifact_tool_name(tool_results)
+                        )
 
             # 如果没有工具调用，说明 Agent 已完成本轮工作
             if not tool_calls:
@@ -418,8 +447,16 @@ class AgentLoop:
                         )
 
                 tool_name = tc.get("function", {}).get("name", "unknown")
+                if (
+                    str(tool_name).startswith("artifact.create_")
+                    and isinstance(result, ToolResult)
+                    and result.success
+                ):
+                    executed_artifact_tools.add(str(tool_name))
+                    forced_artifact_tool_name = str(tool_name)
                 tool_results.append(
                     {
+                        "call_id": tool_call.call_id,
                         "tool": tool_name,
                         "success": result.success if isinstance(result, ToolResult) else True,
                         "error": result.error if isinstance(result, ToolResult) else None,
@@ -443,6 +480,7 @@ class AgentLoop:
                     role="tool",
                     content=str(result.result if isinstance(result, ToolResult) else result),
                     name=tool_name,
+                    tool_call_id=tool_call.call_id,
                 )
                 messages.append(tool_msg)
 
@@ -510,6 +548,50 @@ class AgentLoop:
             and result.get("success") is True
             for result in tool_results
         )
+
+    @staticmethod
+    def _artifact_tool_name(tool_results: List[Dict[str, Any]]) -> str | None:
+        for result in reversed(tool_results):
+            tool_name = str(result.get("tool") or "")
+            if tool_name.startswith("artifact.create_") and result.get("success") is True:
+                return tool_name
+        return None
+
+    @staticmethod
+    def _only_artifact_create_calls(tool_calls: List[Dict[str, Any]]) -> bool:
+        if not tool_calls:
+            return False
+        for tool_call in tool_calls:
+            name = str(tool_call.get("function", {}).get("name") or "")
+            if not name.startswith("artifact.create_"):
+                return False
+        return True
+
+    @staticmethod
+    def _dedupe_artifact_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        seen_artifact_tools: set[str] = set()
+        deduped: List[Dict[str, Any]] = []
+        for tool_call in tool_calls:
+            name = str(tool_call.get("function", {}).get("name") or "")
+            if name.startswith("artifact.create_"):
+                if name in seen_artifact_tools:
+                    continue
+                seen_artifact_tools.add(name)
+            deduped.append(tool_call)
+        return deduped
+
+    @staticmethod
+    def _drop_executed_artifact_tool_calls(
+        tool_calls: List[Dict[str, Any]],
+        executed_artifact_tools: set[str],
+    ) -> List[Dict[str, Any]]:
+        if not executed_artifact_tools:
+            return tool_calls
+        return [
+            tool_call
+            for tool_call in tool_calls
+            if str(tool_call.get("function", {}).get("name") or "") not in executed_artifact_tools
+        ]
 
     @staticmethod
     def _looks_like_artifact_argument_fragment(content: str) -> bool:

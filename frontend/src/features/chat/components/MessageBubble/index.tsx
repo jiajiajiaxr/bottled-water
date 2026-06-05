@@ -6,6 +6,7 @@ import {
   EyeOutlined,
   LoadingOutlined,
   MessageOutlined,
+  RobotOutlined,
 } from "@ant-design/icons";
 import {
   Avatar,
@@ -53,6 +54,10 @@ function MessageBubbleComponent({
 }: MessageBubbleProps) {
   const author = message.author || "未知";
   const isUser = message.role === "user";
+  const agentAvatarUrl =
+    typeof message.rawContent?.agent_avatar_url === "string"
+      ? message.rawContent.agent_avatar_url
+      : undefined;
   const isEvent =
     message.kind === "event" ||
     message.role === "system" ||
@@ -131,7 +136,11 @@ function MessageBubbleComponent({
   if (message.kind === "preview_card") {
     return (
       <div className="message-row from-agent">
-        <Avatar className="message-avatar">{author.slice(0, 1)}</Avatar>
+        <Avatar
+          className="message-avatar"
+          src={agentAvatarUrl}
+          icon={!agentAvatarUrl ? <RobotOutlined /> : undefined}
+        />
         <button
           type="button"
           className="message-card preview-message-card preview-card-button"
@@ -183,7 +192,13 @@ function MessageBubbleComponent({
   return (
     <>
       <div className={`message-row ${isUser ? "from-user" : "from-agent"}`}>
-        <Avatar className="message-avatar">{author.slice(0, 1)}</Avatar>
+        <Avatar
+          className="message-avatar"
+          src={!isUser ? agentAvatarUrl : undefined}
+          icon={!isUser && !agentAvatarUrl ? <RobotOutlined /> : undefined}
+        >
+          {isUser ? author.slice(0, 1) : undefined}
+        </Avatar>
         <div className="message-card">
           <Flex justify="space-between" align="center" gap={12}>
             <Space>

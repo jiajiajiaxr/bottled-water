@@ -27,7 +27,12 @@ def upload_nodes(
     for asset in assets:
         if _skip_asset(asset, user, workspace_id, conversation_ids):
             continue
-        fallback = f"uploads/legacy/{asset.original_filename or asset.filename}"
+        fallback_name = asset.original_filename or asset.filename
+        fallback = (
+            f"uploads/conversations/{asset.conversation_id}/{fallback_name}"
+            if asset.conversation_id
+            else f"uploads/legacy/{fallback_name}"
+        )
         display_path = _relative_or_compat(root, Path(asset.storage_path), fallback)
         if should_hide_file(asset.original_filename or asset.filename, asset.size):
             continue
@@ -59,7 +64,12 @@ def artifact_nodes(db: Session, workspace_id: str, conversations: list[Conversat
         fmt = content.get("format") or (content.get("tool_output") or {}).get("format") or "html"
         filename = content.get("filename") or f"{artifact.name}.{fmt}"
         folder = str(content.get("workspace_folder") or "").strip("/")
-        artifact_path = f"{folder}/{filename}" if folder else f"artifacts/{artifact.id}/{filename}"
+        if folder:
+            artifact_path = f"{folder}/{filename}"
+        elif artifact.conversation_id:
+            artifact_path = f"artifacts/conversations/{artifact.conversation_id}/{artifact.id}/{filename}"
+        else:
+            artifact_path = f"artifacts/{artifact.id}/{filename}"
         nodes.append(
             _file_node(
                 id=f"artifact:{artifact.id}",

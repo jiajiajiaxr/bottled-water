@@ -306,8 +306,8 @@ export function ConversationSidebar({
       ) : (
         <>
           <div className="sidebar-user">
-            <Avatar size="large">
-              {currentUser.avatar ?? currentUser.name.slice(0, 1)}
+            <Avatar size="large" src={currentUser.avatar_url ?? currentUser.avatar}>
+              {currentUser.name.slice(0, 1)}
             </Avatar>
             <div className="sidebar-user-info">
               <Text strong ellipsis>

@@ -61,6 +61,7 @@ class ConversationSessionManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._generation_ids: dict[str, str] = {}
+        self._pending_preview_message_ids: dict[str, list[str]] = {}
         self._session_factory = session_factory or AsyncSessionLocal
 
     @classmethod
@@ -203,7 +204,8 @@ class ConversationSessionManager:
         if not session:
             raise SessionNotFoundError(f"Conversation {conversation_id} 没有活跃 Session")
 
-        status = session.get_status()["status"]
+        status_info = session.get_status()
+        status = status_info.get("status") or ("running" if status_info.get("running") else "idle")
 
         if status == "running":
             # 运行中：通过 send_message 插队
@@ -215,6 +217,14 @@ class ConversationSessionManager:
         else:
             # 已完成：重新启动 generation
             logger.info("用户输入重启 generation", conversation_id=conversation_id, content_preview=content[:50])
+            task = self._running_tasks.get(conversation_id)
+            if task and not task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+                except asyncio.TimeoutError as exc:
+                    raise SessionAlreadyRunningError(
+                        f"Conversation {conversation_id} is still finishing the previous generation"
+                    ) from exc
             await self.start_generation(conversation_id, content)
 
     async def cancel_generation(self, conversation_id: str) -> bool:
@@ -240,6 +250,7 @@ class ConversationSessionManager:
             await ws_sink.emit(cancel_event)
             generation_id = self._generation_ids.pop(conversation_id, None)
             if generation_id:
+                self._pending_preview_message_ids.pop(generation_id, None)
                 await self._record_generation_event(conversation_id, generation_id, cancel_event)
                 await self._finish_generation(
                     conversation_id,
@@ -290,7 +301,9 @@ class ConversationSessionManager:
         self._session_scheduling_strategies.pop(conversation_id, None)
         self._session_runtime_modes.pop(conversation_id, None)
         self._session_workflow_enabled.pop(conversation_id, None)
-        self._generation_ids.pop(conversation_id, None)
+        generation_id = self._generation_ids.pop(conversation_id, None)
+        if generation_id:
+            self._pending_preview_message_ids.pop(generation_id, None)
         self._locks.pop(conversation_id, None)
 
         if session:
@@ -335,6 +348,7 @@ class ConversationSessionManager:
         generation_id: str,
         event: RuntimeEvent,
     ) -> None:
+        self._collect_preview_message_id(generation_id, event)
         async with self._session_factory() as db:
             await record_generation_event(db, conversation_id, generation_id, event)
             message = await self._persist_agent_report_message(
@@ -344,9 +358,47 @@ class ConversationSessionManager:
                 event,
             )
         if message:
-            await WebSocketSink(conversation_id).emit(
-                RuntimeEvent(type="message:new", payload=message_to_dict(message))
-            )
+            sink = WebSocketSink(conversation_id)
+            await sink.emit(RuntimeEvent(type="message:new", payload=message_to_dict(message)))
+            await self._publish_pending_preview_messages(sink, conversation_id, generation_id)
+
+    def _collect_preview_message_id(self, generation_id: str, event: RuntimeEvent) -> None:
+        if event.type != "agent.tool_result":
+            return
+        payload = event.payload or {}
+        result = payload.get("result") if isinstance(payload, dict) else None
+        if not isinstance(result, dict):
+            return
+        output = result.get("output") if isinstance(result.get("output"), dict) else result
+        if not isinstance(output, dict):
+            return
+        preview_id = str(output.get("preview_message_id") or "")
+        if not preview_id:
+            return
+        pending = self._pending_preview_message_ids.setdefault(generation_id, [])
+        if preview_id not in pending:
+            pending.append(preview_id)
+
+    async def _publish_pending_preview_messages(
+        self,
+        sink: WebSocketSink,
+        conversation_id: str,
+        generation_id: str,
+    ) -> None:
+        preview_ids = self._pending_preview_message_ids.pop(generation_id, [])
+        if not preview_ids:
+            return
+        async with self._session_factory() as db:
+            for preview_id in preview_ids:
+                preview = await db.get(Message, preview_id)
+                if (
+                    not preview
+                    or str(preview.conversation_id) != conversation_id
+                    or preview.content_type != "preview_card"
+                    or preview.deleted_at is not None
+                ):
+                    continue
+                await sink.emit(RuntimeEvent(type="message:new", payload=message_to_dict(preview)))
 
     async def _persist_agent_report_message(
         self,
@@ -355,7 +407,7 @@ class ConversationSessionManager:
         generation_id: str,
         event: RuntimeEvent,
     ) -> Message | None:
-        if event.type != "agent.report":
+        if event.type not in {"agent.report", "system.agent_completed"}:
             return None
         payload = event.payload or {}
         work_product = str(payload.get("work_product") or "").strip()
@@ -366,6 +418,27 @@ class ConversationSessionManager:
         session = self._sessions.get(conversation_id)
         agent = session.agents.get(agent_id) if session and agent_id else None
         agent_name = getattr(agent, "name", None) or str(payload.get("agent_name") or "Agent")
+        if event.type == "system.agent_completed":
+            persisted = await db.scalar(
+                select(Message)
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.sender_type == "agent",
+                    Message.sender_id == agent_id,
+                    Message.content["text"].as_string() == work_product,
+                    Message.deleted_at.is_(None),
+                )
+                .order_by(Message.created_at.desc())
+            )
+            if persisted:
+                conversation = await db.get(Conversation, conversation_id)
+                if conversation:
+                    conversation.last_message_preview = work_product[:300]
+                    conversation.last_message_sender = persisted.sender_name or agent_name
+                    conversation.last_message_at = utcnow()
+                await db.commit()
+                await db.refresh(persisted)
+                return persisted
         existing = await db.scalar(
             select(Message).where(
                 Message.conversation_id == conversation_id,

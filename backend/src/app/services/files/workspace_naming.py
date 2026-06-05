@@ -16,10 +16,11 @@ ROOT_LABELS = {
     "tools": "工具文件",
     "logs": "日志文件",
     "conversations": "会话",
-    "agents": "Agent",
-    "tasks": "任务",
-    "legacy": "兼容文件",
+    "agents": "Agent 输出",
+    "tasks": "任务输出",
+    "legacy": "历史文件",
 }
+
 UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.I,
@@ -44,7 +45,7 @@ def readable_segment(part: str, *, path: str = "") -> str:
         return part
     short_id = part[:8]
     if path.startswith("artifacts/"):
-        return f"产物：{short_id}"
+        return f"产物 {short_id}"
     if path.startswith("uploads/") or path.startswith("files/"):
         return f"上传记录 {short_id}"
     if path.startswith("exports/"):

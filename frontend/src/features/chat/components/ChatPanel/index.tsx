@@ -3,6 +3,7 @@ import {
   CloudUploadOutlined,
   BulbOutlined,
   SendOutlined,
+  StopOutlined,
 } from "@ant-design/icons";
 import {
   App as AntApp,
@@ -51,7 +52,11 @@ export function ChatPanel({
   const [awaitingResponse, setAwaitingResponse] = useState(false);
   const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
   const { message } = AntApp.useApp();
-  const { send, streamingMessages, displayOrder } = useMessageOperations(userName);
+  const { send, cancel, streamingMessages, displayOrder } = useMessageOperations(userName);
+  const localRunningConversationIds = useConversationStore(
+    (s) => s.localRunningConversationIds,
+  );
+  const [stopping, setStopping] = useState(false);
 
   // 从 Conversation Store 读取当前会话的思考模式状态（持久化）
   const thinkingEnabled = useConversationStore((s) =>
@@ -124,6 +129,26 @@ export function ChatPanel({
     setText("");
     setQuoted(undefined);
     setPendingFiles([]);
+  };
+
+  const isWorking = Boolean(
+    active &&
+      (awaitingResponse ||
+        streamingMessages.size > 0 ||
+        localRunningConversationIds.has(active.id) ||
+        active.generation_status === "running" ||
+        active.generation_status === "executing"),
+  );
+
+  const stopResponse = async () => {
+    if (!active || stopping) return;
+    setStopping(true);
+    try {
+      await cancel(active.id);
+      setAwaitingResponse(false);
+    } finally {
+      setStopping(false);
+    }
   };
 
   const copy = useCallback(
@@ -203,6 +228,12 @@ export function ChatPanel({
       setAwaitingResponse(false);
     }
   }, [streamingMessages.size, displayOrder.length, awaitingResponse]);
+
+  useEffect(() => {
+    if (!active || active.generation_status === "idle") {
+      setAwaitingResponse(false);
+    }
+  }, [active?.id, active?.generation_status]);
 
   const renderMessageBubble = (item: ChatMessage) => {
     return (
@@ -332,13 +363,15 @@ export function ChatPanel({
               </Button>
             </Tooltip>
             <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={submit}
+              type={isWorking ? "default" : "primary"}
+              danger={isWorking}
+              icon={isWorking ? <StopOutlined /> : <SendOutlined />}
+              loading={stopping}
+              onClick={isWorking ? stopResponse : submit}
               disabled={!active}
               data-testid="send-message"
             >
-              发送
+              {isWorking ? "\u505c\u6b62" : "\u53d1\u9001"}
             </Button>
           </Space>
         </Flex>

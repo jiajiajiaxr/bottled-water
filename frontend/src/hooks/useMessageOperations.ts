@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { api } from "@/api";
 import { disconnectConversationWS } from "@/api/websocket";
 import {
@@ -18,11 +18,20 @@ export function useMessageOperations(userName?: string) {
   const { activeId } = useConversationStore();
   const { updateMessages } = useMessageStore();
   const streaming = useStreamingMessages(activeId);
+  const pendingSendConversationIds = useRef(new Set<string>());
 
   useEffect(() => {
     return () => {
       if (activeId) {
-        disconnectConversationWS(activeId);
+        const store = useConversationStore.getState();
+        const conversation = store.conversations.find((item) => item.id === activeId);
+        const isRunning =
+          store.localRunningConversationIds.has(activeId) ||
+          conversation?.generation_status === "running" ||
+          conversation?.generation_status === "executing";
+        if (!isRunning) {
+          disconnectConversationWS(activeId);
+        }
       }
     };
   }, [activeId]);
@@ -37,6 +46,10 @@ export function useMessageOperations(userName?: string) {
     if (!activeId) return;
 
     const conversationId = activeId;
+    if (pendingSendConversationIds.current.has(conversationId)) {
+      return;
+    }
+    pendingSendConversationIds.current.add(conversationId);
     const activeConversation = useConversationStore
       .getState()
       .conversations.find((item) => item.id === conversationId);
@@ -90,11 +103,37 @@ export function useMessageOperations(userName?: string) {
       );
     } catch {
       clearConversationRunning(conversationId);
+    } finally {
+      pendingSendConversationIds.current.delete(conversationId);
+    }
+  };
+
+  const cancel = async (conversationId = activeId) => {
+    if (!conversationId) return;
+    try {
+      api.cancelAssistantReplyWs(conversationId);
+      await api.cancelAssistantReply(conversationId);
+    } finally {
+      streaming.clearPendingStreams();
+      clearConversationRunning(conversationId);
+      updateMessages((prev) =>
+        prev.map((item) =>
+          item.conversationId === conversationId &&
+          (item.status === "streaming" || item.streamState === "streaming")
+            ? {
+                ...item,
+                status: "cancelled",
+                streamState: "done",
+              }
+            : item,
+        ),
+      );
     }
   };
 
   return {
     send,
+    cancel,
     streamingMessages: streaming.streamingMessages,
     displayOrder: streaming.displayOrder,
   };

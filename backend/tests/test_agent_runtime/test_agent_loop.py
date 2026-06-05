@@ -106,6 +106,48 @@ class TestAgentLoopBasic:
         assert mock_provider.call_count == 2
 
     @pytest.mark.asyncio
+    async def test_run_dedupes_repeated_artifact_create_calls(
+        self,
+        agent_config,
+        mock_provider,
+        mock_tool_executor,
+    ):
+        mock_provider.responses = [
+            ChatResponse(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_docx_1",
+                        "type": "function",
+                        "function": {"name": "artifact.create_docx", "arguments": '{"title": "demo"}'},
+                    }
+                ],
+            ),
+            ChatResponse(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_docx_2",
+                        "type": "function",
+                        "function": {"name": "artifact.create_docx", "arguments": '{"title": "demo 2"}'},
+                    }
+                ],
+            ),
+        ]
+        mock_tool_executor._tools = [
+            {
+                "type": "function",
+                "function": {"name": "artifact.create_docx", "description": "create docx"},
+            }
+        ]
+
+        loop = AgentLoop(agent_config, mock_provider)
+        result = await loop.run("create a demo docx", {}, mock_tool_executor)
+
+        assert [call["tool_name"] for call in mock_tool_executor.calls] == ["artifact.create_docx"]
+        assert len(result["tool_events"]) == 1
+
+    @pytest.mark.asyncio
     async def test_run_tool_not_found(self, agent_config, mock_provider):
         """测试工具未找到的情况"""
         mock_provider.responses = [

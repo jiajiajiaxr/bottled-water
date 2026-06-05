@@ -210,6 +210,10 @@ class ArtifactOut(ORMModel):
     status: str
     storage_url: str
     preview_url: str = ""
+    export_url: str = ""
+    format: str = ""
+    filename: str = ""
+    media_type: str = ""
     content: dict[str, Any] = Field(default_factory=dict)
     files: dict[str, Any] = Field(default_factory=dict)
     code: str = ""

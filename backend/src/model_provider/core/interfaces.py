@@ -17,6 +17,7 @@ class ChatMessage:
     content: str
     name: Optional[str] = None
     tool_calls: Optional[List[Dict]] = None
+    tool_call_id: Optional[str] = None
 
 
 @dataclass

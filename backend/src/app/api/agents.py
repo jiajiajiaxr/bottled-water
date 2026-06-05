@@ -136,6 +136,7 @@ async def list_agents(
         query = query.where(Agent.status.in_(statuses))
     agents = (await db.scalars(query)).all()
     items = [agent_to_dict(agent) for agent in agents]
+    items = [item for item in items if not _is_acceptance_agent_item(item)]
     if provider != "all":
         items = [it for it in items if it.get("provider") == provider]
     if capability:
@@ -180,6 +181,18 @@ async def list_agents(
             "has_prev": page > 1,
         }
     )
+
+
+def _is_acceptance_agent_item(item: dict) -> bool:
+    text = " ".join(
+        str(value or "")
+        for value in (
+            item.get("name"),
+            item.get("display_name"),
+            item.get("description"),
+        )
+    ).lower()
+    return "acceptance config agent" in text or "acceptance agent" in text
 
 
 @router.get("/agents/status", response_model=ApiResponse[dict[str, AgentStatusItemOut]])

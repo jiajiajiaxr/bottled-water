@@ -3,12 +3,13 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import McpServer, Skill, ToolDefinition, utcnow
+from app.models import Agent, McpServer, Skill, ToolDefinition, utcnow
 
 
 TEST_MCP_PREFIXES = ("Acceptance ",)
 TEST_TOOL_PREFIXES = ("custom_echo_acceptance",)
 TEST_SKILL_NAMES = {"Release Notes Skill", "Filesystem Read Skill"}
+TEST_AGENT_PATTERNS = ("acceptance config agent", "acceptance agent")
 
 
 def cleanup_acceptance_residue(db: Session) -> None:
@@ -35,6 +36,11 @@ def cleanup_acceptance_residue(db: Session) -> None:
             skill.deleted_at = now
             skill.status = "deleted"
 
+    for agent in db.scalars(select(Agent).where(Agent.deleted_at.is_(None))).all():
+        if _is_acceptance_agent(agent):
+            agent.deleted_at = now
+            agent.status = "archived"
+
     _soft_delete_duplicate_skills(db, now)
 
 
@@ -50,3 +56,16 @@ def _soft_delete_duplicate_skills(db: Session, now) -> None:
             skill.status = "deleted"
         else:
             seen.add(key)
+
+
+def _is_acceptance_agent(agent: Agent) -> bool:
+    extra = agent.extra or {}
+    text = " ".join(
+        str(value or "")
+        for value in (
+            agent.name,
+            extra.get("display_name"),
+            agent.description,
+        )
+    ).lower()
+    return any(pattern in text for pattern in TEST_AGENT_PATTERNS)

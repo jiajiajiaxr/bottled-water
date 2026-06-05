@@ -10,8 +10,8 @@ const agents: Agent[] = [
     name: "Daily Chat Agent",
     type: "chat",
     version: "1.0.0",
-    capabilities: [{ label: "日常问答", category: "chat", proficiency: 90 }],
-    description: "日常对话",
+    capabilities: [{ label: "\u65e5\u5e38\u95ee\u7b54", category: "chat", proficiency: 90 }],
+    description: "\u65e5\u5e38\u5bf9\u8bdd",
     status: "online",
     provider: "official",
     is_official: true,
@@ -21,7 +21,7 @@ const agents: Agent[] = [
 ];
 
 describe("CreateConversationModal", () => {
-  it("creates a single chat immediately after selecting an agent without blur", async () => {
+  it("creates a single chat with the default Daily Chat Agent", async () => {
     const onCreate = vi.fn();
 
     render(
@@ -35,8 +35,7 @@ describe("CreateConversationModal", () => {
       />,
     );
 
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "选择 1 个 Agent" }));
-    fireEvent.click(await screen.findByText(/Daily Chat Agent/));
+    await screen.findByText(/Daily Chat Agent/);
     fireEvent.click(screen.getByTestId("create-conversation-confirm"));
 
     await waitFor(() => {

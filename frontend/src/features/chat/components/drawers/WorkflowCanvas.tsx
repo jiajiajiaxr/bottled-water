@@ -268,7 +268,7 @@ export function WorkflowCanvas({
     const structuralChanges = changes.filter((change) => {
       if (change.type === "remove") {
         const node = nodeById.get(String(change.id));
-        if (node && !["start", "end"].includes(workflowNodeType(node))) {
+        if (node) {
           removedNodeIds.push(String(change.id));
           return true;
         }
@@ -329,14 +329,7 @@ export function WorkflowCanvas({
 
   const deleteSelectedElements = () => {
     if (locked || (!selectedNodeIds.length && !selectedEdgeIds.length)) return;
-    const protectedIds = new Set(
-      workflow.nodes
-        .filter((node) => ["start", "end"].includes(workflowNodeType(node)))
-        .map((node) => String(node.id)),
-    );
-    const removableNodeIds = new Set(
-      selectedNodeIds.filter((id) => !protectedIds.has(id)),
-    );
+    const removableNodeIds = new Set(selectedNodeIds);
     const removableEdgeIds = new Set(selectedEdgeIds);
     const nodes = workflow.nodes.filter(
       (node) => !removableNodeIds.has(String(node.id)),

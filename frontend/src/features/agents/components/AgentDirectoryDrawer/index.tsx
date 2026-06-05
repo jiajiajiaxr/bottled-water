@@ -408,10 +408,10 @@ export function AgentDirectoryDrawer({
                     dot
                   >
                     <Avatar
+                      src={agent.avatar_url}
+                      icon={!agent.avatar_url ? <RobotOutlined /> : undefined}
                       style={{ background: agent.avatar_color ?? "#1677ff" }}
-                    >
-                      {agent.name.slice(0, 1)}
-                    </Avatar>
+                    />
                   </Badge>
                   <div>
                     <Space>

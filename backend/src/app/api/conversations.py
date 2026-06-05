@@ -41,6 +41,7 @@ from app.schemas.requests import (
     WorkflowUpdatePayload,
 )
 from app.services.chat.scheduling import normalize_scheduling_strategy
+from app.services.conversation_identity import generate_group_number
 from app.services.serialization import (
     conversation_to_dict,
     participant_to_dict,
@@ -182,6 +183,7 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
         description=payload.get("description") or "",
         extra={
             "workspace_id": str(workspace_id) if workspace_id else None,
+            "group_number": generate_group_number() if is_group else None,
             "master_enabled": bool(payload.get("master_enabled", len(selected) > 1)),
             "category": payload.get("category") or "Default",
             "folder": payload.get("folder") or "Default",

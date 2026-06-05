@@ -113,6 +113,15 @@ class SchedulerAgent(AgentActor):
             return bool(self.current_task)
         if event.type == AGENT_REPORT:
             report = _report_from_payload(event.payload.get("report") or {}, event.payload.get("agent_id"))
+            if event.payload.get("work_product") and report.state in {
+                AgentState.IDLE,
+                AgentState.READY,
+                AgentState.RUNNING,
+                AgentState.WAITING,
+                AgentState.UNKNOWN,
+            }:
+                report.state = AgentState.COMPLETED
+                report.will = AgentWill.COMPLETE
             self.reports[report.agent_id] = report
             return self.current_task and report.state in {AgentState.COMPLETED, AgentState.FAILED, AgentState.WAITING}
         if event.type == BLACKBOARD_UPDATED:
@@ -138,6 +147,8 @@ class SchedulerAgent(AgentActor):
         reports = list(self.reports.values()) or list(self._initial_reports().values())
         try:
             decision = self._mention_decision()
+            if decision is None:
+                decision = self._greeting_decision(reports)
             if decision is None:
                 decision = await self._scheduler.make_decision(
                     blackboard,
@@ -268,6 +279,45 @@ class SchedulerAgent(AgentActor):
             expected_outputs=["目标 Agent 的直接回复"],
         )
 
+    def _greeting_decision(self, reports: list[AgentReport]) -> SchedulingDecision | None:
+        if not _is_simple_greeting(self.current_task):
+            return None
+        target = self._chat_agent_id() or _first_ready_agent_id(reports, self.scheduler_id)
+        if not target:
+            return SchedulingDecision(
+                decision_type="wait",
+                action="wait",
+                rationale="Greeting detected but no ready chat agent is available.",
+            )
+        target_report = next((report for report in reports if report.agent_id == target), None)
+        if target_report and target_report.state in {AgentState.COMPLETED, AgentState.FAILED}:
+            return SchedulingDecision(
+                decision_type="complete",
+                action="complete",
+                target_agent_id=target,
+                target_agent_ids=[target],
+                task=self.current_task,
+                task_description=self.current_task,
+                rationale="Greeting turn reached a terminal agent report.",
+            )
+        return SchedulingDecision(
+            decision_type="assign",
+            action="assign",
+            target_agent_id=target,
+            target_agent_ids=[target],
+            task=self.current_task,
+            task_description=self.current_task,
+            rationale="Simple greeting: route to the chat-oriented agent instead of waiting.",
+            expected_outputs=["A concise visible greeting reply."],
+        )
+
+    def _chat_agent_id(self) -> str | None:
+        for agent_id, config in self.agents.items():
+            text = f"{config.name} {config.role}".lower()
+            if "daily chat" in text or "chat" in text or "日常" in text:
+                return agent_id
+        return None
+
     def _normalize_decision(self, decision: SchedulingDecision) -> SchedulingDecision:
         if not decision.action:
             decision.action = "assign" if decision.decision_type == "parallel" else decision.decision_type
@@ -313,6 +363,36 @@ class SchedulerAgent(AgentActor):
         if reports and all(report.state == AgentState.COMPLETED for report in reports):
             return SchedulingDecision(decision_type="complete", rationale="All Agents completed.")
         return SchedulingDecision(decision_type="wait", rationale="No ready Agent is available.")
+
+
+def _is_simple_greeting(text: str) -> bool:
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return False
+    compact = "".join(
+        char for char in normalized if char.isalnum() or "\u4e00" <= char <= "\u9fff"
+    )
+    greetings = {
+        "hi",
+        "hello",
+        "hey",
+        "你好",
+        "你们好",
+        "大家好",
+        "早上好",
+        "下午好",
+        "晚上好",
+    }
+    return compact in greetings or compact.rstrip("呀啊哈") in greetings
+
+
+def _first_ready_agent_id(reports: list[AgentReport], scheduler_id: str) -> str | None:
+    for report in reports:
+        if report.agent_id == scheduler_id:
+            continue
+        if report.state in {AgentState.READY, AgentState.IDLE, AgentState.UNKNOWN}:
+            return report.agent_id
+    return None
 
 
 def _report_from_payload(payload: dict[str, Any], fallback_agent_id: str | None) -> AgentReport:

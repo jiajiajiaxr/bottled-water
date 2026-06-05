@@ -1,16 +1,12 @@
 import { App as AntApp } from "antd";
 import { api } from "@/api";
 import {
+  useArtifactStore,
   useConversationStore,
   useMessageStore,
-  useArtifactStore,
   useUIStore,
 } from "@/store";
-import type {
-  ChatMessage,
-  Conversation,
-  WorkspaceArtifact,
-} from "@/types";
+import type { ChatMessage, Conversation, WorkspaceArtifact } from "@/types";
 
 export function useWorkbenchActions(
   activeWorkspaceId: string | undefined,
@@ -23,11 +19,7 @@ export function useWorkbenchActions(
   ) => void,
 ) {
   const { message } = AntApp.useApp();
-  const {
-    activeId,
-    setActiveId,
-    updateConversations,
-  } = useConversationStore();
+  const { activeId, setActiveId, updateConversations } = useConversationStore();
   const { clearMessages } = useMessageStore();
   const {
     artifact,
@@ -46,13 +38,10 @@ export function useWorkbenchActions(
     const updated = await api.updateConversation(item.id, patch);
     const nextCategory =
       patch.folder || patch.category || updated.folder || updated.category;
-    if (nextCategory)
-      saveCategories([...conversationCategories, nextCategory]);
+    if (nextCategory) saveCategories([...conversationCategories, nextCategory]);
     updateConversations((current) =>
       current.map((conversation) =>
-        conversation.id === item.id
-          ? { ...conversation, ...updated }
-          : conversation,
+        conversation.id === item.id ? { ...conversation, ...updated } : conversation,
       ),
     );
   };
@@ -79,10 +68,7 @@ export function useWorkbenchActions(
     saveCategories([...conversationCategories, payload.folder]);
     updateConversations((current) => [created, ...current]);
     setActiveId(created.id);
-    navigateToConversation(
-      created.workspace_id || activeWorkspaceId,
-      created.id,
-    );
+    navigateToConversation(created.workspace_id || activeWorkspaceId, created.id);
     clearMessages();
     setCreateOpen({ open: false });
     message.success("会话已创建");
@@ -116,35 +102,63 @@ export function useWorkbenchActions(
 
   const openArtifactPreview = async (source?: ChatMessage) => {
     if (!activeId) return;
+
+    const raw = asRecord(source?.rawContent);
+    const nestedArtifact = asRecord(raw.artifact);
     const artifactId =
-      typeof source?.rawContent?.artifact_id === "string"
-        ? source.rawContent.artifact_id
-        : undefined;
+      stringValue(raw.artifact_id) ||
+      stringValue(raw.artifactId) ||
+      stringValue(nestedArtifact.artifact_id) ||
+      stringValue(nestedArtifact.artifactId) ||
+      stringValue(nestedArtifact.id) ||
+      (source?.kind === "preview_card" ? stringValue(raw.id) : "");
+
     if (source?.kind === "preview_card" && !artifactId) {
-      message.error("产物卡片缺少 artifact_id，无法打开预览");
+      message.error("产物卡片缺少 artifact_id，无法打开预览。");
       return;
     }
+
+    const title =
+      stringValue(raw.title) ||
+      stringValue(nestedArtifact.title) ||
+      stringValue(nestedArtifact.name) ||
+      source?.content.replace(/^预览产物[:：]\s*/, "") ||
+      "产物预览";
+    const format =
+      stringValue(raw.format) || stringValue(nestedArtifact.format) || undefined;
+    const mediaType =
+      stringValue(raw.media_type) ||
+      stringValue(nestedArtifact.media_type) ||
+      undefined;
+    const filename =
+      stringValue(raw.filename) ||
+      stringValue(nestedArtifact.filename) ||
+      undefined;
+
     if (artifactId) {
       setArtifact({
         id: artifactId,
         conversationId: activeId,
-        title: source?.rawContent?.title
-          ? String(source.rawContent.title)
-          : source?.content.replace(/^预览产物[:：]\s*/, "") || "产物预览",
+        title,
         language: "html",
         code: "<main><h1>正在加载真实产物...</h1><p>正在根据 artifact_id 拉取产物文件。</p></main>",
         previousCode: "",
         updatedAt: new Date().toISOString(),
+        content: { format, media_type: mediaType, filename },
+        format,
+        media_type: mediaType,
+        filename,
       });
       setArtifactPanelOpen(true);
     }
+
     try {
       const current =
         (artifactId ? await api.artifactById(artifactId) : undefined) ??
         artifact ??
         (await api.artifact(activeId));
       if (!current) {
-        message.warning("当前会话还没有可预览产物");
+        message.warning("当前会话还没有可预览产物。");
         return;
       }
       setArtifact(current);
@@ -176,6 +190,16 @@ export function useWorkbenchActions(
     uploadFile,
     openArtifactPreview,
   };
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" && value ? value : "";
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function escapeHtml(value: string) {

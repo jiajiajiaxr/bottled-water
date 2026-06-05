@@ -166,6 +166,10 @@ class ArkProvider(BaseModelProvider):
             msg = {"role": m.role, "content": m.content}
             if m.name:
                 msg["name"] = m.name
+            if m.tool_calls:
+                msg["tool_calls"] = m.tool_calls
+            if m.role == "tool" and m.tool_call_id:
+                msg["tool_call_id"] = m.tool_call_id
             msgs.append(msg)
 
         payload = {

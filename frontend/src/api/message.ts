@@ -170,18 +170,15 @@ function dispatchStreamEvent(
     case "system.round_started":
       break;
     case "system.agent_started":
-      handlers.onMessageStart?.(data as Record<string, unknown>);
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
     case "system.agent_completed":
     case "system.agent_failed":
-      handlers.onMessageEnd?.(data as Record<string, unknown>);
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
 
     case "scheduler.decision":
     case "agent.state_changed":
-      if (String((data as Record<string, unknown>).state || "") === "running") {
-        handlers.onMessageStart?.(data as Record<string, unknown>);
-      }
       handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
     case "agent.report":
@@ -199,8 +196,6 @@ function dispatchStreamEvent(
         result: payload.result,
         error: payload.error,
       });
-      const previewMessage = previewCardFromToolResult(payload);
-      if (previewMessage) handlers.onMessageNew?.(previewMessage);
       break;
     }
 

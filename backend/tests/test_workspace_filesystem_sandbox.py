@@ -514,7 +514,11 @@ def test_workspace_file_preview_converts_legacy_docx_artifact_to_pdf(db: Session
         preview = asyncio.run(preview_workspace_file(workspace.id, f"artifact:{artifact.id}", db, user))["data"]
         tree = workspace_file_tree(db, user, workspace.id)
         flat = _flatten(tree["root"])
-        folder = next(item for item in flat if item.get("path") == f"artifacts/{artifact.id}")
+        folder = next(
+            item
+            for item in flat
+            if item.get("path") == f"artifacts/conversations/{conversation.id}/{artifact.id}"
+        )
 
         assert preview["mode"] == "pdf"
         assert preview["preview_pdf_url"]
