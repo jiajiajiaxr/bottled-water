@@ -25,6 +25,7 @@ export function WorkflowSettingsCard({
   onRun: () => void;
 }) {
   const settings = workflowSettings(workflow);
+  const enabled = Boolean(settings.enabled);
   return (
     <Space direction="vertical" size={14} className="full-width">
       {validationIssues.length > 0 && (
@@ -48,7 +49,7 @@ export function WorkflowSettingsCard({
           <Text type="secondary">发送群聊消息时是否按此画布执行</Text>
         </div>
         <Switch
-          checked={settings.enabled !== false}
+          checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="停用"
           onChange={(checked) => onPatchSettings({ enabled: checked })}

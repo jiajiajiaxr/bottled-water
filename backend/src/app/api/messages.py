@@ -17,7 +17,6 @@ from app.schemas.requests import RunMessageCodeRequest, SendMessagePayload
 from app.events import SseSink
 from app.events import app_event_bus as event_bus
 from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
-from app.services.runtime_service import OrchestratorService
 from app.services.serialization import message_to_dict
 from app.services.files.references import resolve_file_reference_attachments
 from app.services.chat.code_runner import run_message_code_block
@@ -147,21 +146,16 @@ async def _send_async(
     await db.refresh(message)
 
     if trigger_agent:
-        previous = ORCHESTRATION_TASKS.get(conversation.id)
+        from app.services.conversation_session_manager import ConversationSessionManager
 
-        if previous and not previous.done():
-            previous.cancel()
-        model_config_id = payload.get("model_config_id")
-        task = asyncio.create_task(
-            OrchestratorService.run(db, conversation, message, scheduling_strategy, model_config_id)
+        session_manager = ConversationSessionManager.get_instance()
+        await session_manager.get_or_create_session(
+            db,
+            conversation,
+            model_config_id=payload.get("model_config_id"),
+            event_sink=SseSink(str(conversation.id)),
         )
-        ORCHESTRATION_TASKS[conversation.id] = task
-
-        task.add_done_callback(
-            lambda done, cid=conversation.id: (
-                ORCHESTRATION_TASKS.pop(cid, None) if ORCHESTRATION_TASKS.get(cid) is done else None
-            )
-        )
+        await session_manager.start_generation(conversation.id, text)
 
     return message
 
@@ -317,15 +311,31 @@ async def stream_conversation(
     else:
         message_payload = payload.model_dump()
 
-    # 保存用户消息并触发编排
-    message = await _send(db, user, conversation_id, message_payload, trigger_agent=True)
+    # 保存用户消息并触发统一 ConversationSessionManager 链路
+    sse_sink = SseSink(conversation_id)
+    message = await _send(db, user, conversation_id, message_payload, trigger_agent=False)
 
     # 先推送用户消息事件（保留用于兼容）
     await event_bus.publish(channel, "message:new", message_to_dict(message))
 
     # 返回 SSE 流：仅监听 SseSink
     async def generator():
-        queue = SseSink.get_queue_for(conversation_id)
+        from app.services.conversation_session_manager import ConversationSessionManager
+
+        session_manager = ConversationSessionManager.get_instance()
+        conversation = await _get_conversation(db, user, conversation_id)
+        await session_manager.get_or_create_session(
+            db,
+            conversation,
+            model_config_id=message_payload.get("model_config_id"),
+            event_sink=sse_sink,
+        )
+        await session_manager.start_generation(
+            conversation_id,
+            message.content.get("text", "") if isinstance(message.content, dict) else str(message.content),
+        )
+
+        queue = sse_sink.get_queue()
         if queue is None:
             return
 
@@ -390,6 +400,10 @@ async def run_message_code(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if payload.conversation_id and payload.conversation_id != conversation_id:
+        raise ValidationAppError("conversation_id 与请求路径不一致")
+    if payload.message_id and payload.message_id != message_id:
+        raise ValidationAppError("message_id 与请求路径不一致")
     result = await db.run_sync(
         lambda session: run_message_code_block(
             session,
@@ -400,6 +414,7 @@ async def run_message_code(
             code=payload.code,
             index=payload.index,
             timeout_seconds=payload.timeout_seconds,
+            workspace_id=payload.workspace_id,
         )
     )
     return ok(result, "代码已在会话沙箱中执行")

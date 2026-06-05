@@ -25,17 +25,18 @@ export function RuntimeDecisionStrip({ conversation }: { conversation?: Conversa
 
   const decision = latestDecision(generation);
   const agentRuns = generation.agent_runs || [];
+  const status = effectiveGenerationStatus(conversation, generation);
   const isVisible =
     decision ||
     agentRuns.some((item) => item.status && item.status !== "queued") ||
-    generation.status === "running";
+    status === "running";
   if (!isVisible) return null;
 
   return (
     <div className="runtime-decision-strip" data-testid="runtime-decision-strip">
       <Space size={[8, 8]} wrap>
-        <Tag color={generation.status === "running" ? "processing" : "default"}>
-          {modeLabel(conversation)} · {generation.status || "idle"}
+        <Tag color={status === "running" ? "processing" : "default"}>
+          {modeLabel(conversation)} · {status}
         </Tag>
         {decision && <DecisionTag decision={decision} />}
         {agentRuns.slice(0, 5).map((run) => (
@@ -103,6 +104,22 @@ function modeLabel(conversation?: Conversation): string {
 function latestGeneration(conversation?: Conversation): ConversationRuntimeGeneration | undefined {
   const generations = conversation?.runtime?.generations || [];
   return generations.length ? generations[generations.length - 1] : undefined;
+}
+
+function effectiveGenerationStatus(
+  conversation: Conversation | undefined,
+  generation: ConversationRuntimeGeneration,
+) {
+  const conversationStatus = String(conversation?.generation_status || "").toLowerCase();
+  const generationStatus = String(generation.status || "idle").toLowerCase();
+  if (
+    conversationStatus &&
+    conversationStatus !== "running" &&
+    generationStatus === "running"
+  ) {
+    return conversationStatus === "idle" ? "completed" : conversationStatus;
+  }
+  return generationStatus || "idle";
 }
 
 function latestDecision(generation: ConversationRuntimeGeneration): ConversationRuntimeDecision | undefined {

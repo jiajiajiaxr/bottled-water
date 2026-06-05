@@ -35,6 +35,7 @@ const { Text, Paragraph } = Typography;
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  workspaceId?: string;
   version?: number;
   quoted?: ChatMessage;
   onQuote?: (message: ChatMessage) => void;
@@ -44,6 +45,7 @@ interface MessageBubbleProps {
 
 function MessageBubbleComponent({
   message,
+  workspaceId,
   quoted,
   onQuote,
   onCopy,
@@ -131,6 +133,7 @@ function MessageBubbleComponent({
       <div className="message-row from-agent">
         <Avatar className="message-avatar">{author.slice(0, 1)}</Avatar>
         <button
+          type="button"
           className="message-card preview-message-card preview-card-button"
           data-testid="preview-card"
           onClick={() => onPreview?.(message)}
@@ -171,6 +174,9 @@ function MessageBubbleComponent({
       code,
       index,
       timeout_seconds: 10,
+      workspace_id: workspaceId,
+      conversation_id: message.conversationId,
+      message_id: message.id,
     });
   };
 
@@ -337,7 +343,8 @@ function MessageBubbleComponent({
 
 export const MessageBubble = React.memo(
   MessageBubbleComponent,
-  (prev, next) => prev.version === next.version,
+  (prev, next) =>
+    prev.version === next.version && prev.workspaceId === next.workspaceId,
 );
 
 function codeRunsFromMessage(message: ChatMessage): Record<string, CodeRunRecord> {

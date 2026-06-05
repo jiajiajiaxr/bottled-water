@@ -430,3 +430,20 @@ Agent Function Call / Workflow Tool Node
 `agent_runtime` 不直接创建聊天卡片，也不绕过 app 层工具系统。运行时 Agent 调用工具时，经由 `app.services.runtime_service._ToolExecutorAdapter` 进入 `app.services.agents.async_tool_loop.execute_tool_by_name()`，再进入 `services/tools/catalog.py` 与 `services/tools/executor.py` 做 ToolDefinition 读取、Agent 授权、参数校验和 ToolInvocation 记录。
 
 当工具输出包含真实 `artifact_id` 时，adapter 会读取已持久化的 Artifact 与 preview_card Message，并向当前会话 WebSocket 推送 `artifact:created` 和 `message:new`。因此新 WebSocket / actor runtime 与旧 Function Call Loop 共享同一套 artifact 数据模型、下载 API 和预览卡片结构。
+
+## 2026-06-05 唯一主链路约定
+
+后续后端开发以 `ConversationSessionManager + agent_runtime` 为唯一消息运行主链路：
+
+- `api/websocket.py`：主实时入口，负责连接、鉴权、`chat.send`、`chat.cancel`。
+- `api/messages.py`：SSE 兼容入口，内部仍创建/复用 `ConversationSessionManager` session，不再走旧 orchestrator。
+- `conversation_session_manager.py`：会话级 session 缓存、generation 生命周期、事件持久化、终态收敛、WebSocket/SSE sink 注册。
+- `runtime_service.py`：把会话参与者、调度策略、工具执行器和持久化 backend 组装为 `agent_runtime.AgentSession`。
+- `agent_runtime/`：Actor、Scheduler、Workflow 与事件循环核心。
+- `services/tools/*`、`services/artifacts/*`、`services/files/*`：真实副作用执行与数据落库。
+
+旧入口迁移规则：
+
+- `services/chat/orchestrator.py`、`services/agents/direct.py`、`services/agents/function_loop.py`、`services/tool_registry.py` 仅允许保留 deprecated shim、旧测试和旧 API 兼容逻辑。
+- 产物卡片、工具摘要、running 状态、取消传播、Agent report 持久化必须在新主链路实现。
+- 新 workflow / tool / skill / mcp 能力应依赖 `ToolExecutorAdapter -> async_tool_loop -> tools.executor`，而不是从 runtime 内部直接写数据库或伪造聊天消息。

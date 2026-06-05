@@ -39,6 +39,9 @@ export async function runMessageCodeBlock(
     code: string;
     index: number;
     timeout_seconds?: number;
+    workspace_id?: string;
+    conversation_id?: string;
+    message_id?: string;
   },
 ): Promise<SandboxCommandResult & Record<string, unknown>> {
   return await post<SandboxCommandResult & Record<string, unknown>>(

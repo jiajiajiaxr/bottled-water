@@ -4,7 +4,6 @@ import { disconnectConversationWS } from "@/api/websocket";
 import {
   useConversationStore,
   useMessageStore,
-  useUIStore,
 } from "@/store";
 import { makeMessage } from "@/lib";
 import { applyRuntimeEvent } from "@/lib/runtimeEvents";
@@ -38,14 +37,14 @@ export function useMessageOperations(userName?: string) {
     if (!activeId) return;
 
     const conversationId = activeId;
-    const scheduleMode = useUIStore.getState().scheduleMode;
     const activeConversation = useConversationStore
       .getState()
       .conversations.find((item) => item.id === conversationId);
+    const workflowEnabled = Boolean(activeConversation?.workflow_enabled);
     const schedulingStrategy =
       activeConversation?.chat_type === "single"
         ? "single_agent"
-        : scheduleMode === "workflow" || activeConversation?.workflow_enabled
+        : workflowEnabled
           ? "workflow"
           : "tech_lead";
     const localAttachments = normalizeAttachments(attachments);
@@ -166,6 +165,19 @@ function isTerminalRuntimeEvent(event: string) {
     "system.session_completed",
     "system.session_cancelled",
     "system.session_error",
+    "generation_finished",
+    "generation:finished",
+    "generation:cancelled",
+    "generation:failed",
+    "workflow_completed",
+    "workflow:completed",
+    "workflow:run_completed",
+    "workflow_cancelled",
+    "workflow:cancelled",
+    "workflow_failed",
+    "workflow:failed",
+    "cancelled",
+    "failed",
     "control.cancel",
   ].includes(event);
 }

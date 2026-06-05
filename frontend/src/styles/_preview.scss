@@ -1,7 +1,11 @@
 @use "variables" as *;
 
 .preview-panel {
-  height: 100vh;
+  flex: 0 0 clamp(420px, 34vw, 680px) !important;
+  width: clamp(420px, 34vw, 680px) !important;
+  max-width: 48vw !important;
+  min-width: 380px !important;
+  height: 100%;
   padding: $spacing-3xl;
   background: $color-bg-preview !important;
   border-left: 1px solid $color-border;
@@ -29,7 +33,7 @@
 }
 
 .preview-frame-wrap {
-  height: calc(100vh - 130px);
+  height: calc(100vh - 64px - 130px);
   margin-top: $spacing-xl;
   border: 1px solid $color-border;
   border-radius: $radius-md;

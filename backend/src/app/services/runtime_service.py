@@ -20,6 +20,7 @@ from model_provider import create_provider
 from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
 
 from db.models import Agent, Artifact, Conversation, Message, User
+from db.session import AsyncSessionLocal
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink, WebSocketSink
 from app.services.chat.scheduling import resolve_scheduling_strategy
@@ -338,34 +339,68 @@ class _ToolExecutorAdapter(ToolExecutor):
         conversation: Conversation,
         agents_by_id: dict[str, Agent] | None = None,
     ):
-        self.db = db
-        self.agent = agent
-        self.user = user
-        self.conversation = conversation
-        self.agents_by_id = agents_by_id or {agent.id: agent}
+        self.agent_id = str(agent.id)
+        self.user_id = str(user.id)
+        self.conversation_id = str(conversation.id)
+        self.agent_ids = set(agents_by_id or {agent.id: agent})
+        self._test_db_override = None if isinstance(db, AsyncSession) else db
+        self._test_agent = agent
+        self._test_user = user
+        self._test_conversation = conversation
 
     def bind_agent(self, agent_id: str) -> "_ToolExecutorAdapter":
-        agent = self.agents_by_id.get(agent_id) or self.agent
-        return _ToolExecutorAdapter(self.db, agent, self.user, self.conversation, self.agents_by_id)
+        clone = object.__new__(_ToolExecutorAdapter)
+        clone.agent_id = agent_id if agent_id in self.agent_ids else self.agent_id
+        clone.user_id = self.user_id
+        clone.conversation_id = self.conversation_id
+        clone.agent_ids = self.agent_ids
+        clone._test_db_override = self._test_db_override
+        clone._test_agent = self._test_agent
+        clone._test_user = self._test_user
+        clone._test_conversation = self._test_conversation
+        return clone
 
     async def list_tools(self) -> list[dict]:
         from app.services.agents.async_tool_loop import build_tools_for_agent
-        return await build_tools_for_agent(self.db, self.agent)
+        if self._test_db_override is not None:
+            return await build_tools_for_agent(self._test_db_override, self._test_agent)
+        async with AsyncSessionLocal() as db:
+            agent = await db.get(Agent, self.agent_id)
+            if not agent:
+                return []
+            return await build_tools_for_agent(db, agent)
 
     async def execute(self, tool_call: ToolCall) -> Any:
         from app.services.agents.async_tool_loop import execute_tool_by_name
-        result = await execute_tool_by_name(
-            self.db,
-            agent=self.agent,
-            user=self.user,
-            conversation=self.conversation,
-            tool_name=tool_call.tool_name,
-            arguments=tool_call.parameters,
-        )
-        await self._publish_artifact_messages(result)
-        return result
+        if self._test_db_override is not None:
+            result = await execute_tool_by_name(
+                self._test_db_override,
+                agent=self._test_agent,
+                user=self._test_user,
+                conversation=self._test_conversation,
+                tool_name=tool_call.tool_name,
+                arguments=tool_call.parameters,
+            )
+            await self._publish_artifact_messages(self._test_db_override, result)
+            return result
+        async with AsyncSessionLocal() as db:
+            agent = await db.get(Agent, self.agent_id)
+            user = await db.get(User, self.user_id)
+            conversation = await db.get(Conversation, self.conversation_id)
+            if not agent or not user or not conversation:
+                raise ValueError("Runtime tool context is no longer available")
+            result = await execute_tool_by_name(
+                db,
+                agent=agent,
+                user=user,
+                conversation=conversation,
+                tool_name=tool_call.tool_name,
+                arguments=tool_call.parameters,
+            )
+            await self._publish_artifact_messages(db, result)
+            return result
 
-    async def _publish_artifact_messages(self, result: Any) -> None:
+    async def _publish_artifact_messages(self, db: AsyncSession, result: Any) -> None:
         if not isinstance(result, dict):
             return
         output = result.get("output") if isinstance(result.get("output"), dict) else {}
@@ -373,15 +408,15 @@ class _ToolExecutorAdapter(ToolExecutor):
         if not artifact_id:
             return
 
-        sink = WebSocketSink(str(self.conversation.id))
-        artifact = await self.db.get(Artifact, artifact_id)
+        sink = WebSocketSink(self.conversation_id)
+        artifact = await db.get(Artifact, artifact_id)
         if artifact:
             await sink.emit(RuntimeEvent(type="artifact:created", payload=artifact_to_dict(artifact)))
 
         preview_id = str(output.get("preview_message_id") or "")
-        preview = await self.db.get(Message, preview_id) if preview_id else None
+        preview = await db.get(Message, preview_id) if preview_id else None
         if not preview and artifact:
-            preview = await self.db.scalar(
+            preview = await db.scalar(
                 select(Message)
                 .where(
                     Message.conversation_id == artifact.conversation_id,

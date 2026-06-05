@@ -92,6 +92,32 @@ export function useStreamingMessages(conversationId?: string) {
     bumpMessageVersion(agentId);
   };
 
+  const finalizePendingStreams = () => {
+    const pending = Array.from(streamingMessagesRef.current.entries());
+    if (!pending.length) return;
+
+    setStreamingMessages(new Map());
+    setDisplayOrder([]);
+
+    updateMessages((prev) => {
+      const existingIds = new Set(prev.map((item) => item.id));
+      const completed = pending
+        .map(([, msg]) => ({
+          ...msg,
+          content: stripInternalAgentOutput(
+            String(msg.rawContent?._streamRawText || msg.content || ""),
+          ),
+          streamState: "done" as const,
+          status: msg.status === "failed" ? "failed" : "completed",
+        }))
+        .filter((msg) => msg.content.trim() && !existingIds.has(msg.id));
+
+      return completed.length ? [...prev, ...completed] : prev;
+    });
+
+    updateMessageVersions(() => new Map());
+  };
+
   const streamHandlers: StreamAssistantHandlers = {
     onMessageStart: (payload) => {
       const agentId = streamKey(payload);
@@ -176,8 +202,26 @@ export function useStreamingMessages(conversationId?: string) {
 
     onThinking: (agentId, thinking) => appendThinking(agentId, thinking),
 
-    onDone: () => {},
+    onDone: () => finalizePendingStreams(),
     onMessageNew: (message) => {
+      const senderId = String(message.sender_id || "");
+      if (senderId) {
+        setStreamingMessages((prev) => {
+          const next = new Map(prev);
+          for (const [key, item] of prev) {
+            if (String(item.rawContent?.agent_id || "") === senderId) {
+              next.delete(key);
+            }
+          }
+          return next;
+        });
+        setDisplayOrder((prev) =>
+          prev.filter((key) => {
+            const item = streamingMessagesRef.current.get(key);
+            return String(item?.rawContent?.agent_id || "") !== senderId;
+          }),
+        );
+      }
       updateMessages((prev) => {
         if (prev.some((item) => item.id === message.id)) return prev;
         return [...prev, message];

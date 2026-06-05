@@ -12,6 +12,10 @@
   background: $color-bg-white;
   display: flex;
   flex-direction: column;
+
+  &.ant-layout-has-sider {
+    flex-direction: column;
+  }
 }
 
 .main-content {
@@ -19,7 +23,8 @@
   min-height: 0;
   overflow: hidden;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  min-width: 0;
 }
 
 .topbar {
@@ -69,9 +74,9 @@
   }
 
   .preview-panel {
-    width: 360px !important;
-    flex: 0 0 360px !important;
-    max-width: 360px !important;
-    min-width: 360px !important;
+    width: min(420px, 45vw) !important;
+    flex: 0 0 min(420px, 45vw) !important;
+    max-width: 45vw !important;
+    min-width: 340px !important;
   }
 }

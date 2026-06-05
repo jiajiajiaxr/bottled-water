@@ -80,4 +80,20 @@ describe("deriveRunningConversationIds", () => {
 
     expect(ids.has("conv-1")).toBe(false);
   });
+
+  it("ignores a stale active_generation_id when the generation is completed", () => {
+    const ids = runningIds({
+      conversations: [
+        conversation({
+          generation_status: "idle",
+          runtime: {
+            active_generation_id: "gen-1",
+            generations: [{ id: "gen-1", status: "completed" }],
+          },
+        }),
+      ],
+    });
+
+    expect(ids.has("conv-1")).toBe(false);
+  });
 });

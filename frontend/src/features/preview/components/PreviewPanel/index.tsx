@@ -75,10 +75,59 @@ export function PreviewPanel({
     contentType: string;
     filename?: string;
   }>();
+  const [previewFile, setPreviewFile] = useState<{
+    previewUrl?: string;
+    contentType: string;
+    filename?: string;
+  }>();
+  const [previewError, setPreviewError] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
     setDraft(artifact?.code ?? "");
   }, [artifact?.id, artifact?.code]);
+
+  useEffect(() => {
+    if (!artifact) return;
+    setPreviewFile(undefined);
+    setPreviewError("");
+    if (artifactPreviewKind(artifact) !== "pdf") return;
+    let cancelled = false;
+    setPreviewLoading(true);
+    api.previewArtifactPdf(artifact.id)
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.previewUrl) {
+          setPreviewError("预览接口没有返回可显示的 PDF 内容");
+          return;
+        }
+        setPreviewFile({
+          previewUrl: result.previewUrl,
+          contentType: result.contentType,
+          filename: result.filename,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setPreviewError(
+          error instanceof Error ? error.message : "产物预览加载失败",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact]);
+
+  useEffect(() => {
+    return () => {
+      if (previewFile?.previewUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(previewFile.previewUrl);
+      }
+    };
+  }, [previewFile?.previewUrl]);
 
   if (!artifact) {
     return (
@@ -93,6 +142,7 @@ export function PreviewPanel({
   }
 
   const previewDocument = buildPreviewDocument(draft);
+  const previewKind = artifactPreviewKind(artifact);
 
   return (
     <Sider
@@ -152,11 +202,28 @@ export function PreviewPanel({
             label: <EyeOutlined />,
             children: (
               <div className="preview-frame-wrap">
-                <iframe
-                  title="artifact preview"
-                  sandbox="allow-scripts"
-                  srcDoc={previewDocument}
-                />
+                {previewKind === "pdf" ? (
+                  previewLoading ? (
+                    <Empty description="正在生成预览..." />
+                  ) : previewFile?.previewUrl ? (
+                    <iframe
+                      title="artifact pdf preview"
+                      src={previewFile.previewUrl}
+                    />
+                  ) : (
+                    <Empty
+                      description={
+                        previewError || "当前产物暂时无法在线预览，请下载原文件"
+                      }
+                    />
+                  )
+                ) : (
+                  <iframe
+                    title="artifact preview"
+                    sandbox="allow-scripts"
+                    srcDoc={previewDocument}
+                  />
+                )}
               </div>
             ),
           },
@@ -255,4 +322,25 @@ export function PreviewPanel({
       />
     </Sider>
   );
+}
+
+function artifactPreviewKind(artifact: WorkspaceArtifact): "html" | "pdf" {
+  const format = String(
+    artifact.content?.format ||
+      artifact.content?.tool_output?.format ||
+      artifact.format ||
+      artifact.filename?.split(".").pop() ||
+      "",
+  ).toLowerCase();
+  const mediaType = String(
+    artifact.content?.media_type || artifact.media_type || "",
+  ).toLowerCase();
+  if (
+    ["pdf", "docx", "pptx", "xlsx"].includes(format) ||
+    mediaType.includes("pdf") ||
+    mediaType.includes("officedocument")
+  ) {
+    return "pdf";
+  }
+  return "html";
 }

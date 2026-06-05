@@ -188,6 +188,17 @@ function CodeBlock({
     try {
       const next = await onRunCode(index, language, code);
       setLocalResult(next);
+    } catch (error) {
+      setLocalResult({
+        status: "failed",
+        stdout: "",
+        stderr:
+          error instanceof Error
+            ? error.message
+            : "\u4ee3\u7801\u8fd0\u884c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002",
+        exit_code: -1,
+        duration_ms: 0,
+      });
     } finally {
       setRunning(false);
     }
@@ -196,7 +207,11 @@ function CodeBlock({
     <div className="markdown-code-block" data-testid="markdown-code-block">
       <div className="markdown-code-head">
         <span>{language || "text"}</span>
-        {streaming && <span className="markdown-code-streaming">生成中</span>}
+        {streaming && (
+          <span className="markdown-code-streaming">
+            {"\u751f\u6210\u4e2d"}
+          </span>
+        )}
         {canRun && (
           <button
             type="button"
@@ -204,7 +219,7 @@ function CodeBlock({
             disabled={running || !code.trim()}
             onClick={handleRun}
           >
-            {running ? "运行中..." : "运行"}
+            {running ? "\u8fd0\u884c\u4e2d..." : "\u8fd0\u884c"}
           </button>
         )}
       </div>
@@ -224,7 +239,7 @@ function CodeRunResultView({ result }: { result: CodeRunRecord }) {
       data-testid="code-run-result"
     >
       <div className="markdown-code-result-meta">
-        <span>{ok ? "执行成功" : "执行失败"}</span>
+        <span>{ok ? "\u6267\u884c\u6210\u529f" : "\u6267\u884c\u5931\u8d25"}</span>
         <span>exit_code: {String(result.exit_code ?? -1)}</span>
         <span>{String(result.duration_ms ?? 0)}ms</span>
       </div>

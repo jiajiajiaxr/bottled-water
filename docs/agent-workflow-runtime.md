@@ -355,3 +355,31 @@ Master / Planner 理解任务
 14. 编辑产物、查看 Diff、导出文件。
 15. 回到历史会话，确认消息和产物可恢复。
 
+## 12. 运行时主链路收口
+
+当前新业务统一走下面的链路：
+
+```text
+Frontend WebSocket / SSE compatibility
+  -> ConversationSessionManager
+  -> OrchestratorService.create_session()
+  -> agent_runtime.AgentSession
+  -> Scheduler / AgentActor / Workflow runtime
+  -> app services ToolExecutor adapter
+  -> ToolInvocation + Artifact + Message
+  -> RuntimeEvent -> WebSocket/SSE sink
+```
+
+关键边界：
+
+- WebSocket 是首选实时通道；SSE 仅是兼容入口，但也委托给同一个 SessionManager。
+- `message_stop` 表示某条 Agent 消息结束；不能关闭整个 generation。
+- `system.session_completed` / `generation_finished` / `generation:cancelled` / `generation:failed` 才是全局终态。
+- `workflow:completed` 只表示画布运行态完成，前端需等待 generation 终态再清理会话 running。
+- 工具成功不直接刷系统消息；成功工具记录进入 ToolInvocation、运行日志和消息底部摘要。Artifact 工具成功后由后端创建真实 preview_card。
+
+旧入口边界：
+
+- `services/chat/orchestrator.py`、`services/agents/direct.py`、`services/agents/function_loop.py` 只保留旧 API、测试和兼容调用所需 shim。
+- 新增业务应接入 `agent_runtime`、`ConversationSessionManager`、`services/tools/*`、`services/artifacts/*`，不要继续扩展旧 orchestrator 或旧 tool registry。
+

@@ -33,6 +33,7 @@ def run_message_code_block(
     code: str,
     index: int,
     timeout_seconds: int = 10,
+    workspace_id: str | None = None,
 ) -> dict[str, Any]:
     conversation = _conversation(db, user, conversation_id)
     message = _message(db, conversation.id, message_id)
@@ -43,8 +44,9 @@ def run_message_code_block(
 
     extension, command_template = SUPPORTED_LANGUAGES[normalized]
     filename = f"chat_code_{message.id[:8]}_{max(index, 0)}.{extension}"
+    resolved_workspace_id = _workspace_id(conversation, workspace_id)
     common_args = {
-        "workspace_id": _workspace_id(conversation),
+        "workspace_id": resolved_workspace_id,
         "conversation_id": conversation.id,
         "path": filename,
     }
@@ -57,7 +59,14 @@ def run_message_code_block(
     command = command_template.format(path=file_payload["result"]["sandbox_path"])
     result = _interactive_rejection(normalized, source, command)
     if not result:
-        result = _run_sandbox(db, user, conversation, command, timeout_seconds)
+        result = _run_sandbox(
+            db,
+            user,
+            conversation,
+            command,
+            timeout_seconds,
+            workspace_id=resolved_workspace_id,
+        )
     result.update(
         {
             "language": normalized,
@@ -77,6 +86,8 @@ def _run_sandbox(
     conversation: Conversation,
     command: str,
     timeout_seconds: int,
+    *,
+    workspace_id: str | None,
 ) -> dict[str, Any]:
     try:
         payload = invoke_tool(
@@ -84,7 +95,7 @@ def _run_sandbox(
             user,
             "sandbox.run",
             {
-                "workspace_id": _workspace_id(conversation),
+                "workspace_id": workspace_id,
                 "conversation_id": conversation.id,
                 "command": command,
                 "timeout": max(1, min(timeout_seconds, 30)),
@@ -187,7 +198,9 @@ def _normalize_language(language: str) -> str:
     return normalized
 
 
-def _workspace_id(conversation: Conversation) -> str | None:
+def _workspace_id(conversation: Conversation, explicit: str | None = None) -> str | None:
+    if explicit:
+        return explicit
     if isinstance(conversation.extra, dict):
         value = conversation.extra.get("workspace_id") or conversation.extra.get("workspaceId")
         return str(value) if value else None
