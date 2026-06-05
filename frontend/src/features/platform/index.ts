@@ -1,2 +1,9 @@
-// Platform 功能域统一导出
-// TODO: 拆分 PlatformControlDrawer 组件后填充
+export { PlatformControlDrawer } from "./components/PlatformControlDrawer";
+export { AssetsPanel } from "./tabs/AssetsPanel";
+export { WorkflowBoardPanel } from "./tabs/WorkflowBoardPanel";
+export { ModelsPanel } from "./tabs/ModelsPanel";
+export { McpPanel } from "./tabs/McpPanel";
+export { ToolsPanel } from "./tabs/ToolsPanel";
+export { SkillsPanel } from "./tabs/SkillsPanel";
+export { SecurityPanel } from "./tabs/SecurityPanel";
+export { SandboxPanel } from "./tabs/SandboxPanel";

@@ -5,7 +5,7 @@ export {
   mergeConversationCategories,
 } from "./conversation";
 
-export { formatTime, formatFileSize } from "./format";
+export { formatTime, formatFileSize, parseList } from "./format";
 
 export {
   makeMessage,

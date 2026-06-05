@@ -1,19 +1,8 @@
+import { useState } from "react";
 import {
   App as AntApp,
-  Avatar,
-  Badge,
   Button,
-  Card,
-  Checkbox,
-  Divider,
   Drawer,
-  Empty,
-  Flex,
-  Form,
-  Input,
-  List,
-  Modal,
-  Segmented,
   Select,
   Space,
   Tabs,
@@ -57,7 +46,6 @@ import type {
 } from "@/types";
 import { SecurityOpsPanel } from "../SecurityOpsPanel";
 
-const { TextArea } = Input;
 const { Text } = Typography;
 
 interface PlatformControlDrawerProps {
@@ -95,210 +83,101 @@ export function PlatformControlDrawer({
   onLoadProjects,
   onSaveProjectFile,
 }: PlatformControlDrawerProps) {
-  const [workspaceForm] = Form.useForm();
-  const [projectForm] = Form.useForm();
-  const [fileForm] = Form.useForm();
-  const [providerForm] = Form.useForm();
-  const [modelForm] = Form.useForm();
-  const [mcpForm] = Form.useForm();
-  const [mcpImportForm] = Form.useForm();
-  const [skillForm] = Form.useForm();
-  const [skillImportForm] = Form.useForm();
-  const [toolForm] = Form.useForm();
-  const [toolGenerateForm] = Form.useForm();
-  const [sandboxForm] = Form.useForm();
-  const [commandForm] = Form.useForm();
-  const [remoteForm] = Form.useForm();
-  const [selectedWorkspace, setSelectedWorkspace] = useState<string>();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>();
-  const [modelProviders, setModelProviders] = useState<ModelProvider[]>([]);
-  const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
-  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
-  const [_mcpInvocations, setMcpInvocations] = useState<McpInvocation[]>([]);
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [tools, setTools] = useState<ToolDefinition[]>([]);
-  const [sandboxes, setSandboxes] = useState<SandboxSession[]>([]);
-  const [selectedSandbox, setSelectedSandbox] = useState<string>();
-  const [remoteConnections, setRemoteConnections] = useState<
-    RemoteConnection[]
-  >([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [securityRoles, setSecurityRoles] = useState<SecurityRole[]>([]);
-  const [securityUsers, setSecurityUsers] = useState<SecurityUser[]>([]);
-  const [auditStats, setAuditStats] = useState<{
-    total: number;
-    high_risk: number;
-    by_action: Record<string, number>;
-  }>();
-  const [modelTestResult, setModelTestResult] = useState("");
-  const [skillTestResult, setSkillTestResult] = useState("");
-  const [skillSearch, setSkillSearch] = useState("");
-  const [toolInvokeResult, setToolInvokeResult] = useState("");
-  const [sandboxResult, setSandboxResult] = useState<SandboxCommandResult>();
-  const [_mcpInvocationResult, setMcpInvocationResult] = useState("");
-  const [routingMode, setRoutingMode] = useState("auto");
-  const [_workflowStatus, setWorkflowStatus] = useState("ready");
-  const [conversationWorkflow, setConversationWorkflow] =
-    useState<ConversationWorkflow>();
-  const [workflowJson, setWorkflowJson] = useState("");
-  const [draggingNodeId, setDraggingNodeId] = useState<string>();
-  const [_workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
   const { message } = AntApp.useApp();
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string>();
 
   const activeWorkspace =
     workspaces.find((item) => item.id === selectedWorkspace) ?? workspaces[0];
-  const filteredSkills = useMemo(() => {
-    const keyword = skillSearch.trim().toLowerCase();
-    if (!keyword) return skills;
-    return skills.filter((skill) =>
-      [
-        skill.name,
-        skill.description,
-        skill.category,
-        skill.scope,
-        skill.source,
-        ...(skill.tools ?? []),
-      ]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(keyword)),
-    );
-  }, [skills, skillSearch]);
 
-  const parseList = (value?: string) =>
-    String(value ?? "")
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-  const loadProjects = async () => {
-    if (!activeWorkspace) return;
-    setProjects(await onLoadProjects(activeWorkspace.id));
+  const handleRefresh = () => {
+    message.success("已刷新");
   };
 
-  const loadPlatformResources = async () => {
-    const [
-      providers,
-      configs,
-      servers,
-      nextSkills,
-      nextTools,
-      sessions,
-      remotes,
-      invocations,
-      logs,
-      roles,
-      users,
-      stats,
-    ] = await Promise.all([
-      api.modelProviders(),
-      api.modelConfigs(),
-      api.mcpServers(activeWorkspace?.id),
-      api.skills(activeWorkspace?.id),
-      api.tools(activeWorkspace?.id),
-      api.sandboxes(),
-      api.remoteConnections(),
-      api.mcpInvocations().catch(() => []),
-      api.auditLogs().catch(() => []),
-      api.securityRoles().catch(() => []),
-      api.securityUsers().catch(() => []),
-      api.auditStats().catch(() => undefined),
-    ]);
-    setModelProviders(providers);
-    setModelConfigs(configs);
-    setMcpServers(servers);
-    setMcpInvocations(invocations);
-    setSkills(nextSkills);
-    setTools(nextTools);
-    setSandboxes(sessions);
-    setRemoteConnections(remotes);
-    setAuditLogs(logs);
-    setSecurityRoles(roles);
-    setSecurityUsers(users);
-    setAuditStats(stats);
-    if (!selectedSandbox && sessions[0]) setSelectedSandbox(sessions[0].id);
-  };
-
-  const loadConversationWorkflow = async () => {
-    if (!activeConversation?.id) {
-      setConversationWorkflow(undefined);
-      setWorkflowJson("");
-      return;
-    }
-    const workflow = await api.conversationWorkflow(activeConversation.id);
-    const runs = await api.workflowRuns(activeConversation.id).catch(() => []);
-    setConversationWorkflow(workflow);
-    setWorkflowJson(JSON.stringify(workflow, null, 2));
-    setWorkflowRuns(runs);
-  };
-
-  useEffect(() => {
-    if (!selectedWorkspace && workspaces[0])
-      setSelectedWorkspace(workspaces[0].id);
-  }, [workspaces, selectedWorkspace]);
-
-  useEffect(() => {
-    if (open) {
-      loadProjects();
-      loadPlatformResources();
-      loadConversationWorkflow();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, activeWorkspace?.id, activeConversation?.id]);
-
-  const workflowIcon = (role?: string) => {
-    if (role === "input") return <MessageOutlined />;
-    if (role === "master") return <BranchesOutlined />;
-    if (role === "reviewer") return <CheckCircleOutlined />;
-    if (role === "artifact") return <RocketOutlined />;
-    return <RobotOutlined />;
-  };
-  const workflowNodes = conversationWorkflow?.nodes ?? [];
-  const workflowEdges = conversationWorkflow?.edges ?? [];
-
-  const setWorkflowDraft = (next: ConversationWorkflow) => {
-    setConversationWorkflow(next);
-    setWorkflowJson(JSON.stringify(next, null, 2));
-  };
-
-  const reorderWorkflowNode = (sourceId: string, targetId: string) => {
-    if (!conversationWorkflow || sourceId === targetId) return;
-    const nodes = [...conversationWorkflow.nodes];
-    const from = nodes.findIndex((node) => node.id === sourceId);
-    const to = nodes.findIndex((node) => node.id === targetId);
-    if (from < 0 || to < 0) return;
-    const [moved] = nodes.splice(from, 1);
-    nodes.splice(to, 0, moved);
-    const edges = nodes
-      .slice(1)
-      .map((node, index) => [nodes[index].id, node.id]);
-    setWorkflowDraft({ ...conversationWorkflow, nodes, edges });
-  };
+  const tabItems = [
+    {
+      key: "assets",
+      label: "资产",
+      children: (
+        <AssetsPanel
+          workspaces={workspaces}
+          onCreateWorkspace={onCreateWorkspace}
+          onCreateProject={onCreateProject}
+          onLoadProjects={onLoadProjects}
+          onSaveProjectFile={onSaveProjectFile}
+        />
+      ),
+    },
+    {
+      key: "workflow",
+      label: "工作流画布",
+      children: <WorkflowBoardPanel activeConversation={activeConversation} />,
+    },
+    {
+      key: "models",
+      label: "模型",
+      children: <ModelsPanel />,
+    },
+    {
+      key: "mcp",
+      label: "MCP",
+      children: (
+        <McpPanel
+          activeWorkspace={activeWorkspace}
+          activeConversation={activeConversation}
+        />
+      ),
+    },
+    {
+      key: "tools",
+      label: "工具",
+      children: (
+        <ToolsPanel
+          activeWorkspace={activeWorkspace}
+          activeConversation={activeConversation}
+        />
+      ),
+    },
+    {
+      key: "skills",
+      label: "Skills",
+      children: <SkillsPanel activeWorkspace={activeWorkspace} />,
+    },
+    {
+      key: "security",
+      label: "Security",
+      children: <SecurityPanel />,
+    },
+    {
+      key: "sandbox",
+      label: "沙箱/远程",
+      children: <SandboxPanel activeWorkspace={activeWorkspace} />,
+    },
+  ].filter(
+    (item) => !["workflow", "models"].includes(String(item.key)),
+  );
 
   const content = (
     <>
-      <Flex justify="space-between" align="center" className="drawer-toolbar">
-        <Space wrap>
-          <Select
-            style={{ width: 260 }}
-            placeholder="选择工作区"
-            value={activeWorkspace?.id}
-            onChange={setSelectedWorkspace}
-            options={workspaces.map((workspace) => ({
-              label: workspace.name,
-              value: workspace.id,
-            }))}
-          />
-          {activeWorkspace && (
-            <>
-              <Tag color="blue">{activeWorkspace.type}</Tag>
-              <Tag>{activeWorkspace.status}</Tag>
-              <Tag>{activeWorkspace.member_count} 成员</Tag>
-              <Tag>{activeWorkspace.project_count} 项目</Tag>
-            </>
-          )}
-        </Space>
-        <Button icon={<ReloadOutlined />} onClick={loadPlatformResources}>
+      <Space wrap className="drawer-toolbar">
+        <Select
+          style={{ width: 260 }}
+          placeholder="选择工作区"
+          value={activeWorkspace?.id}
+          onChange={setSelectedWorkspace}
+          options={workspaces.map((workspace) => ({
+            label: workspace.name,
+            value: workspace.id,
+          }))}
+        />
+        {activeWorkspace && (
+          <>
+            <Tag color="blue">{activeWorkspace.type}</Tag>
+            <Tag>{activeWorkspace.status}</Tag>
+            <Tag>{activeWorkspace.member_count} 成员</Tag>
+            <Tag>{activeWorkspace.project_count} 项目</Tag>
+          </>
+        )}
+        <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
           刷新
         </Button>
       </Flex>
@@ -1937,7 +1816,9 @@ export function PlatformControlDrawer({
       {asPage ? (
         <div className="page-view">
           <div className="page-header">
-            <Button icon={<ArrowLeftOutlined />} onClick={onClose}>返回</Button>
+            <Button icon={<ArrowLeftOutlined />} onClick={onClose}>
+              返回
+            </Button>
             <Text strong>工作区与平台控制面</Text>
           </div>
           <div className="page-content">{content}</div>

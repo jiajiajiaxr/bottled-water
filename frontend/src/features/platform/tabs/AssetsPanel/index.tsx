@@ -1,36 +1,25 @@
 import { useEffect, useState } from "react";
 import {
+  App as AntApp,
   Avatar,
   Button,
   Card,
   Divider,
-  Drawer,
-  Flex,
   Form,
   Input,
   List,
   Select,
   Space,
   Tag,
-  Typography,
 } from "antd";
+import { api } from "@/api";
+import { parseList } from "@/lib/format";
 import type { Project, Workspace } from "@/types";
 
-const { Text, Title } = Typography;
 const { TextArea } = Input;
 
-export function WorkspacesDrawer({
-  open,
-  workspaces,
-  onClose,
-  onCreateWorkspace,
-  onCreateProject,
-  onLoadProjects,
-  onSaveProjectFile,
-}: {
-  open: boolean;
+interface AssetsPanelProps {
   workspaces: Workspace[];
-  onClose: () => void;
   onCreateWorkspace: (payload: {
     name: string;
     description: string;
@@ -47,37 +36,48 @@ export function WorkspacesDrawer({
     projectId: string,
     payload: { path: string; language: string; content: string },
   ) => Promise<void>;
-}) {
+}
+
+export function AssetsPanel({
+  workspaces,
+  onCreateWorkspace,
+  onCreateProject,
+  onLoadProjects,
+  onSaveProjectFile,
+}: AssetsPanelProps) {
+  const { message } = AntApp.useApp();
   const [workspaceForm] = Form.useForm();
   const [projectForm] = Form.useForm();
   const [fileForm] = Form.useForm();
+
   const [selectedWorkspace, setSelectedWorkspace] = useState<string>();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>();
-
-  useEffect(() => {
-    if (!selectedWorkspace) return;
-    onLoadProjects(selectedWorkspace).then(setProjects);
-  }, [selectedWorkspace, onLoadProjects]);
 
   const activeWorkspace =
     workspaces.find((item) => item.id === selectedWorkspace) ?? workspaces[0];
 
   useEffect(() => {
-    if (!selectedWorkspace && workspaces[0])
+    if (!selectedWorkspace && workspaces[0]) {
       setSelectedWorkspace(workspaces[0].id);
+    }
   }, [workspaces, selectedWorkspace]);
 
+  useEffect(() => {
+    if (!activeWorkspace) return;
+    onLoadProjects(activeWorkspace.id).then(setProjects);
+  }, [activeWorkspace, onLoadProjects]);
+
   return (
-    <Drawer title="工作区与项目资产" width={760} open={open} onClose={onClose}>
+    <>
       <div className="workspace-grid">
-        <Card title="工作区">
+        <Card title="创建工作区">
           <Form
             form={workspaceForm}
             layout="vertical"
             initialValues={{
               type: "vertical",
-              tags: "全链路开发",
+              tags: "fullstack,demo",
               template_id: "fullstack-delivery",
             }}
             onFinish={async (values) => {
@@ -85,28 +85,29 @@ export function WorkspacesDrawer({
                 name: values.name,
                 description: values.description ?? "",
                 type: values.type,
-                tags: String(values.tags ?? "")
-                  .split(",")
-                  .map((item) => item.trim())
-                  .filter(Boolean),
+                tags: parseList(values.tags),
                 config: { template_id: values.template_id },
               });
               workspaceForm.resetFields();
             }}
           >
-            <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+            <Form.Item
+              name="name"
+              label="名称"
+              rules={[{ required: true }]}
+            >
               <Input placeholder="业务增长工作区" />
             </Form.Item>
             <Form.Item name="description" label="描述">
               <Input />
             </Form.Item>
-            <Space>
+            <Space align="start">
               <Form.Item name="type" label="类型">
                 <Select
                   style={{ width: 150 }}
                   options={[
-                    { label: "垂直类", value: "vertical" },
-                    { label: "跨类", value: "cross" },
+                    { label: "垂直业务", value: "vertical" },
+                    { label: "跨团队", value: "cross" },
                     { label: "自定义", value: "custom" },
                   ]}
                 />
@@ -115,7 +116,10 @@ export function WorkspacesDrawer({
                 <Select
                   style={{ width: 180 }}
                   options={[
-                    { label: "全链路开发", value: "fullstack-delivery" },
+                    {
+                      label: "全链路开发",
+                      value: "fullstack-delivery",
+                    },
                     { label: "数据分析", value: "data-analysis" },
                     { label: "自定义实验", value: "custom-lab" },
                   ]}
@@ -136,7 +140,9 @@ export function WorkspacesDrawer({
             renderItem={(workspace) => (
               <List.Item
                 className={
-                  workspace.id === activeWorkspace?.id ? "workspace-active" : ""
+                  workspace.id === activeWorkspace?.id
+                    ? "workspace-active"
+                    : ""
                 }
                 onClick={() => setSelectedWorkspace(workspace.id)}
               >
@@ -148,7 +154,7 @@ export function WorkspacesDrawer({
                   }
                   title={
                     <Space>
-                      <Text strong>{workspace.name}</Text>
+                      <strong>{workspace.name}</strong>
                       <Tag>{workspace.type}</Tag>
                       <Tag>{workspace.status}</Tag>
                     </Space>
@@ -161,12 +167,6 @@ export function WorkspacesDrawer({
         </Card>
       </div>
       <Divider />
-      <Flex justify="space-between" align="center">
-        <Title level={4}>{activeWorkspace?.name ?? "项目资产"}</Title>
-        <Text type="secondary">
-          工作区隔离项目、知识库、Agent 编排和快捷指令
-        </Text>
-      </Flex>
       <div className="workspace-grid">
         <Card title="创建项目">
           <Form
@@ -175,7 +175,10 @@ export function WorkspacesDrawer({
             initialValues={{ type: "code_project" }}
             onFinish={async (values) => {
               if (!activeWorkspace) return;
-              const project = await onCreateProject(activeWorkspace.id, values);
+              const project = await onCreateProject(
+                activeWorkspace.id,
+                values,
+              );
               setProjects((current) => [project, ...current]);
               setSelectedProject(project.id);
               projectForm.resetFields();
@@ -200,7 +203,9 @@ export function WorkspacesDrawer({
                 ]}
               />
             </Form.Item>
-            <Button htmlType="submit">创建项目</Button>
+            <Button htmlType="submit" disabled={!activeWorkspace}>
+              创建项目
+            </Button>
           </Form>
         </Card>
         <Card title="项目文件快照">
@@ -229,7 +234,11 @@ export function WorkspacesDrawer({
               fileForm.resetFields();
             }}
           >
-            <Form.Item name="path" label="路径" rules={[{ required: true }]}>
+            <Form.Item
+              name="path"
+              label="路径"
+              rules={[{ required: true }]}
+            >
               <Input />
             </Form.Item>
             <Form.Item name="language" label="语言">
@@ -244,6 +253,6 @@ export function WorkspacesDrawer({
           </Form>
         </Card>
       </div>
-    </Drawer>
+    </>
   );
 }

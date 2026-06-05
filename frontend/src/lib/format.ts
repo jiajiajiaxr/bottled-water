@@ -13,3 +13,15 @@ export function formatFileSize(size?: number) {
   if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)}MB`;
   return `${Math.max(1, Math.ceil(size / 1024))}KB`;
 }
+
+/**
+ * 将逗号分隔的字符串解析为去重空格的字符串数组。
+ *
+ * 常用于表单中标签、工具参数、权限列表等字段的解析。
+ */
+export function parseList(value?: string): string[] {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
