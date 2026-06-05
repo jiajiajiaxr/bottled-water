@@ -8,21 +8,23 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from agent_runtime import AgentConfig, Session as AgentSession, ToolCall
 from agent_runtime.core.interfaces import ToolExecutor
+from agent_runtime.core.types import Event as RuntimeEvent
 from agent_runtime.workflow.replanner import sanitize_workflow
 from model_provider import create_provider
 from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
 
-from db.models import Agent, Conversation, Message, User
+from db.models import Agent, Artifact, Conversation, Message, User
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
-from app.events import SseSink
+from app.events import SseSink, WebSocketSink
 from app.services.chat.scheduling import resolve_scheduling_strategy
 from app.services.model_config_resolver import normalize_provider_type
+from app.services.serialization import artifact_to_dict, message_to_dict
 from app.services.tools.permissions import normalize_tool_names
 from app.services.tools.toolboxes import get_official_toolbox
 from common.logger import get_logger
@@ -320,7 +322,8 @@ class OrchestratorService:
 
 def _runtime_agent_tools(agent: Agent) -> list[str]:
     configured = list(normalize_tool_names((agent.config or {}).get("tools") or []))
-    official = [] if agent.type == "custom" else get_official_toolbox(agent.type or "chat")
+    agent_type = agent.type if isinstance(getattr(agent, "type", None), str) else "custom"
+    official = [] if agent_type == "custom" else get_official_toolbox(agent_type or "chat")
     return list(dict.fromkeys([*configured, *official]))
 
 
@@ -351,7 +354,7 @@ class _ToolExecutorAdapter(ToolExecutor):
 
     async def execute(self, tool_call: ToolCall) -> Any:
         from app.services.agents.async_tool_loop import execute_tool_by_name
-        return await execute_tool_by_name(
+        result = await execute_tool_by_name(
             self.db,
             agent=self.agent,
             user=self.user,
@@ -359,6 +362,36 @@ class _ToolExecutorAdapter(ToolExecutor):
             tool_name=tool_call.tool_name,
             arguments=tool_call.parameters,
         )
+        await self._publish_artifact_messages(result)
+        return result
+
+    async def _publish_artifact_messages(self, result: Any) -> None:
+        if not isinstance(result, dict):
+            return
+        output = result.get("output") if isinstance(result.get("output"), dict) else {}
+        artifact_id = str(output.get("artifact_id") or "")
+        if not artifact_id:
+            return
+
+        sink = WebSocketSink(str(self.conversation.id))
+        artifact = await self.db.get(Artifact, artifact_id)
+        if artifact:
+            await sink.emit(RuntimeEvent(type="artifact:created", payload=artifact_to_dict(artifact)))
+
+        preview_id = str(output.get("preview_message_id") or "")
+        preview = await self.db.get(Message, preview_id) if preview_id else None
+        if not preview and artifact:
+            preview = await self.db.scalar(
+                select(Message)
+                .where(
+                    Message.conversation_id == artifact.conversation_id,
+                    Message.content_type == "preview_card",
+                    Message.deleted_at.is_(None),
+                )
+                .order_by(Message.created_at.desc())
+            )
+        if preview:
+            await sink.emit(RuntimeEvent(type="message:new", payload=message_to_dict(preview)))
 
 
 class SingleAgentOrchestrator:

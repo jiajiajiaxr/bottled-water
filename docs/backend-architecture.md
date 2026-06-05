@@ -425,3 +425,8 @@ Agent Function Call / Workflow Tool Node
 - 工作流 Tool 节点也通过同一 executor 调用，不直接启动子进程。
 - 取消响应时可通过 `external_agent.cancel` 收敛运行记录；后续可继续把 generation cancel 与 active external run 绑定得更紧。
 - CLI 缺失时返回 degraded，前端管理页显示 setup hint；平台不伪造成功。
+## 2026-06-05 Runtime 工具产物链路补充
+
+`agent_runtime` 不直接创建聊天卡片，也不绕过 app 层工具系统。运行时 Agent 调用工具时，经由 `app.services.runtime_service._ToolExecutorAdapter` 进入 `app.services.agents.async_tool_loop.execute_tool_by_name()`，再进入 `services/tools/catalog.py` 与 `services/tools/executor.py` 做 ToolDefinition 读取、Agent 授权、参数校验和 ToolInvocation 记录。
+
+当工具输出包含真实 `artifact_id` 时，adapter 会读取已持久化的 Artifact 与 preview_card Message，并向当前会话 WebSocket 推送 `artifact:created` 和 `message:new`。因此新 WebSocket / actor runtime 与旧 Function Call Loop 共享同一套 artifact 数据模型、下载 API 和预览卡片结构。

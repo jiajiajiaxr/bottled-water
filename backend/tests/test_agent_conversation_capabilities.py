@@ -69,6 +69,10 @@ async def test_agent_extracts_file_summary_and_generates_document_artifact(
     assert Path(artifact.content["source_file"]["storage_path"]).exists()
     assert preview is not None
     assert preview.content["artifact_id"] == artifact.id
+    assert preview.content["format"] == artifact_format
+    assert preview.content["filename"].endswith(extension)
+    assert preview.content["media_type"] == artifact.content["media_type"]
+    assert preview.content["export_url"].endswith(f"format={artifact_format}")
     assert exported is not None
     assert exported.filename.endswith(extension)
     assert len(exported.content) > 500
@@ -103,6 +107,9 @@ async def test_explicit_pdf_preview_card_request_forces_real_artifact_when_model
     assert artifact.content["format"] == "pdf"
     assert preview is not None
     assert preview.content["artifact_id"] == artifact.id
+    assert preview.content["format"] == "pdf"
+    assert preview.content["export_url"].endswith("format=pdf")
+    assert preview.content["media_type"] == "application/pdf"
     assert Path(artifact.content["source_file"]["storage_path"]).exists()
     assert result.assistant and "真实 PDF" in result.assistant.content["text"]
 

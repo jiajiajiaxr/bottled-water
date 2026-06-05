@@ -191,3 +191,10 @@ agenthub/
 - `frontend/src/features/settings/components/ExternalAgentsPanel/`：全局设置中的“外部 Agent”管理卡片，展示安装/降级状态与最近运行记录。
 - `frontend/src/api/externalAgent.ts`、`frontend/src/types/externalAgent.ts`：前端 API SDK 与类型定义。
 - `backend/tests/test_external_agents.py`、`frontend/tests/external-agents-panel.test.tsx`：fake executable 与管理卡片测试，不依赖真实 Codex / Claude Code CLI。
+## 2026-06-05 工具产物稳定性文件地图
+
+- `backend/src/app/services/runtime_service.py`：Agent Runtime 的 ToolExecutor 适配层；负责把 runtime tool call 路由到 app 工具系统，并在 artifact 工具成功后推送真实 `artifact:created/message:new`。
+- `backend/src/app/services/tools/builtins/artifact/executor.py`：内置 artifact.create_* 的真实文件生成、Artifact 持久化和 preview_card 创建；preview_card 字段必须包含主格式下载信息。
+- `backend/src/app/services/artifacts.py`：旧 async artifact 创建入口的 preview_card 兼容逻辑。
+- `backend/src/app/api/workspace_files.py` 与 `backend/src/app/services/files/previewers/office.py`：工作区文件预览、Office 转 PDF 缓存与降级错误信息。
+- `frontend/src/api/message.ts`：WebSocket/SSE 事件分发；支持后端 `message:new` 真实卡片事件，并保留 tool_result fallback。

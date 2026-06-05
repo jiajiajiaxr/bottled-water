@@ -122,3 +122,9 @@
 | 前端管理入口 | 已完成 | `frontend/src/features/settings/components/ExternalAgentsPanel/` | 展示 installed/degraded、命令来源、setup hint 和最近运行记录，不展示敏感配置。 |
 | 真实 CLI 缺失降级 | 已完成 | `adapters/_cli.py` | 缺失时返回 degraded，测试使用 fake executable。 |
 | 生产级长任务监控 | 需继续加固 | `process_manager.py` | 已支持同步等待、后台 start/cancel；跨进程恢复、分布式 worker 和更细粒度文件事件可后续增强。 |
+## 2026-06-05 工具 / 产物 / 文件稳定性补丁
+
+- Agent Runtime 路径下的 `artifact.create_pdf/docx/pptx/xlsx/html` 工具成功后，会复用同一条 ToolInvocation 结果创建并持久化真实 `preview_card`，同时通过 WebSocket 推送 `artifact:created` 与 `message:new`。刷新页面后卡片仍来自数据库，不依赖前端临时拼接。
+- `preview_card.rawContent` 现在必须包含 `artifact_id`、`artifact_type`、`preview_url`、`export_url`、`format`、`filename`、`media_type`。主下载按钮按 `format` 下载真实主格式文件；生成失败不会创建卡片。
+- 工作区文件预览仍按类型分流：文本/Markdown/JSON/HTML 走文本或 `srcDoc`，图片/PDF 走 Blob 预览，DOCX/PPTX/XLSX 优先 LibreOffice 转 PDF 缓存，缺少 LibreOffice 时返回明确降级信息与下载入口。
+- 沙箱执行继续由 workspace resolver 生成 cwd，并写入 `SandboxSession.command_history` 与 `ToolInvocation`；stdout/stderr 保持截断与脱敏，`exit_code` 固定返回数值。

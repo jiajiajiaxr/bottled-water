@@ -130,6 +130,9 @@ function dispatchStreamEvent(
     case "task:status_changed":
       handlers.onTaskStatusChanged?.(data as Record<string, unknown>);
       break;
+    case "message:new":
+      handlers.onMessageNew?.(data as ChatMessage);
+      break;
     case "generation_finished":
     case "generation:cancelled":
     case "cancelled":
@@ -264,6 +267,7 @@ function previewCardFromToolResult(
     rawContent: {
       artifact_id: artifactId,
       title,
+      artifact_type: output.artifact_type ?? artifact.type,
       preview_url: output.preview_url ?? artifact.previewUrl,
       export_url: output.export_url ?? artifact.exportUrl,
       format: output.format ?? artifact.format,

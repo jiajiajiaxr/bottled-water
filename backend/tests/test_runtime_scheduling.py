@@ -7,7 +7,7 @@ import pytest
 
 from app.services.chat.scheduling import resolve_scheduling_strategy
 from app.services.conversation_session_manager import ConversationSessionManager
-from app.services.runtime_service import OrchestratorService
+from app.services.runtime_service import OrchestratorService, _ToolExecutorAdapter
 from db.models import User
 
 
@@ -130,3 +130,51 @@ async def test_session_manager_recreates_cached_session_when_strategy_changes() 
 
     assert create_session.await_count == 2
     assert create_session.await_args.kwargs["scheduling_strategy"] == "tech_lead"
+
+
+@pytest.mark.asyncio
+async def test_runtime_tool_executor_publishes_persisted_artifact_preview_message() -> None:
+    emitted: list[object] = []
+    artifact = SimpleNamespace(id="artifact-1", conversation_id="conv-1")
+    preview = SimpleNamespace(id="preview-1", conversation_id="conv-1", content_type="preview_card")
+
+    class FakeToolDb:
+        async def get(self, model, record_id: str):
+            if record_id == "artifact-1":
+                return artifact
+            if record_id == "preview-1":
+                return preview
+            return None
+
+        async def scalar(self, _query):
+            return None
+
+    async def fake_execute_tool_by_name(_db, **_kwargs):
+        return {
+            "type": "tool",
+            "tool_name": "artifact.create_pdf",
+            "status": "succeeded",
+            "output": {
+                "artifact_id": "artifact-1",
+                "preview_message_id": "preview-1",
+            },
+        }
+
+    async def fake_emit(self, event):
+        emitted.append(event)
+
+    adapter = _ToolExecutorAdapter(
+        FakeToolDb(),
+        _agent(),
+        SimpleNamespace(id="user-1"),
+        _conversation(id="conv-1"),
+    )
+
+    with patch("app.services.agents.async_tool_loop.execute_tool_by_name", new=fake_execute_tool_by_name):
+        with patch("app.services.runtime_service.artifact_to_dict", return_value={"id": "artifact-1"}):
+            with patch("app.services.runtime_service.message_to_dict", return_value={"id": "preview-1", "kind": "preview_card"}):
+                with patch("app.services.runtime_service.WebSocketSink.emit", new=fake_emit):
+                    await adapter.execute(SimpleNamespace(tool_name="artifact.create_pdf", parameters={}))
+
+    assert [event.type for event in emitted] == ["artifact:created", "message:new"]
+    assert emitted[-1].payload["id"] == "preview-1"

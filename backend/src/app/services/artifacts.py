@@ -185,6 +185,10 @@ async def create_artifact(
 
 
 async def create_preview_message(db: AsyncSession, conversation: Conversation, artifact: Artifact) -> Message:
+    content = artifact.content if isinstance(artifact.content, dict) else {}
+    artifact_format = str(content.get("format") or artifact.type or "html")
+    filename = str(content.get("filename") or f"{artifact.name}.{artifact_format}")
+    media_type = str(content.get("media_type") or artifact.mime_type or "text/html")
     message = Message(
         conversation_id=conversation.id,
         sender_type="agent",
@@ -196,6 +200,10 @@ async def create_preview_message(db: AsyncSession, conversation: Conversation, a
             "title": artifact.name,
             "artifact_type": artifact.type,
             "preview_url": f"/api/v1/artifacts/{artifact.id}/preview",
+            "export_url": f"/api/v1/artifacts/{artifact.id}/export?format={artifact_format}",
+            "format": artifact_format,
+            "filename": filename,
+            "media_type": media_type,
             "file_count": len(artifact.content.get("files") or {}),
             "total_size": len((artifact.content.get("files") or {}).get("index.html", "")),
         },

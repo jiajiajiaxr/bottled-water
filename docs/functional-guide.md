@@ -400,3 +400,10 @@ AgentHub 支持把 Codex / Claude Code 作为外部长任务 Coding Agent 接入
 - 外部 Agent 的 cwd 被限制在当前 workspace 的 `tools/conversations/.../agents/.../` 子目录中。
 - 后端不会把 API Key、token、CLI 登录态或 `.env` 内容返回前端。
 - stdout/stderr 会脱敏；命令用 argv 数组启动，不使用 shell 拼接。
+## 2026-06-05 产物、工具与文件预览使用边界
+
+- 用户要求生成 PDF / Word / PPT / Excel / HTML 时，Agent 必须拥有对应 `artifact.create_*` 工具权限；无权限时系统返回明确提示，不会创建假卡片。
+- 成功生成的产物会在聊天区出现真实预览卡片。卡片绑定数据库 `artifact_id` 和 `preview_message_id`，右侧预览与下载入口都从后端真实 artifact/export API 读取。
+- 工作区文件系统支持上传文件、产物文件、沙箱文件、导出文件和项目文件聚合展示。在线预览按格式处理：文本/Markdown/JSON/HTML 直接预览，图片/PDF 使用浏览器预览，Office 文件优先转换为 PDF 预览。
+- 如果当前环境缺少 LibreOffice，DOCX/PPTX/XLSX 在线预览会显示清晰降级说明，并保留下载原文件按钮；不会返回空白预览。
+- 工具调用成功默认只显示在对应 Agent 消息底部摘要和运行日志中；失败工具调用会给出一条简洁错误提示并保留审计记录。
