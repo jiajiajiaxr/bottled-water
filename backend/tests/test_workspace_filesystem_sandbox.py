@@ -796,6 +796,7 @@ def test_message_python_code_block_runs_in_conversation_sandbox(db: Session) -> 
             language="python",
             code="print('hello from code')",
             index=0,
+            workspace_id=workspace.id,
         )
         db.refresh(message)
         invocation = db.scalar(
@@ -837,6 +838,7 @@ def test_message_interactive_python_code_is_rejected_without_hanging(db: Session
             language="python",
             code="name = input('name: ')",
             index=0,
+            workspace_id=workspace.id,
         )
 
         assert result["status"] == "failed"

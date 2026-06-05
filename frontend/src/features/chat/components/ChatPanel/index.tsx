@@ -209,6 +209,7 @@ export function ChatPanel({
       <MessageBubble
         key={item.id}
         message={item}
+        workspaceId={active?.workspace_id}
         version={messageVersions.get(item.id) ?? 0}
         quoted={
           item.quotedMessageId

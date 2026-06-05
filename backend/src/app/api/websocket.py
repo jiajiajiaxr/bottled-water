@@ -19,6 +19,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_runtime.core.types import Event as RuntimeEvent
 from app.core.errors import NotFoundError, UnauthorizedError, ValidationAppError
 from app.core.security import decode_access_token
 from app.events import WebSocketSink
@@ -292,6 +293,16 @@ async def _send_user_input_async(
     try:
         await session_manager.send_user_input(conversation_id, content)
     except Exception as e:
+        await WebSocketSink(conversation_id).emit(
+            RuntimeEvent(
+                type="generation:failed",
+                payload={
+                    "conversation_id": conversation_id,
+                    "status": "failed",
+                    "error": str(e),
+                },
+            )
+        )
         logger.error("发送用户输入失败", conversation_id=conversation_id, error=str(e))
 
 

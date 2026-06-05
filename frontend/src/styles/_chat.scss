@@ -1,7 +1,9 @@
 @use "variables" as *;
 
 .chat-panel {
-  height: calc(100vh - 64px);
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   background: $color-bg-white;
@@ -30,9 +32,8 @@
 }
 
 .runtime-decision-strip {
-  position: sticky;
-  top: 0;
-  z-index: 4;
+  position: relative;
+  z-index: 1;
   width: fit-content;
   max-width: min(920px, 100%);
   margin: 0 auto $spacing-xxl;

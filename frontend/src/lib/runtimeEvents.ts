@@ -74,17 +74,61 @@ export function applyRuntimeEvent(
     }
   }
 
-  if (["system.session_completed", "system.session_cancelled", "control.cancel"].includes(event)) {
-    generation.status = event === "system.session_completed" ? "completed" : "cancelled";
+  const terminalStatus = terminalStatusForEvent(event);
+  if (terminalStatus) {
+    generation.status = terminalStatus;
     generation.completed_at ||= new Date().toISOString();
-    if (event !== "system.session_completed") generation.cancelled_at ||= generation.completed_at;
+    if (terminalStatus === "cancelled") generation.cancelled_at ||= generation.completed_at;
     runtime.active_generation_id = null;
   }
 
   return {
     runtime,
-    generation_status: runtime.active_generation_id ? "running" : event === "system.session_completed" ? "idle" : generation.status,
+    generation_status: runtime.active_generation_id
+      ? "running"
+      : terminalStatus === "completed"
+        ? "idle"
+        : terminalStatus || generation.status,
   };
+}
+
+function terminalStatusForEvent(event: string): "completed" | "failed" | "cancelled" | undefined {
+  if (
+    [
+      "system.session_completed",
+      "generation_finished",
+      "generation:finished",
+      "workflow_completed",
+      "workflow:completed",
+      "workflow:run_completed",
+    ].includes(event)
+  ) {
+    return "completed";
+  }
+  if (
+    [
+      "system.session_cancelled",
+      "generation:cancelled",
+      "cancelled",
+      "control.cancel",
+      "workflow:cancelled",
+      "workflow_cancelled",
+    ].includes(event)
+  ) {
+    return "cancelled";
+  }
+  if (
+    [
+      "system.session_error",
+      "generation:failed",
+      "failed",
+      "workflow:failed",
+      "workflow_failed",
+    ].includes(event)
+  ) {
+    return "failed";
+  }
+  return undefined;
 }
 
 function ensureRuntime(

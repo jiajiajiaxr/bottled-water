@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api";
 import { layoutWorkflowPositions } from "../../lib/workflowLayout";
 import { conversationRoutePath } from "../../lib/workflowRoutes";
+import { useConversationStore } from "../../store";
 import type { ConversationWorkflow } from "../../types";
 import { workflowSettings } from "./utils";
 import { useWorkflowStudio } from "./useWorkflowStudio";
@@ -36,6 +37,7 @@ export function WorkflowStudioContent({
   const [fitViewSignal, setFitViewSignal] = useState(0);
   const [activePanel, setActivePanel] = useState<WorkflowFloatingPanelKey>();
   const navigate = useNavigate();
+  const updateConversation = useConversationStore((state) => state.updateConversation);
   const studio = useWorkflowStudio({
     workspaceId,
     conversationId,
@@ -77,6 +79,15 @@ export function WorkflowStudioContent({
       return;
     }
     const saved = await api.saveConversationWorkflow(conversationId, parsed);
+    const enabled = Boolean(workflowSettings(saved).enabled);
+    if (typeof api.updateConversation === "function") {
+      const conversation = await api.updateConversation(conversationId, {
+        scheduling_strategy: enabled ? "workflow" : "tech_lead",
+        runtime_mode: enabled ? "legacy" : "actor",
+        workflow_enabled: enabled,
+      });
+      updateConversation(conversationId, conversation);
+    }
     studio.setWorkflowDraft(saved);
     onSuccess("工作流已保存");
   };

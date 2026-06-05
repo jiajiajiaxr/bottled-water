@@ -83,4 +83,22 @@ describe("applyRuntimeEvent", () => {
     expect(patch.runtime?.generations?.[0].status).toBe("cancelled");
     expect(patch.generation_status).toBe("cancelled");
   });
+
+  it("treats generation_finished as a global completion event", () => {
+    const patch = applyRuntimeEvent(
+      conversation({
+        generation_status: "running",
+        runtime: {
+          active_generation_id: "gen-1",
+          generations: [{ id: "gen-1", status: "running" }],
+        },
+      }),
+      "generation_finished",
+      { conversation_id: "conv-1" },
+    );
+
+    expect(patch.runtime?.active_generation_id).toBeNull();
+    expect(patch.runtime?.generations?.[0].status).toBe("completed");
+    expect(patch.generation_status).toBe("idle");
+  });
 });

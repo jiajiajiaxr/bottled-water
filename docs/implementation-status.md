@@ -128,3 +128,11 @@
 - `preview_card.rawContent` 现在必须包含 `artifact_id`、`artifact_type`、`preview_url`、`export_url`、`format`、`filename`、`media_type`。主下载按钮按 `format` 下载真实主格式文件；生成失败不会创建卡片。
 - 工作区文件预览仍按类型分流：文本/Markdown/JSON/HTML 走文本或 `srcDoc`，图片/PDF 走 Blob 预览，DOCX/PPTX/XLSX 优先 LibreOffice 转 PDF 缓存，缺少 LibreOffice 时返回明确降级信息与下载入口。
 - 沙箱执行继续由 workspace resolver 生成 cwd，并写入 `SandboxSession.command_history` 与 `ToolInvocation`；stdout/stderr 保持截断与脱敏，`exit_code` 固定返回数值。
+
+## 2026-06-05 新旧架构迁移收尾
+
+- 新业务主链路统一为 `WebSocket / ConversationSessionManager / agent_runtime`。`/api/v1/conversations/{id}/stream` 仍保留 SSE 兼容入口，但内部同样创建 `ConversationSessionManager` session 并使用 runtime event sink。
+- 单聊、默认群聊 `tech_lead + actor`、显式启用的 workflow 均通过 `OrchestratorService.create_session()` 进入 `AgentSession`；默认群聊只有 `workflow_enabled=true` 时才切到 workflow。
+- `agent.report` 会持久化为普通 Agent assistant message 并推送 `message:new`，刷新后能从数据库恢复；`artifact.create_*` 的工具结果会读取真实 Artifact 与 preview_card Message 后推送 `artifact:created/message:new`。
+- 事件终态语义已收口：`message_stop` 只结束单条气泡；`system.session_completed`、`generation_finished`、`generation:cancelled`、`generation:failed` 才清理全局 running。`workflow:completed` 仅作为运行态事件，不关闭会话流。
+- `services/chat/orchestrator.py`、`services/agents/direct.py`、旧 `function_loop.py` 和顶层 `tool_registry.py` 仅保留兼容/测试/旧 API shim；新消息、产物、工具、取消逻辑不再向这些旧入口新增业务。

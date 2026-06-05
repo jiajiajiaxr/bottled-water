@@ -134,19 +134,35 @@ function dispatchStreamEvent(
       handlers.onMessageNew?.(data as ChatMessage);
       break;
     case "generation_finished":
+    case "generation:finished":
     case "generation:cancelled":
+    case "generation:failed":
     case "cancelled":
     case "failed":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       handlers.onDone?.(data as Record<string, unknown>);
+      break;
+    case "workflow_completed":
+    case "workflow:completed":
+    case "workflow:run_completed":
+    case "workflow_cancelled":
+    case "workflow:cancelled":
+    case "workflow_failed":
+    case "workflow:failed":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
 
     // 运行时事件：Session 生命周期
     case "system.session_started":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
+      break;
     case "system.session_completed":
     case "system.session_cancelled":
       handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
+      handlers.onDone?.(data as Record<string, unknown>);
       break;
     case "system.session_error":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       handlers.onDone?.(data as Record<string, unknown>);
       break;
 
@@ -163,6 +179,11 @@ function dispatchStreamEvent(
 
     case "scheduler.decision":
     case "agent.state_changed":
+      if (String((data as Record<string, unknown>).state || "") === "running") {
+        handlers.onMessageStart?.(data as Record<string, unknown>);
+      }
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
+      break;
     case "agent.report":
     case "agent.failed":
     case "control.cancel":
@@ -368,11 +389,16 @@ export function streamAssistantReply(
       }
       if (
         eventName === "generation_finished" ||
+        eventName === "generation:finished" ||
         eventName === "generation:cancelled" ||
+        eventName === "generation:failed" ||
         eventName === "cancelled" ||
         eventName === "failed" ||
+        eventName === "system.session_completed" ||
+        eventName === "system.session_cancelled" ||
         eventName === "system.session_error"
       ) {
+        handlers.onRuntimeEvent?.(eventName, data as Record<string, unknown>);
         complete(data as Record<string, unknown>);
         return;
       }
@@ -384,11 +410,21 @@ export function streamAssistantReply(
       "content_block_delta",
       "message_stop",
       "task:status_changed",
+      "workflow_completed",
       "workflow:completed",
+      "workflow:run_completed",
       "generation_finished",
+      "generation:finished",
       "generation:cancelled",
+      "generation:failed",
+      "workflow_cancelled",
+      "workflow:cancelled",
+      "workflow_failed",
+      "workflow:failed",
       "cancelled",
       "failed",
+      "system.session_completed",
+      "system.session_cancelled",
       "system.session_error",
     ].forEach((eventName) => source.addEventListener(eventName, handle(eventName)));
     source.onerror = () => complete({ reason: "event_source_error" });
@@ -441,15 +477,16 @@ export async function sendMessageWs(
       switch (event) {
         case "system.session_completed":
         case "generation_finished":
+        case "generation:finished":
         case "generation:cancelled":
+        case "generation:failed":
+        case "cancelled":
+        case "failed":
           window.clearTimeout(timeout);
           if (!resolved) {
             resolved = true;
             unsubscribe();
             dispatchStreamEvent(event, data, handlers);
-            if (event === "system.session_completed") {
-              handlers.onDone?.();
-            }
             resolve("ok");
           }
           break;

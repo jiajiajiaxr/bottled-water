@@ -407,3 +407,22 @@ AgentHub 支持把 Codex / Claude Code 作为外部长任务 Coding Agent 接入
 - 工作区文件系统支持上传文件、产物文件、沙箱文件、导出文件和项目文件聚合展示。在线预览按格式处理：文本/Markdown/JSON/HTML 直接预览，图片/PDF 使用浏览器预览，Office 文件优先转换为 PDF 预览。
 - 如果当前环境缺少 LibreOffice，DOCX/PPTX/XLSX 在线预览会显示清晰降级说明，并保留下载原文件按钮；不会返回空白预览。
 - 工具调用成功默认只显示在对应 Agent 消息底部摘要和运行日志中；失败工具调用会给出一条简洁错误提示并保留审计记录。
+
+## 2026-06-05 会话运行模式说明
+
+工作台里的三种运行模式现在有明确边界：
+
+- 单聊：固定 `single_agent`，当前 Agent 使用自己的模型配置、工具、Skill、MCP 权限执行。
+- 普通群聊：默认 `自动组织`，即 `scheduling_strategy=tech_lead`、`runtime_mode=actor`、`workflow_enabled=false`。Team Leader 只负责指派和总结，不能越权调用非群成员或未授权工具。
+- 工作流画布：只有用户在画布设置中显式启用后，才设置 `workflow_enabled=true` 并进入 `workflow`。保存画布不等于启用画布。
+
+运行中状态说明：
+
+- 单个 Agent 消息结束时，前端只清理该消息的 streaming 状态。
+- 收到 generation/session 终态后，左侧会话、顶部模式条和消息气泡才统一退出 running。
+- 停止响应会传播到当前 generation，并把未完成消息、任务和 workflow run 收敛为 cancelled 或 failed。
+
+产物说明：
+
+- 聊天里的产物预览卡片必须来自后端真实 Message；点击卡片用 `artifact_id` 打开右侧预览。
+- 前端不会再因为关键词自行拼假卡片。没有工具权限、生成失败或文件缺失时，用户会看到明确错误。

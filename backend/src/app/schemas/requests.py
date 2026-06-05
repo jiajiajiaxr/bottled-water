@@ -405,6 +405,9 @@ class RunMessageCodeRequest(BaseModel):
     code: str
     index: int = 0
     timeout_seconds: int = 10
+    workspace_id: str | None = None
+    conversation_id: str | None = None
+    message_id: str | None = None
 
 
 class CreateRemoteConnectionRequest(BaseModel):

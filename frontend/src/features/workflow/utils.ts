@@ -49,8 +49,10 @@ export function configValueFromText(value?: string) {
   }
 }
 
-export function workflowSettings(workflow?: ConversationWorkflow) {
-  return workflow?.settings ?? {};
+export function workflowSettings(workflow?: ConversationWorkflow): Record<string, unknown> & {
+  enabled: boolean;
+} {
+  return { enabled: false, ...(workflow?.settings ?? {}) };
 }
 
 export function statusTagColor(status?: string) {

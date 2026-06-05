@@ -26,7 +26,7 @@ import {
   useBackgroundTaskPolling,
   useWorkbenchActions,
 } from "@/hooks";
-import { isTaskRunning } from "@/lib/message";
+import { deriveRunningConversationIds } from "@/lib/runningConversations";
 
 export function Workbench({
   user,
@@ -54,7 +54,7 @@ export function Workbench({
 }) {
   const { message } = AntApp.useApp();
   const [currentUser, setCurrentUser] = useState(user);
-  const { setMessages, clearMessages } = useMessageStore();
+  const { setMessages, clearMessages, historyMessages } = useMessageStore();
   const {
     localRunningConversationIds,
   } = useConversationStore();
@@ -79,7 +79,9 @@ export function Workbench({
     useConversationCategories(activeWorkspaceId, conversations);
   const {
     artifact,
+    artifactPanelOpen,
     setArtifact,
+    setArtifactPanelOpen,
     deployment,
     files,
     setFiles,
@@ -94,14 +96,12 @@ export function Workbench({
     conversationSettingsOpen,
     membersOpen,
     createOpen,
-    artifactPanelOpen,
     scheduleMode,
     setAgentDrawerOpen,
     setGlobalSettingsOpen,
     setConversationSettingsOpen,
     setMembersOpen,
     setCreateOpen,
-    setArtifactPanelOpen,
     setScheduleMode,
   } = useUIStore();
   const active = conversations.find((item) => item.id === activeId);
@@ -109,13 +109,20 @@ export function Workbench({
     workspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
     workspaces[0];
   const runningConversationIds = useMemo(() => {
-    const next = new Set(localRunningConversationIds);
-    backgroundTasks.forEach((task) => {
-      if (task.conversation_id && isTaskRunning(task.status))
-        next.add(task.conversation_id);
+    return deriveRunningConversationIds({
+      conversations,
+      backgroundTasks,
+      localRunningConversationIds,
+      activeConversationId: activeId,
+      activeMessages: historyMessages,
     });
-    return next;
-  }, [backgroundTasks, localRunningConversationIds]);
+  }, [
+    activeId,
+    backgroundTasks,
+    conversations,
+    historyMessages,
+    localRunningConversationIds,
+  ]);
   const navigateToConversation = (
     workspaceId?: string,
     conversationId?: string,
@@ -153,26 +160,8 @@ export function Workbench({
     }
   };
 
-  const changeScheduleMode = async (mode: "chat" | "workflow") => {
+  const changeScheduleMode = (mode: "chat" | "workflow") => {
     setScheduleMode(mode);
-    if (!active) return;
-    const isWorkflow = mode === "workflow";
-    try {
-      const updated = await api.updateConversation(active.id, {
-        scheduling_strategy: isWorkflow
-          ? "workflow"
-          : active.chat_type === "single"
-            ? "single_agent"
-            : "tech_lead",
-        runtime_mode: isWorkflow || active.chat_type === "single" ? "legacy" : "actor",
-        workflow_enabled: isWorkflow,
-      });
-      updateConversations((current) =>
-        current.map((item) => (item.id === active.id ? { ...item, ...updated } : item)),
-      );
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : "调度模式切换失败");
-    }
   };
 
   const closeMainTab = (tab: "agents" | "workspace" | "settings" | "files") => {
@@ -324,8 +313,8 @@ export function Workbench({
 
   useEffect(() => {
     if (!active) return;
-    setScheduleMode(active.workflow_enabled ? "workflow" : "chat");
-  }, [active?.id, active?.workflow_enabled, setScheduleMode]);
+    setScheduleMode("chat");
+  }, [active?.id, setScheduleMode]);
 
   return (
     <>

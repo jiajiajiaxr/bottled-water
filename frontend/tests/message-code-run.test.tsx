@@ -24,6 +24,7 @@ describe("chat code block runner", () => {
     render(
       <MessageBubble
         message={messageWithCode("```python\nprint(42)\n```")}
+        workspaceId="workspace-1"
         onCopy={() => undefined}
         onPreview={() => undefined}
         onQuote={() => undefined}
@@ -41,10 +42,33 @@ describe("chat code block runner", () => {
           code: "print(42)",
           index: 0,
           timeout_seconds: 10,
+          workspace_id: "workspace-1",
+          conversation_id: "conversation-1",
+          message_id: "assistant-1",
         },
       ),
     );
     expect((await screen.findByTestId("code-run-result")).textContent).toContain("42");
+  });
+
+  it("shows a visible error when the sandbox request fails", async () => {
+    vi.mocked(api.runMessageCodeBlock).mockRejectedValue(new Error("sandbox offline"));
+
+    render(
+      <MessageBubble
+        message={messageWithCode("```python\nprint(42)\n```")}
+        workspaceId="workspace-1"
+        onCopy={() => undefined}
+        onPreview={() => undefined}
+        onQuote={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "运行" }));
+
+    expect((await screen.findByTestId("code-run-result")).textContent).toContain(
+      "sandbox offline",
+    );
   });
 });
 

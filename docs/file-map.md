@@ -198,3 +198,23 @@ agenthub/
 - `backend/src/app/services/artifacts.py`：旧 async artifact 创建入口的 preview_card 兼容逻辑。
 - `backend/src/app/api/workspace_files.py` 与 `backend/src/app/services/files/previewers/office.py`：工作区文件预览、Office 转 PDF 缓存与降级错误信息。
 - `frontend/src/api/message.ts`：WebSocket/SSE 事件分发；支持后端 `message:new` 真实卡片事件，并保留 tool_result fallback。
+
+## 2026-06-05 Runtime 主链路文件地图
+
+- `backend/src/app/api/websocket.py`：唯一推荐实时入口，处理 `chat.send`、`chat.cancel`，并把 runtime events 推给前端。
+- `backend/src/app/api/messages.py`：SSE 兼容入口；发送后仍复用 `ConversationSessionManager` 和 `agent_runtime`，不再启动旧 orchestrator。
+- `backend/src/app/services/conversation_session_manager.py`：会话级 session 生命周期、generation 记录、Agent report 消息持久化、终态事件发布。
+- `backend/src/app/services/runtime_service.py`：组装 `AgentSession`、选择 scheduler、桥接 ToolExecutor、把 artifact tool result 映射为真实 `artifact:created/message:new`。
+- `backend/src/agent_runtime/`：Actor runtime、SchedulerAgent、AgentActor、Workflow scheduler、EventBus、Blackboard/Agent Context。
+- `frontend/src/api/message.ts`：统一 WebSocket/SSE event dispatch；`message_stop` 与 generation 终态分离。
+- `frontend/src/hooks/useStreamingMessages.ts`：按 `agent_message_id` 维护 streaming 气泡，并在 generation 终态兜底清理。
+- `frontend/src/lib/runtimeEvents.ts`：左侧 running 状态和 RuntimeDecisionStrip 使用的事件归一。
+
+兼容入口：
+
+- `backend/src/app/services/chat/orchestrator.py`
+- `backend/src/app/services/agents/direct.py`
+- `backend/src/app/services/agents/function_loop.py`
+- `backend/src/app/services/tool_registry.py`
+
+这些文件只应承载旧 API、测试和 re-export 兼容。新业务不要继续在其中堆实现。

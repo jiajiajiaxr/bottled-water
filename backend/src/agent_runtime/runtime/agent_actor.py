@@ -213,6 +213,7 @@ class AgentActor:
                 type=AGENT_STATE_CHANGED,
                 payload={
                     "agent_id": self.config.id,
+                    "agent_name": self.config.name,
                     "old_state": old_state.value,
                     "state": state.value,
                     "reason": reason,

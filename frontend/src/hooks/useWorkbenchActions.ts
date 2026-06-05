@@ -33,8 +33,8 @@ export function useWorkbenchActions(
     artifact,
     files,
     setArtifact,
-    setFiles,
     setArtifactPanelOpen,
+    setFiles,
     setDeployment,
   } = useArtifactStore();
   const { setCreateOpen } = useUIStore();
@@ -120,31 +120,52 @@ export function useWorkbenchActions(
       typeof source?.rawContent?.artifact_id === "string"
         ? source.rawContent.artifact_id
         : undefined;
-    const current =
-      (artifactId ? await api.artifactById(artifactId) : undefined) ??
-      artifact ??
-      (await api.artifact(activeId));
-    const nextArtifact =
-      current ??
-      (source?.kind === "preview_card"
-        ? {
-            id: artifactId ?? `local-${activeId}`,
-            conversationId: activeId,
-            title:
-              source.content.replace(/^预览产物[:：]\s*/, "") ||
-              "AgentHub artifact",
-            language: "html",
-            code: "<main><h1>Artifact preview</h1><p>产物索引已恢复，请刷新或重新生成以查看完整文件。</p></main>",
-            previousCode: "",
-            updatedAt: new Date().toISOString(),
-          }
-        : undefined);
-    if (!nextArtifact) {
-      message.warning("当前会话还没有可预览产物");
+    if (source?.kind === "preview_card" && !artifactId) {
+      message.error("产物卡片缺少 artifact_id，无法打开预览");
       return;
     }
-    setArtifact(nextArtifact);
-    setArtifactPanelOpen(true);
+    if (artifactId) {
+      setArtifact({
+        id: artifactId,
+        conversationId: activeId,
+        title: source?.rawContent?.title
+          ? String(source.rawContent.title)
+          : source?.content.replace(/^预览产物[:：]\s*/, "") || "产物预览",
+        language: "html",
+        code: "<main><h1>正在加载真实产物...</h1><p>正在根据 artifact_id 拉取产物文件。</p></main>",
+        previousCode: "",
+        updatedAt: new Date().toISOString(),
+      });
+      setArtifactPanelOpen(true);
+    }
+    try {
+      const current =
+        (artifactId ? await api.artifactById(artifactId) : undefined) ??
+        artifact ??
+        (await api.artifact(activeId));
+      if (!current) {
+        message.warning("当前会话还没有可预览产物");
+        return;
+      }
+      setArtifact(current);
+      setArtifactPanelOpen(true);
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "无法加载真实产物";
+      if (artifactId) {
+        setArtifact({
+          id: artifactId,
+          conversationId: activeId,
+          title: "产物预览失败",
+          language: "html",
+          code: `<main><h1>产物预览失败</h1><p>${escapeHtml(reason)}</p></main>`,
+          previousCode: "",
+          updatedAt: new Date().toISOString(),
+        });
+        setArtifactPanelOpen(true);
+      }
+      message.error(`预览打开失败：${reason}`);
+    }
   };
 
   return {
@@ -155,4 +176,12 @@ export function useWorkbenchActions(
     uploadFile,
     openArtifactPreview,
   };
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

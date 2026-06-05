@@ -14,18 +14,20 @@ from __future__ import annotations
 import asyncio
 from typing import Any, ClassVar, Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_runtime import Session as AgentSession
 from agent_runtime.core.types import Event as RuntimeEvent
 from app.events import WebSocketSink
-from db.models import Conversation
+from db.models import Conversation, Message, utcnow
 from db.session import AsyncSessionLocal
 from app.services.runtime.generation_records import (
     create_generation_record,
     finish_generation_record,
     record_generation_event,
 )
+from app.services.serialization import message_to_dict
 from app.services.chat.scheduling import resolve_scheduling_strategy, runtime_mode, workflow_enabled
 from app.services.runtime_service import OrchestratorService
 from common.logger import get_logger
@@ -102,6 +104,8 @@ class ConversationSessionManager:
                     and self._session_runtime_modes.get(conversation_id) == requested_runtime_mode
                     and self._session_workflow_enabled.get(conversation_id) == requested_workflow_enabled
                 ):
+                    if event_sink is not None:
+                        self._sessions[conversation_id].event_dispatcher.register_sink(event_sink)
                     return self._sessions[conversation_id]
                 self._sessions.pop(conversation_id, None)
                 self._session_model_config_ids.pop(conversation_id, None)
@@ -333,6 +337,76 @@ class ConversationSessionManager:
     ) -> None:
         async with self._session_factory() as db:
             await record_generation_event(db, conversation_id, generation_id, event)
+            message = await self._persist_agent_report_message(
+                db,
+                conversation_id,
+                generation_id,
+                event,
+            )
+        if message:
+            await WebSocketSink(conversation_id).emit(
+                RuntimeEvent(type="message:new", payload=message_to_dict(message))
+            )
+
+    async def _persist_agent_report_message(
+        self,
+        db: AsyncSession,
+        conversation_id: str,
+        generation_id: str,
+        event: RuntimeEvent,
+    ) -> Message | None:
+        if event.type != "agent.report":
+            return None
+        payload = event.payload or {}
+        work_product = str(payload.get("work_product") or "").strip()
+        if not work_product:
+            return None
+
+        agent_id = str(payload.get("agent_id") or "")
+        session = self._sessions.get(conversation_id)
+        agent = session.agents.get(agent_id) if session and agent_id else None
+        agent_name = getattr(agent, "name", None) or str(payload.get("agent_name") or "Agent")
+        existing = await db.scalar(
+            select(Message).where(
+                Message.conversation_id == conversation_id,
+                Message.sender_type == "agent",
+                Message.sender_id == agent_id,
+                Message.extra["runtime_generation_id"].as_string() == generation_id,
+                Message.extra["runtime_report_task"].as_string() == str(payload.get("task") or ""),
+                Message.deleted_at.is_(None),
+            )
+        )
+        if existing:
+            return None
+
+        report = payload.get("report") if isinstance(payload.get("report"), dict) else {}
+        message = Message(
+            conversation_id=conversation_id,
+            sender_type="agent",
+            sender_id=agent_id or None,
+            sender_name=agent_name,
+            content_type="text",
+            content={
+                "text": work_product,
+                "runtime_report": report,
+            },
+            status="completed",
+            extra={
+                "runtime_generation_id": generation_id,
+                "runtime_agent_report": True,
+                "runtime_report_task": str(payload.get("task") or ""),
+            },
+        )
+        conversation = await db.get(Conversation, conversation_id)
+        if conversation:
+            conversation.last_message_preview = work_product[:300]
+            conversation.last_message_sender = agent_name
+            conversation.last_message_at = utcnow()
+            conversation.message_count += 1
+        db.add(message)
+        await db.commit()
+        await db.refresh(message)
+        return message
 
     async def _finish_generation(
         self,
@@ -350,3 +424,18 @@ class ConversationSessionManager:
                 status=status,
                 error=error,
             )
+        event_type = {
+            "cancelled": "generation:cancelled",
+            "failed": "generation:failed",
+        }.get(status, "generation_finished")
+        await WebSocketSink(conversation_id).emit(
+            RuntimeEvent(
+                type=event_type,
+                payload={
+                    "conversation_id": conversation_id,
+                    "generation_id": generation_id,
+                    "status": status,
+                    "error": error,
+                },
+            )
+        )

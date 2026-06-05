@@ -541,11 +541,17 @@ async def run_agent_function_call_loop(
             break
 
         round_tool_results: list[dict[str, Any]] = []
-        for tool_call in current_tool_calls:
+        normalized_tool_calls: list[dict[str, Any]] = []
+        for raw_tool_call in current_tool_calls:
+            tool_call = dict(raw_tool_call) if isinstance(raw_tool_call, dict) else {}
             function = tool_call.get("function") if isinstance(tool_call, dict) else {}
             function = function if isinstance(function, dict) else {}
             tool_name = str(function.get("name") or "")
             tool_call_id = str(tool_call.get("id") or f"call_{round_num}_{len(tool_results) + 1}")
+            tool_call["id"] = tool_call_id
+            tool_call.setdefault("type", "function")
+            tool_call["function"] = function
+            normalized_tool_calls.append(tool_call)
             arguments = _tool_arguments_with_context(
                 tool_arguments(str(function.get("arguments") or "")),
                 conversation=conversation,
@@ -677,7 +683,7 @@ async def run_agent_function_call_loop(
                 message=f"{agent.name} 已完成 {tool_name}",
             )
 
-        messages.append({"role": "assistant", "content": current_text or "", "tool_calls": current_tool_calls})
+        messages.append({"role": "assistant", "content": current_text or "", "tool_calls": normalized_tool_calls})
         for item in round_tool_results:
             messages.append(
                 context_builder.tool_result_message(

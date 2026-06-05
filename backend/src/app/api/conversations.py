@@ -567,7 +567,20 @@ async def update_conversation_workflow(
     _ensure_can_manage(conversation, user)
     workflow = _normalize_workflow(payload.model_dump(), conversation)
     workflow["settings"] = {**(workflow.get("settings") or {}), "edited_by_user": True}
-    conversation.extra = {**(conversation.extra or {}), "workflow": workflow}
+    enabled = bool((workflow.get("settings") or {}).get("enabled"))
+    if conversation.chat_type == "single":
+        strategy = "single_agent"
+    elif enabled:
+        strategy = "workflow"
+    else:
+        strategy = "tech_lead"
+    conversation.extra = {
+        **(conversation.extra or {}),
+        "workflow": workflow,
+        "workflow_enabled": enabled and strategy == "workflow",
+        "scheduling_strategy": strategy,
+        "runtime_mode": "legacy" if strategy in {"workflow", "single_agent"} else "actor",
+    }
     await db.commit()
     return ok(workflow, "工作流已保存")
 
