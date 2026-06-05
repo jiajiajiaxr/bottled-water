@@ -59,13 +59,17 @@ def _agent(agent_id: str = "agent-1"):
     )
 
 
-def test_group_with_workflow_defaults_to_workflow_strategy() -> None:
+def test_group_with_workflow_defaults_to_auto_organization_until_enabled() -> None:
     conversation = _conversation()
 
+    assert resolve_scheduling_strategy(conversation) == "tech_lead"
+    conversation.extra["workflow_enabled"] = True
+    conversation.extra["scheduling_strategy"] = "workflow"
     assert resolve_scheduling_strategy(conversation) == "workflow"
     assert resolve_scheduling_strategy(conversation, "tech_lead") == "tech_lead"
 
     conversation.extra["scheduling_strategy"] = "tech_lead"
+    conversation.extra["workflow_enabled"] = False
     assert resolve_scheduling_strategy(conversation) == "tech_lead"
 
 
@@ -77,7 +81,7 @@ async def test_create_session_honors_explicit_workflow_strategy() -> None:
         captured.update(kwargs)
         return FakeRuntimeSession()
 
-    conversation = _conversation(extra={"scheduling_strategy": "tech_lead"})
+    conversation = _conversation(extra={"scheduling_strategy": "workflow", "workflow_enabled": True})
     db = FakeDb()
     with patch(
         "app.services.model_config_resolver.create_provider_from_db",
@@ -112,7 +116,7 @@ async def test_sse_orchestrator_run_passes_requested_strategy() -> None:
 @pytest.mark.asyncio
 async def test_session_manager_recreates_cached_session_when_strategy_changes() -> None:
     db = FakeDb()
-    conversation = _conversation()
+    conversation = _conversation(extra={"scheduling_strategy": "workflow", "workflow_enabled": True})
     first = FakeRuntimeSession("session-workflow")
     second = FakeRuntimeSession("session-tech-lead")
     create_session = AsyncMock(side_effect=[first, second])

@@ -39,6 +39,15 @@ export function useMessageOperations(userName?: string) {
 
     const conversationId = activeId;
     const scheduleMode = useUIStore.getState().scheduleMode;
+    const activeConversation = useConversationStore
+      .getState()
+      .conversations.find((item) => item.id === conversationId);
+    const schedulingStrategy =
+      activeConversation?.chat_type === "single"
+        ? "single_agent"
+        : scheduleMode === "workflow" || activeConversation?.workflow_enabled
+          ? "workflow"
+          : "tech_lead";
     const localAttachments = normalizeAttachments(attachments);
 
     const userMessage = makeMessage({
@@ -69,7 +78,7 @@ export function useMessageOperations(userName?: string) {
       thinking_enabled: thinkingEnabled,
       model_config_id: modelConfigId,
       client_message_id: `client-${Date.now()}`,
-      scheduling_strategy: scheduleMode === "workflow" ? "workflow" : "tech_lead",
+      scheduling_strategy: schedulingStrategy,
     };
 
     markConversationRunning(conversationId);

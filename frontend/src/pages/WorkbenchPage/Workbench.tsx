@@ -155,6 +155,28 @@ export function Workbench({
     }
   };
 
+  const changeScheduleMode = async (mode: "chat" | "workflow") => {
+    setScheduleMode(mode);
+    if (!active) return;
+    const isWorkflow = mode === "workflow";
+    try {
+      const updated = await api.updateConversation(active.id, {
+        scheduling_strategy: isWorkflow
+          ? "workflow"
+          : active.chat_type === "single"
+            ? "single_agent"
+            : "tech_lead",
+        runtime_mode: isWorkflow || active.chat_type === "single" ? "legacy" : "actor",
+        workflow_enabled: isWorkflow,
+      });
+      updateConversations((current) =>
+        current.map((item) => (item.id === active.id ? { ...item, ...updated } : item)),
+      );
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "调度模式切换失败");
+    }
+  };
+
   const closeMainTab = (tab: "agents" | "workspace" | "settings" | "files") => {
     if (tab === "agents") setAgentDrawerOpen(false);
     if (tab === "workspace") setWorkspacesOpen(false);
@@ -168,6 +190,7 @@ export function Workbench({
     createConversation,
     saveArtifact,
     deploy,
+    openArtifactPreview,
   } = useWorkbenchActions(
     activeWorkspaceId,
     conversationCategories,
@@ -303,6 +326,11 @@ export function Workbench({
       .finally(() => setLoadingMessages(false));
   }, [activeId, setArtifactPanelOpen, setArtifact, setFiles, setLoadingMessages, setMessages]);
 
+  useEffect(() => {
+    if (!active) return;
+    setScheduleMode(active.workflow_enabled ? "workflow" : "chat");
+  }, [active?.id, active?.workflow_enabled, setScheduleMode]);
+
   return (
     <>
       <WorkbenchLayout
@@ -327,7 +355,7 @@ export function Workbench({
         agents={agents}
         routeTab={routeTab}
         scheduleMode={scheduleMode}
-        onScheduleModeChange={setScheduleMode}
+        onScheduleModeChange={changeScheduleMode}
       >
         {routeTab === "chat" ? (
           scheduleMode === "workflow" && active ? (
@@ -346,6 +374,7 @@ export function Workbench({
                 loading={loadingMessages}
                 userName={currentUser.name}
                 defaultModelConfigId={currentUser.default_model_config_id}
+                onPreviewArtifact={openArtifactPreview}
               />
               {artifactPanelOpen && artifact && (
                 <PreviewPanel

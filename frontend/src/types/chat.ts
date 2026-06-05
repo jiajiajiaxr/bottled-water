@@ -50,6 +50,9 @@ export interface Conversation {
   workflow_runtime?: WorkflowRun;
   generation_status?: "idle" | "running" | "failed" | "cancelled" | string;
   active_session_id?: string | null;
+  scheduling_strategy?: "workflow" | "tech_lead" | "single_agent" | string;
+  runtime_mode?: "actor" | "legacy" | string;
+  workflow_enabled?: boolean;
   runtime?: ConversationRuntime;
 }
 
@@ -72,6 +75,10 @@ export interface ConversationRuntimeDecision {
   target?: string;
   task?: string;
   rationale?: string;
+  target_agent_ids?: string[];
+  expected_outputs?: string[];
+  requires_review?: boolean;
+  fallback_reason?: string;
   created_at?: string;
 }
 

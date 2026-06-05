@@ -25,10 +25,14 @@ export function applyRuntimeEvent(
       ...(generation.decisions || []),
       {
         round: numberOrUndefined(payload.round),
-        decision: stringOrUndefined(decision?.decision_type ?? decision?.decision),
+        decision: stringOrUndefined(decision?.action ?? decision?.decision_type ?? decision?.decision),
         target: stringOrUndefined(decision?.target_agent_id ?? payload.target),
-        task: stringOrUndefined(decision?.task_description ?? payload.task),
+        target_agent_ids: arrayOfStrings(decision?.target_agent_ids ?? payload.target_agent_ids),
+        task: stringOrUndefined(decision?.task ?? decision?.task_description ?? payload.task),
         rationale: stringOrUndefined(decision?.rationale ?? payload.rationale),
+        expected_outputs: arrayOfStrings(decision?.expected_outputs),
+        requires_review: Boolean(decision?.requires_review ?? decision?.requires_verification),
+        fallback_reason: stringOrUndefined(decision?.fallback_reason),
         created_at: new Date().toISOString(),
       },
     ].slice(-20);
@@ -144,4 +148,10 @@ function stringOrUndefined(value: unknown): string | undefined {
 function numberOrUndefined(value: unknown): number | undefined {
   const number = Number(value);
   return Number.isFinite(number) ? number : undefined;
+}
+
+function arrayOfStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item)).filter(Boolean)
+    : [];
 }

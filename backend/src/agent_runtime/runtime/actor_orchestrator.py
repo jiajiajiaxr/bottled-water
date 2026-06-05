@@ -8,6 +8,7 @@ round-based Orchestrator remains available; callers opt in with
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -86,7 +87,11 @@ class ActorOrchestrator:
         await self.event_bus.publish(
             Event(
                 type=USER_INPUT,
-                payload={"session_id": self.session_id, "content": user_message},
+                payload={
+                    "session_id": self.session_id,
+                    "content": user_message,
+                    "mention_target_agent_ids": self._mention_targets(user_message),
+                },
                 source="user",
                 channel="all",
             )
@@ -173,6 +178,24 @@ class ActorOrchestrator:
             )
             self.actors[agent_id] = actor
             actor.start()
+
+    def _mention_targets(self, user_message: str) -> list[str]:
+        if not user_message or re.search(r"@(全员|所有人|大家)|全员|所有 Agent|协作", user_message, re.I):
+            return []
+        targets: list[str] = []
+        lowered = user_message.lower()
+        for agent_id, config in self.agents.items():
+            name = (config.name or "").strip()
+            if not name:
+                continue
+            patterns = {
+                f"@{name}",
+                f"＠{name}",
+                f"@{name.lower()}",
+            }
+            if any(pattern.lower() in lowered for pattern in patterns):
+                targets.append(agent_id)
+        return list(dict.fromkeys(targets))
 
     async def _stop_actors(self) -> None:
         await self.scheduler.stop()

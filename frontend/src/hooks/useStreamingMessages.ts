@@ -177,7 +177,12 @@ export function useStreamingMessages(conversationId?: string) {
     onThinking: (agentId, thinking) => appendThinking(agentId, thinking),
 
     onDone: () => {},
-    onMessageNew: () => {},
+    onMessageNew: (message) => {
+      updateMessages((prev) => {
+        if (prev.some((item) => item.id === message.id)) return prev;
+        return [...prev, message];
+      });
+    },
     onToolCallStart: () => {},
     onToolCallDone: () => {},
     onControl: () => {},

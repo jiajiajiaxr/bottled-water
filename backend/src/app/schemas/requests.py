@@ -30,10 +30,13 @@ class CreateConversationRequest(BaseModel):
     category: str | None = None
     folder: str | None = None
     remark: str | None = None
+    scheduling_strategy: Literal["workflow", "tech_lead", "single_agent"] | None = None
+    runtime_mode: Literal["actor", "legacy"] | None = None
+    workflow_enabled: bool | None = None
 
 
 class UpdateConversationRequest(BaseModel):
-    action: Literal["pin", "unpin", "archive", "unarchive", "rename"] | None = None
+    action: Literal["pin", "unpin", "archive", "unarchive", "rename", "runtime"] | None = None
     title: str | None = None
     description: str | None = None
     remark: str | None = None
@@ -41,6 +44,9 @@ class UpdateConversationRequest(BaseModel):
     folder: str | None = None
     pinned: bool | None = None
     archived: bool | None = None
+    scheduling_strategy: Literal["workflow", "tech_lead", "single_agent"] | None = None
+    runtime_mode: Literal["actor", "legacy"] | None = None
+    workflow_enabled: bool | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -499,7 +505,7 @@ class SendMessagePayload(BaseModel):
     reply_to_message_id: str | None = None
     quotedMessageId: str | None = None
     thinking_enabled: bool = False
-    scheduling_strategy: Literal["workflow", "tech_lead"] = "tech_lead"
+    scheduling_strategy: Literal["workflow", "tech_lead", "single_agent"] | None = None
     regenerate_message_id: str | None = None
     model_config_id: str | None = None  # 用户选择的模型配置ID
 

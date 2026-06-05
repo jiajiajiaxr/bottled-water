@@ -71,6 +71,12 @@ class SchedulingDecision:
     rationale: str = ""
     requires_verification: bool = False
     verification_agents: List[str] = field(default_factory=list)
+    action: str = ""
+    target_agent_ids: List[str] = field(default_factory=list)
+    task: str = ""
+    expected_outputs: List[str] = field(default_factory=list)
+    requires_review: bool = False
+    fallback_reason: str = ""
 
 
 @dataclass

@@ -13,6 +13,7 @@ from app.services.skills.runtime import SkillRuntime
 from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.executor import invoke_tool, invoke_tool_async
 from app.services.tools.permissions import normalize_tool_names
+from app.services.tools.toolboxes import get_official_toolbox
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -409,7 +410,7 @@ def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
     config = agent.config or {}
 
     # Tool 目录（内置工具和自定义工具都从数据库目录读取元数据）
-    allowed_tool_names = normalize_tool_names(config.get("tools") or [])
+    allowed_tool_names = _allowed_tool_names(agent)
     if allowed_tool_names:
         tool_rows: list[ToolDefinition] = []
         try:
@@ -605,7 +606,7 @@ def _unauthorized_tool_result(
 
 
 def _is_configured_tool(db: Session, agent: Agent, tool_name: str) -> bool:
-    allowed = normalize_tool_names((agent.config or {}).get("tools") or [])
+    allowed = _allowed_tool_names(agent)
     if tool_name in allowed:
         return True
     if not allowed:
@@ -629,7 +630,7 @@ def _is_configured_mcp(agent: Agent, server_id: str) -> bool:
 
 
 def _resolve_authorized_db_tool(db: Session, agent: Agent, tool_name: str) -> ToolDefinition | None:
-    allowed_tool_names = normalize_tool_names((agent.config or {}).get("tools") or [])
+    allowed_tool_names = _allowed_tool_names(agent)
     if not allowed_tool_names:
         return None
     tool = db.scalar(
@@ -643,6 +644,12 @@ def _resolve_authorized_db_tool(db: Session, agent: Agent, tool_name: str) -> To
     if not tool or tool.is_builtin or tool.type == "builtin":
         return None
     return tool
+
+
+def _allowed_tool_names(agent: Agent) -> list[str]:
+    configured = list(normalize_tool_names((agent.config or {}).get("tools") or []))
+    official = [] if agent.type == "custom" else get_official_toolbox(agent.type or "chat")
+    return list(dict.fromkeys([*configured, *official]))
 
 
 def _db_tool_exists(db: Session, tool_name: str) -> bool:

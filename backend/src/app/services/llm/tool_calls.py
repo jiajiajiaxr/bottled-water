@@ -23,10 +23,10 @@ ARTIFACT_TOOL_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "演示页",
         ),
     ),
-    ("artifact.create_pdf", ("pdf", "PDF", "PDF文档", "PDF 文件", "预览卡片")),
-    ("artifact.create_docx", ("word", "docx", "Word", "DOCX", "Word 文档", "文档", "报告")),
-    ("artifact.create_xlsx", ("excel", "xlsx", "Excel", "表格", "电子表格")),
-    ("artifact.create_pptx", ("ppt", "pptx", "PPT", "幻灯片", "演示文稿")),
+    ("artifact.create_pdf", ("pdf", "pdf文档", "pdf文件", "预览卡片")),
+    ("artifact.create_docx", ("word", "docx", "word文档", "文档", "报告")),
+    ("artifact.create_xlsx", ("excel", "xlsx", "表格", "电子表格")),
+    ("artifact.create_pptx", ("ppt", "pptx", "幻灯片", "演示文稿")),
 )
 
 ARTIFACT_VERBS = (
@@ -50,20 +50,20 @@ ARTIFACT_VERBS = (
 def detect_artifact_tool(prompt: str) -> str | None:
     """Detect explicit artifact creation intent from the latest user prompt."""
 
-    text = prompt or ""
-    lower = _normalize_text(text)
+    lower = _normalize_text(prompt)
     has_create_intent = any(_normalize_text(verb) in lower for verb in ARTIFACT_VERBS)
     if not has_create_intent:
         return None
     for tool_name, patterns in ARTIFACT_TOOL_PATTERNS:
         if any(_normalize_text(pattern) in lower for pattern in patterns):
-            if tool_name == "artifact.create_pdf" and "预览卡片" in text and "pdf" not in lower:
-                continue
             return tool_name
     return None
 
 
-def select_mock_tool_call(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+def select_mock_tool_call(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
     if not tools:
         return None
     user_text = _last_user_text(messages)
@@ -104,7 +104,10 @@ def _document_content_model(title: str, prompt: str) -> dict[str, Any]:
                 "blocks": [
                     {
                         "type": "paragraph",
-                        "text": f"本文档根据用户请求“{body[:120]}”生成，用于演示 AgentHub 真实产物生成、预览卡片和下载导出链路。",
+                        "text": (
+                            f"本文档根据用户请求“{body[:120]}”生成，用于演示 "
+                            "AgentHub 真实产物生成、预览卡片和下载导出链路。"
+                        ),
                     }
                 ],
             },
@@ -125,7 +128,7 @@ def _document_content_model(title: str, prompt: str) -> dict[str, Any]:
                         "headers": ["模块", "演示结果"],
                         "rows": [
                             ["Agent Function Call", "自动调用 artifact.create_* 工具"],
-                            ["Artifact Runtime", "持久化真实文件与 HTML 预览"],
+                            ["Artifact Runtime", "持久化真实文件与 HTML/PDF 预览"],
                             ["Chat UI", "显示可点击预览卡片"],
                         ],
                     },
@@ -136,7 +139,10 @@ def _document_content_model(title: str, prompt: str) -> dict[str, Any]:
                 "blocks": [
                     {
                         "type": "callout",
-                        "text": "该示例用于验证 AgentHub 的端到端产物交付闭环：用户请求、工具调用、文件生成、卡片展示、预览和下载。",
+                        "text": (
+                            "该示例用于验证 AgentHub 的端到端产物交付闭环：用户请求、"
+                            "工具调用、文件生成、卡片展示、预览和下载。"
+                        ),
                     }
                 ],
             },
@@ -145,7 +151,14 @@ def _document_content_model(title: str, prompt: str) -> dict[str, Any]:
 
 
 def _last_user_text(messages: list[dict[str, Any]]) -> str:
-    return next((str(message.get("content") or "") for message in reversed(messages) if message.get("role") == "user"), "")
+    return next(
+        (
+            str(message.get("content") or "")
+            for message in reversed(messages)
+            if message.get("role") == "user"
+        ),
+        "",
+    )
 
 
 def _tool_names(tools: list[dict[str, Any]]) -> set[str]:

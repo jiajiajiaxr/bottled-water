@@ -75,6 +75,9 @@ async def create_generation_record(
     agents: Iterable[Any],
     prompt: str,
     model_config_id: str | None = None,
+    scheduling_strategy: str | None = None,
+    runtime_mode: str | None = None,
+    workflow_enabled: bool | None = None,
 ) -> str:
     """创建可恢复的 generation 运行记录。"""
     conversation = await db.get(Conversation, conversation_id)
@@ -89,6 +92,9 @@ async def create_generation_record(
         "session_id": session_id,
         "status": "running",
         "model_config_id": model_config_id,
+        "scheduling_strategy": scheduling_strategy,
+        "runtime_mode": runtime_mode,
+        "workflow_enabled": bool(workflow_enabled),
         "prompt_preview": prompt[:300],
         "started_at": _now_iso(),
         "completed_at": None,
@@ -264,12 +270,16 @@ def _record_decision_event(record: dict[str, Any], event: Event) -> None:
     payload = event.payload or {}
     decision_payload = payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
     decision_type = (
-        decision_payload.get("decision_type")
+        decision_payload.get("action")
+        or decision_payload.get("decision_type")
         or decision_payload.get("decision")
         or payload.get("decision")
     )
-    target = decision_payload.get("target_agent_id") or payload.get("target")
-    task = decision_payload.get("task_description") or payload.get("task")
+    targets = decision_payload.get("target_agent_ids") or payload.get("target_agent_ids") or []
+    target = decision_payload.get("target_agent_id") or payload.get("target") or (
+        targets[0] if isinstance(targets, list) and targets else None
+    )
+    task = decision_payload.get("task") or decision_payload.get("task_description") or payload.get("task")
     rationale = decision_payload.get("rationale") or payload.get("rationale")
     decisions = list(record.get("decisions") or [])
     decisions.append(
@@ -277,8 +287,15 @@ def _record_decision_event(record: dict[str, Any], event: Event) -> None:
             "round": payload.get("round"),
             "decision": decision_type,
             "target": target,
+            "target_agent_ids": targets if isinstance(targets, list) else [],
             "task": str(task or "")[:300],
             "rationale": str(rationale or "")[:500],
+            "expected_outputs": decision_payload.get("expected_outputs") or [],
+            "requires_review": bool(
+                decision_payload.get("requires_review")
+                or decision_payload.get("requires_verification")
+            ),
+            "fallback_reason": decision_payload.get("fallback_reason"),
             "raw": deepcopy(payload),
             "created_at": _now_iso(),
         }

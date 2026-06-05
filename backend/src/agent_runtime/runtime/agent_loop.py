@@ -276,8 +276,12 @@ class AgentLoop:
 
         # 获取可用工具（按 AgentConfig.tools 过滤）
         tools = []
+        active_tool_executor = tool_executor
         if tool_executor:
-            all_tools = await tool_executor.list_tools()
+            bind_agent = getattr(tool_executor, "bind_agent", None)
+            if callable(bind_agent):
+                active_tool_executor = bind_agent(self.agent.id)
+            all_tools = await active_tool_executor.list_tools()
             if self.agent.tools:
                 allowed = set(self.agent.tools)
                 tools = [t for t in all_tools if t.get("function", {}).get("name") in allowed]
@@ -289,6 +293,7 @@ class AgentLoop:
         tool_results: List[Dict[str, Any]] = []
         tool_events: List[Dict[str, Any]] = []
         tool_round = 0
+        forced_artifact_tool_name: str | None = None
 
         while tool_round < self.MAX_TOOL_ROUNDS:
             tool_round += 1
@@ -313,6 +318,26 @@ class AgentLoop:
 
             content = response.content or ""
             tool_calls = response.tool_calls
+            if not tool_calls:
+                forced_tool_call = (
+                    self._forced_artifact_tool_call(task, tools)
+                    if forced_artifact_tool_name is None
+                    else None
+                )
+                if forced_tool_call:
+                    forced_artifact_tool_name = str(
+                        forced_tool_call.get("function", {}).get("name") or ""
+                    )
+                    logger.info(
+                        "Agent forced artifact tool call",
+                        agent_id=self.agent.id,
+                        tool=forced_artifact_tool_name,
+                    )
+                    content = ""
+                    tool_calls = [forced_tool_call]
+                elif self._artifact_tool_succeeded(tool_results):
+                    if not content.strip() or self._looks_like_artifact_argument_fragment(content):
+                        content = self._artifact_completion_message(forced_artifact_tool_name)
 
             # 如果没有工具调用，说明 Agent 已完成本轮工作
             if not tool_calls:
@@ -347,7 +372,7 @@ class AgentLoop:
 
             # 执行每个工具调用
             for tc in tool_calls:
-                if not tool_executor:
+                if not active_tool_executor:
                     break
 
                 tool_call, err = ToolCall.new(tc)
@@ -372,7 +397,7 @@ class AgentLoop:
                         )
 
                         # 执行工具
-                        result = await tool_executor.execute(tool_call)
+                        result = await active_tool_executor.execute(tool_call)
 
                         # 如果 result 已经是 ToolResult，直接返回
                         if not isinstance(result, ToolResult):
@@ -397,6 +422,7 @@ class AgentLoop:
                     {
                         "tool": tool_name,
                         "success": result.success if isinstance(result, ToolResult) else True,
+                        "error": result.error if isinstance(result, ToolResult) else None,
                         "result": result.result if isinstance(result, ToolResult) else result,
                     }
                 )
@@ -407,6 +433,8 @@ class AgentLoop:
                         "agent_id": self.agent.id,
                         "tool": tool_name,
                         "success": result.success if isinstance(result, ToolResult) else True,
+                        "result": result.result if isinstance(result, ToolResult) else result,
+                        "error": result.error if isinstance(result, ToolResult) else None,
                     },
                 )
 
@@ -473,6 +501,60 @@ class AgentLoop:
             "work_product": work_product,
             "status_report": status_report,
             "tool_events": tool_events,
+        }
+
+    @staticmethod
+    def _artifact_tool_succeeded(tool_results: List[Dict[str, Any]]) -> bool:
+        return any(
+            str(result.get("tool", "")).startswith("artifact.create_")
+            and result.get("success") is True
+            for result in tool_results
+        )
+
+    @staticmethod
+    def _looks_like_artifact_argument_fragment(content: str) -> bool:
+        normalized = content.strip().lower()
+        if normalized in {"0", ">", "<", "li", "ul", "html", "body", "head", "script"}:
+            return True
+        return bool(len(normalized) <= 3 and re.fullmatch(r"[<>/a-z0-9]+", normalized))
+
+    @staticmethod
+    def _artifact_completion_message(tool_name: str | None) -> str:
+        label = {
+            "artifact.create_pdf": "PDF",
+            "artifact.create_docx": "Word",
+            "artifact.create_pptx": "PPT",
+            "artifact.create_xlsx": "Excel",
+            "artifact.create_html": "HTML",
+        }.get(tool_name or "", "产物")
+        return f"已生成真实 {label} 产物，可在预览卡片中查看和下载。"
+
+    def _forced_artifact_tool_call(
+        self,
+        task: str,
+        tools: List[Dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not tools:
+            return None
+        try:
+            from app.services.llm.tool_calls import artifact_arguments, detect_artifact_tool
+        except Exception:
+            return None
+        available = {
+            str(tool.get("function", {}).get("name") or "")
+            for tool in tools
+            if isinstance(tool, dict)
+        }
+        requested = detect_artifact_tool(task)
+        if not requested or requested not in available:
+            return None
+        return {
+            "id": f"call_forced_{requested.replace('.', '_')}_{uuid.uuid4().hex[:8]}",
+            "type": "function",
+            "function": {
+                "name": requested,
+                "arguments": json.dumps(artifact_arguments(requested, task), ensure_ascii=False),
+            },
         }
 
     async def _execute_virtual_agent(
@@ -543,7 +625,11 @@ class AgentLoop:
         )
 
         try:
-            result = await tool_executor.execute(tool_call)
+            bound_executor = tool_executor
+            bind_agent = getattr(tool_executor, "bind_agent", None)
+            if callable(bind_agent):
+                bound_executor = bind_agent(self.agent.id)
+            result = await bound_executor.execute(tool_call)
             if not isinstance(result, ToolResult):
                 result = ToolResult(
                     call_id=tool_call.call_id,
@@ -565,6 +651,8 @@ class AgentLoop:
                 "agent_id": self.agent.id,
                 "tool": tool_name,
                 "success": result.success,
+                "result": result.result,
+                "error": result.error,
             },
         )
 

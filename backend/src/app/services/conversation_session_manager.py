@@ -26,7 +26,7 @@ from app.services.runtime.generation_records import (
     finish_generation_record,
     record_generation_event,
 )
-from app.services.chat.scheduling import resolve_scheduling_strategy
+from app.services.chat.scheduling import resolve_scheduling_strategy, runtime_mode, workflow_enabled
 from app.services.runtime_service import OrchestratorService
 from common.logger import get_logger
 
@@ -54,6 +54,8 @@ class ConversationSessionManager:
         self._sessions: dict[str, AgentSession] = {}
         self._session_model_config_ids: dict[str, str | None] = {}
         self._session_scheduling_strategies: dict[str, str] = {}
+        self._session_runtime_modes: dict[str, str] = {}
+        self._session_workflow_enabled: dict[str, bool] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._generation_ids: dict[str, str] = {}
@@ -86,6 +88,8 @@ class ConversationSessionManager:
         conversation_id = str(conversation.id)
         requested_model_config_id = str(model_config_id) if model_config_id else None
         requested_strategy = resolve_scheduling_strategy(conversation)
+        requested_runtime_mode = runtime_mode(conversation)
+        requested_workflow_enabled = workflow_enabled(conversation)
 
         async with self._get_lock(conversation_id):
             if conversation_id in self._sessions:
@@ -95,11 +99,15 @@ class ConversationSessionManager:
                 if (
                     self._session_model_config_ids.get(conversation_id) == requested_model_config_id
                     and self._session_scheduling_strategies.get(conversation_id) == requested_strategy
+                    and self._session_runtime_modes.get(conversation_id) == requested_runtime_mode
+                    and self._session_workflow_enabled.get(conversation_id) == requested_workflow_enabled
                 ):
                     return self._sessions[conversation_id]
                 self._sessions.pop(conversation_id, None)
                 self._session_model_config_ids.pop(conversation_id, None)
                 self._session_scheduling_strategies.pop(conversation_id, None)
+                self._session_runtime_modes.pop(conversation_id, None)
+                self._session_workflow_enabled.pop(conversation_id, None)
 
             agents = await OrchestratorService._get_conversation_agents(db, conversation)
             if not agents:
@@ -116,6 +124,8 @@ class ConversationSessionManager:
             self._sessions[conversation_id] = session
             self._session_model_config_ids[conversation_id] = requested_model_config_id
             self._session_scheduling_strategies[conversation_id] = requested_strategy
+            self._session_runtime_modes[conversation_id] = requested_runtime_mode
+            self._session_workflow_enabled[conversation_id] = requested_workflow_enabled
 
             # 更新数据库状态
             conversation.generation_status = "idle"
@@ -274,6 +284,8 @@ class ConversationSessionManager:
         session = self._sessions.pop(conversation_id, None)
         self._session_model_config_ids.pop(conversation_id, None)
         self._session_scheduling_strategies.pop(conversation_id, None)
+        self._session_runtime_modes.pop(conversation_id, None)
+        self._session_workflow_enabled.pop(conversation_id, None)
         self._generation_ids.pop(conversation_id, None)
         self._locks.pop(conversation_id, None)
 
@@ -306,6 +318,9 @@ class ConversationSessionManager:
                 agents=session.agents.values(),
                 prompt=content,
                 model_config_id=self._session_model_config_ids.get(conversation_id),
+                scheduling_strategy=self._session_scheduling_strategies.get(conversation_id),
+                runtime_mode=self._session_runtime_modes.get(conversation_id),
+                workflow_enabled=self._session_workflow_enabled.get(conversation_id),
             )
         self._generation_ids[conversation_id] = generation_id
         return generation_id

@@ -35,7 +35,7 @@ export function RuntimeDecisionStrip({ conversation }: { conversation?: Conversa
     <div className="runtime-decision-strip" data-testid="runtime-decision-strip">
       <Space size={[8, 8]} wrap>
         <Tag color={generation.status === "running" ? "processing" : "default"}>
-          调度 {generation.status || "idle"}
+          {modeLabel(conversation)} · {generation.status || "idle"}
         </Tag>
         {decision && <DecisionTag decision={decision} />}
         {agentRuns.slice(0, 5).map((run) => (
@@ -48,15 +48,27 @@ export function RuntimeDecisionStrip({ conversation }: { conversation?: Conversa
 }
 
 function DecisionTag({ decision }: { decision: ConversationRuntimeDecision }) {
+  const targets =
+    decision.target_agent_ids?.length
+      ? decision.target_agent_ids.map((item) => item.slice(0, 8)).join(", ")
+      : decision.target?.slice(0, 8);
   const label = [
     decision.round ? `第 ${decision.round} 轮` : "",
     decision.decision || "wait",
-    decision.target ? `→ ${decision.target}` : "",
+    targets ? `指派 ${targets}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
+  const detail = [
+    decision.rationale ? `原因：${decision.rationale}` : "",
+    decision.task ? `任务：${decision.task}` : "",
+    decision.expected_outputs?.length ? `期望：${decision.expected_outputs.join("、")}` : "",
+    decision.fallback_reason ? `回退：${decision.fallback_reason}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   return (
-    <Tooltip title={decision.rationale || decision.task || "Team Leader 调度决策"}>
+    <Tooltip title={detail || "Team Leader 调度决策"}>
       <Tag color="blue">{label}</Tag>
     </Tooltip>
   );
@@ -81,6 +93,11 @@ function AgentRunTag({ run }: { run: ConversationRuntimeAgentRun }) {
       </Tag>
     </Tooltip>
   );
+}
+
+function modeLabel(conversation?: Conversation): string {
+  if (conversation?.chat_type === "single") return "单 Agent";
+  return conversation?.workflow_enabled ? "画布执行" : "自动组织";
 }
 
 function latestGeneration(conversation?: Conversation): ConversationRuntimeGeneration | undefined {

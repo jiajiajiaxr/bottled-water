@@ -31,6 +31,7 @@ from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.catalog import sync_builtin_tool_definitions
 from app.services.tools.executor import invoke_tool as invoke_tool_sync
 from app.services.tools.permissions import normalize_tool_names
+from app.services.tools.toolboxes import get_official_toolbox
 
 
 def _is_async_session(db: Any) -> bool:
@@ -267,7 +268,7 @@ async def build_tools_for_agent(db: AsyncSession, agent: Agent) -> list[dict[str
     config = agent.config or {}
 
     # Tool 目录：内置和自定义工具都优先从数据库 ToolDefinition 读取。
-    allowed_tool_names = normalize_tool_names(config.get("tools") or [])
+    allowed_tool_names = _allowed_tool_names(agent)
     tool_rows: list[ToolDefinition] = []
     if allowed_tool_names and _is_async_session(db):
         try:
@@ -376,7 +377,7 @@ async def execute_tool_by_name(
 
     # 内置工具
     if tool_name in BUILTIN_TOOLS:
-        if tool_name not in normalize_tool_names((agent.config or {}).get("tools") or []):
+        if tool_name not in _allowed_tool_names(agent):
             return _unauthorized_tool_result(tool_name)
         if not user:
             user = await db.get(User, conversation.creator_id)
@@ -467,7 +468,7 @@ async def _resolve_authorized_db_tool(
     agent: Agent,
     tool_name: str,
 ) -> ToolDefinition | None:
-    allowed_tool_names = normalize_tool_names((agent.config or {}).get("tools") or [])
+    allowed_tool_names = _allowed_tool_names(agent)
     if not allowed_tool_names or not _is_async_session(db):
         return None
     tool = await db.scalar(
@@ -495,3 +496,9 @@ async def _db_tool_exists(db: AsyncSession, tool_name: str) -> bool:
         )
     )
     return isinstance(value, str) and bool(value)
+
+
+def _allowed_tool_names(agent: Agent) -> list[str]:
+    configured = list(normalize_tool_names((agent.config or {}).get("tools") or []))
+    official = [] if agent.type == "custom" else get_official_toolbox(agent.type or "chat")
+    return list(dict.fromkeys([*configured, *official]))

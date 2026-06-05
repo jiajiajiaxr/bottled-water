@@ -40,6 +40,7 @@ from app.schemas.requests import (
     WorkflowGeneratePayload,
     WorkflowUpdatePayload,
 )
+from app.services.chat.scheduling import normalize_scheduling_strategy
 from app.services.serialization import (
     conversation_to_dict,
     participant_to_dict,
@@ -157,6 +158,23 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
     title = payload.get("title") or (
         "新的多 Agent 协作群" if len(selected) > 1 else f"{selected[0].name} · 单聊"
     )
+    is_group = chat_type == "group" or len(selected) > 1
+    workflow_enabled = (
+        bool(payload.get("workflow_enabled"))
+        if payload.get("workflow_enabled") is not None
+        else False
+    )
+    requested_strategy = normalize_scheduling_strategy(payload.get("scheduling_strategy"))
+    scheduling_strategy = (
+        "single_agent"
+        if not is_group
+        else ("workflow" if workflow_enabled and requested_strategy == "workflow" else "tech_lead")
+    )
+    runtime_mode = (
+        "legacy"
+        if scheduling_strategy in {"workflow", "single_agent"}
+        else str(payload.get("runtime_mode") or "actor")
+    )
     conversation = Conversation(
         creator_id=user.id,
         chat_type=chat_type,
@@ -168,6 +186,9 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
             "category": payload.get("category") or "Default",
             "folder": payload.get("folder") or "Default",
             "remark": payload.get("remark") or "",
+            "scheduling_strategy": scheduling_strategy,
+            "runtime_mode": runtime_mode,
+            "workflow_enabled": workflow_enabled and scheduling_strategy == "workflow",
         },
         last_message_preview="会话已创建，可以发送任务开始协作。",
         last_message_sender="System",
@@ -434,6 +455,8 @@ async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: di
             action = "pin" if payload["pinned"] else "unpin"
         elif payload.get("archived") is not None:
             action = "archive" if payload["archived"] else "unarchive"
+        elif any(k in payload for k in ("scheduling_strategy", "runtime_mode", "workflow_enabled")):
+            action = "runtime"
         elif any(k in payload for k in ("title", "description", "remark", "category", "folder")):
             action = "rename"
     if action == "pin":
@@ -464,6 +487,23 @@ async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: di
                 extra[key] = (
                     value[:120] if value else ("Default" if key in {"category", "folder"} else "")
                 )
+        conversation.extra = extra
+    elif action == "runtime":
+        extra = dict(conversation.extra or {})
+        requested_strategy = normalize_scheduling_strategy(payload.get("scheduling_strategy"))
+        if conversation.chat_type == "single":
+            strategy = "single_agent"
+        elif requested_strategy == "workflow" and bool(payload.get("workflow_enabled")):
+            strategy = "workflow"
+        else:
+            strategy = "tech_lead"
+        extra["scheduling_strategy"] = strategy
+        extra["workflow_enabled"] = bool(payload.get("workflow_enabled")) and strategy == "workflow"
+        extra["runtime_mode"] = (
+            "legacy"
+            if strategy in {"workflow", "single_agent"}
+            else str(payload.get("runtime_mode") or "actor")
+        )
         conversation.extra = extra
     else:
         raise ValidationAppError("不支持的操作类型")

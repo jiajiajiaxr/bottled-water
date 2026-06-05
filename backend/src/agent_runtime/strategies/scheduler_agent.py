@@ -10,11 +10,13 @@ from model_provider.core.interfaces import BaseModelProvider
 from common.logger import get_logger
 from ..context.blackboard import BlackboardManager
 from ..core.protocol import (
+    AGENT_FAILED,
     AGENT_REPORT,
     BLACKBOARD_UPDATED,
     CONTROL_ASSIGN,
     CONTROL_COMPLETE,
     CONTROL_PAUSE,
+    CONTROL_RESUME,
     SCHEDULER_DECISION,
     USER_INPUT,
 )
@@ -64,10 +66,11 @@ class SchedulerAgent(AgentActor):
         self.round_num = 0
         self._subscriptions: list[str] = []
         self._scheduler = TechLeadScheduler(agents=agents, model_provider=model_provider)
+        self._mention_target_ids: list[str] = []
         self._bind()
 
     def _bind(self) -> None:
-        for event_type in (USER_INPUT, AGENT_REPORT, BLACKBOARD_UPDATED):
+        for event_type in (USER_INPUT, AGENT_REPORT, BLACKBOARD_UPDATED, AGENT_FAILED):
             self._subscriptions.append(self.event_bus.subscribe(event_type, self.mailbox.send, target=None))
 
     def start(self) -> asyncio.Task:
@@ -102,6 +105,11 @@ class SchedulerAgent(AgentActor):
         if event.type == USER_INPUT:
             self.current_task = str(event.payload.get("content") or event.payload.get("task") or "")
             self.reports = self._initial_reports()
+            self._mention_target_ids = [
+                str(item)
+                for item in (event.payload.get("mention_target_agent_ids") or [])
+                if str(item) in self.agents
+            ]
             return bool(self.current_task)
         if event.type == AGENT_REPORT:
             report = _report_from_payload(event.payload.get("report") or {}, event.payload.get("agent_id"))
@@ -109,6 +117,18 @@ class SchedulerAgent(AgentActor):
             return self.current_task and report.state in {AgentState.COMPLETED, AgentState.FAILED, AgentState.WAITING}
         if event.type == BLACKBOARD_UPDATED:
             return False
+        if event.type == AGENT_FAILED:
+            agent_id = str(event.payload.get("agent_id") or "")
+            if agent_id:
+                self.reports[agent_id] = AgentReport(
+                    agent_id=agent_id,
+                    state=AgentState.FAILED,
+                    will=AgentWill.BLOCKED,
+                    blockers=[str(event.payload.get("error") or "Agent failed")],
+                    rationale="Agent failed; scheduler will re-plan.",
+                    confidence=0.0,
+                )
+            return bool(self.current_task)
         return False
 
     async def _schedule(self) -> None:
@@ -117,19 +137,23 @@ class SchedulerAgent(AgentActor):
         blackboard = await self.blackboard_mgr.get(self.session_id) or {}
         reports = list(self.reports.values()) or list(self._initial_reports().values())
         try:
-            decision = await self._scheduler.make_decision(
-                blackboard,
-                reports,
-                {
-                    "round": self.round_num,
-                    "session_id": self.session_id,
-                    "current_task": self.current_task,
-                    "agent_count": len(self.agents),
-                },
-            )
+            decision = self._mention_decision()
+            if decision is None:
+                decision = await self._scheduler.make_decision(
+                    blackboard,
+                    reports,
+                    {
+                        "round": self.round_num,
+                        "session_id": self.session_id,
+                        "current_task": self.current_task,
+                        "agent_count": len(self.agents),
+                    },
+                )
+                decision = self._normalize_decision(decision)
         except Exception as exc:
             logger.warning("SchedulerAgent fallback after decision failure", error=str(exc))
             decision = self._fallback_decision(reports)
+            decision.fallback_reason = str(exc)[:500]
 
         await self._archive_decision(decision)
         await self.event_bus.publish(
@@ -160,14 +184,27 @@ class SchedulerAgent(AgentActor):
         if decision.decision_type == "wait":
             return
 
+        if decision.decision_type == "resume" and decision.target_agent_id:
+            await self.event_bus.publish(
+                Event(
+                    type=CONTROL_RESUME,
+                    payload={"round": self.round_num, "rationale": decision.rationale},
+                    source=f"scheduler:{self.scheduler_id}",
+                    target=decision.target_agent_id,
+                    channel="internal",
+                )
+            )
+            return
+
         if decision.decision_type == "parallel":
-            targets = decision.verification_agents or [
+            targets = decision.target_agent_ids or decision.verification_agents or [
                 agent_id for agent_id, report in self.reports.items() if report.state in {AgentState.READY, AgentState.IDLE}
             ]
             if decision.target_agent_id:
                 targets.insert(0, decision.target_agent_id)
             for target in dict.fromkeys(targets):
-                await self._assign(target, decision)
+                if target in self.agents and target != self.scheduler_id:
+                    await self._assign(target, decision)
             return
 
         if decision.decision_type == "pause" and decision.target_agent_id:
@@ -183,7 +220,8 @@ class SchedulerAgent(AgentActor):
             return
 
         if decision.target_agent_id:
-            await self._assign(decision.target_agent_id, decision)
+            if decision.target_agent_id in self.agents and decision.target_agent_id != self.scheduler_id:
+                await self._assign(decision.target_agent_id, decision)
 
     async def _assign(self, target: str, decision: SchedulingDecision) -> None:
         await self.event_bus.publish(
@@ -211,6 +249,47 @@ class SchedulerAgent(AgentActor):
             },
         )
 
+    def _mention_decision(self) -> SchedulingDecision | None:
+        targets = [
+            agent_id
+            for agent_id in dict.fromkeys(self._mention_target_ids)
+            if agent_id in self.agents and agent_id != self.scheduler_id
+        ]
+        if not targets:
+            return None
+        return SchedulingDecision(
+            decision_type="parallel" if len(targets) > 1 else "assign",
+            action="assign",
+            target_agent_id=targets[0],
+            target_agent_ids=targets,
+            task=self.current_task,
+            task_description=self.current_task,
+            rationale="用户 @ 指定了目标 Agent，本轮只调度被指定成员。",
+            expected_outputs=["目标 Agent 的直接回复"],
+        )
+
+    def _normalize_decision(self, decision: SchedulingDecision) -> SchedulingDecision:
+        if not decision.action:
+            decision.action = "assign" if decision.decision_type == "parallel" else decision.decision_type
+        if not decision.target_agent_ids:
+            targets: list[str] = []
+            if decision.target_agent_id:
+                targets.append(decision.target_agent_id)
+            targets.extend(decision.verification_agents or [])
+            decision.target_agent_ids = [
+                agent_id
+                for agent_id in dict.fromkeys(targets)
+                if agent_id in self.agents and agent_id != self.scheduler_id
+            ]
+        if not decision.task:
+            decision.task = decision.task_description or self.current_task
+        if not decision.task_description:
+            decision.task_description = decision.task or self.current_task
+        decision.requires_review = bool(decision.requires_review or decision.requires_verification)
+        if not decision.expected_outputs:
+            decision.expected_outputs = ["Agent 可见成果", "Blackboard 运行记录"]
+        return decision
+
     def _initial_reports(self) -> dict[str, AgentReport]:
         return {
             agent_id: AgentReport(agent_id=agent_id, state=AgentState.READY, will=AgentWill.EXECUTE)
@@ -225,8 +304,11 @@ class SchedulerAgent(AgentActor):
                 return SchedulingDecision(
                     decision_type="assign",
                     target_agent_id=report.agent_id,
+                    target_agent_ids=[report.agent_id],
+                    action="assign",
                     task_description="继续处理当前用户任务",
                     rationale="SchedulerAgent rule fallback selected the first ready Agent.",
+                    fallback_reason="rule_fallback",
                 )
         if reports and all(report.state == AgentState.COMPLETED for report in reports):
             return SchedulingDecision(decision_type="complete", rationale="All Agents completed.")
@@ -266,6 +348,12 @@ def _will(value: Any) -> AgentWill:
 
 def _decision_payload(decision: SchedulingDecision) -> dict[str, Any]:
     return {
+        "action": decision.action or ("assign" if decision.decision_type == "parallel" else decision.decision_type),
+        "target_agent_ids": decision.target_agent_ids,
+        "task": decision.task or decision.task_description,
+        "expected_outputs": decision.expected_outputs,
+        "requires_review": bool(decision.requires_review or decision.requires_verification),
+        "fallback_reason": decision.fallback_reason,
         "decision_type": decision.decision_type,
         "target_agent_id": decision.target_agent_id,
         "task_description": decision.task_description,

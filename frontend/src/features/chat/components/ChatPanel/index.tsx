@@ -37,11 +37,13 @@ export function ChatPanel({
   loading,
   userName,
   defaultModelConfigId,
+  onPreviewArtifact,
 }: {
   active?: Conversation;
   loading: boolean;
   userName?: string;
   defaultModelConfigId?: string;
+  onPreviewArtifact?: (message: ChatMessage) => void;
 }) {
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
@@ -215,7 +217,7 @@ export function ChatPanel({
         }
         onQuote={handleQuote}
         onCopy={handleCopy}
-        onPreview={() => {}}
+        onPreview={(message) => onPreviewArtifact?.(message)}
       />
     );
   };

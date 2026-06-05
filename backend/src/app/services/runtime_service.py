@@ -23,6 +23,8 @@ from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink
 from app.services.chat.scheduling import resolve_scheduling_strategy
 from app.services.model_config_resolver import normalize_provider_type
+from app.services.tools.permissions import normalize_tool_names
+from app.services.tools.toolboxes import get_official_toolbox
 from common.logger import get_logger
 
 logger = get_logger("app.services.runtime_service")
@@ -180,7 +182,7 @@ class OrchestratorService:
                 name=agent.name,
                 system_prompt=(agent.config or {}).get("system_prompt", "") or agent.description or f"你是 {agent.name}。",
                 role=agent.type or "worker",
-                tools=(agent.config or {}).get("tools", []),
+                tools=_runtime_agent_tools(agent),
             )
             for agent in agents
         ]
@@ -200,9 +202,11 @@ class OrchestratorService:
                 or conversation.extra.get("runtime_mode")
                 or ""
             ).strip()
+        if not runtime_mode and conversation.chat_type == "group" and resolved_strategy == "tech_lead":
+            runtime_mode = "actor"
 
         tool_executor = _ToolExecutorAdapter(
-            db, primary_agent, user, conversation
+            db, primary_agent, user, conversation, {agent.id: agent for agent in agents}
         ) if primary_agent else None
 
         # ---- Workflow 模式 ----
@@ -314,14 +318,32 @@ class OrchestratorService:
             logger.debug("OrchestratorService event", type=event.type)
 
 
+def _runtime_agent_tools(agent: Agent) -> list[str]:
+    configured = list(normalize_tool_names((agent.config or {}).get("tools") or []))
+    official = [] if agent.type == "custom" else get_official_toolbox(agent.type or "chat")
+    return list(dict.fromkeys([*configured, *official]))
+
+
 class _ToolExecutorAdapter(ToolExecutor):
     """ToolExecutor 适配器，将 agent_runtime 的工具执行请求路由到 app 层工具注册表"""
 
-    def __init__(self, db: AsyncSession, agent: Agent, user: User, conversation: Conversation):
+    def __init__(
+        self,
+        db: AsyncSession,
+        agent: Agent,
+        user: User,
+        conversation: Conversation,
+        agents_by_id: dict[str, Agent] | None = None,
+    ):
         self.db = db
         self.agent = agent
         self.user = user
         self.conversation = conversation
+        self.agents_by_id = agents_by_id or {agent.id: agent}
+
+    def bind_agent(self, agent_id: str) -> "_ToolExecutorAdapter":
+        agent = self.agents_by_id.get(agent_id) or self.agent
+        return _ToolExecutorAdapter(self.db, agent, self.user, self.conversation, self.agents_by_id)
 
     async def list_tools(self) -> list[dict]:
         from app.services.agents.async_tool_loop import build_tools_for_agent
