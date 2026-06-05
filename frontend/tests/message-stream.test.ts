@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { streamAssistantReply } from "../src/api/message";
+import { sendMessageWs, streamAssistantReply } from "../src/api/message";
 
 class FakeEventSource {
   static latest?: FakeEventSource;
@@ -23,6 +23,46 @@ class FakeEventSource {
   emit(type: string, payload: Record<string, unknown>) {
     const event = new MessageEvent(type, { data: JSON.stringify(payload) });
     (this.listeners.get(type) ?? []).forEach((listener) => listener(event));
+  }
+}
+
+class FakeWebSocket {
+  static latest?: FakeWebSocket;
+
+  static OPEN = 1;
+
+  readyState = FakeWebSocket.OPEN;
+
+  onopen: (() => void) | null = null;
+
+  onmessage: ((event: MessageEvent) => void) | null = null;
+
+  onclose: (() => void) | null = null;
+
+  onerror: (() => void) | null = null;
+
+  sent: string[] = [];
+
+  constructor(public url: string) {
+    FakeWebSocket.latest = this;
+    window.setTimeout(() => this.onopen?.(), 0);
+  }
+
+  send(payload: string) {
+    this.sent.push(payload);
+  }
+
+  close() {
+    this.readyState = 3;
+    this.onclose?.();
+  }
+
+  emit(event: string, data: unknown) {
+    this.onmessage?.(
+      new MessageEvent("message", {
+        data: JSON.stringify({ event, data }),
+      }),
+    );
   }
 }
 
@@ -105,5 +145,43 @@ describe("conversation SSE stream", () => {
 
     source.emit("generation_finished", { reason: "direct_agent_completed" });
     await expect(promise).resolves.toBeTruthy();
+  });
+});
+
+describe("conversation WebSocket stream", () => {
+  it("dispatches actor agent.token payloads without requiring message_start", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    window.localStorage.setItem("agenthub_token", "test-token");
+    const onToken = vi.fn();
+    const promise = sendMessageWs(
+      "conversation-token",
+      { content: { text: "hello" } },
+      { onToken },
+    );
+
+    await vi.waitFor(() => expect(FakeWebSocket.latest).toBeDefined());
+    const ws = FakeWebSocket.latest!;
+    await vi.waitFor(() => expect(ws.sent.length).toBeGreaterThan(0));
+    ws.emit("agent.token", {
+      conversation_id: "conversation-token",
+      agent_id: "agent-1",
+      agent_name: "Daily Chat Agent",
+      token: "你好",
+    });
+
+    expect(onToken).toHaveBeenCalledWith(
+      "agent-1",
+      "你好",
+      expect.objectContaining({
+        conversation_id: "conversation-token",
+        agent_name: "Daily Chat Agent",
+      }),
+    );
+
+    ws.emit("generation_finished", {
+      conversation_id: "conversation-token",
+      status: "completed",
+    });
+    await expect(promise).resolves.toBe("ok");
   });
 });

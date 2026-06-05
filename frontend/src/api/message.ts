@@ -241,7 +241,7 @@ function dispatchStreamEvent(
 
       if (!agentId) break;
       const token = String(p.token || "");
-      if (token) handlers.onToken?.(agentId, token);
+      if (token) handlers.onToken?.(agentId, token, p);
       break;
     }
 

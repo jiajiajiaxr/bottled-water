@@ -12,7 +12,11 @@ export type StreamAssistantHandlers = {
   onTaskStatusChanged?: (payload: Record<string, unknown>) => void;
   onDone?: (payload?: Record<string, unknown>) => void;
   onControl?: (stop: () => void) => void;
-  onToken?: (agentId: string, token: string) => void;
+  onToken?: (
+    agentId: string,
+    token: string,
+    payload?: Record<string, unknown>,
+  ) => void;
   onThinking?: (agentId: string, thinking: string) => void;
   onRuntimeEvent?: (event: string, payload: Record<string, unknown>) => void;
 };

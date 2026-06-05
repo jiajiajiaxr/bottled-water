@@ -114,7 +114,7 @@ export function useMessageOperations(userName?: string) {
       api.cancelAssistantReplyWs(conversationId);
       await api.cancelAssistantReply(conversationId);
     } finally {
-      streaming.clearPendingStreams();
+      streaming.clearPendingStreams(conversationId);
       clearConversationRunning(conversationId);
       updateMessages((prev) =>
         prev.map((item) =>
