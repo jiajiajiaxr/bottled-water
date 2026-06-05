@@ -8,19 +8,25 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from agent_runtime import AgentConfig, Session as AgentSession, ToolCall
 from agent_runtime.core.interfaces import ToolExecutor
+from agent_runtime.core.types import Event as RuntimeEvent
 from agent_runtime.workflow.replanner import sanitize_workflow
 from model_provider import create_provider
 from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse, StreamChunk
 
-from db.models import Agent, Conversation, Message, User
+from db.models import Agent, Artifact, Conversation, Message, User
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
-from app.events import SseSink
+from app.events import SseSink, WebSocketSink
+from app.services.chat.scheduling import resolve_scheduling_strategy
+from app.services.model_config_resolver import normalize_provider_type
+from app.services.serialization import artifact_to_dict, message_to_dict
+from app.services.tools.permissions import normalize_tool_names
+from app.services.tools.toolboxes import get_official_toolbox
 from common.logger import get_logger
 
 logger = get_logger("app.services.runtime_service")
@@ -126,7 +132,7 @@ class OrchestratorService:
             return create_provider_from_env_fallback()
 
         return create_provider(MPModelConfig(
-            provider=provider.provider_type or "ark",
+            provider=normalize_provider_type(provider.provider_type),
             model=config.model_id,
             api_key=api_key,
             base_url=provider.base_url or None,
@@ -139,6 +145,7 @@ class OrchestratorService:
         agents: list[Agent],
         model_config_id: str | None = None,
         event_sink=None,
+        scheduling_strategy: str | None = None,
     ) -> AgentSession:
         """创建 AgentSession（不运行）。
 
@@ -151,9 +158,20 @@ class OrchestratorService:
         user = await db.get(User, conversation.creator_id)
         agent_count = len(agents)
 
-        # 构建统一的模型提供者
-        if model_config_id:
-            model_provider = await OrchestratorService.create_provider_from_config(db, model_config_id)
+        primary_agent = agents[0] if agents else None
+        agent_model_config_id = (
+            (primary_agent.config or {}).get("model_config_id")
+            if primary_agent is not None
+            else None
+        )
+        selected_model_config_id = model_config_id or agent_model_config_id
+
+        # 构建统一的模型提供者。优先级：聊天框选择 > Agent 绑定模型 > 用户默认/环境默认。
+        if selected_model_config_id:
+            model_provider = await OrchestratorService.create_provider_from_config(
+                db,
+                str(selected_model_config_id),
+            )
         else:
             from app.services.model_config_resolver import create_provider_from_db
             default_id = (user.extra or {}).get("default_model_config_id") if user else None
@@ -166,30 +184,36 @@ class OrchestratorService:
                 name=agent.name,
                 system_prompt=(agent.config or {}).get("system_prompt", "") or agent.description or f"你是 {agent.name}。",
                 role=agent.type or "worker",
-                tools=(agent.config or {}).get("tools", []),
+                tools=_runtime_agent_tools(agent),
             )
             for agent in agents
         ]
 
         # 判断调度策略
-        scheduling_strategy = ""
-        if conversation.extra and isinstance(conversation.extra, dict):
-            scheduling_strategy = conversation.extra.get("scheduling_strategy", "")
+        resolved_strategy = resolve_scheduling_strategy(conversation, scheduling_strategy)
 
         has_workflow = (
             conversation.extra
             and isinstance(conversation.extra, dict)
             and isinstance(conversation.extra.get("workflow"), dict)
         )
+        runtime_mode = ""
+        if conversation.extra and isinstance(conversation.extra, dict):
+            runtime_mode = str(
+                conversation.extra.get("runtime")
+                or conversation.extra.get("runtime_mode")
+                or ""
+            ).strip()
+        if not runtime_mode and conversation.chat_type == "group" and resolved_strategy == "tech_lead":
+            runtime_mode = "actor"
 
-        primary_agent = agents[0] if agents else None
         tool_executor = _ToolExecutorAdapter(
-            db, primary_agent, user, conversation
+            db, primary_agent, user, conversation, {agent.id: agent for agent in agents}
         ) if primary_agent else None
 
         # ---- Workflow 模式 ----
-        # 仅当显式指定 workflow 或未指定策略但存在 workflow 定义时才使用 workflow
-        if scheduling_strategy == "workflow" or (not scheduling_strategy and has_workflow):
+        # Strategy resolution is centralized in services.chat.scheduling.
+        if resolved_strategy == "workflow":
             from agent_runtime.workflow.replanner import _fallback_workflow
 
             if has_workflow:
@@ -249,7 +273,10 @@ class OrchestratorService:
         # ---- 多 Agent TechLead 模式 ----
         return AgentSession.create(
             agents=agent_configs,
-            scheduler_config={"strategy": "tech_lead"},
+            scheduler_config={
+                "strategy": "tech_lead",
+                **({"runtime": "actor"} if runtime_mode == "actor" else {}),
+            },
             model_provider=model_provider,
             persistence=SQLAlchemyBackend(db),
             event_sink=event_sink,
@@ -269,30 +296,65 @@ class OrchestratorService:
             logger.warning(f"会话没有可用 Agent conversation_id={conversation.id}")
             return
 
-        agent_count = len(agents)
+        session = await OrchestratorService.create_session(
+            db,
+            conversation,
+            agents,
+            model_config_id,
+            event_sink=SseSink(conversation_id=str(conversation.id)),
+            scheduling_strategy=strategy,
+        )
+        prompt = (
+            message.content.get("text", "")
+            if isinstance(message.content, dict)
+            else str(message.content)
+        )
+        resolved_strategy = resolve_scheduling_strategy(conversation, strategy)
+        logger.info(
+            "OrchestratorService run",
+            conversation_id=str(conversation.id),
+            strategy=resolved_strategy,
+            agent_count=len(agents),
+        )
+        async for event in session.run(prompt):
+            logger.debug("OrchestratorService event", type=event.type)
 
-        if agent_count == 1:
-            await SingleAgentOrchestrator(db, conversation, message, str(conversation.id), agents, model_config_id).run()
-        else:
-            await TechLeadOrchestrator(db, conversation, message, str(conversation.id), agents, model_config_id).run()
+
+def _runtime_agent_tools(agent: Agent) -> list[str]:
+    configured = list(normalize_tool_names((agent.config or {}).get("tools") or []))
+    agent_type = agent.type if isinstance(getattr(agent, "type", None), str) else "custom"
+    official = [] if agent_type == "custom" else get_official_toolbox(agent_type or "chat")
+    return list(dict.fromkeys([*configured, *official]))
 
 
 class _ToolExecutorAdapter(ToolExecutor):
     """ToolExecutor 适配器，将 agent_runtime 的工具执行请求路由到 app 层工具注册表"""
 
-    def __init__(self, db: AsyncSession, agent: Agent, user: User, conversation: Conversation):
+    def __init__(
+        self,
+        db: AsyncSession,
+        agent: Agent,
+        user: User,
+        conversation: Conversation,
+        agents_by_id: dict[str, Agent] | None = None,
+    ):
         self.db = db
         self.agent = agent
         self.user = user
         self.conversation = conversation
+        self.agents_by_id = agents_by_id or {agent.id: agent}
+
+    def bind_agent(self, agent_id: str) -> "_ToolExecutorAdapter":
+        agent = self.agents_by_id.get(agent_id) or self.agent
+        return _ToolExecutorAdapter(self.db, agent, self.user, self.conversation, self.agents_by_id)
 
     async def list_tools(self) -> list[dict]:
-        from app.services.agentic_runtime import build_tools_for_agent
+        from app.services.agents.async_tool_loop import build_tools_for_agent
         return await build_tools_for_agent(self.db, self.agent)
 
     async def execute(self, tool_call: ToolCall) -> Any:
-        from app.services.agentic_runtime import execute_tool_by_name
-        return await execute_tool_by_name(
+        from app.services.agents.async_tool_loop import execute_tool_by_name
+        result = await execute_tool_by_name(
             self.db,
             agent=self.agent,
             user=self.user,
@@ -300,6 +362,36 @@ class _ToolExecutorAdapter(ToolExecutor):
             tool_name=tool_call.tool_name,
             arguments=tool_call.parameters,
         )
+        await self._publish_artifact_messages(result)
+        return result
+
+    async def _publish_artifact_messages(self, result: Any) -> None:
+        if not isinstance(result, dict):
+            return
+        output = result.get("output") if isinstance(result.get("output"), dict) else {}
+        artifact_id = str(output.get("artifact_id") or "")
+        if not artifact_id:
+            return
+
+        sink = WebSocketSink(str(self.conversation.id))
+        artifact = await self.db.get(Artifact, artifact_id)
+        if artifact:
+            await sink.emit(RuntimeEvent(type="artifact:created", payload=artifact_to_dict(artifact)))
+
+        preview_id = str(output.get("preview_message_id") or "")
+        preview = await self.db.get(Message, preview_id) if preview_id else None
+        if not preview and artifact:
+            preview = await self.db.scalar(
+                select(Message)
+                .where(
+                    Message.conversation_id == artifact.conversation_id,
+                    Message.content_type == "preview_card",
+                    Message.deleted_at.is_(None),
+                )
+                .order_by(Message.created_at.desc())
+            )
+        if preview:
+            await sink.emit(RuntimeEvent(type="message:new", payload=message_to_dict(preview)))
 
 
 class SingleAgentOrchestrator:

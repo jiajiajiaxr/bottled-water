@@ -15,11 +15,12 @@ export type PreviewState = {
 export function WorkspaceFilePreviewView({ preview }: { preview: PreviewState }) {
   const payload = preview.payload;
   const text = payload.text ?? payload.preview_text ?? "";
+
   if (preview.loading) {
     return (
       <div className="workspace-file-loading">
         <Spin />
-        <Text type="secondary">{preview.loadingText ?? "正在生成预览…"}</Text>
+        <Text type="secondary">{preview.loadingText ?? "正在生成预览..."}</Text>
       </div>
     );
   }
@@ -39,18 +40,37 @@ export function WorkspaceFilePreviewView({ preview }: { preview: PreviewState })
   }
   if (payload.mode === "pdf") {
     return preview.objectUrl ? (
-      <iframe title="workspace-file-pdf-preview" className="workspace-file-preview-frame" src={preview.objectUrl} />
+      <iframe
+        title="workspace-file-pdf-preview"
+        className="workspace-file-preview-frame"
+        src={preview.objectUrl}
+      />
     ) : (
       <Empty description="PDF 文件下载失败，无法在线预览。" />
     );
   }
   if (payload.mode === "html") {
     return text ? (
-      <iframe title="workspace-file-html-preview" className="workspace-file-preview-frame" srcDoc={text} />
+      <iframe
+        title="workspace-file-html-preview"
+        className="workspace-file-preview-frame"
+        srcDoc={text}
+        sandbox="allow-scripts allow-forms allow-same-origin"
+      />
     ) : preview.objectUrl ? (
-      <iframe title="workspace-file-html-preview" className="workspace-file-preview-frame" src={preview.objectUrl} />
+      <iframe
+        title="workspace-file-html-preview"
+        className="workspace-file-preview-frame"
+        src={preview.objectUrl}
+        sandbox="allow-scripts allow-forms allow-same-origin"
+      />
     ) : payload.artifact_id && payload.preview_url ? (
-      <iframe title="workspace-artifact-html-preview" className="workspace-file-preview-frame" src={payload.preview_url} />
+      <iframe
+        title="workspace-artifact-html-preview"
+        className="workspace-file-preview-frame"
+        src={payload.preview_url}
+        sandbox="allow-scripts allow-forms allow-same-origin"
+      />
     ) : (
       <Empty description="HTML 预览内容为空，请下载原文件查看。" />
     );

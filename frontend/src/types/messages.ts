@@ -5,13 +5,16 @@ export type StreamAssistantHandlers = {
   onReasoningDelta?: (delta: string, payload: Record<string, unknown>) => void;
   onMessageStart?: (payload: Record<string, unknown>) => void;
   onMessageEnd?: (message: Record<string, unknown>) => void;
+  onMessageStop?: (message: Record<string, unknown>) => void;
   onMessageNew?: (message: ChatMessage) => void;
   onToolCallStart?: (payload: Record<string, unknown>) => void;
   onToolCallDone?: (payload: Record<string, unknown>) => void;
+  onTaskStatusChanged?: (payload: Record<string, unknown>) => void;
   onDone?: (payload?: Record<string, unknown>) => void;
   onControl?: (stop: () => void) => void;
   onToken?: (agentId: string, token: string) => void;
   onThinking?: (agentId: string, thinking: string) => void;
+  onRuntimeEvent?: (event: string, payload: Record<string, unknown>) => void;
 };
 
 /** 消息内容中附件的精简结构（发送时只需要这几个字段） */
@@ -40,7 +43,7 @@ export type MessageBody = {
   reply_to_message_id?: string;
   quotedMessageId?: string;
   thinking_enabled?: boolean;
-  scheduling_strategy?: "workflow" | "tech_lead";
+  scheduling_strategy?: "workflow" | "tech_lead" | "single_agent";
   regenerate_message_id?: string;
   model_config_id?: string;
 };

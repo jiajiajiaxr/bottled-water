@@ -221,11 +221,14 @@ async def change_password(
         raise ValidationAppError("current password and new password are required")
     if len(new_password) < 6:
         raise ValidationAppError("new password must be at least 6 characters")
-    if not verify_password(current_password, user.password_hash):
+    managed_user = await db.get(User, user.id)
+    if not managed_user or managed_user.deleted_at is not None:
+        raise UnauthorizedError("user not found")
+    if not verify_password(current_password, managed_user.password_hash):
         raise UnauthorizedError("current password is incorrect")
-    user.password_hash = hash_password(new_password)
+    managed_user.password_hash = hash_password(new_password)
     await db.commit()
-    return ok({"changed": True}, "password updated")
+    return ok({"ok": True, "changed": True}, "password updated")
 
 
 async def _compat_payload(request: Request) -> dict:

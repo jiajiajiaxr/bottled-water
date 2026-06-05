@@ -30,6 +30,7 @@ export interface WorkbenchDrawersProps {
   onCreateConversation: (payload: {
     title?: string;
     agentIds: string[];
+    group?: boolean;
     masterEnabled: boolean;
     folder: string;
   }) => Promise<void>;

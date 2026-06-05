@@ -247,6 +247,84 @@ def test_group_context_lists_members_and_warns_current_agent_not_to_impersonate(
     assert bundle.sections["group"]["enabled"] is True
 
 
+def test_context_builder_uses_blackboard_and_current_agent_private_context() -> None:
+    db = _memory_session()
+    user = _user(db)
+    conversation = _group_conversation(db, user)
+    frontend = _agent(
+        db,
+        user,
+        name="Frontend Worker",
+        agent_type="frontend",
+        description="负责 React 页面实现",
+        tools=["file.read"],
+    )
+    backend = _agent(
+        db,
+        user,
+        name="Backend Worker",
+        agent_type="backend",
+        description="负责 FastAPI 服务实现",
+        tools=["sandbox.run"],
+    )
+    conversation.extra = {
+        "workspace_id": None,
+        "blackboard": {
+            "version": 4,
+            "structured_summaries": [
+                {"title": "Round 1", "content": "共享结论：先实现登录页，再补 API。"}
+            ],
+            "kv_state": {"last_topic": "登录页", "shared_decision": "前后端并行"},
+            "raw_history": [
+                {
+                    "type": "agent_result",
+                    "agent_id": str(frontend.id),
+                    "content": "Frontend 已完成登录页草图。",
+                },
+                {
+                    "type": "tool_result",
+                    "agent_id": str(backend.id),
+                    "content": {"tool": "sandbox.run", "stdout": "pytest passed"},
+                },
+            ],
+        },
+        "agent_contexts": {
+            str(backend.id): [
+                {"type": "task", "content": "Backend 私有计划：先设计登录 API。"},
+                {"type": "tool_result", "content": {"stdout": "backend lint passed"}},
+            ],
+            str(frontend.id): [
+                {"type": "thought", "content": "Frontend 私有草稿：不要泄露给 Backend。"}
+            ],
+        },
+    }
+    db.add_all([_participant(conversation, frontend), _participant(conversation, backend)])
+    current = _message(conversation, user, "Backend 继续")
+    db.add(current)
+    db.commit()
+
+    bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=current,
+        agent=backend,
+        system_prompt="系统提示",
+        prompt="Backend 继续",
+        mode="workflow-agent",
+    )
+    serialized = "\n".join(str(item["content"]) for item in bundle.messages)
+
+    assert "Blackboard 全局共享上下文" in serialized
+    assert "共享结论：先实现登录页，再补 API。" in serialized
+    assert "shared_decision" in serialized
+    assert "Frontend 已完成登录页草图。" in serialized
+    assert "当前 Agent 私有上下文" in serialized
+    assert "Backend 私有计划：先设计登录 API。" in serialized
+    assert "backend lint passed" in serialized
+    assert "Frontend 私有草稿：不要泄露给 Backend。" not in serialized
+    assert bundle.sections["runtime_context"]["blackboard"]["version"] == 4
+    assert bundle.sections["runtime_context"]["agent_context"]["frame_count"] == 2
+
+
 def test_single_chat_does_not_include_group_member_context() -> None:
     db = _memory_session()
     user, conversation = _user_conversation(db)

@@ -26,9 +26,15 @@ from app.schemas.requests import (
     InvokeToolRequest,
     UpdateToolRequest,
 )
-from app.services.serialization import redact_sensitive, tool_definition_to_dict
-from app.services.tool_registry import BUILTIN_TOOLS, ensure_tool_tables, invoke_tool, list_tools
 from app.services.model_config_resolver import create_provider_from_db
+from app.services.serialization import redact_sensitive, tool_definition_to_dict
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.catalog import (
+    ensure_tool_tables as ensure_tool_tables_sync,
+    get_tool_definition as get_tool_definition_sync,
+    list_tools as list_tools_sync,
+)
+from app.services.tools.executor import invoke_tool as invoke_tool_sync
 
 router = APIRouter(tags=["tools"])
 
@@ -47,8 +53,18 @@ async def _validate_workspace(db: AsyncSession, user: User, workspace_id: str | 
         raise ForbiddenError("无权访问该工作区")
 
 
+async def _ensure_tool_tables(db: AsyncSession) -> None:
+    await db.run_sync(ensure_tool_tables_sync)
+
+
+async def _catalog_tool(db: AsyncSession, user: User, tool_id_or_name: str) -> ToolDefinition:
+    return await db.run_sync(
+        lambda session: get_tool_definition_sync(session, user, tool_id_or_name)
+    )
+
+
 async def _owned_tool(db: AsyncSession, user: User, tool_id: str) -> ToolDefinition:
-    await ensure_tool_tables(db)
+    await _ensure_tool_tables(db)
     tool = await db.scalar(
         select(ToolDefinition).where(
             ToolDefinition.id == tool_id, ToolDefinition.deleted_at.is_(None)
@@ -56,6 +72,8 @@ async def _owned_tool(db: AsyncSession, user: User, tool_id: str) -> ToolDefinit
     )
     if not tool:
         raise NotFoundError("工具不存在")
+    if tool.is_builtin or tool.type == "builtin":
+        raise ValidationAppError("内置工具由系统维护，不能在这里修改")
     if tool.owner_id != user.id and user.role != "admin":
         raise ForbiddenError("只能修改自己创建的工具")
     return tool
@@ -197,7 +215,14 @@ async def list_tool_catalog(
     user: User = Depends(get_current_user),
 ):
     await _validate_workspace(db, user, workspace_id)
-    items = await list_tools(db, user, workspace_id=workspace_id, q=q)
+    items = await db.run_sync(
+        lambda session: list_tools_sync(
+            session,
+            user,
+            workspace_id=workspace_id,
+            q=q,
+        )
+    )
     return ok({"items": items, "total": len(items)})
 
 
@@ -207,7 +232,7 @@ async def create_tool(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await ensure_tool_tables(db)
+    await _ensure_tool_tables(db)
     await _validate_workspace(db, user, payload.workspace_id)
     if payload.name in BUILTIN_TOOLS:
         raise ValidationAppError("不能覆盖平台内置工具")
@@ -254,7 +279,7 @@ async def generate_tool(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await ensure_tool_tables(db)
+    await _ensure_tool_tables(db)
     await _validate_workspace(db, user, payload.workspace_id)
     spec = await _generate_tool_spec(payload, db)
     if spec["name"] in BUILTIN_TOOLS:
@@ -291,9 +316,7 @@ async def generate_tool(
 async def get_tool(
     tool_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
-    if tool_id in BUILTIN_TOOLS:
-        return ok(BUILTIN_TOOLS[tool_id].to_dict())
-    return ok(tool_definition_to_dict(await _owned_tool(db, user, tool_id)))
+    return ok(tool_definition_to_dict(await _catalog_tool(db, user, tool_id)))
 
 
 @router.patch("/tools/{tool_id}", response_model=ApiResponse[ToolDefinitionOut])
@@ -342,5 +365,7 @@ async def invoke_tool_endpoint(
     user: User = Depends(get_current_user),
 ):
     await _validate_workspace(db, user, payload.workspace_id)
-    result = await invoke_tool(db, user, tool_id, payload.arguments)
+    result = await db.run_sync(
+        lambda session: invoke_tool_sync(session, user, tool_id, payload.arguments)
+    )
     return ok(result, "工具调用完成")

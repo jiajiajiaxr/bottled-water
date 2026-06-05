@@ -29,6 +29,12 @@ export function deriveRunningConversationIds({
     }),
   );
 
+  conversations.forEach((conversation) => {
+    if (hasBackendRunningSignal(conversation) && !hasTerminalRuntime(conversation, running.has(conversation.id))) {
+      running.add(conversation.id);
+    }
+  });
+
   backgroundTasks.forEach((task) => {
     const conversation = task.conversation_id
       ? conversationById.get(task.conversation_id)
@@ -60,11 +66,40 @@ export function deriveRunningConversationIds({
 function hasCancelledSignal(conversation?: Conversation) {
   if (!conversation) return false;
   const runtimeStatus = String(conversation.workflow_runtime?.status || "").toLowerCase();
-  return runtimeStatus === "cancelled" || conversation.lastMessage === "已停止本次响应";
+  const generationStatus = String(conversation.generation_status || "").toLowerCase();
+  const latestGenerationStatus = String(latestGeneration(conversation)?.status || "").toLowerCase();
+  return (
+    runtimeStatus === "cancelled" ||
+    generationStatus === "cancelled" ||
+    latestGenerationStatus === "cancelled" ||
+    conversation.lastMessage === "已停止本次响应"
+  );
 }
 
 function hasTerminalRuntime(conversation: Conversation, hasLocalRunning: boolean) {
   if (hasLocalRunning) return false;
-  const status = String(conversation.workflow_runtime?.status || "").toLowerCase();
-  return TERMINAL_RUNTIME_STATUSES.has(status);
+  const workflowStatus = String(conversation.workflow_runtime?.status || "").toLowerCase();
+  const generationStatus = String(conversation.generation_status || "").toLowerCase();
+  const latestGenerationStatus = String(latestGeneration(conversation)?.status || "").toLowerCase();
+  return (
+    TERMINAL_RUNTIME_STATUSES.has(workflowStatus) ||
+    generationStatus === "idle" ||
+    TERMINAL_RUNTIME_STATUSES.has(generationStatus) ||
+    TERMINAL_RUNTIME_STATUSES.has(latestGenerationStatus)
+  );
+}
+
+function hasBackendRunningSignal(conversation: Conversation) {
+  if (String(conversation.generation_status || "").toLowerCase() === "running") {
+    return true;
+  }
+  const runtime = conversation.runtime;
+  if (!runtime?.active_generation_id) return false;
+  const active = (runtime.generations || []).find((item) => item.id === runtime.active_generation_id);
+  return !active || !TERMINAL_RUNTIME_STATUSES.has(String(active.status || "").toLowerCase());
+}
+
+function latestGeneration(conversation: Conversation) {
+  const generations = conversation.runtime?.generations || [];
+  return generations.length ? generations[generations.length - 1] : undefined;
 }

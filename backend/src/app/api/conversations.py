@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -26,6 +27,7 @@ from db.models import (
     User,
     Workspace,
     WorkspaceMember,
+    WorkflowRun,
     utcnow,
 )
 from app.schemas.common import ApiResponse
@@ -38,11 +40,15 @@ from app.schemas.requests import (
     WorkflowGeneratePayload,
     WorkflowUpdatePayload,
 )
+from app.services.chat.scheduling import normalize_scheduling_strategy
 from app.services.serialization import (
     conversation_to_dict,
     participant_to_dict,
+    workflow_run_to_dict,
 )
 from app.services.model_config_resolver import create_provider_from_db
+from app.services.workflows.runtime import build_edge_states, build_node_states
+from app.services.workflows.validator import format_workflow_validation_message, validate_workflow_graph
 
 router = APIRouter(tags=["conversations"])
 compat_router = APIRouter(tags=["conversations-compat"])
@@ -152,6 +158,23 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
     title = payload.get("title") or (
         "新的多 Agent 协作群" if len(selected) > 1 else f"{selected[0].name} · 单聊"
     )
+    is_group = chat_type == "group" or len(selected) > 1
+    workflow_enabled = (
+        bool(payload.get("workflow_enabled"))
+        if payload.get("workflow_enabled") is not None
+        else False
+    )
+    requested_strategy = normalize_scheduling_strategy(payload.get("scheduling_strategy"))
+    scheduling_strategy = (
+        "single_agent"
+        if not is_group
+        else ("workflow" if workflow_enabled and requested_strategy == "workflow" else "tech_lead")
+    )
+    runtime_mode = (
+        "legacy"
+        if scheduling_strategy in {"workflow", "single_agent"}
+        else str(payload.get("runtime_mode") or "actor")
+    )
     conversation = Conversation(
         creator_id=user.id,
         chat_type=chat_type,
@@ -163,6 +186,9 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
             "category": payload.get("category") or "Default",
             "folder": payload.get("folder") or "Default",
             "remark": payload.get("remark") or "",
+            "scheduling_strategy": scheduling_strategy,
+            "runtime_mode": runtime_mode,
+            "workflow_enabled": workflow_enabled and scheduling_strategy == "workflow",
         },
         last_message_preview="会话已创建，可以发送任务开始协作。",
         last_message_sender="System",
@@ -206,7 +232,11 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
 
 
 async def _get(db: AsyncSession, user: User, conversation_id: str) -> Conversation:
-    conv = await db.scalar(_conversation_query(user.id).where(Conversation.id == conversation_id))
+    conv = await db.scalar(
+        _conversation_query(user.id)
+        .where(Conversation.id == conversation_id)
+        .execution_options(populate_existing=True)
+    )
     if not conv:
         raise NotFoundError("会话不存在")
     return conv
@@ -394,15 +424,40 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
         "edges": normalized_edges or fallback["edges"],
     }
 
+
+def _new_node_states(workflow: dict[str, Any]) -> list[dict[str, Any]]:
+    states = build_node_states(workflow)
+    if states:
+        states[0]["status"] = "running"
+        states[0]["progress"] = 5
+        states[0]["started_at"] = utcnow().isoformat()
+    return states
+
+
+def _sync_workflow_runtime(conversation: Conversation, run: WorkflowRun) -> None:
+    conversation.extra = {
+        **(conversation.extra or {}),
+        "workflow_runtime": {
+            "run_id": run.id,
+            "status": run.status,
+            "progress": run.progress,
+            "node_states": run.node_states or [],
+            "updated_at": utcnow().isoformat(),
+        },
+    }
+
+
 async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: dict) -> Conversation:
     conversation = await _get(db, user, conversation_id)
     action = payload.get("action")
     if not action:
-        if "pinned" in payload:
+        if payload.get("pinned") is not None:
             action = "pin" if payload["pinned"] else "unpin"
-        elif "archived" in payload:
+        elif payload.get("archived") is not None:
             action = "archive" if payload["archived"] else "unarchive"
-        elif any(k in payload for k in ("title", "description", "remark", "category", "folder")):
+        elif any(payload.get(k) is not None for k in ("scheduling_strategy", "runtime_mode", "workflow_enabled")):
+            action = "runtime"
+        elif any(payload.get(k) is not None for k in ("title", "description", "remark", "category", "folder")):
             action = "rename"
     if action == "pin":
         conversation.is_pinned = True
@@ -417,7 +472,7 @@ async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: di
     elif action == "rename":
         title = payload.get("title")
         if title is None and any(
-            k in payload for k in ("description", "remark", "category", "folder")
+            payload.get(k) is not None for k in ("description", "remark", "category", "folder")
         ):
             title = conversation.title
         if not title:
@@ -427,11 +482,28 @@ async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: di
             conversation.description = str(payload.get("description") or "")[:1000]
         extra = dict(conversation.extra or {})
         for key in ("remark", "category", "folder"):
-            if key in payload:
+            if payload.get(key) is not None:
                 value = str(payload.get(key) or "").strip()
                 extra[key] = (
                     value[:120] if value else ("Default" if key in {"category", "folder"} else "")
                 )
+        conversation.extra = extra
+    elif action == "runtime":
+        extra = dict(conversation.extra or {})
+        requested_strategy = normalize_scheduling_strategy(payload.get("scheduling_strategy"))
+        if conversation.chat_type == "single":
+            strategy = "single_agent"
+        elif requested_strategy == "workflow" and bool(payload.get("workflow_enabled")):
+            strategy = "workflow"
+        else:
+            strategy = "tech_lead"
+        extra["scheduling_strategy"] = strategy
+        extra["workflow_enabled"] = bool(payload.get("workflow_enabled")) and strategy == "workflow"
+        extra["runtime_mode"] = (
+            "legacy"
+            if strategy in {"workflow", "single_agent"}
+            else str(payload.get("runtime_mode") or "actor")
+        )
         conversation.extra = extra
     else:
         raise ValidationAppError("不支持的操作类型")
@@ -558,6 +630,142 @@ async def generate_conversation_workflow(
     await db.commit()
     return ok(workflow, "工作流已生成")
 
+
+
+@router.get("/conversations/{conversation_id}/workflow/runs", response_model=ApiResponse[dict])
+async def list_workflow_runs(
+    conversation_id: str,
+    latest: bool = False,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conversation = await _get(db, user, conversation_id)
+    query = (
+        select(WorkflowRun)
+        .where(WorkflowRun.conversation_id == conversation.id)
+        .order_by(WorkflowRun.created_at.desc())
+    )
+    if latest:
+        run = await db.scalar(query.limit(1))
+        return ok(workflow_run_to_dict(run) if run else None)
+    runs = (await db.scalars(query.limit(50))).all()
+    return ok({"items": [workflow_run_to_dict(run) for run in runs], "total": len(runs)})
+
+
+@router.post("/conversations/{conversation_id}/workflow/runs", response_model=ApiResponse[dict])
+async def start_workflow_run(
+    conversation_id: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conversation = await _get(db, user, conversation_id)
+    workflow = (conversation.extra or {}).get("workflow")
+    if not isinstance(workflow, dict):
+        workflow = _fallback_workflow(conversation)
+    workflow = _normalize_workflow(
+        payload.get("workflow") if isinstance(payload.get("workflow"), dict) else workflow,
+        conversation,
+    )
+    agents = [item.agent for item in _active_participants(conversation) if item.agent]
+    validation = validate_workflow_graph(workflow, agents=agents)
+    if not validation.ok:
+        raise ValidationAppError(format_workflow_validation_message(validation))
+    run = WorkflowRun(
+        conversation_id=conversation.id,
+        trigger_message_id=payload.get("trigger_message_id"),
+        started_by=user.id,
+        status="running",
+        mode=str(payload.get("mode") or workflow.get("mode") or "manual"),
+        workflow_snapshot=workflow,
+        node_states=_new_node_states(workflow),
+        edge_states=build_edge_states(workflow),
+        events=[{"type": "run.started", "at": utcnow().isoformat(), "actor_id": user.id}],
+        progress=5,
+        started_at=utcnow(),
+    )
+    db.add(run)
+    await db.flush()
+    _sync_workflow_runtime(conversation, run)
+    await db.commit()
+    await db.refresh(run)
+    return ok(workflow_run_to_dict(run), "Workflow run started")
+
+
+@router.patch("/conversations/{conversation_id}/workflow/runs/{run_id}/nodes/{node_id}", response_model=ApiResponse[dict])
+async def update_workflow_node_state(
+    conversation_id: str,
+    run_id: str,
+    node_id: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conversation = await _get(db, user, conversation_id)
+    run = await db.get(WorkflowRun, run_id)
+    if not run or run.conversation_id != conversation.id:
+        raise NotFoundError("Workflow run not found")
+
+    states = list(run.node_states or [])
+    found = False
+    now = utcnow().isoformat()
+    for state in states:
+        if state.get("id") != node_id:
+            continue
+        found = True
+        next_status = str(payload.get("status") or state.get("status") or "running")
+        state["status"] = next_status
+        if "progress" in payload:
+            state["progress"] = max(0, min(100, int(payload.get("progress") or 0)))
+        elif next_status in {"completed", "succeeded"}:
+            state["progress"] = 100
+        state["output"] = payload.get("output", state.get("output") or {})
+        if state.get("type") == "condition" and "matched_branch" in payload:
+            state["output"] = {**(state.get("output") or {}), "matched_branch": payload.get("matched_branch")}
+        if state.get("type") == "loop":
+            loop_output = dict(state.get("output") or {})
+            if "current_iteration" in payload:
+                loop_output["current_iteration"] = max(0, int(payload.get("current_iteration") or 0))
+            if "max_iterations" in payload:
+                loop_output["max_iterations"] = max(1, int(payload.get("max_iterations") or 1))
+            state["output"] = loop_output
+        state["message"] = payload.get("message", state.get("message"))
+        if next_status in {"running", "reviewing"} and not state.get("started_at"):
+            state["started_at"] = now
+        if next_status in {"completed", "succeeded", "failed", "skipped"}:
+            state["completed_at"] = now
+        break
+    if not found:
+        raise NotFoundError("Workflow node not found")
+
+    completed = len([state for state in states if state.get("status") in {"completed", "succeeded", "skipped"}])
+    failed = any(state.get("status") == "failed" for state in states)
+    total = max(1, len(states))
+    run.node_states = states
+    run.progress = int((completed / total) * 100)
+    if failed:
+        run.status = "failed"
+        run.completed_at = utcnow()
+    elif completed == total:
+        run.status = "completed"
+        run.progress = 100
+        run.completed_at = utcnow()
+    else:
+        run.status = "running"
+    run.events = [
+        *(run.events or []),
+        {
+            "type": "node.updated",
+            "node_id": node_id,
+            "status": payload.get("status"),
+            "at": now,
+            "actor_id": user.id,
+        },
+    ][-200:]
+    _sync_workflow_runtime(conversation, run)
+    await db.commit()
+    await db.refresh(run)
+    return ok(workflow_run_to_dict(run), "Workflow node state updated")
 
 
 @router.patch("/conversations/{conversation_id}", response_model=ApiResponse[dict])
@@ -695,7 +903,8 @@ async def add_participants(
             )
         )
     await db.commit()
-    return ok(conversation_to_dict(conversation), "成员已加入")
+    refreshed = await _get(db, user, conversation_id)
+    return ok(conversation_to_dict(refreshed), "成员已加入")
 
 
 @router.patch(
@@ -867,7 +1076,7 @@ async def compat_add_participants(
             participant.agent = agent
             db.add(participant)
     await db.commit()
-    return conversation_to_dict(conversation)
+    return conversation_to_dict(await _get(db, user, conversation_id))
 
 
 @compat_router.get("/conversations/{conversation_id}", response_model=dict)

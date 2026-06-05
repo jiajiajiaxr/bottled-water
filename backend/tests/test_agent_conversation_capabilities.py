@@ -22,12 +22,17 @@ from agent_capability_support import (
 from db.models import Artifact, McpToolInvocation, Message, SkillRun, ToolInvocation
 from app.services.ark import LLMStreamEvent
 from app.services.tools.builtins.artifact.export import export_artifact
+from app.services.llm.tool_calls import detect_artifact_tool
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("artifact_tool", "artifact_format", "extension"),
-    [("artifact.create_pdf", "pdf", ".pdf"), ("artifact.create_docx", "docx", ".docx")],
+    [
+        ("artifact.create_pdf", "pdf", ".pdf"),
+        ("artifact.create_docx", "docx", ".docx"),
+        ("artifact.create_html", "html", ".html"),
+    ],
 )
 async def test_agent_extracts_file_summary_and_generates_document_artifact(
     tmp_path: Path,
@@ -68,11 +73,49 @@ async def test_agent_extracts_file_summary_and_generates_document_artifact(
     assert Path(artifact.content["source_file"]["storage_path"]).exists()
     assert preview is not None
     assert preview.content["artifact_id"] == artifact.id
+    assert preview.content["format"] == artifact_format
+    assert preview.content["filename"].endswith(extension)
+    assert preview.content["media_type"] == artifact.content["media_type"]
+    assert preview.content["export_url"].endswith(f"format={artifact_format}")
     assert exported is not None
     assert exported.filename.endswith(extension)
     assert len(exported.content) > 500
     assert any(item["tool_name"] == artifact_tool for item in result.tool_results)
     assert result.assistant and artifact_format in result.assistant.content["text"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_pdf_preview_card_request_forces_real_artifact_when_model_only_streams_text() -> None:
+    db = memory_session()
+    user, session, user_message = conversation(db, "生成示例pdf预览卡片")
+    actor = agent(db, user, "Daily Chat Agent", tools=["artifact.create_pdf"])
+    calls: list[list[dict[str, Any]]] = []
+
+    async def fake_stream(messages: list[dict[str, Any]], **kwargs: Any) -> Any:
+        assert_tools_exposed(kwargs, ["artifact.create_pdf"])
+        calls.append(messages)
+        if len(calls) == 1:
+            yield LLMStreamEvent(type="delta", text="📄 示例PDF预览卡片")
+            yield LLMStreamEvent(type="done", usage={})
+            return
+        assert has_tool_result(messages)
+        yield LLMStreamEvent(type="delta", text="真实 PDF 已生成，可以点击预览卡片查看。")
+        yield LLMStreamEvent(type="done", usage={})
+
+    result = await run_loop_with_mocked_edges(db, session, user_message, actor, fake_stream)
+    artifact = db.scalar(select(Artifact).where(Artifact.conversation_id == session.id))
+    preview = db.scalar(select(Message).where(Message.content_type == "preview_card"))
+
+    assert detect_artifact_tool("生成示例pdf预览卡片") == "artifact.create_pdf"
+    assert artifact is not None
+    assert artifact.content["format"] == "pdf"
+    assert preview is not None
+    assert preview.content["artifact_id"] == artifact.id
+    assert preview.content["format"] == "pdf"
+    assert preview.content["export_url"].endswith("format=pdf")
+    assert preview.content["media_type"] == "application/pdf"
+    assert Path(artifact.content["source_file"]["storage_path"]).exists()
+    assert result.assistant and "真实 PDF" in result.assistant.content["text"]
 
 
 @pytest.mark.asyncio

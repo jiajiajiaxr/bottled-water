@@ -10,6 +10,9 @@ from datetime import datetime
 
 from common.logger import get_logger
 from ..core.interfaces import PersistenceBackend
+from ..core.protocol import BLACKBOARD_UPDATED
+from ..core.types import Event
+from ..runtime.event_dispatcher import EventDispatcher
 
 logger = get_logger(__name__)
 
@@ -17,9 +20,14 @@ logger = get_logger(__name__)
 class BlackboardManager:
     """Blackboard 存储管理器"""
 
-    def __init__(self, persistence: Optional[PersistenceBackend] = None):
+    def __init__(
+        self,
+        persistence: Optional[PersistenceBackend] = None,
+        event_bus: Optional[EventDispatcher] = None,
+    ):
         self._cache: Dict[str, Any] = {}
         self._persistence = persistence
+        self._event_bus = event_bus
 
     # --- 核心 CRUD ---
 
@@ -166,3 +174,16 @@ class BlackboardManager:
                     conversation_id=blackboard["conversation_id"],
                     error=str(e),
                 )
+        if self._event_bus:
+            await self._event_bus.publish(
+                Event(
+                    type=BLACKBOARD_UPDATED,
+                    payload={
+                        "conversation_id": blackboard["conversation_id"],
+                        "version": blackboard.get("version", 0),
+                        "updated_at": blackboard.get("updated_at"),
+                    },
+                    source="blackboard",
+                    channel="internal",
+                )
+            )

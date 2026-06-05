@@ -36,8 +36,10 @@ from app.schemas.requests import (
     UpdateAgentRequest,
 )
 from app.services.serialization import agent_to_dict
-from app.services.tool_registry import normalize_tool_names
 from app.services.model_config_resolver import create_provider_from_db
+from app.services.tools.permissions import normalize_tool_names
+from app.services.llm.gateway import test_model_config
+from model_provider.core.interfaces import ChatMessage
 
 router = APIRouter(tags=["agents"])
 
@@ -90,8 +92,8 @@ def _parse_json_object(text: str) -> dict | None:
         return None
 
 
-async def _model_provider(db: AsyncSession):
-    return await create_provider_from_db(db)
+async def _model_provider(db: AsyncSession, prefer_config_id: str | None = None):
+    return await create_provider_from_db(db, prefer_config_id)
 
 
 @router.get("/agents", response_model=ApiResponse[PaginatedItems[AgentOut]])
@@ -485,7 +487,21 @@ async def test_agent(
         测试响应详情，包括 Agent 信息、请求内容、模型输出及延迟。
     """
     agent = await _get_agent(db, agent_id)
-    provider = await _model_provider(db)
+    model_config_id = (agent.config or {}).get("model_config_id")
+    if model_config_id:
+        result = await test_model_config(db, str(model_config_id), payload.message)
+        return ok(
+            {
+                "agent": agent_to_dict(agent),
+                "request": payload.message,
+                "response": result.text,
+                "model": result.model,
+                "usage": result.usage,
+                "latency_ms": (agent.extra or {}).get("response_latency_ms", 1000),
+            },
+            "娴嬭瘯瀹屾垚",
+        )
+    provider = await _model_provider(db, str(model_config_id) if model_config_id else None)
     system_prompt = (
         (agent.config or {}).get("system_prompt") or agent.description or f"你是 {agent.name}"
     )
@@ -506,8 +522,8 @@ async def test_agent(
     try:
         result = await provider.chat(
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": payload.message},
+                ChatMessage(role="system", content=system_prompt),
+                ChatMessage(role="user", content=payload.message),
             ],
         )
         response_text = result.content

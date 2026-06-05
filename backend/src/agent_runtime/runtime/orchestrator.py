@@ -216,6 +216,7 @@ class Orchestrator:
             watchdog_event = self.watchdog.check_before_decision(blackboard_view, reports)
 
             if watchdog_event:
+                await self._archive_watchdog_event(watchdog_event)
                 yield Event(type="control.watchdog_triggered", payload=watchdog_event.payload)
                 self.status = "completed"
                 return
@@ -238,6 +239,20 @@ class Orchestrator:
                 decision=decision.decision_type,
                 target=decision.target_agent_id,
             )
+            await self._append_blackboard_history(
+                {
+                    "type": "scheduling_decision",
+                    "round": self.round_num,
+                    "decision": {
+                        "decision_type": decision.decision_type,
+                        "target_agent_id": decision.target_agent_id,
+                        "task_description": decision.task_description,
+                        "rationale": decision.rationale,
+                        "requires_verification": decision.requires_verification,
+                        "verification_agents": decision.verification_agents,
+                    },
+                }
+            )
 
             yield Event(
                 type="control.scheduling_decision",
@@ -253,6 +268,7 @@ class Orchestrator:
             # --- 5. 看门狗后置校验 ---
             watchdog_event = self.watchdog.check_after_decision(decision)
             if watchdog_event:
+                await self._archive_watchdog_event(watchdog_event)
                 yield Event(type="control.watchdog_triggered", payload=watchdog_event.payload)
                 self.status = "completed"
                 return
@@ -475,6 +491,24 @@ class Orchestrator:
             logger.error(
                 "Agent 执行失败", session_id=self.session_id, agent_id=agent_id, error=str(e)
             )
+            self._pending_agent_reports[agent_id] = AgentReport(
+                agent_id=agent_id,
+                state=AgentState.FAILED,
+                will=AgentWill.BLOCKED,
+                blockers=[str(e)],
+                confidence=0.0,
+                rationale=f"Agent execution failed: {type(e).__name__}",
+            )
+            await self._append_blackboard_history(
+                {
+                    "type": "agent_error",
+                    "round": self.round_num,
+                    "agent_id": agent_id,
+                    "task": task,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
             events.append(
                 Event(
                     type="system.agent_failed",
@@ -517,8 +551,45 @@ class Orchestrator:
             return await self._execute_assign(sub_decision, current_task, blackboard_view)
 
         # 使用 asyncio.gather 并发执行
-        results = await asyncio.gather(*[run_agent(aid) for aid in agent_ids])
-        for cont, evs in results:
+        results = await asyncio.gather(*[run_agent(aid) for aid in agent_ids], return_exceptions=True)
+        for agent_id, result in zip(agent_ids, results):
+            if isinstance(result, Exception):
+                logger.error(
+                    "Parallel agent branch failed outside assign handler",
+                    session_id=self.session_id,
+                    agent_id=agent_id,
+                    error=str(result),
+                )
+                self._pending_agent_reports[agent_id] = AgentReport(
+                    agent_id=agent_id,
+                    state=AgentState.FAILED,
+                    will=AgentWill.BLOCKED,
+                    blockers=[str(result)],
+                    confidence=0.0,
+                    rationale=f"Parallel branch failed: {type(result).__name__}",
+                )
+                await self._append_blackboard_history(
+                    {
+                        "type": "agent_error",
+                        "round": self.round_num,
+                        "agent_id": agent_id,
+                        "task": decision.task_description or current_task,
+                        "error": str(result),
+                        "error_type": type(result).__name__,
+                    }
+                )
+                events.append(
+                    Event(
+                        type="system.agent_failed",
+                        payload={
+                            "round": self.round_num,
+                            "agent_id": agent_id,
+                            "error": str(result),
+                        },
+                    )
+                )
+                continue
+            _cont, evs = result
             events.extend(evs)
 
         return True, events
@@ -580,6 +651,27 @@ class Orchestrator:
                 "round": self.round_num,
             },
         )
+
+    async def _archive_watchdog_event(self, event: Event) -> None:
+        await self._append_blackboard_history(
+            {
+                "type": "watchdog_triggered",
+                "round": self.round_num,
+                "payload": event.payload,
+            }
+        )
+
+    async def _append_blackboard_history(self, entry: dict) -> None:
+        try:
+            await self.blackboard_mgr.append_history(self.session_id, entry)
+        except Exception:
+            logger.warning(
+                "Blackboard runtime history archive failed",
+                session_id=self.session_id,
+                entry_type=entry.get("type"),
+                exc_info=True,
+            )
+
     async def handle_user_input(self, content: str) -> AsyncIterator[Event]:
         """处理用户中途输入。
 

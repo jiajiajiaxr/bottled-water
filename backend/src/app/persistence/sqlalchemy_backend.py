@@ -4,7 +4,8 @@ SQLAlchemy 持久化后端实现
 把 agent_runtime 的抽象接口桥接到现有的 SQLAlchemy ORM。
 """
 
-from typing import List
+from copy import deepcopy
+from typing import Any, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,13 @@ class SQLAlchemyBackend(PersistenceBackend):
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _merge_extra(conversation: Conversation, key: str, value: Any) -> None:
+        """Replace the JSON payload so SQLAlchemy reliably persists runtime state."""
+        extra = dict(conversation.extra or {})
+        extra[key] = deepcopy(value)
+        conversation.extra = extra
 
     async def create_conversation(self, metadata: dict) -> str:
         """创建会话"""
@@ -97,9 +105,7 @@ class SQLAlchemyBackend(PersistenceBackend):
             )
             conv = result.scalar_one_or_none()
             if conv:
-                if not conv.extra:
-                    conv.extra = {}
-                conv.extra["blackboard"] = data
+                self._merge_extra(conv, "blackboard", data)
                 await self.db.commit()
         except Exception:
             pass  # 持久化失败不影响主流程
@@ -124,9 +130,7 @@ class SQLAlchemyBackend(PersistenceBackend):
         )
         conv = result.scalar_one_or_none()
         if conv:
-            if not conv.extra:
-                conv.extra = {}
-            if "agent_contexts" not in conv.extra:
-                conv.extra["agent_contexts"] = {}
-            conv.extra["agent_contexts"][agent_id] = frames
+            contexts = dict((conv.extra or {}).get("agent_contexts") or {})
+            contexts[agent_id] = deepcopy(frames)
+            self._merge_extra(conv, "agent_contexts", contexts)
             await self.db.commit()

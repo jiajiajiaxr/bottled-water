@@ -69,6 +69,22 @@ describe("tool call summary", () => {
     expect(summary).toHaveTextContent("工具失败：sandbox.run");
     expect(summary).toHaveClass("warning");
   });
+
+  it("keeps external agent run metadata in the summary details", () => {
+    const summary = summarizeToolEvents([
+      {
+        toolName: "external_agent.run_codex",
+        status: "completed",
+        run_id: "run-123",
+        provider: "codex",
+        changed_files_count: 2,
+      },
+    ]);
+
+    expect(summary?.label).toBe("调用：external_agent.run_codex");
+    expect(summary?.details[0].run_id).toBe("run-123");
+    expect(summary?.details[0].changed_files_count).toBe(2);
+  });
 });
 
 function messageWithTools(toolEvents: Array<Record<string, unknown>>): ChatMessage {
@@ -81,5 +97,6 @@ function messageWithTools(toolEvents: Array<Record<string, unknown>>): ChatMessa
     content: "done",
     rawContent: { text: "done", tool_events: toolEvents },
     createdAt: "2026-05-28T00:00:00.000Z",
+    state: "active",
   };
 }

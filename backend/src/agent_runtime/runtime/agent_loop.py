@@ -19,8 +19,112 @@ from common.logger import get_logger
 from ..core.types import AgentConfig, AgentReport, AgentState, AgentWill, ToolCall, ToolResult
 from ..core.interfaces import ToolExecutor
 from ..context.agent_ctx import AgentContext
+from .status_report import parse_agent_status_report
 
 logger = get_logger(__name__)
+
+
+class _StatusReportStreamFilter:
+    """Hide status_report fenced blocks while preserving the raw final response."""
+
+    _fence = "```status_report"
+    _names = ("status_report", "status")
+    _fence_re = re.compile(r"^```\s*(?:status_report|status)\b", re.IGNORECASE)
+
+    def __init__(self) -> None:
+        self._raw = ""
+        self._visible = ""
+
+    def push(self, delta: str) -> str:
+        if not delta:
+            return ""
+        self._raw += delta
+        visible = self._strip_status_report(self._raw)
+        if not visible:
+            self._visible = ""
+            return ""
+        if visible.startswith(self._visible):
+            new_text = visible[len(self._visible) :]
+        else:
+            new_text = ""
+        self._visible = visible
+        return new_text
+
+    @classmethod
+    def _strip_status_report(cls, text: str) -> str:
+        lines = text.splitlines()
+        visible: list[str] = []
+        removed = False
+        index = 0
+        while index < len(lines):
+            line = lines[index]
+            trimmed = line.strip()
+            lowered = trimmed.lower()
+
+            if index == len(lines) - 1 and cls._can_become_status_fence(lowered):
+                removed = True
+                index += 1
+                continue
+
+            if lowered.startswith("```"):
+                opening_could_be_internal = bool(
+                    cls._fence_re.match(trimmed) or cls._can_become_status_fence(lowered)
+                )
+                body: list[str] = []
+                cursor = index + 1
+                while cursor < len(lines) and not lines[cursor].strip().startswith("```"):
+                    body.append(lines[cursor])
+                    cursor += 1
+
+                closed = cursor < len(lines)
+                if not closed:
+                    removed = True
+                    break
+
+                if opening_could_be_internal or cls._body_looks_like_status_report(body):
+                    removed = True
+                    index = cursor + 1
+                    continue
+
+                visible.extend([line, *body, lines[cursor]])
+                index = cursor + 1
+                continue
+
+            visible.append(line)
+            index += 1
+        cleaned = "\n".join(visible).strip()
+        return cleaned if cleaned or not removed else ""
+
+    @classmethod
+    def _can_become_status_fence(cls, value: str) -> bool:
+        if not value:
+            return False
+        normalized = value.strip().lower()
+        if cls._fence.startswith(normalized):
+            return True
+        if cls._fence_re.match(normalized):
+            return True
+        partial = re.match(r"^```\s*([a-z_]*)$", normalized, flags=re.IGNORECASE)
+        return bool(
+            partial
+            and any(name.startswith(partial.group(1).lower()) for name in cls._names)
+        )
+
+    @classmethod
+    def _body_looks_like_status_report(cls, body_lines: list[str]) -> bool:
+        first_meaningful = next((line.strip().lower() for line in body_lines if line.strip()), "")
+        if not first_meaningful:
+            return False
+        if first_meaningful in cls._names:
+            return True
+        body = "\n".join(body_lines).lower()
+        if not body.strip().startswith("{"):
+            return False
+        has_state = bool(re.search(r'"state"\s*:', body))
+        has_status_fields = bool(
+            re.search(r'"(?:will|rationale|blockers|priority|confidence)"\s*:', body)
+        )
+        return has_state and has_status_fields
 
 
 class AgentLoop:
@@ -172,8 +276,12 @@ class AgentLoop:
 
         # 获取可用工具（按 AgentConfig.tools 过滤）
         tools = []
+        active_tool_executor = tool_executor
         if tool_executor:
-            all_tools = await tool_executor.list_tools()
+            bind_agent = getattr(tool_executor, "bind_agent", None)
+            if callable(bind_agent):
+                active_tool_executor = bind_agent(self.agent.id)
+            all_tools = await active_tool_executor.list_tools()
             if self.agent.tools:
                 allowed = set(self.agent.tools)
                 tools = [t for t in all_tools if t.get("function", {}).get("name") in allowed]
@@ -185,6 +293,7 @@ class AgentLoop:
         tool_results: List[Dict[str, Any]] = []
         tool_events: List[Dict[str, Any]] = []
         tool_round = 0
+        forced_artifact_tool_name: str | None = None
 
         while tool_round < self.MAX_TOOL_ROUNDS:
             tool_round += 1
@@ -209,6 +318,26 @@ class AgentLoop:
 
             content = response.content or ""
             tool_calls = response.tool_calls
+            if not tool_calls:
+                forced_tool_call = (
+                    self._forced_artifact_tool_call(task, tools)
+                    if forced_artifact_tool_name is None
+                    else None
+                )
+                if forced_tool_call:
+                    forced_artifact_tool_name = str(
+                        forced_tool_call.get("function", {}).get("name") or ""
+                    )
+                    logger.info(
+                        "Agent forced artifact tool call",
+                        agent_id=self.agent.id,
+                        tool=forced_artifact_tool_name,
+                    )
+                    content = ""
+                    tool_calls = [forced_tool_call]
+                elif self._artifact_tool_succeeded(tool_results):
+                    if not content.strip() or self._looks_like_artifact_argument_fragment(content):
+                        content = self._artifact_completion_message(forced_artifact_tool_name)
 
             # 如果没有工具调用，说明 Agent 已完成本轮工作
             if not tool_calls:
@@ -243,7 +372,7 @@ class AgentLoop:
 
             # 执行每个工具调用
             for tc in tool_calls:
-                if not tool_executor:
+                if not active_tool_executor:
                     break
 
                 tool_call, err = ToolCall.new(tc)
@@ -268,7 +397,7 @@ class AgentLoop:
                         )
 
                         # 执行工具
-                        result = await tool_executor.execute(tool_call)
+                        result = await active_tool_executor.execute(tool_call)
 
                         # 如果 result 已经是 ToolResult，直接返回
                         if not isinstance(result, ToolResult):
@@ -293,6 +422,7 @@ class AgentLoop:
                     {
                         "tool": tool_name,
                         "success": result.success if isinstance(result, ToolResult) else True,
+                        "error": result.error if isinstance(result, ToolResult) else None,
                         "result": result.result if isinstance(result, ToolResult) else result,
                     }
                 )
@@ -303,6 +433,8 @@ class AgentLoop:
                         "agent_id": self.agent.id,
                         "tool": tool_name,
                         "success": result.success if isinstance(result, ToolResult) else True,
+                        "result": result.result if isinstance(result, ToolResult) else result,
+                        "error": result.error if isinstance(result, ToolResult) else None,
                     },
                 )
 
@@ -369,6 +501,60 @@ class AgentLoop:
             "work_product": work_product,
             "status_report": status_report,
             "tool_events": tool_events,
+        }
+
+    @staticmethod
+    def _artifact_tool_succeeded(tool_results: List[Dict[str, Any]]) -> bool:
+        return any(
+            str(result.get("tool", "")).startswith("artifact.create_")
+            and result.get("success") is True
+            for result in tool_results
+        )
+
+    @staticmethod
+    def _looks_like_artifact_argument_fragment(content: str) -> bool:
+        normalized = content.strip().lower()
+        if normalized in {"0", ">", "<", "li", "ul", "html", "body", "head", "script"}:
+            return True
+        return bool(len(normalized) <= 3 and re.fullmatch(r"[<>/a-z0-9]+", normalized))
+
+    @staticmethod
+    def _artifact_completion_message(tool_name: str | None) -> str:
+        label = {
+            "artifact.create_pdf": "PDF",
+            "artifact.create_docx": "Word",
+            "artifact.create_pptx": "PPT",
+            "artifact.create_xlsx": "Excel",
+            "artifact.create_html": "HTML",
+        }.get(tool_name or "", "产物")
+        return f"已生成真实 {label} 产物，可在预览卡片中查看和下载。"
+
+    def _forced_artifact_tool_call(
+        self,
+        task: str,
+        tools: List[Dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not tools:
+            return None
+        try:
+            from app.services.llm.tool_calls import artifact_arguments, detect_artifact_tool
+        except Exception:
+            return None
+        available = {
+            str(tool.get("function", {}).get("name") or "")
+            for tool in tools
+            if isinstance(tool, dict)
+        }
+        requested = detect_artifact_tool(task)
+        if not requested or requested not in available:
+            return None
+        return {
+            "id": f"call_forced_{requested.replace('.', '_')}_{uuid.uuid4().hex[:8]}",
+            "type": "function",
+            "function": {
+                "name": requested,
+                "arguments": json.dumps(artifact_arguments(requested, task), ensure_ascii=False),
+            },
         }
 
     async def _execute_virtual_agent(
@@ -439,7 +625,11 @@ class AgentLoop:
         )
 
         try:
-            result = await tool_executor.execute(tool_call)
+            bound_executor = tool_executor
+            bind_agent = getattr(tool_executor, "bind_agent", None)
+            if callable(bind_agent):
+                bound_executor = bind_agent(self.agent.id)
+            result = await bound_executor.execute(tool_call)
             if not isinstance(result, ToolResult):
                 result = ToolResult(
                     call_id=tool_call.call_id,
@@ -461,6 +651,8 @@ class AgentLoop:
                 "agent_id": self.agent.id,
                 "tool": tool_name,
                 "success": result.success,
+                "result": result.result,
+                "error": result.error,
             },
         )
 
@@ -501,6 +693,7 @@ class AgentLoop:
     ) -> ChatResponse:
         """流式对话，emit agent.token 事件，组装成 ChatResponse"""
         content_parts: List[str] = []
+        token_filter = _StatusReportStreamFilter()
         # tool_calls 在流式中可能分散在多个 chunk，需要积累
         tool_calls_acc: Dict[int, Dict[str, Any]] = {}
 
@@ -514,13 +707,15 @@ class AgentLoop:
             # 1. 文本内容
             if chunk.content:
                 content_parts.append(chunk.content)
-                await _emit(
-                    "agent.token",
-                    {
-                        "agent_id": self.agent.id,
-                        "token": chunk.content,
-                    },
-                )
+                visible_delta = token_filter.push(chunk.content)
+                if visible_delta:
+                    await _emit(
+                        "agent.token",
+                        {
+                            "agent_id": self.agent.id,
+                            "token": visible_delta,
+                        },
+                    )
 
             # 1.5 思考过程
             if chunk.reasoning:
@@ -623,24 +818,7 @@ class AgentLoop:
 
     def _extract_status_report(self, content: str) -> AgentReport:
         """从回复中提取状态报告"""
-        import re
-
-        pattern = r"```status_report\s*([\s\S]*?)\s*```"
-        match = re.search(pattern, content)
-        if match:
-            try:
-                data = json.loads(match.group(1))
-                return AgentReport(
-                    agent_id=self.agent.id,
-                    state=self._parse_state(data.get("state", "unknown")),
-                    will=self._parse_will(data.get("will", "wait")),
-                    rationale=data.get("rationale", ""),
-                    blockers=data.get("blockers", []),
-                    priority=data.get("priority", 0),
-                    confidence=data.get("confidence", 0.0),
-                )
-            except (json.JSONDecodeError, ValueError):
-                pass
+        return parse_agent_status_report(content, self.agent.id)
 
         return AgentReport(
             agent_id=self.agent.id,
@@ -653,8 +831,7 @@ class AgentLoop:
     def _remove_status_report(self, content: str) -> str:
         """从回复中移除状态报告部分"""
 
-        pattern = r"```status_report\s*[\s\S]*?\s*```"
-        return re.sub(pattern, "", content).strip()
+        return _StatusReportStreamFilter._strip_status_report(content)
 
     def _parse_state(self, state_str: str) -> AgentState:
         """解析状态字符串"""
@@ -662,6 +839,7 @@ class AgentLoop:
             "idle": AgentState.IDLE,
             "ready": AgentState.READY,
             "running": AgentState.RUNNING,
+            "paused": AgentState.PAUSED,
             "waiting": AgentState.WAITING,
             "completed": AgentState.COMPLETED,
             "failed": AgentState.FAILED,

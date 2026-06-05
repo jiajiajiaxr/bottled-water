@@ -171,7 +171,7 @@ async def test_retry_success_does_not_insert_failed_tool_runner_message(db: Sess
 
 @pytest.mark.asyncio
 async def test_agent_tool_events_are_persisted_without_tool_runner_messages(db: Session) -> None:
-    user, conversation, user_message = _user_conversation_message(db, "杩愯涓夋 sandbox")
+    user, conversation, user_message = _user_conversation_message(db, "运行三次 sandbox")
     agent = _agent(user, "Frontend Worker", "frontend", tools=["sandbox.run"])
     db.add(agent)
     db.commit()
@@ -219,7 +219,7 @@ async def test_agent_tool_events_are_persisted_without_tool_runner_messages(db: 
                     conversation=conversation,
                     user_message=user_message,
                     agent=agent,
-                    prompt="杩愯涓夋 sandbox",
+                    prompt="运行三次 sandbox",
                     channel=f"conversation:{conversation.id}",
                     mode="unit-test",
                 )
@@ -620,6 +620,43 @@ async def test_model_exception_path_does_not_leave_streaming_message(db: Session
     assert "模型调用异常" in result.assistant.content["text"]
     assert not db.scalars(select(Message).where(Message.status == "streaming")).all()
     assert any(call.args[1] == "message_stop" for call in publish.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_chatbox_model_selection_overrides_agent_bound_model(db: Session) -> None:
+    user, conversation, user_message = _user_conversation_message(db, "你好")
+    user_message.extra = {"model_config_id": "chatbox-model"}
+    agent = _agent(user, "Daily Chat Agent", "daily")
+    agent.config = {"model_config_id": "agent-bound-model", "tools": []}
+    db.add(agent)
+    db.commit()
+    used_model_ids: list[str] = []
+
+    async def fake_model_stream(
+        _db: Session,
+        model_config_id: str,
+        _messages: list[dict[str, Any]],
+        **_: Any,
+    ) -> Any:
+        used_model_ids.append(model_config_id)
+        yield LLMStreamEvent(type="delta", text="已使用聊天框模型")
+        yield LLMStreamEvent(type="done", usage={})
+
+    with patch("app.services.agents.function_loop.stream_model_config_chat", fake_model_stream):
+        with patch("app.services.agents.function_loop.event_bus.publish", new_callable=AsyncMock):
+            result = await run_agent_function_call_loop(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                agent=agent,
+                prompt="你好",
+                channel=f"conversation:{conversation.id}",
+                mode="unit-test",
+            )
+
+    assert used_model_ids == ["chatbox-model"]
+    assert result.assistant is not None
+    assert result.assistant.status == "completed"
 
 
 @pytest.mark.asyncio

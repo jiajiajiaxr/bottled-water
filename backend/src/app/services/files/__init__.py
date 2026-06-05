@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import ValidationAppError
 from db.models import AuditLog, FileAsset, KnowledgeBase, KnowledgeDocument, User
-from app.services.file_tools import extract_text_from_path
+from app.services.tools.builtins.file import extract_text_from_path
 
 
 SAFE_NAME = re.compile(r"[^a-zA-Z0-9._\-\u4e00-\u9fff]+")

@@ -92,7 +92,8 @@ export function sectionTitle(line: string): { title?: string; remainder: string 
 export function stripInternalAgentOutput(raw: string) {
   const text = String(raw || "");
   if (!text.trim()) return "";
-  const lines = text.split(/\r?\n/);
+  const internalFenceResult = stripInternalFencedBlocks(text);
+  const lines = internalFenceResult.text.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     const { title, remainder } = sectionTitle(lines[index]);
     if (title && FINAL_SECTION_TITLES.has(title)) {
@@ -116,7 +117,96 @@ export function stripInternalAgentOutput(raw: string) {
     if (!skipping) visible.push(line);
   });
   const cleaned = visible.join("\n").trim();
-  return cleaned || (sawInternal ? "" : text.trim());
+  return cleaned || (
+    sawInternal || internalFenceResult.removed ? "" : text.trim()
+  );
+}
+
+function stripInternalFencedBlocks(text: string) {
+  const lines = text.split(/\r?\n/);
+  const visible: string[] = [];
+  let removed = false;
+  const statusFence = "```status_report";
+  const statusFenceNames = ["status_report", "status"];
+  const isStatusFence = (value: string) =>
+    /^```\s*(?:status_report|status)\b/i.test(value.trim());
+  const isClosingFence = (value: string) => value.trim().startsWith("```");
+  const canBecomeStatusFence = (value: string) =>
+    Boolean(value) &&
+    (statusFence.startsWith(value) ||
+      /^```\s*(?:status_report|status)\b/i.test(value) ||
+      (() => {
+        const partial = value.match(/^```\s*([a-z_]*)$/i);
+        if (!partial) return false;
+        return statusFenceNames.some((name) =>
+          name.startsWith(partial[1].toLowerCase()),
+        );
+      })());
+  const bodyLooksLikeStatusReport = (bodyLines: string[]) => {
+    const firstMeaningful = bodyLines.find((line) => line.trim().length > 0);
+    if (!firstMeaningful) return false;
+    const first = firstMeaningful.trim().toLowerCase();
+    if (statusFenceNames.includes(first)) return true;
+
+    const body = bodyLines.join("\n").toLowerCase();
+    if (!body.trim().startsWith("{")) return false;
+    const hasState = /"state"\s*:/.test(body);
+    const hasStatusFields =
+      /"will"\s*:/.test(body) ||
+      /"rationale"\s*:/.test(body) ||
+      /"blockers"\s*:/.test(body) ||
+      /"priority"\s*:/.test(body) ||
+      /"confidence"\s*:/.test(body);
+    return hasState && hasStatusFields;
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    const lowered = trimmed.toLowerCase();
+
+    if (index === lines.length - 1 && canBecomeStatusFence(lowered)) {
+      removed = true;
+      continue;
+    }
+
+    if (lowered.startsWith("```")) {
+      const openingCouldBeInternal =
+        isStatusFence(trimmed) || canBecomeStatusFence(lowered);
+      const body: string[] = [];
+      let cursor = index + 1;
+      while (cursor < lines.length && !isClosingFence(lines[cursor])) {
+        body.push(lines[cursor]);
+        cursor += 1;
+      }
+
+      const closed = cursor < lines.length;
+      if (!closed) {
+        if (openingCouldBeInternal || bodyLooksLikeStatusReport(body)) {
+          removed = true;
+          break;
+        }
+        visible.push(line, ...body);
+        break;
+      }
+
+      const internal =
+        openingCouldBeInternal || bodyLooksLikeStatusReport(body);
+      if (internal) {
+        removed = true;
+        index = cursor;
+        continue;
+      }
+
+      visible.push(line, ...body, lines[cursor]);
+      index = cursor;
+      continue;
+    }
+
+    visible.push(line);
+  }
+
+  return { text: visible.join("\n"), removed };
 }
 
 export function isTaskRunning(status?: string) {
@@ -144,6 +234,33 @@ export function isLikelyArtifactRequest(text: string) {
     "代码",
     "项目",
   ].some((keyword) => value.includes(keyword));
+}
+
+export function isSuccessfulToolRunnerMessage(message: ChatMessage) {
+  const author = String(message.author || "").toLowerCase();
+  const raw = message.rawContent || {};
+  const output = (raw.output || raw.result || {}) as Record<string, unknown>;
+  const hasToolName = Boolean(raw.tool_name || raw.toolName || output.tool_name || output.toolName);
+  const looksLikeToolRunner =
+    message.role === "tool" ||
+    author === "tool runner" ||
+    author.includes("tool runner") ||
+    hasToolName;
+  if (!looksLikeToolRunner) return false;
+
+  const status = String(raw.status || output.status || "").toLowerCase();
+  if (["failed", "error", "cancelled", "timeout"].includes(status)) return false;
+  if (["succeeded", "success", "completed", "ok"].includes(status)) return true;
+
+  const exitCode = Number(output.exit_code ?? output.exitCode ?? raw.exit_code ?? raw.exitCode);
+  if (Number.isFinite(exitCode)) return exitCode === 0;
+
+  if (output.error || raw.error) return false;
+  return hasToolName && Boolean(output.stdout || output.summary || output.result);
+}
+
+export function isVisibleChatMessage(message: ChatMessage) {
+  return !isSuccessfulToolRunnerMessage(message);
 }
 
 export function participantName(

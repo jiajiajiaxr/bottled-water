@@ -15,10 +15,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from db.base import Base
 from app.core.errors import ValidationAppError
-from db.models import Artifact, Conversation, FileAsset, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
+from db.models import Artifact, Conversation, FileAsset, Message, SandboxSession, ToolInvocation, User, Workspace, WorkspaceMember
 from app.api.artifacts import download_artifact_preview_pdf
 from app.api.messages import _send
 from app.api.workspace_files import download_workspace_file, download_workspace_file_preview_pdf, preview_workspace_file
+from app.services.chat.code_runner import run_message_code_block
 from app.services.files.workspace_tree import (
     bulk_delete_workspace_file_nodes,
     create_workspace_folder,
@@ -768,6 +769,79 @@ def test_dangerous_sandbox_command_is_rejected_and_recorded(db: Session) -> None
         assert invocation is not None
         assert invocation.workspace_id == workspace.id
         assert invocation.status == "failed"
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_message_python_code_block_runs_in_conversation_sandbox(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    message = Message(
+        conversation_id=conversation.id,
+        sender_type="agent",
+        sender_id="agent-code",
+        sender_name="Code Agent",
+        content_type="text",
+        content={"text": "```python\nprint('hello from code')\n```"},
+        status="completed",
+    )
+    db.add(message)
+    db.commit()
+
+    try:
+        result = run_message_code_block(
+            db,
+            user=user,
+            conversation_id=conversation.id,
+            message_id=message.id,
+            language="python",
+            code="print('hello from code')",
+            index=0,
+        )
+        db.refresh(message)
+        invocation = db.scalar(
+            select(ToolInvocation)
+            .where(ToolInvocation.tool_name == "sandbox.run")
+            .order_by(ToolInvocation.created_at.desc())
+        )
+
+        assert result["status"] == "succeeded"
+        assert result["exit_code"] == 0
+        assert "hello from code" in result["stdout"]
+        assert invocation is not None
+        assert invocation.status == "succeeded"
+        assert message.content["code_runs"]["0"]["exit_code"] == 0
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_message_interactive_python_code_is_rejected_without_hanging(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    message = Message(
+        conversation_id=conversation.id,
+        sender_type="agent",
+        sender_id="agent-code",
+        sender_name="Code Agent",
+        content_type="text",
+        content={"text": "```python\nname = input('name: ')\n```"},
+        status="completed",
+    )
+    db.add(message)
+    db.commit()
+
+    try:
+        result = run_message_code_block(
+            db,
+            user=user,
+            conversation_id=conversation.id,
+            message_id=message.id,
+            language="python",
+            code="name = input('name: ')",
+            index=0,
+        )
+
+        assert result["status"] == "failed"
+        assert result["exit_code"] == -1
+        assert "input()" in result["stderr"]
     finally:
         _cleanup(workspace.id)
 

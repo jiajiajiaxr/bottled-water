@@ -1,9 +1,11 @@
-const MAIN_TABS = new Set(["chat", "agents", "workspace", "settings"]);
+export type MainTab = "chat" | "agents" | "workspace" | "settings" | "files";
+
+const MAIN_TABS = new Set(["chat", "agents", "workspace", "settings", "files"]);
 
 export function normalizeMainTab(
   value: string | null,
-): "chat" | "agents" | "workspace" | "settings" {
+): MainTab {
   return MAIN_TABS.has(value ?? "")
-    ? (value as "chat" | "agents" | "workspace" | "settings")
+    ? (value as MainTab)
     : "chat";
 }

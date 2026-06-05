@@ -12,32 +12,23 @@ import {
   BranchesOutlined,
   CommentOutlined,
   FileTextOutlined,
+  FolderOpenOutlined,
   RobotOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { api } from "@/api";
 import { ConversationSidebar } from "@/features/chat/components/ConversationSidebar";
-import type {
-  Agent,
-  Conversation,
-  User,
-  Workspace,
-} from "@/types";
+import type { Agent, Conversation, User, Workspace } from "@/types";
 
 export interface WorkbenchLayoutProps {
-  // User
   currentUser: User;
   onLogout: () => void;
-
-  // Workspaces
   workspaces: Workspace[];
   activeWorkspace: Workspace | undefined;
   activeWorkspaceId: string | undefined;
   selectWorkspace: (workspaceId?: string, replace?: boolean) => void;
-  openMainTab: (tab: "agents" | "workspace" | "settings") => void;
-
-  // Conversations
+  openMainTab: (tab: "agents" | "workspace" | "settings" | "files") => void;
   conversations: Conversation[];
   activeId: string | undefined;
   conversationCategories: string[];
@@ -57,13 +48,8 @@ export interface WorkbenchLayoutProps {
     conversationId?: string,
     replace?: boolean,
   ) => void;
-
   runningConversationIds: Set<string>;
-
-  // Agents
   agents: Agent[];
-
-  // Main content
   routeTab: string;
   scheduleMode: "chat" | "workflow";
   onScheduleModeChange: (mode: "chat" | "workflow") => void;
@@ -72,7 +58,6 @@ export interface WorkbenchLayoutProps {
 
 export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const { message } = AntApp.useApp();
-
   const {
     currentUser,
     onLogout,
@@ -99,6 +84,33 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     children,
   } = props;
 
+  const deleteConversation = (item: Conversation) => {
+    Modal.confirm({
+      title: "删除归档会话",
+      content: `确认删除「${item.title}」？删除后会从列表移除。`,
+      okText: "删除",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await api.deleteConversation(item.id);
+        updateConversations((current) =>
+          current.filter((conversation) => conversation.id !== item.id),
+        );
+        if (activeId === item.id) {
+          const nextConversation = conversations.find(
+            (conversation) => conversation.id !== item.id,
+          );
+          setActiveId(nextConversation?.id);
+          navigateToConversation(
+            nextConversation?.workspace_id || activeWorkspaceId,
+            nextConversation?.id,
+            true,
+          );
+        }
+        message.success("会话已删除");
+      },
+    });
+  };
+
   return (
     <Layout className="workbench">
       <ConversationSidebar
@@ -111,39 +123,12 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         onSelect={selectConversation}
         onCreate={() => setCreateOpen({ open: true })}
         onCreateCategory={addConversationCategory}
-        onTogglePin={(item) =>
-          patchConversation(item, { pinned: !item.pinned })
-        }
+        onTogglePin={(item) => patchConversation(item, { pinned: !item.pinned })}
         onToggleArchive={(item) =>
           patchConversation(item, { archived: !item.archived })
         }
         onEdit={(item, patch) => patchConversation(item, patch)}
-        onDelete={(item) => {
-          Modal.confirm({
-            title: "删除归档会话",
-            content: `确认删除「${item.title}」？删除后会从列表移除。`,
-            okText: "删除",
-            okButtonProps: { danger: true },
-            onOk: async () => {
-              await api.deleteConversation(item.id);
-              updateConversations((current) =>
-                current.filter((conversation) => conversation.id !== item.id),
-              );
-              if (activeId === item.id) {
-                const nextConversation = conversations.find(
-                  (conversation) => conversation.id !== item.id,
-                );
-                setActiveId(nextConversation?.id);
-                navigateToConversation(
-                  nextConversation?.workspace_id || activeWorkspaceId,
-                  nextConversation?.id,
-                  true,
-                );
-              }
-              message.success("归档会话已删除");
-            },
-          });
-        }}
+        onDelete={deleteConversation}
       />
       <Layout className="center-layout">
         <div className="topbar">
@@ -165,15 +150,24 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
             >
               工作区
             </Button>
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={() => openMainTab("files")}
+              data-testid="workspace-files"
+            >
+              工作区文件
+            </Button>
           </Space>
           <Space>
             {routeTab === "chat" && (
               <Segmented
                 value={scheduleMode}
-                onChange={(value) => onScheduleModeChange(value as "chat" | "workflow")}
+                onChange={(value) =>
+                  onScheduleModeChange(value as "chat" | "workflow")
+                }
                 options={[
-                  { label: <><CommentOutlined /> 一般</>, value: "chat" },
-                  { label: <><BranchesOutlined /> 工作流</>, value: "workflow" },
+                  { label: <><CommentOutlined /> 自动组织</>, value: "chat" },
+                  { label: <><BranchesOutlined /> 工作流画布</>, value: "workflow" },
                 ]}
               />
             )}

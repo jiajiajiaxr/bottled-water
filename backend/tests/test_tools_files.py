@@ -2,9 +2,43 @@ import io
 import uuid
 from typing import Any
 
+from agent_capability_support import memory_session
+from db.models import ToolDefinition, User
+from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.catalog import list_tools
+
 
 def unwrap(body: dict[str, Any]) -> Any:
     return body.get("data", body)
+
+
+def test_tool_catalog_dedupes_legacy_duplicate_builtin_display() -> None:
+    db = memory_session()
+    user = User(email="tool-dedupe@example.com", username="tool-dedupe", password_hash="x")
+    db.add(user)
+    db.flush()
+    builtin = BUILTIN_TOOLS["artifact.create_pdf"]
+    db.add(
+        ToolDefinition(
+            owner_id=user.id,
+            name="legacy_create_pdf_duplicate",
+            display_name=builtin.display_name,
+            description="legacy duplicate",
+            category=builtin.category,
+            type="custom_python",
+            status="active",
+        )
+    )
+    db.commit()
+
+    tools = list_tools(db, user)
+    pdf_tools = [
+        item
+        for item in tools
+        if item["display_name"] == builtin.display_name and item["category"] == builtin.category
+    ]
+
+    assert [item["name"] for item in pdf_tools] == ["artifact.create_pdf"]
 
 
 def test_tool_catalog_create_invoke_and_artifact_tool(
@@ -15,9 +49,13 @@ def test_tool_catalog_create_invoke_and_artifact_tool(
     listed = client.get("/api/v1/tools", headers=auth_headers)
     assert listed.status_code == 200, listed.text
     tools = unwrap(listed.json())["items"]
-    names = {item["name"] for item in tools}
+    names = [item["name"] for item in tools]
+    assert len(names) == len(set(names))
     assert "file.extract_text" in names
+    assert "file.preview" in names
+    assert "file.summarize" in names
     assert "artifact.create_pdf" in names
+    assert "sandbox.run" in names
 
     tool_name = f"custom_echo_acceptance_{uuid.uuid4().hex[:8]}"
     created = client.post(

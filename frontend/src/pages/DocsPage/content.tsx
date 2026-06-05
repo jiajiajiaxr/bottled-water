@@ -177,31 +177,31 @@ export const apiSections: ApiEntry[] = [
   {
     id: "api-auth",
     title: "认证与用户",
-    meta: "backend/app/api/auth.py",
+    meta: "backend/src/app/api/auth.py",
     icon: <SafetyCertificateOutlined />,
   },
   {
     id: "api-chat",
     title: "会话与消息",
-    meta: "backend/app/api/conversations.py / messages.py",
+    meta: "backend/src/app/api/conversations.py / messages.py",
     icon: <MessageOutlined />,
   },
   {
     id: "api-capability",
     title: "Agent / Tool / MCP",
-    meta: "backend/app/api/agents.py / tools.py / mcp.py",
+    meta: "backend/src/app/api/agents.py / tools.py / mcp.py",
     icon: <ToolOutlined />,
   },
   {
     id: "api-assets",
     title: "文件 / 知识库 / 产物",
-    meta: "backend/app/api/files.py / knowledge.py / artifacts.py",
+    meta: "backend/src/app/api/files.py / knowledge.py / artifacts.py",
     icon: <FileProtectOutlined />,
   },
   {
     id: "api-workflow",
     title: "工作流运行",
-    meta: "backend/app/api/conversations.py / workflow.py",
+    meta: "backend/src/app/api/conversations.py / workflow.py",
     icon: <BranchesOutlined />,
   },
 ];

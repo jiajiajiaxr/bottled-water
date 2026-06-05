@@ -1,5 +1,6 @@
 import {
   ArrowLeftOutlined,
+  DeleteOutlined,
   FolderAddOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -42,14 +43,18 @@ export function WorkspaceFileToolbar({
   return (
     <>
       <div className="workspace-files-page-head">
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={onBack}>返回聊天</Button>
+        <Space align="center">
+          <Button icon={<ArrowLeftOutlined />} onClick={onBack}>
+            返回聊天
+          </Button>
           <div>
             <Title level={4}>工作区文件</Title>
-            <Text type="secondary">上传、产物、沙箱、导出和项目文件统一视图</Text>
+            <Text type="secondary">
+              统一查看上传、产物、沙箱、导出和项目文件
+            </Text>
           </div>
         </Space>
-        <Space>
+        <Space wrap>
           {stats && (
             <Statistic
               className="workspace-file-stat"
@@ -57,10 +62,23 @@ export function WorkspaceFileToolbar({
               value={`${formatBytes(stats.total_size)} / ${stats.file_count} 个文件`}
             />
           )}
-          <Button icon={<FolderAddOutlined />} onClick={onCreateFolder}>新建文件夹</Button>
-          <Button disabled={!checkedCount} onClick={onMoveSelected}>移动</Button>
-          <Button danger disabled={!checkedCount} onClick={onBulkDelete}>批量删除</Button>
-          <Button icon={<ReloadOutlined />} onClick={onReload} loading={loading}>刷新</Button>
+          <Button icon={<FolderAddOutlined />} onClick={onCreateFolder}>
+            新建文件夹
+          </Button>
+          <Button disabled={!checkedCount} onClick={onMoveSelected}>
+            移动
+          </Button>
+          <Button
+            danger
+            disabled={!checkedCount}
+            icon={<DeleteOutlined />}
+            onClick={onBulkDelete}
+          >
+            批量删除
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={onReload} loading={loading}>
+            刷新
+          </Button>
         </Space>
       </div>
       <Space.Compact block className="workspace-file-toolbar">
@@ -71,7 +89,12 @@ export function WorkspaceFileToolbar({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
         />
-        <Select value={source} onChange={onSourceChange} style={{ width: 150 }} options={sources} />
+        <Select
+          value={source}
+          onChange={onSourceChange}
+          style={{ width: 160 }}
+          options={sources}
+        />
       </Space.Compact>
     </>
   );

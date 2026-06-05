@@ -6,6 +6,14 @@ def unwrap(body: dict[str, Any]) -> Any:
     return body.get("data", body)
 
 
+def _demo_headers(client: Any) -> dict[str, str]:
+    login = client.post("/api/v1/auth/demo")
+    assert login.status_code == 200, login.text
+    token = unwrap(login.json()).get("access_token") or unwrap(login.json()).get("token")
+    assert token
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_workspace_project_permissions_and_audit(client: Any, auth_headers: dict[str, str]) -> None:
     permissions = client.get("/api/v1/permissions/me", headers=auth_headers)
     assert permissions.status_code == 200, permissions.text
@@ -58,6 +66,42 @@ def test_workspace_project_permissions_and_audit(client: Any, auth_headers: dict
     assert "total" in unwrap(stats.json())
 
 
+def test_security_user_role_update_syncs_rbac_mapping_and_audit(client: Any) -> None:
+    admin_headers = _demo_headers(client)
+    email = f"rbac-{uuid.uuid4().hex[:8]}@example.com"
+    signup = client.post(
+        "/auth/signup",
+        json={"email": email, "password": "Acceptance123!", "name": "RBAC User"},
+    )
+    assert signup.status_code in {200, 201, 409}, signup.text
+    target_user = unwrap(signup.json())["user"]
+
+    updated = client.patch(
+        f"/api/v1/security/users/{target_user['id']}/role",
+        json={"role": "developer"},
+        headers=admin_headers,
+    )
+    assert updated.status_code == 200, updated.text
+    updated_body = unwrap(updated.json())
+    assert updated_body["role"] == "developer"
+    assert updated_body["roles"] == ["ROLE_USER", "ROLE_DEVELOPER"]
+
+    users = client.get("/api/v1/security/users", headers=admin_headers)
+    assert users.status_code == 200, users.text
+    listed = next(item for item in unwrap(users.json())["items"] if item["id"] == target_user["id"])
+    assert listed["role"] == "developer"
+    assert listed["roles"] == ["ROLE_USER", "ROLE_DEVELOPER"]
+
+    logs = client.get(
+        "/api/v1/audit-logs?action=security.user.role.update",
+        headers=admin_headers,
+    )
+    assert logs.status_code == 200, logs.text
+    matching = [item for item in unwrap(logs.json())["items"] if item["target_id"] == target_user["id"]]
+    assert matching
+    assert matching[0]["detail"]["role_codes"] == ["ROLE_USER", "ROLE_DEVELOPER"]
+
+
 def test_task_approval_and_deployment_operations(
     client: Any,
     auth_headers: dict[str, str],
@@ -105,15 +149,36 @@ def test_task_approval_and_deployment_operations(
         headers=auth_headers,
     )
     assert deployment.status_code == 200, deployment.text
-    deployment_id = unwrap(deployment.json())["id"]
+    deployment_body = unwrap(deployment.json())
+    deployment_id = deployment_body["id"]
+    assert deployment_body["status"] == "deployed"
+    assert deployment_body["health_status"] == "healthy"
+    assert deployment_body["health"]["checks"]
 
     logs = client.get(f"/api/v1/deployments/{deployment_id}/logs", headers=auth_headers)
     assert logs.status_code == 200, logs.text
-    assert unwrap(logs.json())["items"]
+    log_items = unwrap(logs.json())["items"]
+    assert log_items
+    assert any("访问入口" in item["message"] for item in log_items)
+
+    health = client.post(f"/api/v1/deployments/{deployment_id}/health", headers=auth_headers)
+    assert health.status_code == 200, health.text
+    assert unwrap(health.json())["health_status"] == "healthy"
 
     parsed = client.post("/api/v1/deployments/parse-command", json={"message": "请部署到预览链接"}, headers=auth_headers)
     assert parsed.status_code == 200, parsed.text
     assert unwrap(parsed.json())["recognized"] is True
+
+    container_deployment = client.post(
+        "/api/v1/deployments",
+        json={"artifact_id": artifact_id, "mode": "container"},
+        headers=auth_headers,
+    )
+    assert container_deployment.status_code == 200, container_deployment.text
+    container_body = unwrap(container_deployment.json())
+    assert container_body["status"] == "failed"
+    assert container_body["health_status"] == "failed"
+    assert "未启用 container 部署运行时" in container_body["error_message"]
 
     rollback = client.post(f"/api/v1/deployments/{deployment_id}/rollback", json={}, headers=auth_headers)
     assert rollback.status_code == 200, rollback.text

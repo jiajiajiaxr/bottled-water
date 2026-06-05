@@ -12,6 +12,7 @@ from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.graph import WorkflowGraph
 from app.services.workflows.io import resolve_node_input
 from app.services.workflows.nodes.base import NodeExecutionResult, WorkflowNodeExecutor
+from app.services.workflows.nodes.artifact import ArtifactNodeExecutor
 from app.services.workflows.nodes.condition import ConditionNodeExecutor
 from app.services.workflows.nodes.end import EndNodeExecutor
 from app.services.workflows.nodes.loop import LoopNodeExecutor
@@ -159,6 +160,7 @@ def test_runtime_node_states_include_input_output_error_fields() -> None:
     assert states[0]["input"] == {}
     assert states[0]["output"] == {}
     assert states[0]["error"] is None
+    assert states[0]["retry_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -358,6 +360,17 @@ class FailingExecutor(WorkflowNodeExecutor):
         return NodeExecutionResult(output={"ok": node.id})
 
 
+class FailedResultThenSuccessExecutor(WorkflowNodeExecutor):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def execute(self, node: Any, context: Any) -> NodeExecutionResult:
+        self.calls += 1
+        if self.calls == 1:
+            return NodeExecutionResult(status="failed", output={"error": "temporary result failure"})
+        return NodeExecutionResult(output={"ok": True})
+
+
 class SlowParallelExecutor(WorkflowNodeExecutor):
     def __init__(self) -> None:
         self.started: list[str] = []
@@ -404,6 +417,9 @@ async def test_engine_retry_and_cancel_paths() -> None:
 
     assert flaky.calls == 2
     assert result.outputs["tool"] == {"ok": True}
+    retry_state = next(state for state in run.node_states if state["id"] == "tool")
+    assert retry_state["retry_count"] == 1
+    assert any(event["type"] == "node.retry" for event in run.events)
 
     cancelled_run = SimpleNamespace(**{**run.__dict__, "status": "cancelled", "events": []})
     with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
@@ -420,6 +436,47 @@ async def test_engine_retry_and_cancel_paths() -> None:
         ).run()
     assert cancelled.outputs == {}
     assert cancelled_run.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_engine_retries_failed_node_result_before_stopping() -> None:
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {
+                "id": "tool",
+                "type": "tool",
+                "config": {"failure_strategy": "retry", "tool_name": "api.test"},
+            },
+            {"id": "end", "type": "end"},
+        ],
+        "edges": [["start", "tool"], ["tool", "end"]],
+    }
+    db, conversation, user_message, task, run = _runtime(workflow)
+    executor = FailedResultThenSuccessExecutor()
+
+    with patch(
+        "app.services.workflows.engine.get_executor",
+        side_effect=lambda node_type: executor if node_type == "tool" else WorkflowNodeExecutor(),
+    ):
+        with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+            result = await WorkflowEngine(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                task=task,
+                workflow_run=run,
+                workflow=workflow,
+                prompt="hello",
+                channel="conversation:conv-1",
+                agents=[],
+            ).run()
+
+    state = next(item for item in run.node_states if item["id"] == "tool")
+    assert executor.calls == 2
+    assert result.outputs["tool"] == {"ok": True}
+    assert state["status"] == "completed"
+    assert state["retry_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -454,6 +511,44 @@ async def test_engine_marks_failed_node_and_skips_downstream_dependencies() -> N
     assert states["fail"]["error"] == "boom"
     assert states["end"]["status"] == "skipped"
     assert result.outputs["fail"]["error"] == "boom"
+
+
+@pytest.mark.asyncio
+async def test_engine_skip_failure_strategy_allows_downstream_nodes() -> None:
+    workflow = {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {
+                "id": "fail",
+                "type": "tool",
+                "config": {"tool_name": "bad.tool", "failure_strategy": "skip"},
+            },
+            {"id": "end", "type": "end"},
+        ],
+        "edges": [["start", "fail"], ["fail", "end"]],
+    }
+    db, conversation, user_message, task, run = _runtime(workflow)
+
+    with patch("app.services.workflows.engine.get_executor", return_value=FailingExecutor()):
+        with patch("app.services.workflows.events.event_bus.publish", new_callable=AsyncMock):
+            result = await WorkflowEngine(
+                db,
+                conversation=conversation,
+                user_message=user_message,
+                task=task,
+                workflow_run=run,
+                workflow=workflow,
+                prompt="hello",
+                channel="conversation:conv-1",
+                agents=[],
+            ).run()
+
+    states = {state["id"]: state for state in run.node_states}
+    assert run.status == "completed"
+    assert states["fail"]["status"] == "skipped"
+    assert states["fail"]["output"]["reason"] == "failure_strategy_skip"
+    assert states["end"]["status"] == "completed"
+    assert result.outputs["fail"]["failed_status"] == "failed"
 
 
 @pytest.mark.asyncio
@@ -692,3 +787,73 @@ async def test_tool_node_executes_real_tool_and_records_failure_status() -> None
     execute_tool.assert_awaited_once()
     assert result.status == "failed"
     assert result.output["result"]["output"] == "missing"
+
+
+@pytest.mark.asyncio
+async def test_artifact_node_uses_real_artifact_tool_executor() -> None:
+    workflow = {
+        "nodes": [
+            {
+                "id": "artifact",
+                "type": "artifact",
+                "title": "Deliverable",
+                "config": {
+                    "artifact_type": "pdf",
+                    "name": "交付报告",
+                    "content_model": {
+                        "title": "交付报告",
+                        "sections": [{"title": "摘要", "blocks": [{"type": "paragraph", "text": "{{input}}"}]}],
+                    },
+                },
+            }
+        ],
+        "edges": [],
+    }
+    db, conversation, _user_message, _task, run = _runtime(workflow)
+    db.get.side_effect = lambda model, item_id: SimpleNamespace(id="user-1") if model is User else None
+    context = SimpleNamespace(
+        db=db,
+        conversation=conversation,
+        workflow_run=run,
+        channel="conversation:conv-1",
+        outputs={},
+        prompt="生成正式项目报告",
+        node_input={"upstream_text": "上游分析结果"},
+    )
+    payload = {
+        "status": "succeeded",
+        "output": {
+            "status": "succeeded",
+            "artifact_id": "artifact-1",
+            "artifact": {"id": "artifact-1", "name": "交付报告"},
+            "preview_url": "/api/v1/artifacts/artifact-1/preview",
+            "export_url": "/api/v1/artifacts/artifact-1/export?format=pdf",
+            "format": "pdf",
+            "filename": "交付报告.pdf",
+            "media_type": "application/pdf",
+        },
+    }
+
+    with patch(
+        "app.services.workflows.nodes.artifact.execute_tool_by_name",
+        new_callable=AsyncMock,
+    ) as execute_tool:
+        execute_tool.return_value = payload
+        with patch("app.services.workflows.nodes.artifact.publish_tool_event", new_callable=AsyncMock):
+            with patch("app.services.workflows.nodes.artifact.event_bus.publish", new_callable=AsyncMock) as publish:
+                result = await ArtifactNodeExecutor().execute(
+                    WorkflowGraph.from_workflow(workflow).nodes[0],
+                    context,
+                )
+
+    execute_tool.assert_awaited_once()
+    call = execute_tool.await_args.kwargs
+    assert call["tool_name"] == "artifact.create_pdf"
+    assert call["arguments"]["conversation_id"] == "conv-1"
+    assert call["arguments"]["title"] == "交付报告"
+    assert call["arguments"]["body"] == "上游分析结果"
+    assert call["arguments"]["content_model"]["sections"][0]["blocks"][0]["text"] == "生成正式项目报告"
+    assert result.status == "completed"
+    assert result.output["artifact_id"] == "artifact-1"
+    assert result.output["export_url"].endswith("format=pdf")
+    assert any(call.args[1] == "artifact:created" for call in publish.await_args_list)

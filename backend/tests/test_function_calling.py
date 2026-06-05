@@ -1,12 +1,10 @@
-import asyncio
-import json
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.services.ark import LLMStreamEvent, ArkClient
-from app.services.agentic_runtime import build_tools_for_agent, execute_tool_by_name
+from app.services.agents.async_tool_loop import build_tools_for_agent, execute_tool_by_name
 
 
 class TestArkClientToolCalls:
@@ -157,12 +155,14 @@ class TestExecuteToolByName:
         conversation = MagicMock()
         conversation.id = "conv-1"
 
-        from app.services import tool_registry
-
-        with patch.object(
-            tool_registry, "invoke_builtin_tool"
+        with patch(
+            "app.services.agents.async_tool_loop._invoke_catalog_tool",
+            new_callable=AsyncMock,
         ) as mock_invoke:
-            mock_invoke.return_value = {"status": "succeeded", "path": "/health"}
+            mock_invoke.return_value = {
+                "result": {"status": "succeeded", "path": "/health"},
+                "invocation_id": "inv-1",
+            }
             result = await execute_tool_by_name(
                 db,
                 agent=agent,

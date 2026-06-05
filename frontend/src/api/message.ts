@@ -1,6 +1,6 @@
 import type { StreamAssistantHandlers, MessageBody } from "@/types/messages";
 import type { ChatMessage } from "@/types";
-import { get, post, sse } from "./client";
+import { API_BASE, get, post, sse } from "./client";
 import { getConversationWS } from "./websocket";
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
@@ -108,9 +108,43 @@ function dispatchStreamEvent(
   handlers: StreamAssistantHandlers,
 ): void {
   switch (event) {
+    case "message_start":
+      handlers.onMessageStart?.(data as Record<string, unknown>);
+      break;
+    case "content_block_delta": {
+      const payload = data as Record<string, unknown>;
+      const delta = payload.delta as Record<string, unknown> | undefined;
+      const text = String(delta?.text || "");
+      if (!text) break;
+      if (delta?.type === "reasoning_delta") {
+        handlers.onReasoningDelta?.(text, payload);
+      } else {
+        handlers.onDelta?.(text, payload);
+      }
+      break;
+    }
+    case "message_stop":
+      handlers.onMessageEnd?.(data as Record<string, unknown>);
+      handlers.onMessageStop?.(data as Record<string, unknown>);
+      break;
+    case "task:status_changed":
+      handlers.onTaskStatusChanged?.(data as Record<string, unknown>);
+      break;
+    case "message:new":
+      handlers.onMessageNew?.(data as ChatMessage);
+      break;
+    case "generation_finished":
+    case "generation:cancelled":
+    case "cancelled":
+    case "failed":
+      handlers.onDone?.(data as Record<string, unknown>);
+      break;
+
     // 运行时事件：Session 生命周期
     case "system.session_started":
     case "system.session_completed":
+    case "system.session_cancelled":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
     case "system.session_error":
       handlers.onDone?.(data as Record<string, unknown>);
@@ -126,6 +160,28 @@ function dispatchStreamEvent(
     case "system.agent_failed":
       handlers.onMessageEnd?.(data as Record<string, unknown>);
       break;
+
+    case "scheduler.decision":
+    case "agent.state_changed":
+    case "agent.report":
+    case "agent.failed":
+    case "control.cancel":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
+      break;
+    case "agent.tool_result": {
+      const payload = data as Record<string, unknown>;
+      handlers.onRuntimeEvent?.(event, payload);
+      const toolName = String(payload.tool || payload.tool_name || "");
+      handlers.onToolCallDone?.({
+        tool_name: toolName,
+        status: payload.success === false ? "failed" : "succeeded",
+        result: payload.result,
+        error: payload.error,
+      });
+      const previewMessage = previewCardFromToolResult(payload);
+      if (previewMessage) handlers.onMessageNew?.(previewMessage);
+      break;
+    }
 
     // 运行时事件：工具调用
     case "agent.tool_calls_executed": {
@@ -185,6 +241,54 @@ function dispatchStreamEvent(
 }
 
 /** 标准 SSE fetch 客户端（POST + ReadableStream）。 */
+function previewCardFromToolResult(
+  payload: Record<string, unknown>,
+): ChatMessage | undefined {
+  const result = asRecord(payload.result) || {};
+  const output = asRecord(result.output) || asRecord(result.result) || result;
+  const artifact = asRecord(output.artifact) || {};
+  const artifactId = stringValue(output.artifact_id ?? artifact.id);
+  if (!artifactId) return undefined;
+  const conversationId = stringValue(
+    artifact.conversationId ?? artifact.conversation_id ?? output.conversation_id,
+  );
+  if (!conversationId) return undefined;
+  const title =
+    stringValue(artifact.title ?? artifact.name ?? output.title ?? output.filename) ||
+    "AgentHub 产物";
+  const messageId = stringValue(output.preview_message_id) || `preview-${artifactId}`;
+  return {
+    id: messageId,
+    conversationId,
+    role: "assistant",
+    kind: "preview_card",
+    author: "Master Agent",
+    content: `预览产物：${title}`,
+    rawContent: {
+      artifact_id: artifactId,
+      title,
+      artifact_type: output.artifact_type ?? artifact.type,
+      preview_url: output.preview_url ?? artifact.previewUrl,
+      export_url: output.export_url ?? artifact.exportUrl,
+      format: output.format ?? artifact.format,
+      media_type: output.media_type ?? artifact.media_type,
+      filename: output.filename ?? artifact.filename,
+    },
+    createdAt: new Date().toISOString(),
+    streamState: "done",
+    state: "active",
+    status: "completed",
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" && value ? value : "";
+}
+
 export async function sendMessage(
   conversationId: string,
   body: MessageBody,
@@ -233,6 +337,64 @@ export async function sendMessage(
   return "ok";
 }
 
+export function streamAssistantReply(
+  conversationId: string,
+  handlers: StreamAssistantHandlers,
+): Promise<string> {
+  let accumulated = "";
+  let settled = false;
+  const source = new EventSource(
+    `${API_BASE}/conversations/${conversationId}/stream`,
+  );
+  const finish = (payload?: Record<string, unknown>) => {
+    if (settled) return;
+    settled = true;
+    source.close();
+    handlers.onDone?.(payload);
+  };
+
+  return new Promise((resolve) => {
+    const complete = (payload?: Record<string, unknown>) => {
+      finish(payload);
+      resolve(accumulated || "ok");
+    };
+    const handle = (eventName: string) => (event: MessageEvent) => {
+      const data = event.data ? JSON.parse(event.data) : {};
+      if (eventName === "content_block_delta") {
+        const payload = data as Record<string, unknown>;
+        const delta = payload.delta as Record<string, unknown> | undefined;
+        const text = String(delta?.text || "");
+        accumulated += text;
+      }
+      if (
+        eventName === "generation_finished" ||
+        eventName === "generation:cancelled" ||
+        eventName === "cancelled" ||
+        eventName === "failed" ||
+        eventName === "system.session_error"
+      ) {
+        complete(data as Record<string, unknown>);
+        return;
+      }
+      dispatchStreamEvent(eventName, data, handlers);
+    };
+
+    [
+      "message_start",
+      "content_block_delta",
+      "message_stop",
+      "task:status_changed",
+      "workflow:completed",
+      "generation_finished",
+      "generation:cancelled",
+      "cancelled",
+      "failed",
+      "system.session_error",
+    ].forEach((eventName) => source.addEventListener(eventName, handle(eventName)));
+    source.onerror = () => complete({ reason: "event_source_error" });
+  });
+}
+
 export async function cancelAssistantReply(
   conversationId: string,
 ): Promise<{ cancelled: boolean }> {
@@ -278,11 +440,16 @@ export async function sendMessageWs(
     const unsubscribe = ws.onMessage((event, data) => {
       switch (event) {
         case "system.session_completed":
+        case "generation_finished":
+        case "generation:cancelled":
           window.clearTimeout(timeout);
           if (!resolved) {
             resolved = true;
             unsubscribe();
-            handlers.onDone?.();
+            dispatchStreamEvent(event, data, handlers);
+            if (event === "system.session_completed") {
+              handlers.onDone?.();
+            }
             resolve("ok");
           }
           break;

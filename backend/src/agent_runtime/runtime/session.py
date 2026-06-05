@@ -14,6 +14,7 @@ from common.logger import get_logger
 from ..core.types import AgentConfig, Event
 from ..core.interfaces import PersistenceBackend, EventSink, ToolExecutor
 from .orchestrator import Orchestrator
+from .actor_orchestrator import ActorOrchestrator
 from .event_dispatcher import EventDispatcher
 from ..strategies.base import Scheduler
 from ..strategies.single_agent import SingleAgentScheduler
@@ -56,14 +57,24 @@ class Session:
         if event_sink:
             self.event_dispatcher.register_sink(event_sink)
 
-        self.orchestrator = Orchestrator(
-            session_id=session_id,
-            agents=self.agents,
-            scheduler=self.scheduler,
-            model_provider=model_provider,
-            persistence=persistence,
-            tool_executor=self.tool_executor,
-        )
+        if scheduler_config.get("runtime") == "actor":
+            self.orchestrator = ActorOrchestrator(
+                session_id=session_id,
+                agents=self.agents,
+                model_provider=model_provider,
+                persistence=persistence,
+                tool_executor=self.tool_executor,
+                max_runtime_seconds=float(scheduler_config.get("max_runtime_seconds") or 120.0),
+            )
+        else:
+            self.orchestrator = Orchestrator(
+                session_id=session_id,
+                agents=self.agents,
+                scheduler=self.scheduler,
+                model_provider=model_provider,
+                persistence=persistence,
+                tool_executor=self.tool_executor,
+            )
 
     def _create_scheduler(self, config: Dict[str, Any]) -> Scheduler:
         """根据配置创建对应的调度器。"""
@@ -141,6 +152,11 @@ class Session:
         async for event in self.orchestrator.handle_user_input(content):
             await self.event_dispatcher.dispatch(event)
             yield event
+
+    async def cancel(self, reason: str = "user_cancelled") -> None:
+        cancel = getattr(self.orchestrator, "cancel", None)
+        if cancel:
+            await cancel(reason)
 
     def get_status(self) -> dict:
         """获取会话当前状态"""

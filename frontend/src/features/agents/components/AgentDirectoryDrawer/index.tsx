@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
@@ -27,7 +27,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { api } from "@/api";
+import { api } from "../../../../api";
 import type {
   Agent,
   AgentCapability,
@@ -35,7 +35,7 @@ import type {
   ModelConfig,
   Skill,
   ToolDefinition,
-} from "@/types";
+} from "../../../../types";
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -76,41 +76,134 @@ export function AgentDirectoryDrawer({
   const [toolCatalog, setToolCatalog] = useState<ToolDefinition[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
   const { message } = AntApp.useApp();
+  const createToolValues = Form.useWatch("tools", form) as string[] | undefined;
+  const editToolValues = Form.useWatch("tools", editForm) as string[] | undefined;
+  const createSkillValues = Form.useWatch("skill_ids", form) as string[] | undefined;
+  const editSkillValues = Form.useWatch("skill_ids", editForm) as string[] | undefined;
+  const createMcpValues = Form.useWatch("mcp_server_ids", form) as string[] | undefined;
+  const editMcpValues = Form.useWatch("mcp_server_ids", editForm) as string[] | undefined;
 
   useEffect(() => {
-    if (!open) return;
-    Promise.all([
-      api.modelConfigs().catch(() => []),
-      api.tools().catch(() => []),
-      api.skills().catch(() => []),
-      api.mcpServers().catch(() => []),
-    ]).then(([configs, tools, nextSkills, servers]) => {
-      setModelConfigs(configs);
-      setToolCatalog(tools);
-      setSkills(nextSkills);
-      setMcpServers(servers);
-    });
-  }, [open]);
+    if (!open && !asPage) return;
+    let cancelled = false;
+    setCatalogLoading(true);
+    setCatalogError("");
+    Promise.allSettled([
+      api.modelConfigs(),
+      api.tools(),
+      api.skills(),
+      api.mcpServers(),
+    ])
+      .then(([configs, tools, nextSkills, servers]) => {
+        if (cancelled) return;
+        const failures = [configs, tools, nextSkills, servers].filter(
+          (result) => result.status === "rejected",
+        );
+        if (failures.length) {
+          setCatalogError("能力目录加载失败，请刷新后重试");
+          message.error("能力目录加载失败，请刷新后重试");
+        }
+        setModelConfigs(configs.status === "fulfilled" ? configs.value : []);
+        setToolCatalog(tools.status === "fulfilled" ? tools.value : []);
+        setSkills(nextSkills.status === "fulfilled" ? nextSkills.value : []);
+        setMcpServers(servers.status === "fulfilled" ? servers.value : []);
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [asPage, message, open]);
 
-  const toolOptions = toolCatalog.map((tool) => ({
-    label: `${tool.display_name ?? tool.name} · ${tool.name}`,
-    value: tool.name,
-  }));
-  const skillOptions = skills.map((skill) => ({
-    label: `${skill.name} · ${skill.category}`,
-    value: skill.id,
-  }));
-  const mcpOptions = mcpServers.map((server) => ({
-    label: `${server.name} · ${server.transport}`,
-    value: server.id,
-  }));
-  const modelConfigOptions = modelConfigs.map((model) => ({
-    label: `${model.name} · ${model.model_id}`,
-    value: model.id,
-  }));
+  const selectedToolValues = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(createToolValues ?? []),
+          ...(editToolValues ?? []),
+          ...(editingAgent?.config.tools ?? []),
+        ]),
+      ),
+    [createToolValues, editToolValues, editingAgent],
+  );
+  const selectedSkillValues = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(createSkillValues ?? []),
+          ...(editSkillValues ?? []),
+          ...(editingAgent?.config.skill_ids ?? []),
+        ]),
+      ),
+    [createSkillValues, editSkillValues, editingAgent],
+  );
+  const selectedMcpValues = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(createMcpValues ?? []),
+          ...(editMcpValues ?? []),
+          ...(editingAgent?.config.mcp_server_ids ?? []),
+        ]),
+      ),
+    [createMcpValues, editMcpValues, editingAgent],
+  );
+
+  const toolOptions = useMemo(() => {
+    const dedupedCatalog = dedupeToolCatalog(toolCatalog);
+    const known = new Set(dedupedCatalog.map((tool) => tool.name));
+    return [
+      ...dedupedCatalog.map((tool) => ({
+        label: `${tool.display_name ?? tool.name} · ${tool.name}`,
+        value: tool.name,
+      })),
+      ...selectedToolValues
+        .filter((name) => name && !known.has(name))
+        .map((name) => ({
+          label: `旧配置：${name}`,
+          value: name,
+          disabled: true,
+        })),
+    ];
+  }, [selectedToolValues, toolCatalog]);
+  const skillOptions = useMemo(() => {
+    const known = new Set(skills.map((skill) => skill.id));
+    return [
+      ...skills.map((skill) => ({
+        label: `${skill.name} · ${skill.category}`,
+        value: skill.id,
+      })),
+      ...selectedSkillValues
+        .filter((id) => id && !known.has(id))
+        .map((id) => ({ label: `旧 Skill：${id}`, value: id, disabled: true })),
+    ];
+  }, [selectedSkillValues, skills]);
+  const mcpOptions = useMemo(() => {
+    const known = new Set(mcpServers.map((server) => server.id));
+    return [
+      ...mcpServers.map((server) => ({
+        label: `${server.name} · ${server.transport}`,
+        value: server.id,
+      })),
+      ...selectedMcpValues
+        .filter((id) => id && !known.has(id))
+        .map((id) => ({ label: `旧 MCP：${id}`, value: id, disabled: true })),
+    ];
+  }, [mcpServers, selectedMcpValues]);
+  const modelConfigOptions = useMemo(
+    () =>
+      modelConfigs.map((model) => ({
+        label: `${model.name} · ${model.model_id}`,
+        value: model.id,
+      })),
+    [modelConfigs],
+  );
   const modelLabel = (modelConfigId?: string) => {
     const model =
       modelConfigs.find((item) => item.id === modelConfigId) ??
@@ -558,6 +651,7 @@ export function AgentDirectoryDrawer({
             <Select
               allowClear
               placeholder="使用系统默认豆包模型"
+              loading={catalogLoading}
               options={modelConfigOptions}
             />
           </Form.Item>
@@ -567,6 +661,8 @@ export function AgentDirectoryDrawer({
               showSearch
               placeholder="选择该 Agent 可调用的工具"
               optionFilterProp="label"
+              loading={catalogLoading}
+              notFoundContent={catalogError || undefined}
               options={toolOptions}
             />
           </Form.Item>
@@ -576,6 +672,8 @@ export function AgentDirectoryDrawer({
               showSearch
               placeholder="选择可调用的 Skills"
               optionFilterProp="label"
+              loading={catalogLoading}
+              notFoundContent={catalogError || undefined}
               options={skillOptions}
             />
           </Form.Item>
@@ -585,6 +683,8 @@ export function AgentDirectoryDrawer({
               showSearch
               placeholder="选择可调用的 MCP 服务"
               optionFilterProp="label"
+              loading={catalogLoading}
+              notFoundContent={catalogError || undefined}
               options={mcpOptions}
             />
           </Form.Item>
@@ -668,6 +768,7 @@ export function AgentDirectoryDrawer({
               showSearch
               optionFilterProp="label"
               placeholder="使用系统默认豆包模型"
+              loading={catalogLoading}
               options={modelConfigOptions}
             />
           </Form.Item>
@@ -677,6 +778,8 @@ export function AgentDirectoryDrawer({
               showSearch
               placeholder="选择该 Agent 可调用的工具"
               optionFilterProp="label"
+              loading={catalogLoading}
+              notFoundContent={catalogError || undefined}
               options={toolOptions}
             />
           </Form.Item>
@@ -686,6 +789,8 @@ export function AgentDirectoryDrawer({
               showSearch
               placeholder="选择可调用的 Skills"
               optionFilterProp="label"
+              loading={catalogLoading}
+              notFoundContent={catalogError || undefined}
               options={skillOptions}
             />
           </Form.Item>
@@ -695,6 +800,8 @@ export function AgentDirectoryDrawer({
               showSearch
               placeholder="选择可调用的 MCP 服务"
               optionFilterProp="label"
+              loading={catalogLoading}
+              notFoundContent={catalogError || undefined}
               options={mcpOptions}
             />
           </Form.Item>
@@ -776,4 +883,32 @@ export function AgentDirectoryDrawer({
       </Modal>
     </>
   );
+}
+
+function dedupeToolCatalog(catalog: ToolDefinition[]) {
+  const byName = new Map<string, ToolDefinition>();
+  const byBuiltinDisplay = new Map<string, ToolDefinition>();
+
+  for (const tool of catalog) {
+    const existing = byName.get(tool.name);
+    if (!existing || preferTool(tool, existing)) {
+      byName.set(tool.name, tool);
+    }
+  }
+
+  for (const tool of byName.values()) {
+    const key = `${tool.display_name ?? tool.name}::${tool.category ?? ""}`;
+    const existing = byBuiltinDisplay.get(key);
+    if (!existing || preferTool(tool, existing)) {
+      byBuiltinDisplay.set(key, tool);
+    }
+  }
+
+  return [...byBuiltinDisplay.values()];
+}
+
+function preferTool(candidate: ToolDefinition, current: ToolDefinition) {
+  if (candidate.is_builtin && !current.is_builtin) return true;
+  if (!candidate.created_by && current.created_by) return true;
+  return false;
 }
