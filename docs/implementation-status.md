@@ -62,7 +62,7 @@
 - WebSocket V2 runtime 启动 generation 时会创建可恢复运行记录，消费 runtime 事件时更新 AgentRun 状态、调度决策和 watchdog 事件，完成/失败/取消后收敛到终态。
 - V2 Orchestrator 会把每轮 `scheduling_decision`、`watchdog_triggered` 和 `agent_error` 写入 Blackboard；并行 Agent 分支使用隔离的异常收集，单个分支失败不会吞掉其它 Agent 的完成事件。
 - WorkflowRun 的 `node_states` 新增 `retry_count`，工作流引擎支持节点级 `stop/retry/skip` 失败策略，并用测试覆盖失败结果重试、异常重试和跳过后继续下游。
-- 消息入口、SSE 兼容入口和 WebSocket 入口统一使用 `services/chat/scheduling.py` 解析调度策略；有 workflow 的群聊默认走 `workflow`，显式切换 `tech_lead` 会重建对应 Session，避免复用旧调度器。
+- 消息入口、SSE 兼容入口和 WebSocket 入口统一使用 `services/chat/scheduling.py` 解析调度策略；单聊固定 `single_agent`，普通群聊默认 `tech_lead + actor` 自动组织，只有 `workflow_enabled=true` 才走 `workflow`；Session 复用会比较 strategy、runtime_mode 和 workflow_enabled，避免复用旧调度器。
 - 安全后台的用户角色更新会同步 `users.role` 与 `user_roles`，默认保留 `ROLE_USER` 并追加提升角色，同时写入 `security.user.role.update` 审计日志；前端安全运营面板已支持直接变更用户角色并展开审计详情。
 - 预览部署迁入 `services/deployments.py`，创建和 `deploy.preview` 工具调用都执行产物可访问性健康检查；容器部署无运行时时会以 failed 状态和清晰错误降级，并写入部署审计。
 - Skill manifest 现在支持 `mcp_skill` 和 `script_skill` runtime；脚本 Skill 只有在 manifest 显式依赖 `file.write` 与 `sandbox.run` 时才会写入脚本和输入文件，并通过同一沙箱工具执行，运行记录落到 `SkillRun` 与 `ToolInvocation`。
@@ -95,8 +95,8 @@
 - `runtime.mailbox.Mailbox` 为每个 Agent / Scheduler 提供 `asyncio.Queue` inbox，可绑定 EventBus 接收定向控制事件。
 - `runtime.agent_stepper.AgentStepper` 在兼容旧 `AgentLoop.run()` 的前提下，增加 step 间控制检查，支持 assign/pause/resume/cancel/complete 状态处理。
 - `runtime.agent_actor.AgentActor` 作为独立 `asyncio.Task` 运行，接收 `control.assign` 后执行 AgentLoop，发布 `agent.state_changed` / `agent.report` / `agent.failed`，并把 `agent_work` / `agent_error` 写入 Blackboard。
-- `strategies.scheduler_agent.SchedulerAgent` 作为事件驱动 Team Leader actor，订阅 `user.input`、`agent.report`、`blackboard.updated`，复用 `TechLeadScheduler` 的 LLM 调度能力，失败时回退到规则指派，并发布 `scheduler.decision` 和 `control.*` 指令。
-- `runtime.actor_orchestrator.ActorOrchestrator` 提供 opt-in 事件驱动运行入口；`Session` 在 `scheduler_config.runtime == "actor"` 时启用该路径，默认旧 Orchestrator 和 workflow 主链路不变。
+- `strategies.scheduler_agent.SchedulerAgent` 作为事件驱动 Team Leader actor，订阅 `user.input`、`agent.report`、`blackboard.updated`、`agent.failed`，复用 `TechLeadScheduler` 的 LLM 调度能力，失败时回退到规则指派并写入 `fallback_reason`，发布包含 `action/target_agent_ids/task/expected_outputs/requires_review` 的 `scheduler.decision` 和 `control.*` 指令。
+- `runtime.actor_orchestrator.ActorOrchestrator` 提供默认群聊自动组织运行入口；`Session` 在 `scheduler_config.runtime == "actor"` 时启用该路径。workflow 画布仍保留，但必须由 `workflow_enabled=true` 显式启用。
 - `ConversationSessionManager.cancel_generation()` 会优先调用 `Session.cancel()`，让 actor runtime 收到取消事件后再取消后台 generation task；取消事件会写入 generation 记录，并避免 task done 回调覆盖用户取消终态。
 - `SchedulerAgent` 已归入 `AgentActor` 继承体系，调度员会像普通 Agent 一样发布 `agent.state_changed`，同时把 LLM/规则调度结果发布为 `scheduler.decision`。
 - `generation_records` 已支持折叠 `scheduler.decision`、`agent.state_changed`、`agent.report`、`agent.failed`、`control.cancel` 等 actor runtime 事件，刷新后可以恢复调度决策、AgentRun 状态、输出摘要和取消原因。

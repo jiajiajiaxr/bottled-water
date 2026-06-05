@@ -86,13 +86,15 @@
 
 ## 5. 群聊与多 Agent 协作
 
-群聊可以在 `workflow` 和 `tech_lead` 两种调度策略之间切换。默认群聊会生成并使用工作流画布，`tech_lead` 则走多智能体 V2 的 Team Leader 调度链路。Master Agent 不再是隐藏最高调度者，而是一个擅长规划、补全、总结的官方 Agent。
+群聊可以在“自动组织”和“工作流画布”两种模式之间切换。默认群聊使用 `tech_lead + actor`，由 SchedulerAgent 作为真实 Team Leader Actor 自动选择和指派当前群聊成员；只有用户显式启用画布后才使用 `workflow`。Master Agent 不再是隐藏最高调度者，而是一个擅长规划、补全、总结的官方 Agent。
 
 默认行为：
 
-- 群聊创建后会生成默认并行工作流。
-- 如果用户没有指定调度策略，且当前群聊有 `conversation.extra.workflow`，则按 `workflow` 策略执行。
-- 如果会话或消息明确选择 `tech_lead`，则由 TechLeadScheduler 记录调度决策、AgentRun 和 watchdog 事件。
+- 群聊创建后默认写入 `scheduling_strategy="tech_lead"`、`runtime_mode="actor"`、`workflow_enabled=false`。
+- 如果 `workflow_enabled=false`，即使历史中存在 `conversation.extra.workflow`，本轮也继续走自动组织。
+- 用户在画布中显式启用后才写入 `workflow_enabled=true` 并按 `workflow` 策略执行；保存画布不等于启用画布。
+- `tech_lead + actor` 会记录 `scheduler.decision`、AgentRun、watchdog 事件，并通过 WebSocket 推送前端轻量展示。
+- `@AgentName` 命中明确成员时，本轮只调度目标 Agent；其他 Agent 标记为跳过。
 - 如果用户明确让 Agent 规划，具备权限的 Agent 可以生成或修改 workflow，后端 normalize 后写回当前会话。
 - Agent 节点会真正调用对应 Agent 的小循环。
 

@@ -79,15 +79,15 @@ agenthub/
 ## 后端 services
 
 - `backend/src/app/services/runtime_service.py`：统一编排入口。负责创建 AgentSession、选择调度策略（单 Agent / TechLead / Workflow）。
-- `backend/src/app/services/chat/scheduling.py`：消息级、会话级和 workflow 默认策略的统一解析入口，供 SSE、WebSocket 和 RuntimeService 复用。
-- `backend/src/agent_runtime/`：核心运行时。包含 Session、Scheduler、AgentLoop、Workflow 图遍历等。
+- `backend/src/app/services/chat/scheduling.py`：消息级、会话级调度策略的统一解析入口。单聊固定 `single_agent`，群聊默认 `tech_lead + actor`，只有 `workflow_enabled=true` 才进入 workflow。
+- `backend/src/agent_runtime/`：核心运行时。WebSocket 对话主链路都进入这里，包含 Session、SchedulerAgent、AgentLoop、Actor Runtime、Workflow 图遍历等。
 - `backend/src/agent_runtime/core/protocol.py`：异步多 Agent Runtime 事件协议常量。
 - `backend/src/agent_runtime/runtime/event_dispatcher.py`：运行时 EventBus，兼容 sink dispatch，并支持 publish/subscribe/target routing。
 - `backend/src/agent_runtime/runtime/mailbox.py`：Agent / Scheduler inbox。
 - `backend/src/agent_runtime/runtime/agent_stepper.py`：兼容旧 AgentLoop 的 step 间控制层。
 - `backend/src/agent_runtime/runtime/agent_actor.py`：独立 asyncio Task Agent actor。
-- `backend/src/agent_runtime/runtime/actor_orchestrator.py`：opt-in 事件驱动 Actor Runtime 生命周期管理。
-- `backend/src/agent_runtime/strategies/scheduler_agent.py`：事件驱动 Team Leader / Scheduler actor。
+- `backend/src/agent_runtime/runtime/actor_orchestrator.py`：事件驱动 Actor Runtime 生命周期管理，是默认群聊自动组织的运行容器。
+- `backend/src/agent_runtime/strategies/scheduler_agent.py`：事件驱动 Team Leader / Scheduler actor。订阅用户输入、Agent 报告、Blackboard 更新和失败事件，发布 `scheduler.decision` 与 `control.assign`。
 - `backend/src/app/services/runtime/generation_records.py`：把旧 Orchestrator 和新 Actor Runtime 的 generation、AgentRun、调度决策、watchdog、取消事件折叠进 `Conversation.extra.runtime`，供刷新恢复和前端运行态展示使用。
 - `docs/runtime-async-closure-2026-06-05.md`：记录本轮异步 Actor Runtime 的已落地能力、验证覆盖和仍需长期演进的边界。
 - `backend/src/app/services/agents/function_loop.py`：Agent Function Calling Loop。根据 Agent 权限暴露 Tool、Skill、MCP，执行 tool_calls 并把结果回填模型。

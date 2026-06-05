@@ -10,9 +10,9 @@
 - `runtime.agent_stepper.AgentStepper` 兼容旧 `AgentLoop.run()`，并在每次 `emit_event` 后执行控制 checkpoint；`pause/resume/cancel/complete` 可以在 token/tool/status 等 step 间生效。
 - `runtime.agent_actor.AgentActor` 作为独立 `asyncio.Task` 运行，收到 `control.assign` 后执行 AgentLoop，发布 `agent.state_changed`、`agent.report`、`agent.failed`，并把普通结果写入 Blackboard `agent_work`。
 - `AgentActor` 收到 `control.complete` 后会发布 completed report 并退出；被 `control.cancel/complete` 中断的 assignment 会写入 Blackboard `agent_control`，便于审计和恢复。
-- `strategies.scheduler_agent.SchedulerAgent` 已作为真实 `AgentActor`，订阅 `user.input`、`agent.report`、`blackboard.updated`，复用 `TechLeadScheduler` 的 LLM 调度能力，失败时降级到规则 fallback，并发布 `scheduler.decision` / `control.*`。
-- `runtime.actor_orchestrator.ActorOrchestrator` 提供 opt-in 事件驱动入口；`Session` 在 `scheduler_config.runtime == "actor"` 时启用该路径，默认 workflow 主链路保持兼容。
-- `ConversationSessionManager` 会持久化 actor runtime 事件到 `Conversation.extra.runtime`，前端可恢复调度决策、AgentRun 状态、输出摘要和取消原因。
+- `strategies.scheduler_agent.SchedulerAgent` 已作为真实 `AgentActor`，订阅 `user.input`、`agent.report`、`blackboard.updated`、`agent.failed`，复用 `TechLeadScheduler` 的 LLM 调度能力，失败时降级到规则 fallback 并写入 `fallback_reason`，发布包含 `action/target_agent_ids/task/expected_outputs/requires_review` 的 `scheduler.decision` / `control.*`。
+- `runtime.actor_orchestrator.ActorOrchestrator` 是普通群聊默认“自动组织”运行入口；`Session` 在 `scheduler_config.runtime == "actor"` 时启用该路径，workflow 画布保持兼容但必须由 `workflow_enabled=true` 显式启用。
+- `ConversationSessionManager` 会持久化 actor runtime 事件到 `Conversation.extra.runtime`，前端可恢复调度决策、AgentRun 状态、输出摘要和取消原因；Session 复用会比较 `scheduling_strategy/runtime_mode/workflow_enabled`。
 
 ## 验证覆盖
 
@@ -26,6 +26,6 @@
 
 ## 当前边界
 
-- Actor Runtime 仍是 opt-in；群聊默认 workflow 继续由 `WorkflowEngine` 作为事实来源执行。
+- 普通群聊默认使用 `tech_lead + actor` 自动组织；`WorkflowEngine` 只在当前会话显式启用画布后作为事实来源执行。
 - Step checkpoint 依赖 AgentLoop 发出事件；如果底层模型调用长时间无增量事件，取消会在下一次 checkpoint 收敛，不是操作系统级强抢占。
 - 跨进程 Blackboard、分布式 Agent 私有上下文同步、远程容器沙箱、企业级审批流仍是长期架构项。

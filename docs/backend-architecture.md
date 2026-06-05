@@ -81,7 +81,7 @@ AgentHub 后端采用经典的分层架构，自上而下分为六层：
 
 **关键设计**：
 - `ConversationSessionManager` 是进程内单例，多进程部署时需配合 sticky session
-- `OrchestratorService.create_session()` 是 V2 运行时创建 `AgentSession` 的入口；调度策略由 `services/chat/scheduling.py` 统一解析，群聊默认按 workflow，显式选择 `tech_lead` 时进入 V2 Team Leader 链路。
+- `OrchestratorService.create_session()` 是 V2 运行时创建 `AgentSession` 的入口；调度策略由 `services/chat/scheduling.py` 统一解析，群聊默认按 `tech_lead + actor` 自动组织，只有 `workflow_enabled=true` 时才进入画布 workflow 链路。
 - WebSocket 路径每次 `start_generation()` 都会创建 `Conversation.extra.runtime.generations[]` 记录。记录包含 `session_id`、`model_config_id`、prompt 摘要、事件计数、调度决策、watchdog 触发项和每个 Agent 的 `agent_runs` 终态；完成后 `generation_status` 会从 `running` 收敛到 `idle / failed / cancelled`。
 
 ---
@@ -193,20 +193,20 @@ model_provider/
 
 `Conversation.extra` 是 JSON 字段，运行时写入 Blackboard 和 Agent Context 时会整体替换目标 key，而不是原地修改嵌套 dict。这样 SQLAlchemy 可以可靠追踪变更，避免版本号、结构化摘要、KV 状态或私有上下文栈在刷新 Session 后丢失。
 
-### 2.4 异步 Actor Runtime（opt-in）
+### 2.4 异步 Actor Runtime（默认群聊自动组织）
 
-当前代码保留稳定的旧 `Orchestrator` 轮询调度路径，同时新增可选的事件驱动 Actor Runtime：
+当前代码保留 workflow/兼容调度路径，同时将事件驱动 Actor Runtime 作为普通群聊默认自动组织入口：
 
 - `agent_runtime.core.protocol`：统一运行时事件协议。
 - `agent_runtime.runtime.event_dispatcher.EventDispatcher`：EventBus，支持 publish/subscribe/target routing，并兼容旧 sink dispatch。
 - `agent_runtime.runtime.mailbox.Mailbox`：每个 Agent / Scheduler 的 inbox。
 - `agent_runtime.runtime.agent_stepper.AgentStepper`：在旧 AgentLoop 外层增加 step 间控制点。
 - `agent_runtime.runtime.agent_actor.AgentActor`：独立 asyncio Task，接收 control.assign，发布 AgentReport，并写入 Blackboard。
-- `agent_runtime.strategies.scheduler_agent.SchedulerAgent`：继承 AgentActor 的事件驱动 Team Leader 调度员，订阅 user.input / agent.report / blackboard.updated，输出 scheduler.decision 与 control.*，并通过 agent.state_changed 暴露自身运行态。
+- `agent_runtime.strategies.scheduler_agent.SchedulerAgent`：继承 AgentActor 的事件驱动 Team Leader 调度员，订阅 user.input / agent.report / blackboard.updated / agent.failed，输出 scheduler.decision 与 control.*，并通过 agent.state_changed 暴露自身运行态。
 - `agent_runtime.runtime.actor_orchestrator.ActorOrchestrator`：Actor 生命周期管理器。
 - `app.services.runtime.generation_records`：折叠 actor runtime 事件到 `Conversation.extra.runtime.generations[]`，包括 scheduler.decision、agent.state_changed、agent.report、agent.failed、control.cancel 和 watchdog 事件。
 
-启用方式：`AgentSession.create(..., scheduler_config={"strategy": "tech_lead", "runtime": "actor"})`。业务层可通过 `conversation.extra.runtime = "actor"` 或 `runtime_mode = "actor"` 让 `OrchestratorService.create_session()` 进入该路径。默认 workflow 画布仍走现有 WorkflowEngine / 旧 Orchestrator，避免破坏当前演示主链路。
+启用方式：`AgentSession.create(..., scheduler_config={"strategy": "tech_lead", "runtime": "actor"})`。业务层通过 `conversation.extra.runtime_mode = "actor"` 让 `OrchestratorService.create_session()` 进入该路径。新建普通群聊默认写入 `scheduling_strategy="tech_lead"`、`runtime_mode="actor"`、`workflow_enabled=false`；workflow 画布仍走现有 WorkflowEngine，但必须由 `workflow_enabled=true` 显式启用。
 
 取消边界：`ConversationSessionManager.cancel_generation()` 会先调用 `Session.cancel()` 让 actor runtime 收到 `control.cancel`，再取消后台 generation task，并把 `control.cancel` 与 terminal status 写入同一条 generation 记录。后台 task done 回调如果发现 generation 已被取消接口收敛，不会再次覆盖终态。
 
@@ -304,11 +304,11 @@ EventDispatcher.dispatch(event)
 
 调度策略由消息级参数、会话级 `conversation.extra.scheduling_strategy` 和当前会话 workflow 共同决定：
 
-- **workflow**：群聊默认策略。读取 `conversation.extra.workflow`，按画布执行；没有画布时使用当前 Agent 生成默认 workflow。
-- **tech_lead**：显式选择时使用 `TechLeadScheduler`，由 Team Leader 风格调度器记录决策和 AgentRun。
-- **single_agent**：单 Agent 会话内部自动退化策略，纯代码调度，无额外协作开销。
+- **single_agent**：单聊固定策略，纯代码调度，无额外协作开销。
+- **tech_lead**：群聊默认策略。默认 `runtime_mode="actor"`，由 `SchedulerAgent` 作为 Team Leader Actor 发布 `scheduler.decision` 和 `control.assign`，只能调度当前群聊成员。
+- **workflow**：显式启用画布后的策略。只有 `conversation.extra.workflow_enabled=true` 时读取 `conversation.extra.workflow` 并严格按画布执行；保存画布不等于启用画布。
 
-`ConversationSessionManager` 缓存 Session 时会同时比较模型配置和调度策略。策略变更会使旧 Session 失效并重新创建，确保 workflow 与 tech_lead 不互相串状态。
+`ConversationSessionManager` 缓存 Session 时会同时比较模型配置、调度策略、`runtime_mode` 和 `workflow_enabled`。任一运行语义变化都会使旧 Session 失效并重新创建，确保 workflow 与 tech_lead/actor 不互相串状态。
 
 ### 4.3 上下文隔离：Blackboard + Agent Context
 
