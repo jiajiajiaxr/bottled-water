@@ -146,7 +146,12 @@ export {
   deleteTool,
 } from "./tool";
 
-export { sandboxes, createSandbox, runSandboxCommand } from "./sandbox";
+export {
+  sandboxes,
+  createSandbox,
+  runSandboxCommand,
+  runMessageCodeBlock,
+} from "./sandbox";
 
 export {
   externalAgentProbe,

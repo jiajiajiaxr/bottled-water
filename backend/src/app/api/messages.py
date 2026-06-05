@@ -13,13 +13,14 @@ from app.deps import get_current_user
 from db import get_db
 from db.models import Conversation, FileAsset, Message, User, utcnow
 from app.schemas.common import ApiResponse
-from app.schemas.requests import SendMessagePayload
+from app.schemas.requests import RunMessageCodeRequest, SendMessagePayload
 from app.events import SseSink
 from app.events import app_event_bus as event_bus
 from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
 from app.services.runtime_service import OrchestratorService
 from app.services.serialization import message_to_dict
 from app.services.files.references import resolve_file_reference_attachments
+from app.services.chat.code_runner import run_message_code_block
 
 
 router = APIRouter(tags=["messages"])
@@ -376,6 +377,32 @@ async def cancel_stream(
         {"conversation_id": conversation.id, "cancelled": cancelled},
     )
     return ok({"conversation_id": conversation.id, "cancelled": cancelled}, "Generation cancelled")
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/code-runs",
+    response_model=ApiResponse[dict],
+)
+async def run_message_code(
+    conversation_id: str,
+    message_id: str,
+    payload: RunMessageCodeRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.run_sync(
+        lambda session: run_message_code_block(
+            session,
+            user=user,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            language=payload.language,
+            code=payload.code,
+            index=payload.index,
+            timeout_seconds=payload.timeout_seconds,
+        )
+    )
+    return ok(result, "代码已在会话沙箱中执行")
 
 
 # ---- compat routes ----

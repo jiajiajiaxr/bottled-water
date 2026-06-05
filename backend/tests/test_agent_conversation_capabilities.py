@@ -28,7 +28,11 @@ from app.services.llm.tool_calls import detect_artifact_tool
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("artifact_tool", "artifact_format", "extension"),
-    [("artifact.create_pdf", "pdf", ".pdf"), ("artifact.create_docx", "docx", ".docx")],
+    [
+        ("artifact.create_pdf", "pdf", ".pdf"),
+        ("artifact.create_docx", "docx", ".docx"),
+        ("artifact.create_html", "html", ".html"),
+    ],
 )
 async def test_agent_extracts_file_summary_and_generates_document_artifact(
     tmp_path: Path,

@@ -182,7 +182,11 @@ function stripInternalFencedBlocks(text: string) {
 
       const closed = cursor < lines.length;
       if (!closed) {
-        removed = true;
+        if (openingCouldBeInternal || bodyLooksLikeStatusReport(body)) {
+          removed = true;
+          break;
+        }
+        visible.push(line, ...body);
         break;
       }
 

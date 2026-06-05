@@ -30,3 +30,19 @@ export async function runSandboxCommand(
     result: SandboxCommandResult;
   }>(`/sandboxes/${sandboxId}/commands`, payload);
 }
+
+export async function runMessageCodeBlock(
+  conversationId: string,
+  messageId: string,
+  payload: {
+    language: string;
+    code: string;
+    index: number;
+    timeout_seconds?: number;
+  },
+): Promise<SandboxCommandResult & Record<string, unknown>> {
+  return await post<SandboxCommandResult & Record<string, unknown>>(
+    `/conversations/${conversationId}/messages/${messageId}/code-runs`,
+    payload,
+  );
+}

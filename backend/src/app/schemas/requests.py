@@ -400,6 +400,13 @@ class RunSandboxCommandRequest(BaseModel):
     timeout_seconds: int = 30
 
 
+class RunMessageCodeRequest(BaseModel):
+    language: str = "python"
+    code: str
+    index: int = 0
+    timeout_seconds: int = 10
+
+
 class CreateRemoteConnectionRequest(BaseModel):
     workspace_id: str | None = None
     name: str

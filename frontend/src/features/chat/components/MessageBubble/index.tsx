@@ -19,16 +19,15 @@ import {
   Typography,
 } from "antd";
 import { api } from "@/api";
-import { formatFileSize } from "@/lib/format";
+import { formatFileSize, formatTime } from "@/lib/format";
 import { MarkdownContent } from "@/lib/markdown";
 import {
   attachmentName,
   messageAttachments,
   stripInternalAgentOutput,
 } from "@/lib/message";
-import { formatTime } from "@/lib/format";
 import { useConversationStore } from "@/store";
-import type { ChatMessage, MessageAttachment } from "@/types";
+import type { ChatMessage, CodeRunRecord, MessageAttachment } from "@/types";
 import ThinkingBlock from "./ThinkingBlock";
 import { ToolCallSummary } from "./ToolCallSummary";
 
@@ -36,16 +35,15 @@ const { Text, Paragraph } = Typography;
 
 interface MessageBubbleProps {
   message: ChatMessage;
-  version: number;
+  version?: number;
   quoted?: ChatMessage;
-  onQuote: (message: ChatMessage) => void;
-  onCopy: (text: string) => void;
-  onPreview: (message: ChatMessage) => void;
+  onQuote?: (message: ChatMessage) => void;
+  onCopy?: (text: string) => void;
+  onPreview?: (message: ChatMessage) => void;
 }
 
 function MessageBubbleComponent({
   message,
-  version: _version,
   quoted,
   onQuote,
   onCopy,
@@ -72,12 +70,12 @@ function MessageBubbleComponent({
   >();
   const [previewLoading, setPreviewLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const onExpandedChange = (expanded: boolean) => setExpanded(expanded);
 
   useEffect(() => {
     return () => {
-      if (previewAttachment?.previewUrl?.startsWith("blob:"))
+      if (previewAttachment?.previewUrl?.startsWith("blob:")) {
         URL.revokeObjectURL(previewAttachment.previewUrl);
+      }
     };
   }, [previewAttachment?.previewUrl]);
 
@@ -95,8 +93,9 @@ function MessageBubbleComponent({
       attachment.extracted_text ||
       attachment.public_url ||
       attachment.url
-    )
+    ) {
       return;
+    }
     setPreviewLoading(true);
     try {
       const preview = await api.previewFile(fileId);
@@ -134,7 +133,7 @@ function MessageBubbleComponent({
         <button
           className="message-card preview-message-card preview-card-button"
           data-testid="preview-card"
-          onClick={() => onPreview(message)}
+          onClick={() => onPreview?.(message)}
         >
           <Flex justify="space-between" align="center">
             <Space>
@@ -158,6 +157,22 @@ function MessageBubbleComponent({
     previewAttachment?.public_url ??
     previewAttachment?.url;
   const visibleMessageContent = stripInternalAgentOutput(message.content);
+  const activeToolCalls = message.rawContent?._activeToolCalls as
+    | Array<{ toolName: string }>
+    | undefined;
+  const codeRunResults = codeRunsFromMessage(message);
+  const runCodeBlock = async (
+    index: number,
+    language: string,
+    code: string,
+  ): Promise<CodeRunRecord> => {
+    return await api.runMessageCodeBlock(message.conversationId, message.id, {
+      language,
+      code,
+      index,
+      timeout_seconds: 10,
+    });
+  };
 
   return (
     <>
@@ -171,20 +186,9 @@ function MessageBubbleComponent({
               {message.streamState === "streaming" && (
                 <Tag color="processing">流式生成中</Tag>
               )}
-              {(
-                message.rawContent?._activeToolCalls as
-                  | Array<{ toolName: string }>
-                  | undefined
-              )?.length ? (
+              {activeToolCalls?.length ? (
                 <Tag icon={<LoadingOutlined />} color="blue">
-                  正在使用{" "}
-                  {(
-                    message.rawContent?._activeToolCalls as Array<{
-                      toolName: string;
-                    }>
-                  )
-                    .map((t) => t.toolName)
-                    .join(", ")}
+                  正在使用 {activeToolCalls.map((t) => t.toolName).join(", ")}
                 </Tag>
               ) : null}
             </Space>
@@ -197,19 +201,15 @@ function MessageBubbleComponent({
             <ThinkingBlock
               thinking={message.thinking ?? ""}
               expanded={expanded}
-              onExpandedChange={onExpandedChange}
+              onExpandedChange={setExpanded}
             />
           )}
           <div className="message-content">
-            {message.streamState === "streaming" ? (
-              <div className="markdown-content">
-                {visibleMessageContent || (
-                  <p className="typing-placeholder">正在组织语言...</p>
-                )}
-              </div>
-            ) : (
-              <MarkdownContent text={visibleMessageContent} />
-            )}
+            <MarkdownContent
+              text={visibleMessageContent}
+              codeRunResults={codeRunResults}
+              onRunCode={!isUser ? runCodeBlock : undefined}
+            />
           </div>
           {attachments.length > 0 && (
             <div
@@ -229,8 +229,7 @@ function MessageBubbleComponent({
                     {attachmentName(file)}
                   </span>
                   <span className="message-attachment-meta">
-                    {formatFileSize(file.size)} ·{" "}
-                    {file.parse_status ?? "stored"}
+                    {formatFileSize(file.size)} · {file.parse_status ?? "stored"}
                   </span>
                 </button>
               ))}
@@ -241,16 +240,14 @@ function MessageBubbleComponent({
               <Button
                 size="small"
                 icon={<MessageOutlined />}
-                onClick={() => onQuote(message)}
+                onClick={() => onQuote?.(message)}
               />
             </Tooltip>
             <Tooltip title="复制">
               <Button
                 size="small"
                 icon={<CopyOutlined />}
-                onClick={() =>
-                  onCopy(stripInternalAgentOutput(message.content))
-                }
+                onClick={() => onCopy?.(stripInternalAgentOutput(message.content))}
               />
             </Tooltip>
             <ToolCallSummary message={message} />
@@ -328,7 +325,7 @@ function MessageBubbleComponent({
                 {formatFileSize(previewAttachment?.size)}
               </Text>
               <Text type="secondary">
-                后端未返回可直接渲染的内容，可从文件资产或原文件入口查看。
+                后端未返回可直接渲染的内容，可以从工作区文件或原文件入口查看。
               </Text>
             </Space>
           )}
@@ -340,7 +337,11 @@ function MessageBubbleComponent({
 
 export const MessageBubble = React.memo(
   MessageBubbleComponent,
-  (prev, next) => {
-    return prev.version === next.version;
-  },
+  (prev, next) => prev.version === next.version,
 );
+
+function codeRunsFromMessage(message: ChatMessage): Record<string, CodeRunRecord> {
+  const raw = message.rawContent?.code_runs;
+  if (!raw || typeof raw !== "object") return {};
+  return raw as Record<string, CodeRunRecord>;
+}

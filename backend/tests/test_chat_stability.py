@@ -171,7 +171,7 @@ async def test_retry_success_does_not_insert_failed_tool_runner_message(db: Sess
 
 @pytest.mark.asyncio
 async def test_agent_tool_events_are_persisted_without_tool_runner_messages(db: Session) -> None:
-    user, conversation, user_message = _user_conversation_message(db, "杩愯涓夋 sandbox")
+    user, conversation, user_message = _user_conversation_message(db, "运行三次 sandbox")
     agent = _agent(user, "Frontend Worker", "frontend", tools=["sandbox.run"])
     db.add(agent)
     db.commit()
@@ -219,7 +219,7 @@ async def test_agent_tool_events_are_persisted_without_tool_runner_messages(db: 
                     conversation=conversation,
                     user_message=user_message,
                     agent=agent,
-                    prompt="杩愯涓夋 sandbox",
+                    prompt="运行三次 sandbox",
                     channel=f"conversation:{conversation.id}",
                     mode="unit-test",
                 )

@@ -128,6 +128,18 @@ export interface ToolEventRecord {
   error?: string;
 }
 
+export interface CodeRunRecord {
+  status?: string;
+  language?: string;
+  command?: string;
+  stdout?: string;
+  stderr?: string;
+  exit_code?: number | string;
+  duration_ms?: number | string;
+  filename?: string;
+  invocation_id?: string;
+}
+
 export interface ChatMessage {
   id: string; // 消息 ID，目前使用agent_id
   conversationId: string; // 对话 ID，不清楚来源
