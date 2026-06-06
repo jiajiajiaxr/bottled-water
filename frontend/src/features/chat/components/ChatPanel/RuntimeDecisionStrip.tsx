@@ -1,6 +1,6 @@
 import { RobotOutlined } from "@ant-design/icons";
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { Space, Tag, Tooltip, Typography } from "antd";
 import type {
   Conversation,
@@ -40,6 +40,7 @@ export function RuntimeDecisionStrip({
     baseX: number;
     baseY: number;
     moved: boolean;
+    cleanup: () => void;
   }>();
   const generation = latestGeneration(conversation);
   const conversationId = conversation?.id;
@@ -48,6 +49,13 @@ export function RuntimeDecisionStrip({
     setExpanded(false);
     setPosition(undefined);
   }, [conversationId]);
+
+  useEffect(() => {
+    return () => {
+      dragRef.current?.cleanup();
+      dragRef.current = undefined;
+    };
+  }, []);
 
   if (!generation) return null;
 
@@ -61,54 +69,64 @@ export function RuntimeDecisionStrip({
     status === "running";
   if (!isVisible) return null;
 
-  const onPointerDown = (event: PointerEvent<HTMLElement>) => {
+  const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     const widget = widgetRef.current;
     const panel = widget?.closest(".chat-panel") as HTMLElement | null;
     if (!widget || !panel) return;
     const widgetRect = widget.getBoundingClientRect();
     const panelRect = panel.getBoundingClientRect();
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      baseX: widgetRect.left - panelRect.left,
-      baseY: widgetRect.top - panelRect.top,
-      moved: false,
+    const pointerId = event.pointerId;
+
+    const onWindowPointerMove = (moveEvent: globalThis.PointerEvent) => {
+      const drag = dragRef.current;
+      const currentWidget = widgetRef.current;
+      const currentPanel = currentWidget?.closest(".chat-panel") as HTMLElement | null;
+      if (!drag || !currentWidget || !currentPanel || drag.pointerId !== moveEvent.pointerId) return;
+      const dx = moveEvent.clientX - drag.startX;
+      const dy = moveEvent.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < 6) return;
+      drag.moved = true;
+      moveEvent.preventDefault();
+      const maxX = Math.max(8, currentPanel.clientWidth - currentWidget.offsetWidth - 8);
+      const maxY = Math.max(8, currentPanel.clientHeight - currentWidget.offsetHeight - 84);
+      setPosition({
+        x: clamp(drag.baseX + dx, 8, maxX),
+        y: clamp(drag.baseY + dy, 8, maxY),
+      });
     };
-    widget.setPointerCapture(event.pointerId);
-  };
 
-  const onPointerMove = (event: PointerEvent<HTMLElement>) => {
-    const drag = dragRef.current;
-    const widget = widgetRef.current;
-    const panel = widget?.closest(".chat-panel") as HTMLElement | null;
-    if (!drag || !widget || !panel || drag.pointerId !== event.pointerId) return;
-    const dx = event.clientX - drag.startX;
-    const dy = event.clientY - drag.startY;
-    if (!drag.moved && Math.hypot(dx, dy) < 6) return;
-    drag.moved = true;
-    event.preventDefault();
-    const maxX = Math.max(8, panel.clientWidth - widget.offsetWidth - 8);
-    const maxY = Math.max(8, panel.clientHeight - widget.offsetHeight - 84);
-    setPosition({
-      x: clamp(drag.baseX + dx, 8, maxX),
-      y: clamp(drag.baseY + dy, 8, maxY),
-    });
-  };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onWindowPointerMove);
+      window.removeEventListener("pointerup", onWindowPointerUp);
+      window.removeEventListener("pointercancel", onWindowPointerUp);
+    };
 
-  const onPointerUp = (event: PointerEvent<HTMLElement>) => {
-    const drag = dragRef.current;
-    if (drag?.pointerId === event.pointerId) {
-      widgetRef.current?.releasePointerCapture(event.pointerId);
+    const onWindowPointerUp = (upEvent: globalThis.PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId !== upEvent.pointerId) return;
       if (drag.moved) {
         suppressClickRef.current = true;
         window.setTimeout(() => {
           suppressClickRef.current = false;
         }, 0);
       }
+      cleanup();
       dragRef.current = undefined;
-    }
+    };
+
+    window.addEventListener("pointermove", onWindowPointerMove, { passive: false });
+    window.addEventListener("pointerup", onWindowPointerUp);
+    window.addEventListener("pointercancel", onWindowPointerUp);
+    dragRef.current = {
+      pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      baseX: widgetRect.left - panelRect.left,
+      baseY: widgetRect.top - panelRect.top,
+      moved: false,
+      cleanup,
+    };
   };
 
   const toggleExpanded = () => {
@@ -139,9 +157,6 @@ export function RuntimeDecisionStrip({
         aria-label={expanded ? "收起组织状态" : "展开组织状态"}
         onClick={toggleExpanded}
         onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
       >
         <RobotOutlined />
         {!expanded && status === "running" && <span className="runtime-decision-pulse" />}
@@ -153,9 +168,6 @@ export function RuntimeDecisionStrip({
             className="runtime-decision-card-head"
             onClick={toggleExpanded}
             onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
           >
             <span className="runtime-decision-card-icon">
               <RobotOutlined />

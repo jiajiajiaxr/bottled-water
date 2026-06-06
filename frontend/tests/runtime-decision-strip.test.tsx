@@ -54,7 +54,10 @@ describe("RuntimeDecisionStrip", () => {
     render(<RuntimeDecisionStrip conversation={conversation()} />);
 
     expect(screen.queryByText(/Daily Chat Agent/)).toBeNull();
-    fireEvent.click(screen.getByLabelText("展开组织状态"));
+    const trigger = screen.getByLabelText("展开组织状态");
+    fireEvent.pointerDown(trigger, { button: 0, pointerId: 1, clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 20, clientY: 20 });
+    fireEvent.click(trigger);
 
     expect(screen.getAllByText(/Daily Chat Agent/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/72fbea2b · running/)).toBeNull();
