@@ -7,9 +7,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Agent, Conversation, McpServer, Skill
+from app.services.agents.capability_permissions import (
+    agent_uses_default_full_permissions,
+    configured_mcp_server_ids,
+    configured_skill_ids,
+    configured_tool_names,
+)
 from app.services.mcp import tool_name
 from app.services.tools.builtins.registry import BUILTIN_TOOLS
-from app.services.tools.permissions import normalize_tool_names
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -72,12 +77,14 @@ async def select_skills(db: AsyncSession, conversation: Conversation, prompt: st
 
 
 async def select_agent_skills(db: AsyncSession, conversation: Conversation, prompt: str, agent: Agent, limit: int = 2) -> list[Skill]:
-    config = agent.config or {}
-    allowed_ids = [str(item) for item in config.get("skill_ids") or [] if item]
-    if not allowed_ids:
+    default_all = agent_uses_default_full_permissions(agent)
+    allowed_ids = configured_skill_ids(agent)
+    if not allowed_ids and not default_all:
         return []
     current_workspace_id = workspace_id(conversation)
-    query = select(Skill).where(Skill.id.in_(allowed_ids), Skill.deleted_at.is_(None), Skill.status == "active")
+    query = select(Skill).where(Skill.deleted_at.is_(None), Skill.status == "active")
+    if allowed_ids and not default_all:
+        query = query.where(Skill.id.in_(allowed_ids))
     if current_workspace_id:
         query = query.where(or_(Skill.workspace_id == current_workspace_id, Skill.workspace_id.is_(None)))
     skills = (await db.scalars(query)).all()
@@ -117,16 +124,17 @@ async def select_mcp_action(db: AsyncSession, conversation: Conversation, prompt
 
 
 async def select_agent_mcp_action(db: AsyncSession, conversation: Conversation, prompt: str, agent: Agent) -> tuple[McpServer, str] | None:
-    config = agent.config or {}
-    allowed_ids = [str(item) for item in config.get("mcp_server_ids") or [] if item]
-    if not allowed_ids or not TOOL_INTENT_PATTERN.search(prompt):
+    default_all = agent_uses_default_full_permissions(agent)
+    allowed_ids = configured_mcp_server_ids(agent)
+    if (not allowed_ids and not default_all) or not TOOL_INTENT_PATTERN.search(prompt):
         return None
     current_workspace_id = workspace_id(conversation)
     query = select(McpServer).where(
-        McpServer.id.in_(allowed_ids),
         McpServer.deleted_at.is_(None),
         McpServer.enabled.is_(True),
     )
+    if allowed_ids and not default_all:
+        query = query.where(McpServer.id.in_(allowed_ids))
     if current_workspace_id:
         query = query.where(or_(McpServer.workspace_id == current_workspace_id, McpServer.workspace_id.is_(None)))
     best: tuple[int, McpServer, str] | None = None
@@ -163,7 +171,7 @@ def builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> dic
 
 
 def select_agent_builtin_tools(agent: Agent, prompt: str, limit: int) -> list[str]:
-    names = normalize_tool_names((agent.config or {}).get("tools") or [])
+    names = list(BUILTIN_TOOLS.keys()) if agent_uses_default_full_permissions(agent) else configured_tool_names(agent)
     allowed = [name for name in names if name in BUILTIN_TOOLS]
     if not allowed:
         return []

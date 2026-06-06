@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
@@ -80,6 +80,7 @@ export function AgentDirectoryDrawer({
   const [catalogError, setCatalogError] = useState("");
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
+  const createDefaultsAppliedRef = useRef(false);
   const { message } = AntApp.useApp();
   const createToolValues = Form.useWatch("tools", form) as string[] | undefined;
   const editToolValues = Form.useWatch("tools", editForm) as string[] | undefined;
@@ -87,6 +88,35 @@ export function AgentDirectoryDrawer({
   const editSkillValues = Form.useWatch("skill_ids", editForm) as string[] | undefined;
   const createMcpValues = Form.useWatch("mcp_server_ids", form) as string[] | undefined;
   const editMcpValues = Form.useWatch("mcp_server_ids", editForm) as string[] | undefined;
+
+  const catalogToolNames = useMemo(
+    () => dedupeToolCatalog(toolCatalog).map((tool) => tool.name),
+    [toolCatalog],
+  );
+  const catalogSkillIds = useMemo(
+    () => skills.map((skill) => skill.id),
+    [skills],
+  );
+  const catalogMcpServerIds = useMemo(
+    () => mcpServers.map((server) => server.id),
+    [mcpServers],
+  );
+  const hasExplicitCapabilityPermissions = (agent?: Agent) =>
+    Boolean(agent?.config.capability_permissions_initialized);
+  const permissionValuesForAgent = (agent?: Agent) => {
+    if (hasExplicitCapabilityPermissions(agent)) {
+      return {
+        tools: agent?.config.tools ?? [],
+        skill_ids: agent?.config.skill_ids ?? [],
+        mcp_server_ids: agent?.config.mcp_server_ids ?? [],
+      };
+    }
+    return {
+      tools: catalogToolNames,
+      skill_ids: catalogSkillIds,
+      mcp_server_ids: catalogMcpServerIds,
+    };
+  };
 
   useEffect(() => {
     if (!open && !asPage) return;
@@ -120,6 +150,28 @@ export function AgentDirectoryDrawer({
       cancelled = true;
     };
   }, [asPage, message, open]);
+
+  useEffect(() => {
+    if (!creatorOpen) {
+      createDefaultsAppliedRef.current = false;
+      return;
+    }
+    if (catalogLoading || createDefaultsAppliedRef.current) return;
+    if (form.isFieldsTouched(["tools", "skill_ids", "mcp_server_ids"])) return;
+    form.setFieldsValue({
+      tools: catalogToolNames,
+      skill_ids: catalogSkillIds,
+      mcp_server_ids: catalogMcpServerIds,
+      agentic_loop_enabled: true,
+    });
+    createDefaultsAppliedRef.current = true;
+  }, [catalogLoading, catalogMcpServerIds, catalogSkillIds, catalogToolNames, creatorOpen, form]);
+
+  useEffect(() => {
+    if (!editingAgent || catalogLoading) return;
+    if (editForm.isFieldsTouched(["tools", "skill_ids", "mcp_server_ids"])) return;
+    editForm.setFieldsValue(permissionValuesForAgent(editingAgent));
+  }, [catalogLoading, catalogMcpServerIds, catalogSkillIds, catalogToolNames, editForm, editingAgent]);
 
   const selectedToolValues = useMemo(
     () =>
@@ -277,7 +329,7 @@ export function AgentDirectoryDrawer({
       description: generated.description,
       capability_text: generated.capability_text ?? capabilityBrief,
       system_prompt: generated.system_prompt,
-      tools: generated.tools,
+      tools: form.getFieldValue("tools") ?? catalogToolNames,
       temperature:
         generated.temperature ?? Number(generated.config?.temperature ?? 0.7),
     });
@@ -286,6 +338,7 @@ export function AgentDirectoryDrawer({
 
   const openEditAgent = (agent: Agent) => {
     setEditingAgent(agent);
+    const permissionValues = permissionValuesForAgent(agent);
     editForm.setFieldsValue({
       name: agent.name,
       display_name: agent.display_name,
@@ -293,15 +346,15 @@ export function AgentDirectoryDrawer({
       status: agent.status,
       system_prompt: agent.config.custom_prompt_prefix,
       model_config_id: agent.config.model_config_id,
-      tools: agent.config.tools ?? [],
-      skill_ids: agent.config.skill_ids ?? [],
-      mcp_server_ids: agent.config.mcp_server_ids ?? [],
+      tools: permissionValues.tools,
+      skill_ids: permissionValues.skill_ids,
+      mcp_server_ids: permissionValues.mcp_server_ids,
       agentic_loop_enabled:
         agent.config.agentic_loop?.enabled ??
         Boolean(
-          (agent.config.tools ?? []).length ||
-          (agent.config.skill_ids ?? []).length ||
-          (agent.config.mcp_server_ids ?? []).length,
+          permissionValues.tools.length ||
+          permissionValues.skill_ids.length ||
+          permissionValues.mcp_server_ids.length,
         ),
       agentic_loop_steps: agent.config.agentic_loop?.max_steps ?? 2,
       temperature: agent.config.temperature ?? 0.7,
@@ -321,6 +374,8 @@ export function AgentDirectoryDrawer({
       config: {
         temperature: values.temperature ?? 0.7,
         model_config_id: values.model_config_id,
+        capability_permissions_initialized: true,
+        tools: values.tools ?? [],
         skill_ids: values.skill_ids ?? [],
         mcp_server_ids: values.mcp_server_ids ?? [],
         agentic_loop: {
@@ -352,6 +407,8 @@ export function AgentDirectoryDrawer({
       config: {
         temperature: values.temperature ?? 0.7,
         model_config_id: values.model_config_id,
+        capability_permissions_initialized: true,
+        tools: values.tools ?? [],
         skill_ids: values.skill_ids ?? [],
         mcp_server_ids: values.mcp_server_ids ?? [],
         agentic_loop: {
@@ -566,9 +623,9 @@ export function AgentDirectoryDrawer({
           className="agent-form"
           initialValues={{
             temperature: 0.7,
-            tools: ["file.read", "file.write", "file.extract_text"],
-            skill_ids: [],
-            mcp_server_ids: [],
+            tools: catalogToolNames,
+            skill_ids: catalogSkillIds,
+            mcp_server_ids: catalogMcpServerIds,
             agentic_loop_enabled: true,
             agentic_loop_steps: 2,
           }}

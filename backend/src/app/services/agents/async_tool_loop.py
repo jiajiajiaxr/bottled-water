@@ -9,6 +9,7 @@ without putting business logic back into the deprecated
 from __future__ import annotations
 
 import json
+import inspect
 from typing import Any
 
 from sqlalchemy import select
@@ -16,6 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Agent, Conversation, McpServer, Skill, ToolDefinition, User
 from app.events import app_event_bus as event_bus
+from app.services.agents.capability_permissions import (
+    agent_uses_default_full_permissions,
+    configured_mcp_server_ids,
+    configured_skill_ids,
+    configured_tool_names,
+)
 from app.services.agents.async_tool_selection import (
     builtin_tool_args,
     mcp_tool_args,
@@ -30,8 +37,6 @@ from app.services.model_config_resolver import create_provider_from_db
 from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.catalog import sync_builtin_tool_definitions
 from app.services.tools.executor import invoke_tool as invoke_tool_sync
-from app.services.tools.permissions import normalize_tool_names
-from app.services.tools.toolboxes import get_official_toolbox
 
 
 def _is_async_session(db: Any) -> bool:
@@ -53,6 +58,13 @@ async def _invoke_catalog_tool(
 
 def _skill_tool_refs(skill: Skill) -> list[dict[str, Any]]:
     return [item for item in (skill.tools or []) if isinstance(item, dict)]
+
+
+async def _scalars_all(db: Any, query: Any) -> list[Any]:
+    result = db.scalars(query)
+    if inspect.isawaitable(result):
+        result = await result
+    return list(result.all())
 
 
 async def execute_skill(
@@ -206,10 +218,11 @@ async def run_agentic_tool_loop(
     user = await db.get(User, conversation.creator_id)
     if agent:
         loop_cfg = (agent.config or {}).get("agentic_loop") or {}
-        allowed_tools = normalize_tool_names((agent.config or {}).get("tools") or [])
-        allowed_skill_ids = (agent.config or {}).get("skill_ids") or []
-        allowed_mcp_ids = (agent.config or {}).get("mcp_server_ids") or []
-        loop_enabled = bool(loop_cfg.get("enabled")) and bool(allowed_tools or allowed_skill_ids or allowed_mcp_ids)
+        default_all = agent_uses_default_full_permissions(agent)
+        allowed_tools = _allowed_tool_names(agent)
+        allowed_skill_ids = configured_skill_ids(agent)
+        allowed_mcp_ids = configured_mcp_server_ids(agent)
+        loop_enabled = bool(loop_cfg.get("enabled")) and bool(default_all or allowed_tools or allowed_skill_ids or allowed_mcp_ids)
         if not loop_enabled:
             return {
                 "mode": "chat_only",
@@ -265,20 +278,23 @@ async def build_tools_for_agent(db: AsyncSession, agent: Agent) -> list[dict[str
     """将 Agent 配置的 tools/skills/mcp 转为 OpenAI Function Calling 格式。"""
 
     tools: list[dict[str, Any]] = []
-    config = agent.config or {}
+    default_all = agent_uses_default_full_permissions(agent)
 
     # Tool 目录：内置和自定义工具都优先从数据库 ToolDefinition 读取。
     allowed_tool_names = _allowed_tool_names(agent)
     tool_rows: list[ToolDefinition] = []
-    if allowed_tool_names and _is_async_session(db):
+    if (allowed_tool_names or default_all) and _is_async_session(db):
         try:
             await db.run_sync(sync_builtin_tool_definitions)
             tool_query = select(ToolDefinition).where(
                 ToolDefinition.deleted_at.is_(None),
                 ToolDefinition.status == "active",
-                (ToolDefinition.name.in_(allowed_tool_names))
-                | (ToolDefinition.id.in_(allowed_tool_names)),
             )
+            if allowed_tool_names and not default_all:
+                tool_query = tool_query.where(
+                    (ToolDefinition.name.in_(allowed_tool_names))
+                    | (ToolDefinition.id.in_(allowed_tool_names))
+                )
             tool_rows = [
                 item
                 for item in (await db.scalars(tool_query)).all()
@@ -315,14 +331,15 @@ async def build_tools_for_agent(db: AsyncSession, agent: Agent) -> list[dict[str
         })
 
     # Skill（作为 function 暴露）
-    allowed_skill_ids = [str(item) for item in config.get("skill_ids") or [] if item]
-    if allowed_skill_ids:
+    allowed_skill_ids = configured_skill_ids(agent)
+    if allowed_skill_ids or (default_all and _is_async_session(db)):
         skill_query = select(Skill).where(
-            Skill.id.in_(allowed_skill_ids),
             Skill.deleted_at.is_(None),
             Skill.status == "active",
         )
-        for skill in (await db.scalars(skill_query)).all():
+        if allowed_skill_ids and not default_all:
+            skill_query = skill_query.where(Skill.id.in_(allowed_skill_ids))
+        for skill in await _scalars_all(db, skill_query):
             tools.append({
                 "type": "function",
                 "function": {
@@ -337,14 +354,15 @@ async def build_tools_for_agent(db: AsyncSession, agent: Agent) -> list[dict[str
             })
 
     # MCP 工具
-    allowed_mcp_ids = [str(item) for item in config.get("mcp_server_ids") or [] if item]
-    if allowed_mcp_ids:
+    allowed_mcp_ids = configured_mcp_server_ids(agent)
+    if allowed_mcp_ids or (default_all and _is_async_session(db)):
         mcp_query = select(McpServer).where(
-            McpServer.id.in_(allowed_mcp_ids),
             McpServer.deleted_at.is_(None),
             McpServer.enabled.is_(True),
         )
-        for server in (await db.scalars(mcp_query)).all():
+        if allowed_mcp_ids and not default_all:
+            mcp_query = mcp_query.where(McpServer.id.in_(allowed_mcp_ids))
+        for server in await _scalars_all(db, mcp_query):
             server_tools = [item for item in (server.tools or []) if isinstance(item, dict) and item.get("enabled", True)]
             if not server_tools:
                 server_tools = [{"name": item, "description": "Allowed by tool_filter", "enabled": True} for item in (server.tool_filter or [])]
@@ -377,7 +395,7 @@ async def execute_tool_by_name(
 
     # 内置工具
     if tool_name in BUILTIN_TOOLS:
-        if tool_name not in _allowed_tool_names(agent):
+        if tool_name not in _allowed_tool_names(agent) and not agent_uses_default_full_permissions(agent):
             return _unauthorized_tool_result(tool_name)
         if not user:
             user = await db.get(User, conversation.creator_id)
@@ -399,7 +417,7 @@ async def execute_tool_by_name(
     # Skill
     if tool_name.startswith("skill."):
         skill_id = tool_name.removeprefix("skill.")
-        if skill_id not in {str(item) for item in (agent.config or {}).get("skill_ids") or [] if item}:
+        if not agent_uses_default_full_permissions(agent) and skill_id not in set(configured_skill_ids(agent)):
             return _unauthorized_tool_result(tool_name, result_type="skill", extra={"skill_id": skill_id})
         skill = await db.get(Skill, skill_id)
         if not skill or skill.deleted_at is not None or skill.status != "active":
@@ -412,7 +430,7 @@ async def execute_tool_by_name(
         if len(parts) >= 3:
             server_id = parts[1]
             actual_tool_name = ".".join(parts[2:])
-            if server_id not in {str(item) for item in (agent.config or {}).get("mcp_server_ids") or [] if item}:
+            if not agent_uses_default_full_permissions(agent) and server_id not in set(configured_mcp_server_ids(agent)):
                 return _unauthorized_tool_result(
                     tool_name,
                     result_type="mcp",
@@ -469,17 +487,20 @@ async def _resolve_authorized_db_tool(
     tool_name: str,
 ) -> ToolDefinition | None:
     allowed_tool_names = _allowed_tool_names(agent)
-    if not allowed_tool_names or not _is_async_session(db):
+    default_all = agent_uses_default_full_permissions(agent)
+    if (not allowed_tool_names and not default_all) or not _is_async_session(db):
         return None
-    tool = await db.scalar(
-        select(ToolDefinition).where(
-            ToolDefinition.deleted_at.is_(None),
-            ToolDefinition.status == "active",
-            (ToolDefinition.name == tool_name) | (ToolDefinition.id == tool_name),
-            (ToolDefinition.name.in_(allowed_tool_names))
-            | (ToolDefinition.id.in_(allowed_tool_names)),
-        )
+    query = select(ToolDefinition).where(
+        ToolDefinition.deleted_at.is_(None),
+        ToolDefinition.status == "active",
+        (ToolDefinition.name == tool_name) | (ToolDefinition.id == tool_name),
     )
+    if allowed_tool_names and not default_all:
+        query = query.where(
+            (ToolDefinition.name.in_(allowed_tool_names))
+            | (ToolDefinition.id.in_(allowed_tool_names))
+        )
+    tool = await db.scalar(query)
     if not tool or tool.is_builtin or tool.type == "builtin":
         return None
     return tool
@@ -499,7 +520,7 @@ async def _db_tool_exists(db: AsyncSession, tool_name: str) -> bool:
 
 
 def _allowed_tool_names(agent: Agent) -> list[str]:
-    configured = list(normalize_tool_names((agent.config or {}).get("tools") or []))
-    agent_type = agent.type if isinstance(getattr(agent, "type", None), str) else "custom"
-    official = [] if agent_type == "custom" else get_official_toolbox(agent_type or "chat")
-    return list(dict.fromkeys([*configured, *official]))
+    if agent_uses_default_full_permissions(agent):
+        return list(BUILTIN_TOOLS.keys())
+    configured = configured_tool_names(agent)
+    return list(dict.fromkeys(configured))

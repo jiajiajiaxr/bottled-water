@@ -23,11 +23,13 @@ from db.models import Agent, Artifact, Conversation, Message, User
 from db.session import AsyncSessionLocal
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink, WebSocketSink
+from app.services.agents.capability_permissions import (
+    agent_uses_default_full_permissions,
+    configured_tool_names,
+)
 from app.services.chat.scheduling import resolve_scheduling_strategy
 from app.services.model_config_resolver import normalize_provider_type
 from app.services.serialization import artifact_to_dict
-from app.services.tools.permissions import normalize_tool_names
-from app.services.tools.toolboxes import get_official_toolbox
 from common.logger import get_logger
 
 logger = get_logger("app.services.runtime_service")
@@ -322,10 +324,9 @@ class OrchestratorService:
 
 
 def _runtime_agent_tools(agent: Agent) -> list[str]:
-    configured = list(normalize_tool_names((agent.config or {}).get("tools") or []))
-    agent_type = agent.type if isinstance(getattr(agent, "type", None), str) else "custom"
-    official = [] if agent_type == "custom" else get_official_toolbox(agent_type or "chat")
-    return list(dict.fromkeys([*configured, *official]))
+    if agent_uses_default_full_permissions(agent):
+        return []
+    return list(dict.fromkeys(configured_tool_names(agent)))
 
 
 class _ToolExecutorAdapter(ToolExecutor):

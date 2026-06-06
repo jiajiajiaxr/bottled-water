@@ -423,4 +423,130 @@ describe("useStreamingMessages internal block filtering", () => {
       finalReply,
     ]);
   });
+
+  it("does not persist a transient streaming bubble on global completion", () => {
+    useConversationStore.getState().setConversations([
+      {
+        id: "conversation-1",
+        chat_type: "single",
+        title: "Daily Chat Agent",
+        participants: [
+          {
+            participant_type: "agent",
+            agent_id: "agent-1",
+            agent_name: "Daily Chat Agent",
+          },
+        ],
+        updatedAt: "2026-06-06T00:00:00Z",
+        pinned: false,
+        archived: false,
+        unread: 0,
+        tags: [],
+        lastMessage: "",
+      },
+    ]);
+    useConversationStore.getState().setActiveId("conversation-1");
+
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onToken?.("agent-1", "你好呀，很高兴见到你", {
+        conversation_id: "conversation-1",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+
+    expect(result.current.streamingMessages.size).toBe(1);
+
+    act(() => {
+      result.current.streamHandlers.onDone?.({
+        conversation_id: "conversation-1",
+        status: "completed",
+      });
+    });
+
+    expect(result.current.streamingMessages.size).toBe(1);
+    flushTypewriter();
+    expect(result.current.streamingMessages.size).toBe(0);
+    expect(useMessageStore.getState().historyMessages).toEqual([]);
+
+    const persisted = makeMessage({
+      conversationId: "conversation-1",
+      sender_id: "agent-1",
+      sender_type: "agent",
+      role: "assistant",
+      kind: "text",
+      author: "Daily Chat Agent",
+      content: "你好呀，很高兴见到你",
+      rawContent: { agent_id: "agent-1" },
+      streamState: "done",
+      status: "completed",
+      state: "active",
+    });
+    persisted.id = "persisted-message-1";
+
+    act(() => {
+      result.current.streamHandlers.onMessageNew?.(persisted);
+    });
+
+    expect(useMessageStore.getState().historyMessages).toEqual([persisted]);
+  });
+
+  it("drains queued characters before committing a stopped stream", () => {
+    useConversationStore.getState().setConversations([
+      {
+        id: "conversation-1",
+        chat_type: "single",
+        title: "Daily Chat Agent",
+        participants: [
+          {
+            participant_type: "agent",
+            agent_id: "agent-1",
+            agent_name: "Daily Chat Agent",
+          },
+        ],
+        updatedAt: "2026-06-06T00:00:00Z",
+        pinned: false,
+        archived: false,
+        unread: 0,
+        tags: [],
+        lastMessage: "",
+      },
+    ]);
+    useConversationStore.getState().setActiveId("conversation-1");
+
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+    const payload = {
+      conversation_id: "conversation-1",
+      agent_id: "agent-1",
+      agent_message_id: "message-1",
+      agent_name: "Daily Chat Agent",
+    };
+
+    act(() => {
+      result.current.streamHandlers.onMessageStart(payload);
+      result.current.streamHandlers.onDelta?.("hello", payload);
+    });
+
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe("h");
+
+    act(() => {
+      result.current.streamHandlers.onMessageEnd(payload);
+    });
+
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe("h");
+    expect(useMessageStore.getState().historyMessages).toEqual([]);
+
+    act(() => {
+      vi.advanceTimersByTime(18);
+    });
+
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe("he");
+
+    flushTypewriter();
+
+    expect(result.current.streamingMessages.size).toBe(0);
+    expect(useMessageStore.getState().historyMessages).toHaveLength(1);
+    expect(useMessageStore.getState().historyMessages[0]?.content).toBe("hello");
+  });
 });

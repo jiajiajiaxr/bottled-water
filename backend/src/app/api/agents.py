@@ -36,6 +36,7 @@ from app.schemas.requests import (
     UpdateAgentRequest,
 )
 from app.services.serialization import agent_to_dict
+from app.services.agents.capability_permissions import mark_capability_permissions_initialized
 from app.services.model_config_resolver import create_provider_from_db
 from app.services.tools.permissions import normalize_tool_names
 from app.services.llm.gateway import test_model_config
@@ -395,11 +396,11 @@ async def create_agent(
         description=payload.description,
         avatar_url=payload.avatar_url,
         capabilities=payload.capabilities,
-        config={
+        config=mark_capability_permissions_initialized({
             **payload.config,
             "system_prompt": payload.system_prompt,
             "tools": normalize_tool_names(payload.tools),
-        },
+        }),
         extra={
             "display_name": payload.display_name or payload.name,
             "avatar_color": payload.avatar_color or "#6B7280",
@@ -450,6 +451,8 @@ async def update_agent(
         config.update(data["config"])
     if "tools" in data:
         config["tools"] = normalize_tool_names(data["tools"])
+    if any(field in data for field in ("tools", "config")):
+        config = mark_capability_permissions_initialized(config)
     agent.config = config
     await db.commit()
     await db.refresh(agent)

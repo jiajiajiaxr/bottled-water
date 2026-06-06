@@ -137,6 +137,20 @@ class TestBuildToolsForAgent:
         db.scalars.return_value.all.return_value = []
 
         tools = await build_tools_for_agent(db, agent)
+        names = {tool["function"]["name"] for tool in tools}
+        assert "file.read" in names
+        assert "artifact.create_pdf" in names
+
+    @pytest.mark.asyncio
+    async def test_build_tools_explicit_empty_permissions(self) -> None:
+        """显式保存空权限后不再默认暴露工具。"""
+        db = MagicMock()
+        agent = MagicMock()
+        agent.config = {"tools": [], "capability_permissions_initialized": True}
+        agent.id = "agent-1"
+        db.scalars.return_value.all.return_value = []
+
+        tools = await build_tools_for_agent(db, agent)
         assert tools == []
 
 

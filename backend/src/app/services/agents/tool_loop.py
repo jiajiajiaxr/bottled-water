@@ -8,12 +8,16 @@ from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, McpServer, Skill, ToolDefinition, User
 from app.services.realtime.event_bus import event_bus
+from app.services.agents.capability_permissions import (
+    agent_uses_default_full_permissions,
+    configured_mcp_server_ids,
+    configured_skill_ids,
+    configured_tool_names,
+)
 from app.services.mcp import invoke_mcp_tool_recorded, tool_name
 from app.services.skills.runtime import SkillRuntime
 from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.executor import invoke_tool, invoke_tool_async
-from app.services.tools.permissions import normalize_tool_names
-from app.services.tools.toolboxes import get_official_toolbox
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -67,12 +71,14 @@ def select_skills(db: Session, conversation: Conversation, prompt: str, limit: i
 
 
 def select_agent_skills(db: Session, conversation: Conversation, prompt: str, agent: Agent, limit: int = 2) -> list[Skill]:
-    config = agent.config or {}
-    allowed_ids = [str(item) for item in config.get("skill_ids") or [] if item]
-    if not allowed_ids:
+    default_all = agent_uses_default_full_permissions(agent)
+    allowed_ids = configured_skill_ids(agent)
+    if not allowed_ids and not default_all:
         return []
     workspace_id = _workspace_id(conversation)
-    query = select(Skill).where(Skill.id.in_(allowed_ids), Skill.deleted_at.is_(None), Skill.status == "active")
+    query = select(Skill).where(Skill.deleted_at.is_(None), Skill.status == "active")
+    if allowed_ids and not default_all:
+        query = query.where(Skill.id.in_(allowed_ids))
     if workspace_id:
         query = query.where(or_(Skill.workspace_id == workspace_id, Skill.workspace_id.is_(None)))
     skills = db.scalars(query).all()
@@ -114,16 +120,17 @@ def select_mcp_action(db: Session, conversation: Conversation, prompt: str) -> t
 
 
 def select_agent_mcp_action(db: Session, conversation: Conversation, prompt: str, agent: Agent) -> tuple[McpServer, str] | None:
-    config = agent.config or {}
-    allowed_ids = [str(item) for item in config.get("mcp_server_ids") or [] if item]
-    if not allowed_ids or not TOOL_INTENT_PATTERN.search(prompt):
+    default_all = agent_uses_default_full_permissions(agent)
+    allowed_ids = configured_mcp_server_ids(agent)
+    if (not allowed_ids and not default_all) or not TOOL_INTENT_PATTERN.search(prompt):
         return None
     workspace_id = _workspace_id(conversation)
     query = select(McpServer).where(
-        McpServer.id.in_(allowed_ids),
         McpServer.deleted_at.is_(None),
         McpServer.enabled.is_(True),
     )
+    if allowed_ids and not default_all:
+        query = query.where(McpServer.id.in_(allowed_ids))
     if workspace_id:
         query = query.where(or_(McpServer.workspace_id == workspace_id, McpServer.workspace_id.is_(None)))
     best: tuple[int, McpServer, str] | None = None
@@ -206,7 +213,7 @@ def _document_title_for_prompt(prompt: str) -> str:
 
 
 def _select_agent_builtin_tools(agent: Agent, prompt: str, limit: int) -> list[str]:
-    names = normalize_tool_names((agent.config or {}).get("tools") or [])
+    names = _allowed_tool_names(agent)
     allowed = [name for name in names if name in BUILTIN_TOOLS]
     if not allowed:
         return []
@@ -346,10 +353,11 @@ async def run_agentic_tool_loop(
     user = db.get(User, conversation.creator_id)
     if agent:
         loop_cfg = (agent.config or {}).get("agentic_loop") or {}
-        allowed_tools = normalize_tool_names((agent.config or {}).get("tools") or [])
-        allowed_skill_ids = (agent.config or {}).get("skill_ids") or []
-        allowed_mcp_ids = (agent.config or {}).get("mcp_server_ids") or []
-        loop_enabled = bool(loop_cfg.get("enabled")) and bool(allowed_tools or allowed_skill_ids or allowed_mcp_ids)
+        default_all = agent_uses_default_full_permissions(agent)
+        allowed_tools = _allowed_tool_names(agent)
+        allowed_skill_ids = configured_skill_ids(agent)
+        allowed_mcp_ids = configured_mcp_server_ids(agent)
+        loop_enabled = bool(loop_cfg.get("enabled")) and bool(default_all or allowed_tools or allowed_skill_ids or allowed_mcp_ids)
         if not loop_enabled:
             return {
                 "mode": "chat_only",
@@ -407,19 +415,22 @@ def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
     from app.services.tools.catalog import sync_builtin_tool_definitions
 
     tools: list[dict[str, Any]] = []
-    config = agent.config or {}
+    default_all = agent_uses_default_full_permissions(agent)
 
     # Tool 目录（内置工具和自定义工具都从数据库目录读取元数据）
     allowed_tool_names = _allowed_tool_names(agent)
-    if allowed_tool_names:
+    if allowed_tool_names or default_all:
         tool_rows: list[ToolDefinition] = []
         try:
             sync_builtin_tool_definitions(db)
             tool_query = select(ToolDefinition).where(
                 ToolDefinition.deleted_at.is_(None),
                 ToolDefinition.status == "active",
-                (ToolDefinition.name.in_(allowed_tool_names)) | (ToolDefinition.id.in_(allowed_tool_names)),
             )
+            if allowed_tool_names and not default_all:
+                tool_query = tool_query.where(
+                    (ToolDefinition.name.in_(allowed_tool_names)) | (ToolDefinition.id.in_(allowed_tool_names))
+                )
             tool_rows = [item for item in db.scalars(tool_query).all() if isinstance(item, ToolDefinition)]
         except Exception:
             tool_rows = []
@@ -447,13 +458,14 @@ def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
                 })
 
     # Skill（作为 function 暴露）
-    allowed_skill_ids = [str(item) for item in config.get("skill_ids") or [] if item]
-    if allowed_skill_ids:
+    allowed_skill_ids = configured_skill_ids(agent)
+    if allowed_skill_ids or default_all:
         skill_query = select(Skill).where(
-            Skill.id.in_(allowed_skill_ids),
             Skill.deleted_at.is_(None),
             Skill.status == "active",
         )
+        if allowed_skill_ids and not default_all:
+            skill_query = skill_query.where(Skill.id.in_(allowed_skill_ids))
         for skill in db.scalars(skill_query).all():
             manifest = legacy_skill_manifest(skill)
             tools.append({
@@ -470,13 +482,14 @@ def build_tools_for_agent(db: Session, agent: Agent) -> list[dict[str, Any]]:
             })
 
     # MCP 工具
-    allowed_mcp_ids = [str(item) for item in config.get("mcp_server_ids") or [] if item]
-    if allowed_mcp_ids:
+    allowed_mcp_ids = configured_mcp_server_ids(agent)
+    if allowed_mcp_ids or default_all:
         mcp_query = select(McpServer).where(
-            McpServer.id.in_(allowed_mcp_ids),
             McpServer.deleted_at.is_(None),
             McpServer.enabled.is_(True),
         )
+        if allowed_mcp_ids and not default_all:
+            mcp_query = mcp_query.where(McpServer.id.in_(allowed_mcp_ids))
         for server in db.scalars(mcp_query).all():
             server_tools = [item for item in (server.tools or []) if isinstance(item, dict) and item.get("enabled", True)]
             if not server_tools:
@@ -606,6 +619,8 @@ def _unauthorized_tool_result(
 
 
 def _is_configured_tool(db: Session, agent: Agent, tool_name: str) -> bool:
+    if agent_uses_default_full_permissions(agent):
+        return tool_name in BUILTIN_TOOLS or _db_tool_exists(db, tool_name)
     allowed = _allowed_tool_names(agent)
     if tool_name in allowed:
         return True
@@ -622,35 +637,38 @@ def _is_configured_tool(db: Session, agent: Agent, tool_name: str) -> bool:
 
 
 def _is_configured_skill(agent: Agent, skill_id: str) -> bool:
-    return skill_id in {str(item) for item in (agent.config or {}).get("skill_ids") or [] if item}
+    return agent_uses_default_full_permissions(agent) or skill_id in set(configured_skill_ids(agent))
 
 
 def _is_configured_mcp(agent: Agent, server_id: str) -> bool:
-    return server_id in {str(item) for item in (agent.config or {}).get("mcp_server_ids") or [] if item}
+    return agent_uses_default_full_permissions(agent) or server_id in set(configured_mcp_server_ids(agent))
 
 
 def _resolve_authorized_db_tool(db: Session, agent: Agent, tool_name: str) -> ToolDefinition | None:
     allowed_tool_names = _allowed_tool_names(agent)
-    if not allowed_tool_names:
+    default_all = agent_uses_default_full_permissions(agent)
+    if not allowed_tool_names and not default_all:
         return None
-    tool = db.scalar(
-        select(ToolDefinition).where(
-            ToolDefinition.deleted_at.is_(None),
-            ToolDefinition.status == "active",
-            (ToolDefinition.name == tool_name) | (ToolDefinition.id == tool_name),
-            (ToolDefinition.name.in_(allowed_tool_names)) | (ToolDefinition.id.in_(allowed_tool_names)),
-        )
+    query = select(ToolDefinition).where(
+        ToolDefinition.deleted_at.is_(None),
+        ToolDefinition.status == "active",
+        (ToolDefinition.name == tool_name) | (ToolDefinition.id == tool_name),
     )
+    if allowed_tool_names and not default_all:
+        query = query.where(
+            (ToolDefinition.name.in_(allowed_tool_names)) | (ToolDefinition.id.in_(allowed_tool_names))
+        )
+    tool = db.scalar(query)
     if not tool or tool.is_builtin or tool.type == "builtin":
         return None
     return tool
 
 
 def _allowed_tool_names(agent: Agent) -> list[str]:
-    configured = list(normalize_tool_names((agent.config or {}).get("tools") or []))
-    agent_type = agent.type if isinstance(getattr(agent, "type", None), str) else "custom"
-    official = [] if agent_type == "custom" else get_official_toolbox(agent_type or "chat")
-    return list(dict.fromkeys([*configured, *official]))
+    if agent_uses_default_full_permissions(agent):
+        return list(BUILTIN_TOOLS.keys())
+    configured = configured_tool_names(agent)
+    return list(dict.fromkeys(configured))
 
 
 def _db_tool_exists(db: Session, tool_name: str) -> bool:

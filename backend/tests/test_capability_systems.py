@@ -507,7 +507,7 @@ async def test_agent_custom_python_tool_is_exposed_and_executed() -> None:
         owner_id=user.id,
         name="Blocked Custom Tool Agent",
         type="custom",
-        config={"tools": []},
+        config={"tools": [], "capability_permissions_initialized": True},
         capabilities=[],
     )
     db.add(blocked_agent)

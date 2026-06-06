@@ -30,6 +30,7 @@ const agent: Agent = {
     tools: ["file.extract_text", "legacy.missing_tool"],
     skill_ids: [],
     mcp_server_ids: [],
+    capability_permissions_initialized: true,
   },
 };
 

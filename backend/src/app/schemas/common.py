@@ -67,6 +67,7 @@ class AgentConfigOut(BaseModel):
     tools: list[str] = Field(default_factory=list)
     skill_ids: list[str] = Field(default_factory=list)
     mcp_server_ids: list[str] = Field(default_factory=list)
+    capability_permissions_initialized: bool = False
     agentic_loop: dict[str, Any] = Field(default_factory=dict)
     base_agent_id: str | None = None
     model_config_id: str | None = None

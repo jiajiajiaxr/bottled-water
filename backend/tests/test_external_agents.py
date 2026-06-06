@@ -184,7 +184,7 @@ def test_external_tools_sync_and_agent_authorization(
         owner_id=user.id,
         name="Denied Agent",
         type="custom",
-        config={"tools": []},
+        config={"tools": [], "capability_permissions_initialized": True},
     )
     db.add_all([authorized_agent, unauthorized_agent])
     sync_builtin_tool_definitions(db)

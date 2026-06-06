@@ -21,6 +21,7 @@ export interface AgentConfig {
   tools?: string[];
   skill_ids?: string[];
   mcp_server_ids?: string[];
+  capability_permissions_initialized?: boolean;
   agentic_loop?: {
     enabled?: boolean;
     max_steps?: number;
