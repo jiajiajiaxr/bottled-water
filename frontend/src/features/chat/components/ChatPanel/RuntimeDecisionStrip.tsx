@@ -129,7 +129,7 @@ function AgentRunTag({
 
 function modeLabel(conversation?: Conversation): string {
   if (conversation?.chat_type === "single") return "单 Agent";
-  return conversation?.workflow_enabled ? "画布执行" : "自动组织";
+  return conversation?.workflow_enabled ? "工作流聊天" : "自动组织";
 }
 
 function buildAgentNameMap(conversation?: Conversation): Map<string, string> {

@@ -83,6 +83,12 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     onScheduleModeChange,
     children,
   } = props;
+  const activeConversation = conversations.find(
+    (conversation) => conversation.id === activeId,
+  );
+  const chatModeLabel = activeConversation?.workflow_enabled
+    ? "工作流聊天"
+    : "自动组织";
 
   const deleteConversation = (item: Conversation) => {
     Modal.confirm({
@@ -166,7 +172,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                   onScheduleModeChange(value as "chat" | "workflow")
                 }
                 options={[
-                  { label: <><CommentOutlined /> 自动组织</>, value: "chat" },
+                  { label: <><CommentOutlined /> {chatModeLabel}</>, value: "chat" },
                   { label: <><BranchesOutlined /> 工作流画布</>, value: "workflow" },
                 ]}
               />
