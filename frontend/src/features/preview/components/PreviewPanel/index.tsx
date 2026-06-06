@@ -19,6 +19,7 @@ import {
   Space,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
 import { api } from "@/api";
@@ -200,6 +201,9 @@ export function PreviewPanel({
           <Tag color="blue">{exportResult.filename}</Tag>
         )}
       </Space>
+      <Text type="secondary" className="preview-tab-hint">
+        图标说明：预览效果、编辑源码、Diff 对比、部署预览、文件与知识库。
+      </Text>
       <Tabs
         data-testid="artifact-tabs"
         activeKey={tab}
@@ -207,7 +211,11 @@ export function PreviewPanel({
         items={[
           {
             key: "preview",
-            label: <EyeOutlined />,
+            label: (
+              <Tooltip title="预览效果：查看渲染页面、PDF 或 Office 转换预览">
+                <EyeOutlined aria-label="预览效果" />
+              </Tooltip>
+            ),
             children: (
               <div className="preview-frame-wrap">
                 {previewKind === "pdf" ? (
@@ -237,7 +245,11 @@ export function PreviewPanel({
           },
           {
             key: "code",
-            label: <CodeOutlined />,
+            label: (
+              <Tooltip title="编辑源码：查看和修改当前产物内容">
+                <CodeOutlined aria-label="编辑源码" />
+              </Tooltip>
+            ),
             children: (
               <div className="code-pane">
                 <Flex justify="space-between" align="center">
@@ -256,7 +268,11 @@ export function PreviewPanel({
           },
           {
             key: "diff",
-            label: <DiffOutlined />,
+            label: (
+              <Tooltip title="Diff 对比：查看当前修改和上一版本的差异">
+                <DiffOutlined aria-label="Diff 对比" />
+              </Tooltip>
+            ),
             children: (
               <div className="diff-pane">
                 {diffLines(artifact.previousCode, draft).map((line, index) => (
@@ -281,7 +297,11 @@ export function PreviewPanel({
           },
           {
             key: "deploy",
-            label: <RocketOutlined />,
+            label: (
+              <Tooltip title="部署预览：创建或查看当前产物的部署状态">
+                <RocketOutlined aria-label="部署预览" />
+              </Tooltip>
+            ),
             children: (
               <Card className="deploy-card" data-testid="deployment-card">
                 <Space direction="vertical" size={14}>
@@ -315,7 +335,11 @@ export function PreviewPanel({
           },
           {
             key: "assets",
-            label: <DatabaseOutlined />,
+            label: (
+              <Tooltip title="文件与知识库：查看关联文件、导入知识库或检索资料">
+                <DatabaseOutlined aria-label="文件与知识库" />
+              </Tooltip>
+            ),
             children: (
               <FilesKnowledgePanel
                 files={files}

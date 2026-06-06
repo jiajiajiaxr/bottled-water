@@ -32,6 +32,13 @@
   margin-bottom: $spacing-xxl;
 }
 
+.preview-tab-hint {
+  display: block;
+  margin: $spacing-sm 0 $spacing-xs;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .preview-frame-wrap {
   height: calc(100vh - 64px - 130px);
   margin-top: $spacing-xl;
