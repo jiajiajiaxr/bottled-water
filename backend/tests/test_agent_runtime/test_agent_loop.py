@@ -148,6 +148,9 @@ class TestAgentLoopBasic:
         assert len(result["tool_events"]) == 1
         assert mock_provider.call_count == 2
         assert "Word" in result["work_product"]
+        assert "已生成真实" not in result["work_product"]
+        assert "产物 产物" not in result["work_product"]
+        assert "产物产物" not in result["work_product"]
 
     @pytest.mark.asyncio
     async def test_run_tool_not_found(self, agent_config, mock_provider):

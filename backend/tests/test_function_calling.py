@@ -5,6 +5,31 @@ import pytest
 
 from app.services.ark import LLMStreamEvent, ArkClient
 from app.services.agents.async_tool_loop import build_tools_for_agent, execute_tool_by_name
+from app.services.agents.function_loop import _artifact_success_text
+
+
+def test_legacy_function_loop_artifact_reply_is_natural() -> None:
+    text = _artifact_success_text(
+        "artifact.create_html",
+        [
+            {
+                "tool_name": "artifact.create_html",
+                "status": "succeeded",
+                "result": {
+                    "output": {
+                        "artifact_id": "artifact-1",
+                        "format": "html",
+                        "filename": "示例计算器.html",
+                    }
+                },
+            }
+        ],
+    )
+
+    assert "HTML 页面" in text
+    assert "示例计算器" in text
+    assert "已生成真实" not in text
+    assert "产物 产物" not in text
 
 
 class TestArkClientToolCalls:

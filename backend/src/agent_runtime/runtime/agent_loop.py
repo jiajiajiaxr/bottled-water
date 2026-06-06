@@ -344,7 +344,11 @@ class AgentLoop:
                     )
                     tool_calls = None
                     if not content.strip() or self._looks_like_artifact_argument_fragment(content):
-                        content = self._artifact_completion_message(artifact_tool_name)
+                        content = self._artifact_completion_message(
+                            artifact_tool_name,
+                            tool_results,
+                            task,
+                        )
             if not tool_calls:
                 forced_tool_call = (
                     self._forced_artifact_tool_call(task, tools)
@@ -364,7 +368,11 @@ class AgentLoop:
                     tool_calls = [forced_tool_call]
                 elif self._artifact_tool_succeeded(tool_results):
                     if not content.strip() or self._looks_like_artifact_argument_fragment(content):
-                        content = self._artifact_completion_message(forced_artifact_tool_name)
+                        content = self._artifact_completion_message(
+                            forced_artifact_tool_name,
+                            tool_results,
+                            task,
+                        )
 
             if tool_calls:
                 tool_calls = self._dedupe_artifact_tool_calls(tool_calls)
@@ -380,7 +388,9 @@ class AgentLoop:
                     tool_calls = None
                     if not content.strip() or self._looks_like_artifact_argument_fragment(content):
                         content = self._artifact_completion_message(
-                            forced_artifact_tool_name or self._artifact_tool_name(tool_results)
+                            forced_artifact_tool_name or self._artifact_tool_name(tool_results),
+                            tool_results,
+                            task,
                         )
 
             # 如果没有工具调用，说明 Agent 已完成本轮工作
@@ -679,15 +689,87 @@ class AgentLoop:
         return bool(len(normalized) <= 3 and re.fullmatch(r"[<>/a-z0-9]+", normalized))
 
     @staticmethod
-    def _artifact_completion_message(tool_name: str | None) -> str:
+    def _artifact_completion_message(
+        tool_name: str | None,
+        tool_results: List[Dict[str, Any]] | None = None,
+        task: str = "",
+    ) -> str:
         label = {
             "artifact.create_pdf": "PDF",
             "artifact.create_docx": "Word",
             "artifact.create_pptx": "PPT",
             "artifact.create_xlsx": "Excel",
             "artifact.create_html": "HTML",
+            "artifact.create_web_app": "HTML",
         }.get(tool_name or "", "产物")
-        return f"已生成真实 {label} 产物，可在预览卡片中查看和下载。"
+        output = AgentLoop._latest_artifact_output(tool_results or [], tool_name)
+        title = AgentLoop._artifact_display_title(output, task)
+        title_part = f"《{title}》" if title else ""
+        if label == "HTML":
+            return (
+                f"我已经把{title_part or '你要的页面'}做成可运行的 HTML 页面了，"
+                "可以在下面的产物卡片里直接预览运行效果，也可以下载源文件继续修改。"
+            )
+        if label == "Excel":
+            return (
+                f"我已经为你生成好{title_part} Excel 表格了，"
+                "可以在下面的产物卡片里预览并下载真实文件。"
+            )
+        if label == "PPT":
+            return (
+                f"我已经为你生成好{title_part} PPT 演示文稿了，"
+                "可以在下面的产物卡片里预览并下载真实文件。"
+            )
+        if label in {"PDF", "Word"}:
+            return (
+                f"我已经为你生成好{title_part} {label} 文档了，"
+                "可以在下面的产物卡片里预览排版效果，也可以直接下载。"
+            )
+        return "我已经完成产物生成，可以在下面的产物卡片里预览和下载。"
+
+    @staticmethod
+    def _latest_artifact_output(
+        tool_results: List[Dict[str, Any]],
+        tool_name: str | None,
+    ) -> Dict[str, Any]:
+        for item in reversed(tool_results):
+            item_tool = str(item.get("tool") or item.get("tool_name") or "")
+            if tool_name and item_tool != tool_name:
+                continue
+            if not item_tool.startswith("artifact.create_"):
+                continue
+            result = item.get("result") if isinstance(item.get("result"), dict) else {}
+            output = result.get("output") if isinstance(result.get("output"), dict) else None
+            if isinstance(output, dict):
+                return output
+            if isinstance(result, dict):
+                return result
+        return {}
+
+    @staticmethod
+    def _artifact_display_title(output: Dict[str, Any], task: str = "") -> str:
+        artifact = output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
+        raw_title = (
+            output.get("title")
+            or output.get("name")
+            or artifact.get("name")
+            or artifact.get("title")
+            or output.get("filename")
+            or ""
+        )
+        title = str(raw_title).strip()
+        if "." in title:
+            title = title.rsplit(".", 1)[0]
+        if not title and task:
+            title = AgentLoop._title_from_task(task)
+        return title[:80]
+
+    @staticmethod
+    def _title_from_task(task: str) -> str:
+        title = re.sub(r"\s+", " ", task or "").strip()
+        title = re.sub(r"^(请|帮我|帮忙|麻烦)?(生成|创建|做|制作)(一个|一份|一下)?", "", title)
+        title = re.sub(r"(pdf|word|docx|pptx?|excel|xlsx|html|网页|页面|文档)$", "", title, flags=re.IGNORECASE)
+        return title.strip(" ：:，,。")[:40]
 
     def _forced_artifact_tool_call(
         self,

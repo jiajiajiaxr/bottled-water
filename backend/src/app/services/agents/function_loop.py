@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -838,9 +839,58 @@ def _artifact_success_text(requested_tool: str | None, tool_results: list[dict[s
         result = item.get("result") if isinstance(item.get("result"), dict) else {}
         output = result.get("output") if isinstance(result, dict) else {}
         if isinstance(output, dict) and output.get("artifact_id"):
-            fmt = str(output.get("format") or requested_tool.rsplit("_", 1)[-1]).upper()
-            return f"已生成真实 {fmt} 产物，可点击产物卡片预览和下载。"
+            return _natural_artifact_success_text(requested_tool, output)
     return ""
+
+
+def _natural_artifact_success_text(requested_tool: str, output: dict[str, Any]) -> str:
+    label = {
+        "artifact.create_pdf": "PDF",
+        "artifact.create_docx": "Word",
+        "artifact.create_pptx": "PPT",
+        "artifact.create_xlsx": "Excel",
+        "artifact.create_html": "HTML",
+        "artifact.create_web_app": "HTML",
+    }.get(requested_tool, str(output.get("format") or "产物").upper())
+    title = _artifact_display_title(output)
+    title_part = f"《{title}》" if title else ""
+    if label == "HTML":
+        return (
+            f"我已经把{title_part or '你要的页面'}做成可运行的 HTML 页面了，"
+            "可以在下面的产物卡片里直接预览运行效果，也可以下载源文件继续修改。"
+        )
+    if label == "Excel":
+        return (
+            f"我已经为你生成好{title_part} Excel 表格了，"
+            "可以在下面的产物卡片里预览并下载真实文件。"
+        )
+    if label == "PPT":
+        return (
+            f"我已经为你生成好{title_part} PPT 演示文稿了，"
+            "可以在下面的产物卡片里预览并下载真实文件。"
+        )
+    if label in {"PDF", "Word"}:
+        return (
+            f"我已经为你生成好{title_part} {label} 文档了，"
+            "可以在下面的产物卡片里预览排版效果，也可以直接下载。"
+        )
+    return "我已经完成产物生成，可以在下面的产物卡片里预览和下载。"
+
+
+def _artifact_display_title(output: dict[str, Any]) -> str:
+    artifact = output.get("artifact") if isinstance(output.get("artifact"), dict) else {}
+    raw_title = (
+        output.get("title")
+        or output.get("name")
+        or artifact.get("name")
+        or artifact.get("title")
+        or output.get("filename")
+        or ""
+    )
+    title = str(raw_title).strip()
+    if "." in title:
+        title = title.rsplit(".", 1)[0]
+    return re.sub(r"\s+", " ", title)[:80]
 
 
 def _tool_arguments_with_context(
