@@ -127,11 +127,20 @@ export function ChatPanel({
       value = "请结合上传附件继续处理。";
     }
     if (!value || !active) return;
+    const filesToSend = pendingFiles;
+    const quotedMessage = quoted;
     setAwaitingResponse(true);
-    await send(value, quoted, pendingFiles, thinkingEnabled, runtimeModelConfigId);
     setText("");
     setQuoted(undefined);
     setPendingFiles([]);
+    try {
+      await send(value, quotedMessage, filesToSend, thinkingEnabled, runtimeModelConfigId);
+    } catch (error) {
+      setText(value);
+      setQuoted(quotedMessage);
+      setPendingFiles(filesToSend);
+      throw error;
+    }
   };
 
   const isWorking = Boolean(

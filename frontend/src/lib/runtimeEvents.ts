@@ -78,6 +78,12 @@ export function applyRuntimeEvent(
     }
   }
 
+  if (event === "control.watchdog_triggered") {
+    const reason = stringOrUndefined(payload.reason) || "watchdog_triggered";
+    generation.error = readableWatchdogReason(reason, payload);
+    generation.status = "failed";
+  }
+
   const terminalStatus = terminalStatusForEvent(event);
   if (terminalStatus) {
     generation.status = terminalStatus;
@@ -129,6 +135,7 @@ function terminalStatusForEvent(event: string): "completed" | "failed" | "cancel
       "failed",
       "workflow:failed",
       "workflow_failed",
+      "control.watchdog_triggered",
     ].includes(event)
   ) {
     return "failed";
@@ -182,6 +189,23 @@ function upsertAgentRun(generation: ConversationRuntimeGeneration, agentId: stri
     generation.agent_runs = runs;
   }
   return run;
+}
+
+function readableWatchdogReason(reason: string, payload: Record<string, unknown>): string {
+  const labels: Record<string, string> = {
+    max_rounds_exceeded: "调度轮数超过上限",
+    token_budget_exhausted: "Token 预算耗尽",
+    deadlock_detected: "检测到无进展或死锁",
+    timeout: "运行超时",
+    decision_loop: "调度决策循环",
+  };
+  const label = labels[reason] || reason;
+  const details = [
+    numberOrUndefined(payload.rounds) ? `轮数 ${payload.rounds}` : "",
+    numberOrUndefined(payload.elapsed_seconds) ? `耗时 ${Math.round(Number(payload.elapsed_seconds))}s` : "",
+    numberOrUndefined(payload.max_seconds) ? `上限 ${payload.max_seconds}s` : "",
+  ].filter(Boolean);
+  return details.length ? `${label}（${details.join("，")}）` : label;
 }
 
 function settleAgentRuns(

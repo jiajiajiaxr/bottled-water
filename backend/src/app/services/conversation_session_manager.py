@@ -365,6 +365,17 @@ class ConversationSessionManager:
             sink = WebSocketSink(conversation_id)
             await sink.emit(RuntimeEvent(type="message:new", payload=message_to_dict(message)))
             await self._publish_pending_preview_messages(sink, conversation_id, generation_id)
+        if event.type == "control.watchdog_triggered":
+            reason = str((event.payload or {}).get("reason") or "watchdog_triggered")
+            if self._generation_ids.get(conversation_id) == generation_id:
+                self._generation_ids.pop(conversation_id, None)
+                self._pending_preview_message_ids.pop(generation_id, None)
+                await self._finish_generation(
+                    conversation_id,
+                    generation_id,
+                    status="failed",
+                    error=reason,
+                )
 
     def _collect_preview_message_id(self, generation_id: str, event: RuntimeEvent) -> None:
         if event.type != "agent.tool_result":

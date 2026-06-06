@@ -9,6 +9,7 @@ import type { WorkspaceFileNode } from "../../types";
 import { FileTreeRow } from "./FileTreeRow";
 import type { FileRowActions } from "./FileTreeRow";
 import { WorkspaceFileToolbar } from "./WorkspaceFileToolbar";
+import { WorkspaceFileMap } from "./WorkspaceFileMap";
 import type { PreviewState } from "./WorkspaceFilePreviewView";
 import { WorkspaceFilePreviewView } from "./WorkspaceFilePreviewView";
 import { filterNodes, sourceLabel, walk } from "./workspaceFileUtils";
@@ -364,6 +365,7 @@ export function WorkspaceFilesContent({
         onReload={load}
         onUploadFile={handleUpload}
       />
+      <WorkspaceFileMap nodes={visibleNodes} />
       <div className="workspace-file-table-head">
         <span>名称</span>
         <span>来源</span>

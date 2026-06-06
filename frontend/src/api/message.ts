@@ -265,6 +265,12 @@ function dispatchStreamEvent(
 
     // 控制类 / 用户事件：前端暂不直接展示
     case "control.watchdog_triggered":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
+      handlers.onDone?.({
+        ...(data as Record<string, unknown>),
+        status: "failed",
+      });
+      break;
     case "control.scheduling_decision":
     case "control.escalation":
     case "user.waiting_for_input":

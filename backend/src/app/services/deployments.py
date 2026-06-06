@@ -216,8 +216,8 @@ def _deployment_message(artifact: Artifact, deployment: Deployment) -> Message:
     progress = 100 if deployment.status == "deployed" else 0
     return Message(
         conversation_id=artifact.conversation_id,
-        sender_type="agent",
-        sender_name="Deploy Agent",
+        sender_type="system",
+        sender_name="部署服务",
         content_type="deploy_status_card",
         content={
             "deployment_id": deployment.id,

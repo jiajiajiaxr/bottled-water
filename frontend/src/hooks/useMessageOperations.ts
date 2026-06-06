@@ -218,5 +218,6 @@ function isTerminalRuntimeEvent(event: string) {
     "cancelled",
     "failed",
     "control.cancel",
+    "control.watchdog_triggered",
   ].includes(event);
 }

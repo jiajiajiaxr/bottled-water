@@ -40,10 +40,10 @@ function samePersistedMessage(left: ChatMessage, right: ChatMessage): boolean {
 
 function streamKey(payload: Record<string, unknown>): string {
   return String(
-    payload.agent_message_id ||
-      payload.message_id ||
-      payload.agent_id ||
+    payload.agent_id ||
       payload.sender_id ||
+      payload.agent_message_id ||
+      payload.message_id ||
       "",
   );
 }
@@ -320,6 +320,10 @@ export function useStreamingMessages(conversationId?: string) {
     const targetConversationId = conversationOf(conversationId, payload);
     const agentId = streamKey(payload) || agentKeyFromScopedKey(scopedKeyValue);
     if (!targetConversationId || !agentId) return undefined;
+    const conversationStore = useConversationStore.getState();
+    const streamThinkingEnabled =
+      conversationStore.thinkingEnabled.has(targetConversationId) &&
+      conversationStore.getThinkingEnabled(targetConversationId);
 
     const author = agentDisplayName(targetConversationId, agentId, payload);
     const msg = makeMessage({
@@ -333,6 +337,7 @@ export function useStreamingMessages(conversationId?: string) {
         message_id: payload.message_id,
         agent_id: payload.agent_id || agentId,
         _streamRawText: "",
+        _streamThinkingEnabled: streamThinkingEnabled,
       },
       streamState: "streaming",
       state: "active",
@@ -350,6 +355,25 @@ export function useStreamingMessages(conversationId?: string) {
       tokenTimersRef.current.delete(key);
     }
     tokenQueuesRef.current.delete(key);
+  };
+
+  const existingKeyForPayload = (payload: Record<string, unknown>): string => {
+    const key = scopedStreamKey(conversationId, payload);
+    if (key && streamingMessagesRef.current.has(key)) return key;
+    const targetConversationId = conversationOf(conversationId, payload);
+    const messageId = String(payload.agent_message_id || payload.message_id || "");
+    if (!targetConversationId || !messageId) return key;
+    for (const [itemKey, message] of streamingMessagesRef.current) {
+      if (message.conversationId !== targetConversationId) continue;
+      const rawId = String(
+        message.rawContent?.agent_message_id ||
+          message.rawContent?.message_id ||
+          message.id ||
+          "",
+      );
+      if (rawId === messageId) return itemKey;
+    }
+    return key;
   };
 
   const appendTokenNow = (payload: Record<string, unknown>, token: string) => {
@@ -593,6 +617,7 @@ export function useStreamingMessages(conversationId?: string) {
         rawContent: {
           ...(existing.rawContent || {}),
           _streamRawThinking: rawThinking,
+          _streamThinkingEnabled: true,
         },
       };
       next.set(key, nextMessage);
@@ -678,7 +703,25 @@ export function useStreamingMessages(conversationId?: string) {
       }
 
       setStreamingMessages((prev) => {
-        if (prev.has(key)) return prev;
+        if (prev.has(key)) {
+          const existing = prev.get(key);
+          if (!existing) return prev;
+          const next = new Map(prev);
+          next.set(key, {
+            ...existing,
+            id: String(payload.agent_message_id || payload.message_id || existing.id),
+            author,
+          rawContent: {
+            ...(existing.rawContent || {}),
+            agent_message_id: payload.agent_message_id || existing.rawContent?.agent_message_id,
+            message_id: payload.message_id || existing.rawContent?.message_id,
+            agent_id: payload.agent_id || existing.rawContent?.agent_id || agentId,
+            _streamThinkingEnabled: existing.rawContent?._streamThinkingEnabled,
+          },
+          });
+          streamingMessagesRef.current = next;
+          return next;
+        }
 
         const next = new Map(prev);
         const msg = makeMessage({
@@ -709,7 +752,7 @@ export function useStreamingMessages(conversationId?: string) {
     },
 
     onMessageEnd: (payload) => {
-      const key = scopedStreamKey(conversationId, payload);
+      const key = existingKeyForPayload(payload);
       if (!key) return;
 
       const msg = streamingMessagesRef.current.get(key);

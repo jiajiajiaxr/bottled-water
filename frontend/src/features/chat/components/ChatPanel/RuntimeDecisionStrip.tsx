@@ -183,6 +183,11 @@ export function RuntimeDecisionStrip({
             {decision && (
               <DecisionTag decision={decision} agentNameMap={agentNameMap} />
             )}
+            {generation.error && (
+              <Tooltip title={generation.error}>
+                <Tag color="error">终止原因：{generation.error}</Tag>
+              </Tooltip>
+            )}
             {agentRuns.slice(0, 5).map((run) => (
               <AgentRunTag
                 key={run.agent_id}

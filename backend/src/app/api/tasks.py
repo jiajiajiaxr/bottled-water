@@ -72,6 +72,26 @@ async def create_task(
     return ok(task_to_dict(task), "Task created")
 
 
+@router.get("/tasks", response_model=ApiResponse[list[dict]])
+async def list_tasks(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.scalars(
+            select(Task)
+            .join(Conversation, Conversation.id == Task.conversation_id)
+            .where(
+                Conversation.creator_id == user.id,
+                Conversation.deleted_at.is_(None),
+            )
+            .order_by(Task.updated_at.desc(), Task.created_at.desc())
+            .limit(100)
+        )
+    ).all()
+    return ok([task_to_dict(task) for task in rows])
+
+
 @router.get("/tasks/{task_id}/status", response_model=ApiResponse[dict])
 async def get_task_status(
     task_id: str,
@@ -98,6 +118,21 @@ async def list_subtasks(
         )
     ).all()
     return ok([subtask_to_dict(item) for item in subtasks])
+
+
+@router.post("/tasks/{task_id}/cancel", response_model=ApiResponse[dict])
+async def cancel_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    task = await _get_task(db, user, task_id)
+    if task.status not in {"COMPLETED", "FAILED", "CANCELLED"}:
+        task.status = "CANCELLED"
+        task.completed_at = utcnow()
+    await db.commit()
+    await db.refresh(task)
+    return ok(task_to_dict(task), "Task cancelled")
 
 
 @router.post("/subtasks/{subtask_id}/approve", response_model=ApiResponse[dict])

@@ -113,6 +113,36 @@ function MarkdownContentComponent({
         else result.push(<h6 key={`h-${result.length}`}>{content}</h6>);
         continue;
       }
+      if (isMarkdownTableStart(lines, index)) {
+        flushParagraph();
+        const tableLines: string[] = [];
+        while (index < lines.length && isTableRow(lines[index])) {
+          tableLines.push(lines[index]);
+          index += 1;
+        }
+        index -= 1;
+        result.push(
+          <MarkdownTable key={`table-${result.length}`} lines={tableLines} />,
+        );
+        continue;
+      }
+      if (/^\s*>\s?/.test(line)) {
+        flushParagraph();
+        const quoteLines: string[] = [];
+        while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+          quoteLines.push(lines[index].replace(/^\s*>\s?/, ""));
+          index += 1;
+        }
+        index -= 1;
+        result.push(
+          <blockquote key={`quote-${result.length}`}>
+            {quoteLines.map((item, itemIndex) => (
+              <p key={itemIndex}>{renderInlineMarkdown(item)}</p>
+            ))}
+          </blockquote>,
+        );
+        continue;
+      }
       const listItems: string[] = [];
       if (/^\s*[-*]\s+/.test(line)) {
         flushParagraph();
@@ -159,6 +189,53 @@ function MarkdownContentComponent({
       ) : (
         <p className="typing-placeholder">正在组织语言...</p>
       )}
+    </div>
+  );
+}
+
+function isTableRow(line: string) {
+  const trimmed = line.trim();
+  return trimmed.includes("|") && /^\|?.+\|.+\|?$/.test(trimmed);
+}
+
+function isMarkdownTableStart(lines: string[], index: number) {
+  const current = lines[index]?.trim() || "";
+  const next = lines[index + 1]?.trim() || "";
+  return isTableRow(current) && /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(next);
+}
+
+function splitTableRow(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function MarkdownTable({ lines }: { lines: string[] }) {
+  const header = splitTableRow(lines[0] || "");
+  const body = lines.slice(2).map(splitTableRow);
+  return (
+    <div className="markdown-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            {header.map((cell, index) => (
+              <th key={index}>{renderInlineMarkdown(cell)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {header.map((_, cellIndex) => (
+                <td key={cellIndex}>{renderInlineMarkdown(row[cellIndex] || "")}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

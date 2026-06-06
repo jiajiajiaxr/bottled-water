@@ -217,6 +217,61 @@
     margin: $spacing-xs 0;
   }
 
+  blockquote {
+    margin: $spacing-sm 0 $spacing-md;
+    padding: $spacing-sm $spacing-lg;
+    border-left: 3px solid $color-primary;
+    border-radius: $radius-sm;
+    background: #f5f8ff;
+    color: $color-text-secondary;
+
+    p {
+      margin: 0 0 $spacing-xs;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+  }
+
+  .markdown-table-wrap {
+    max-width: 100%;
+    overflow: auto;
+    margin: $spacing-sm 0 $spacing-md;
+    border: 1px solid $color-border;
+    border-radius: $radius-md;
+    background: $color-bg-white;
+  }
+
+  table {
+    width: 100%;
+    min-width: 420px;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  th,
+  td {
+    padding: $spacing-sm $spacing-md;
+    border-bottom: 1px solid $color-border-light;
+    border-right: 1px solid $color-border-light;
+    text-align: left;
+    vertical-align: top;
+
+    &:last-child {
+      border-right: 0;
+    }
+  }
+
+  th {
+    background: #f8fafc;
+    font-weight: 700;
+  }
+
+  tr:last-child td {
+    border-bottom: 0;
+  }
+
   code {
     border: 1px solid $color-border;
     border-radius: $radius-sm;

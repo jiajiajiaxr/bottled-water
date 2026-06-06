@@ -169,6 +169,13 @@ function MessageBubbleComponent({
     previewAttachment?.public_url ??
     previewAttachment?.url;
   const visibleMessageContent = stripInternalAgentOutput(message.content);
+  const thinkingText = String(message.thinking || "").trim();
+  const streamThinkingEnabled = message.rawContent?._streamThinkingEnabled === true;
+  const showThinkingBlock = Boolean(
+    thinkingEnabled &&
+      !isUser &&
+      (thinkingText || (message.streamState === "streaming" && streamThinkingEnabled)),
+  );
   const activeToolCalls = message.rawContent?._activeToolCalls as
     | Array<{ toolName: string }>
     | undefined;
@@ -218,7 +225,7 @@ function MessageBubbleComponent({
             </Text>
           </Flex>
           {quoted && <div className="quote-block">{quoted.content}</div>}
-          {thinkingEnabled && !isUser && (
+          {showThinkingBlock && (
             <ThinkingBlock
               thinking={message.thinking ?? ""}
               expanded={expanded}
