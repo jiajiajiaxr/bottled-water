@@ -260,8 +260,8 @@ export function ChatPanel({
 
   return (
     <Content className="chat-panel">
+      <RuntimeDecisionStrip conversation={active} />
       <div ref={messageListRef} className="message-list">
-        <RuntimeDecisionStrip conversation={active} />
         {loading ? (
           <Spin />
         ) : allMessages.length ? (

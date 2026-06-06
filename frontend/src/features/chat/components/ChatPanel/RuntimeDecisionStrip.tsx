@@ -1,3 +1,6 @@
+import { RobotOutlined } from "@ant-design/icons";
+import { useEffect, useRef, useState } from "react";
+import type { PointerEvent } from "react";
 import { Space, Tag, Tooltip, Typography } from "antd";
 import type {
   Conversation,
@@ -26,7 +29,26 @@ export function RuntimeDecisionStrip({
 }: {
   conversation?: Conversation;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [position, setPosition] = useState<{ x: number; y: number }>();
+  const widgetRef = useRef<HTMLDivElement>(null);
+  const suppressClickRef = useRef(false);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+    moved: boolean;
+  }>();
   const generation = latestGeneration(conversation);
+  const conversationId = conversation?.id;
+
+  useEffect(() => {
+    setExpanded(false);
+    setPosition(undefined);
+  }, [conversationId]);
+
   if (!generation) return null;
 
   const decision = latestDecision(generation);
@@ -39,28 +61,137 @@ export function RuntimeDecisionStrip({
     status === "running";
   if (!isVisible) return null;
 
+  const onPointerDown = (event: PointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return;
+    const widget = widgetRef.current;
+    const panel = widget?.closest(".chat-panel") as HTMLElement | null;
+    if (!widget || !panel) return;
+    const widgetRect = widget.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      baseX: widgetRect.left - panelRect.left,
+      baseY: widgetRect.top - panelRect.top,
+      moved: false,
+    };
+    setPosition({
+      x: widgetRect.left - panelRect.left,
+      y: widgetRect.top - panelRect.top,
+    });
+    widget.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event: PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    const widget = widgetRef.current;
+    const panel = widget?.closest(".chat-panel") as HTMLElement | null;
+    if (!drag || !widget || !panel || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    const maxX = Math.max(8, panel.clientWidth - widget.offsetWidth - 8);
+    const maxY = Math.max(8, panel.clientHeight - widget.offsetHeight - 84);
+    setPosition({
+      x: clamp(drag.baseX + dx, 8, maxX),
+      y: clamp(drag.baseY + dy, 8, maxY),
+    });
+  };
+
+  const onPointerUp = (event: PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (drag?.pointerId === event.pointerId) {
+      widgetRef.current?.releasePointerCapture(event.pointerId);
+      if (drag.moved) {
+        suppressClickRef.current = true;
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+      }
+      dragRef.current = undefined;
+    }
+  };
+
+  const toggleExpanded = () => {
+    if (suppressClickRef.current) return;
+    setExpanded((current) => !current);
+  };
+
+  const style = position
+    ? { left: position.x, top: position.y }
+    : undefined;
+
   return (
-    <div className="runtime-decision-strip" data-testid="runtime-decision-strip">
-      <Space size={[8, 8]} wrap>
-        <Tag color={status === "running" ? "processing" : "default"}>
-          {modeLabel(conversation)} · {status}
-        </Tag>
-        {decision && (
-          <DecisionTag decision={decision} agentNameMap={agentNameMap} />
-        )}
-        {agentRuns.slice(0, 5).map((run) => (
-          <AgentRunTag
-            key={run.agent_id}
-            run={run}
-            agentNameMap={agentNameMap}
-          />
-        ))}
-        {agentRuns.length > 5 && (
-          <Text type="secondary">等 {agentRuns.length} 个 Agent</Text>
-        )}
-      </Space>
+    <div
+      ref={widgetRef}
+      className={[
+        "runtime-decision-widget",
+        expanded ? "expanded" : "collapsed",
+        status === "running" ? "running" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      data-testid="runtime-decision-strip"
+      style={style}
+    >
+      <button
+        type="button"
+        className="runtime-decision-trigger"
+        aria-label={expanded ? "收起组织状态" : "展开组织状态"}
+        onClick={toggleExpanded}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        <RobotOutlined />
+        {!expanded && status === "running" && <span className="runtime-decision-pulse" />}
+      </button>
+      {expanded && (
+        <div className="runtime-decision-card">
+          <button
+            type="button"
+            className="runtime-decision-card-head"
+            onClick={toggleExpanded}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+          >
+            <span className="runtime-decision-card-icon">
+              <RobotOutlined />
+            </span>
+            <span>
+              <Text strong>{modeLabel(conversation)}</Text>
+              <Text type="secondary" className="runtime-decision-card-subtitle">
+                {status}
+              </Text>
+            </span>
+          </button>
+          <Space size={[8, 8]} wrap className="runtime-decision-card-body">
+            {decision && (
+              <DecisionTag decision={decision} agentNameMap={agentNameMap} />
+            )}
+            {agentRuns.slice(0, 5).map((run) => (
+              <AgentRunTag
+                key={run.agent_id}
+                run={run}
+                agentNameMap={agentNameMap}
+              />
+            ))}
+            {agentRuns.length > 5 && (
+              <Text type="secondary">等 {agentRuns.length} 个 Agent</Text>
+            )}
+          </Space>
+        </div>
+      )}
     </div>
   );
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function DecisionTag({

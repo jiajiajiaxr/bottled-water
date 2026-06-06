@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { RuntimeDecisionStrip } from "@/features/chat/components/ChatPanel/RuntimeDecisionStrip";
@@ -50,8 +50,11 @@ function conversation(): Conversation {
 }
 
 describe("RuntimeDecisionStrip", () => {
-  it("uses participant names instead of short agent ids", () => {
+  it("expands from the floating robot card and uses participant names", () => {
     render(<RuntimeDecisionStrip conversation={conversation()} />);
+
+    expect(screen.queryByText(/Daily Chat Agent/)).toBeNull();
+    fireEvent.click(screen.getByLabelText("展开组织状态"));
 
     expect(screen.getAllByText(/Daily Chat Agent/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/72fbea2b · running/)).toBeNull();
