@@ -38,10 +38,11 @@ export function isOfficeArtifact(artifact: WorkspaceArtifact | undefined, format
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+  const filename = artifact?.filename ?? artifact?.content?.filename ?? "";
   return (
     ["docx", "pptx", "xlsx"].includes(normalized) ||
     mediaType.includes("officedocument") ||
-    /\.(docx|pptx|xlsx)$/i.test(artifact?.filename ?? artifact?.content?.filename ?? "")
+    /\.(docx|pptx|xlsx)$/i.test(filename)
   );
 }
 
@@ -58,7 +59,8 @@ export function openOrDownloadExport(
   const lowerFormat = normalizeArtifactFormat(format);
   const anchor = document.createElement("a");
   anchor.href = downloadUrl;
-  anchor.download = exported.filename || `agenthub-artifact.${extensionForFormat(lowerFormat)}`;
+  anchor.download =
+    exported.filename || `agenthub-artifact.${extensionForFormat(lowerFormat)}`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

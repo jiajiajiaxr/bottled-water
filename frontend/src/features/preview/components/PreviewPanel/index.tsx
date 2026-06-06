@@ -25,6 +25,12 @@ import { api } from "@/api";
 import { diffLines } from "@/lib/diff";
 import { buildPreviewDocument } from "@/lib/preview";
 import { FilesKnowledgePanel } from "@/features/chat/components/drawers/FilesKnowledgePanel";
+import {
+  artifactExportFormats,
+  downloadLabel,
+  openOrDownloadExport,
+  preferredArtifactFormat,
+} from "./artifactPreview";
 import type {
   Deployment,
   KnowledgeBase,
@@ -149,6 +155,8 @@ export function PreviewPanel({
 
   const previewDocument = buildPreviewDocument(draft);
   const previewKind = artifactPreviewKind(artifact);
+  const preferredFormat = preferredArtifactFormat(artifact);
+  const exportFormats = artifactExportFormats(preferredFormat);
 
   return (
     <Sider
@@ -174,26 +182,20 @@ export function PreviewPanel({
         </Space>
       </Flex>
       <Space wrap className="artifact-export-bar">
-        {["zip", "html", "markdown", "json", "docx", "xlsx", "pptx"].map(
-          (format) => (
-            <Button
-              key={format}
-              size="small"
-              onClick={async () => {
-                const exported = await api.exportArtifact(artifact.id, format);
-                setExportResult(exported);
-                if (exported.previewUrl)
-                  window.open(
-                    exported.previewUrl,
-                    "_blank",
-                    "noopener,noreferrer",
-                  );
-              }}
-            >
-              {format.toUpperCase()}
-            </Button>
-          ),
-        )}
+        {exportFormats.map((format) => (
+          <Button
+            key={format}
+            size="small"
+            type="primary"
+            onClick={async () => {
+              const exported = await api.exportArtifact(artifact.id, format);
+              setExportResult(exported);
+              openOrDownloadExport(exported, format);
+            }}
+          >
+            {downloadLabel(format)}
+          </Button>
+        ))}
         {exportResult?.filename && (
           <Tag color="blue">{exportResult.filename}</Tag>
         )}
