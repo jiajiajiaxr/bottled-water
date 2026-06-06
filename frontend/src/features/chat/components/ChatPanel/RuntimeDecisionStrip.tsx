@@ -76,10 +76,6 @@ export function RuntimeDecisionStrip({
       baseY: widgetRect.top - panelRect.top,
       moved: false,
     };
-    setPosition({
-      x: widgetRect.left - panelRect.left,
-      y: widgetRect.top - panelRect.top,
-    });
     widget.setPointerCapture(event.pointerId);
   };
 
@@ -90,7 +86,9 @@ export function RuntimeDecisionStrip({
     if (!drag || !widget || !panel || drag.pointerId !== event.pointerId) return;
     const dx = event.clientX - drag.startX;
     const dy = event.clientY - drag.startY;
-    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    if (!drag.moved && Math.hypot(dx, dy) < 6) return;
+    drag.moved = true;
+    event.preventDefault();
     const maxX = Math.max(8, panel.clientWidth - widget.offsetWidth - 8);
     const maxY = Math.max(8, panel.clientHeight - widget.offsetHeight - 84);
     setPosition({
@@ -119,7 +117,7 @@ export function RuntimeDecisionStrip({
   };
 
   const style = position
-    ? { left: position.x, top: position.y }
+    ? { left: position.x, top: position.y, right: "auto" }
     : undefined;
 
   return (
