@@ -96,6 +96,54 @@ function sameTextMessage(left: ChatMessage, right: ChatMessage): boolean {
   return sameSender && left.content.trim() === right.content.trim();
 }
 
+function shouldDropStreamForPersisted(
+  streamMessage: ChatMessage,
+  persistedMessage: ChatMessage,
+): boolean {
+  if (streamMessage.conversationId !== persistedMessage.conversationId) {
+    return false;
+  }
+
+  const persistedSenderId = String(persistedMessage.sender_id || "");
+  const streamAgentId = String(
+    streamMessage.rawContent?.agent_id || streamMessage.sender_id || "",
+  );
+  const streamMessageId = String(
+    streamMessage.rawContent?.agent_message_id ||
+      streamMessage.rawContent?.message_id ||
+      streamMessage.id ||
+      "",
+  );
+  const persistedMessageId = String(
+    persistedMessage.rawContent?.agent_message_id ||
+      persistedMessage.rawContent?.message_id ||
+      persistedMessage.id ||
+      "",
+  );
+
+  if (streamMessageId && persistedMessageId && streamMessageId === persistedMessageId) {
+    return true;
+  }
+  if (samePersistedMessage(streamMessage, persistedMessage)) {
+    return true;
+  }
+  if (sameTextMessage(streamMessage, persistedMessage)) {
+    return true;
+  }
+  return Boolean(
+    persistedMessage.role === "assistant" &&
+      persistedSenderId &&
+      streamAgentId === persistedSenderId,
+  );
+}
+
+function isRepresentedByHistory(
+  message: ChatMessage,
+  historyMessages: ChatMessage[],
+): boolean {
+  return historyMessages.some((item) => shouldDropStreamForPersisted(message, item));
+}
+
 /**
  * 管理正在流式生成的 assistant 气泡。
  *
@@ -104,12 +152,14 @@ function sameTextMessage(left: ChatMessage, right: ChatMessage): boolean {
  * `rawContent._streamRawText`，用于持续过滤 status_report 等内部片段。
  */
 export function useStreamingMessages(conversationId?: string) {
-  const { updateMessages, updateMessageVersions } = useMessageStore();
+  const { historyMessages, updateMessages, updateMessageVersions } =
+    useMessageStore();
   const [streamingMessages, setStreamingMessages] = useState<
     Map<string, ChatMessage>
   >(new Map());
   const [displayOrder, setDisplayOrder] = useState<string[]>([]);
   const streamingMessagesRef = useRef(streamingMessages);
+  const hiddenStreamKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     streamingMessagesRef.current = streamingMessages;
@@ -119,6 +169,12 @@ export function useStreamingMessages(conversationId?: string) {
     const next = new Map<string, ChatMessage>();
     for (const [key, message] of streamingMessages) {
       if (message.conversationId === conversationId) {
+        if (
+          hiddenStreamKeysRef.current.has(key) ||
+          isRepresentedByHistory(message, historyMessages)
+        ) {
+          continue;
+        }
         const visibleKey = agentKeyFromScopedKey(key);
         next.set(visibleKey, message);
 
@@ -129,7 +185,7 @@ export function useStreamingMessages(conversationId?: string) {
       }
     }
     return next;
-  }, [conversationId, streamingMessages]);
+  }, [conversationId, historyMessages, streamingMessages]);
 
   const activeDisplayOrder = useMemo(
     () => {
@@ -137,7 +193,13 @@ export function useStreamingMessages(conversationId?: string) {
       const seen = new Set<string>();
       for (const key of displayOrder) {
         const message = streamingMessages.get(key);
-        if (message?.conversationId !== conversationId) continue;
+        if (!message || message.conversationId !== conversationId) continue;
+        if (
+          hiddenStreamKeysRef.current.has(key) ||
+          isRepresentedByHistory(message, historyMessages)
+        ) {
+          continue;
+        }
         const visibleKey = agentKeyFromScopedKey(key);
         if (seen.has(visibleKey)) continue;
         seen.add(visibleKey);
@@ -145,7 +207,7 @@ export function useStreamingMessages(conversationId?: string) {
       }
       return keys;
     },
-    [conversationId, displayOrder, streamingMessages],
+    [conversationId, displayOrder, historyMessages, streamingMessages],
   );
 
   const bumpMessageVersion = (scopedKey: string) => {
@@ -195,6 +257,9 @@ export function useStreamingMessages(conversationId?: string) {
   const appendToken = (payload: Record<string, unknown>, token: string) => {
     const key = scopedStreamKey(conversationId, payload);
     if (!key) return;
+    if (!streamingMessagesRef.current.has(key)) {
+      hiddenStreamKeysRef.current.delete(key);
+    }
     setStreamingMessages((prev) => {
       const existing = ensureMessage(prev, key, payload);
       if (!existing) return prev;
@@ -223,6 +288,9 @@ export function useStreamingMessages(conversationId?: string) {
   const appendThinking = (payload: Record<string, unknown>, thinking: string) => {
     const key = scopedStreamKey(conversationId, payload);
     if (!key) return;
+    if (!streamingMessagesRef.current.has(key)) {
+      hiddenStreamKeysRef.current.delete(key);
+    }
     setStreamingMessages((prev) => {
       const existing = ensureMessage(prev, key, payload);
       if (!existing) return prev;
@@ -267,7 +335,6 @@ export function useStreamingMessages(conversationId?: string) {
     }
 
     updateMessages((prev) => {
-      const existingIds = new Set(prev.map((item) => item.id));
       const completed = pending
         .map(([, msg]) => ({
           ...msg,
@@ -277,7 +344,14 @@ export function useStreamingMessages(conversationId?: string) {
           streamState: "done" as const,
           status: msg.status === "failed" ? "failed" : "completed",
         }))
-        .filter((msg) => msg.content.trim() && !existingIds.has(msg.id));
+        .filter(
+          (msg) =>
+            msg.content.trim() &&
+            !prev.some(
+              (item) =>
+                samePersistedMessage(item, msg) || sameTextMessage(item, msg),
+            ),
+        );
 
       return completed.length ? [...prev, ...completed] : prev;
     });
@@ -310,6 +384,9 @@ export function useStreamingMessages(conversationId?: string) {
       const author = agentDisplayName(targetConversationId, agentId, payload);
 
       if (!agentId || !key) return;
+      if (!streamingMessagesRef.current.has(key)) {
+        hiddenStreamKeysRef.current.delete(key);
+      }
 
       setStreamingMessages((prev) => {
         if (prev.has(key)) return prev;
@@ -347,6 +424,7 @@ export function useStreamingMessages(conversationId?: string) {
 
       const msg = streamingMessagesRef.current.get(key);
       if (!msg) return;
+      hiddenStreamKeysRef.current.add(key);
 
       setStreamingMessages((prev) => {
         if (!prev.has(key)) return prev;
@@ -359,8 +437,14 @@ export function useStreamingMessages(conversationId?: string) {
       if (!isActiveConversation(msg.conversationId)) return;
 
       updateMessages((prev) => {
-        const existingIds = new Set(prev.map((item) => item.id));
-        if (existingIds.has(msg.id)) return prev;
+        if (
+          prev.some(
+            (item) =>
+              samePersistedMessage(item, msg) || sameTextMessage(item, msg),
+          )
+        ) {
+          return prev;
+        }
         return [
           ...prev,
           {
@@ -392,28 +476,21 @@ export function useStreamingMessages(conversationId?: string) {
       finalizePendingStreams(targetConversationId);
     },
     onMessageNew: (message) => {
-      const senderId = String(message.sender_id || "");
-      if (senderId) {
+      const keysToHide: string[] = [];
+      for (const [key, item] of streamingMessagesRef.current) {
+        if (shouldDropStreamForPersisted(item, message)) {
+          keysToHide.push(key);
+        }
+      }
+      keysToHide.forEach((key) => hiddenStreamKeysRef.current.add(key));
+      if (keysToHide.length) {
         setStreamingMessages((prev) => {
           const next = new Map(prev);
-          for (const [key, item] of prev) {
-            if (
-              item.conversationId === message.conversationId &&
-              String(item.rawContent?.agent_id || "") === senderId
-            ) {
-              next.delete(key);
-            }
-          }
+          keysToHide.forEach((key) => next.delete(key));
           return next;
         });
         setDisplayOrder((prev) =>
-          prev.filter((key) => {
-            const item = streamingMessagesRef.current.get(key);
-            return !(
-              item?.conversationId === message.conversationId &&
-              String(item?.rawContent?.agent_id || "") === senderId
-            );
-          }),
+          prev.filter((key) => !hiddenStreamKeysRef.current.has(key)),
         );
       }
       if (!isActiveConversation(message.conversationId)) return;
