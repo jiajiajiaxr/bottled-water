@@ -1,10 +1,11 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeMessage } from "../src/lib";
 import { useStreamingMessages } from "../src/hooks/useStreamingMessages";
 import { useConversationStore, useMessageStore } from "../src/store";
 
 beforeEach(() => {
+  vi.useFakeTimers();
   useMessageStore.getState().setMessages([]);
   useMessageStore.getState().clearMessageCache();
   useConversationStore.setState({
@@ -14,6 +15,17 @@ beforeEach(() => {
     localRunningConversationIds: new Set(),
   });
 });
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
+});
+
+function flushTypewriter() {
+  act(() => {
+    vi.runAllTimers();
+  });
+}
 
 describe("useStreamingMessages internal block filtering", () => {
   it("filters status_report fragments from streamed thinking text", () => {
@@ -65,6 +77,9 @@ describe("useStreamingMessages internal block filtering", () => {
       });
     });
 
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe("可");
+    flushTypewriter();
+
     expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
       "可见回答",
     );
@@ -78,6 +93,7 @@ describe("useStreamingMessages internal block filtering", () => {
         },
       );
     });
+    flushTypewriter();
 
     expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
       "可见回答\n继续说明",
@@ -101,6 +117,9 @@ describe("useStreamingMessages internal block filtering", () => {
       });
     });
 
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe("v");
+    flushTypewriter();
+
     expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
       "visible answer",
     );
@@ -114,6 +133,7 @@ describe("useStreamingMessages internal block filtering", () => {
         },
       );
     });
+    flushTypewriter();
 
     expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
       "visible answer\nfinal",
@@ -153,7 +173,7 @@ describe("useStreamingMessages internal block filtering", () => {
     });
 
     expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
-      "我可以帮你",
+      "我",
     );
 
     const persisted = makeMessage({
@@ -178,5 +198,73 @@ describe("useStreamingMessages internal block filtering", () => {
     expect(useMessageStore.getState().historyMessages).toEqual([persisted]);
     expect(result.current.streamingMessages.size).toBe(0);
     expect(result.current.displayOrder).toEqual([]);
+  });
+
+  it("keeps streaming visible for empty persisted placeholders until message update", () => {
+    useConversationStore.getState().setConversations([
+      {
+        id: "conversation-1",
+        chat_type: "single",
+        title: "Daily Chat Agent",
+        participants: [
+          {
+            participant_type: "agent",
+            agent_id: "agent-1",
+            agent_name: "Daily Chat Agent",
+          },
+        ],
+        updatedAt: "2026-06-06T00:00:00Z",
+        pinned: false,
+        archived: false,
+        unread: 0,
+        tags: [],
+        lastMessage: "",
+      },
+    ]);
+    useConversationStore.getState().setActiveId("conversation-1");
+
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onToken?.("agent-1", "你好呀", {
+        conversation_id: "conversation-1",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+
+    const placeholder = makeMessage({
+      conversationId: "conversation-1",
+      sender_id: "agent-1",
+      sender_type: "agent",
+      role: "assistant",
+      kind: "text",
+      author: "Daily Chat Agent",
+      content: "",
+      rawContent: { agent_id: "agent-1" },
+      streamState: "streaming",
+      status: "streaming",
+      state: "active",
+    });
+    placeholder.id = "persisted-message-1";
+
+    act(() => {
+      result.current.streamHandlers.onMessageNew?.(placeholder);
+    });
+
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe("你");
+
+    const completed = {
+      ...placeholder,
+      content: "你好呀",
+      streamState: "done" as const,
+      status: "completed",
+    };
+
+    act(() => {
+      result.current.streamHandlers.onMessageUpdated?.(completed);
+    });
+
+    expect(useMessageStore.getState().historyMessages).toEqual([completed]);
+    expect(result.current.streamingMessages.size).toBe(0);
   });
 });

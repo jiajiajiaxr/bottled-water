@@ -139,6 +139,10 @@ export function ChatPanel({
         active.generation_status === "running" ||
         active.generation_status === "executing"),
   );
+  const hasVisibleStreamingMessage = streamingMessages.size > 0 || displayOrder.length > 0;
+  const showThinkingIndicator = Boolean(
+    active && isWorking && !hasVisibleStreamingMessage,
+  );
 
   const stopResponse = async () => {
     if (!active || stopping) return;
@@ -268,7 +272,7 @@ export function ChatPanel({
 
               return msg ? renderMessageBubble(msg) : null;
             })}
-            {awaitingResponse && (
+            {showThinkingIndicator && (
               <div className="thinking-indicator">
                 <div className="thinking-indicator-dots">
                   <span className="dot" />

@@ -133,6 +133,9 @@ function dispatchStreamEvent(
     case "message:new":
       handlers.onMessageNew?.(data as ChatMessage);
       break;
+    case "message:updated":
+      handlers.onMessageUpdated?.(data as ChatMessage);
+      break;
     case "generation_finished":
     case "generation:finished":
     case "generation:cancelled":
@@ -408,6 +411,7 @@ export function streamAssistantReply(
       "workflow_completed",
       "workflow:completed",
       "workflow:run_completed",
+      "message:updated",
       "generation_finished",
       "generation:finished",
       "generation:cancelled",

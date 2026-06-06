@@ -85,6 +85,11 @@ function mergeStreamText(current: string, incoming: string): string {
   return `${current}${incoming}`;
 }
 
+function incrementalStreamText(current: string, incoming: string): string {
+  const merged = mergeStreamText(current, incoming);
+  return merged.startsWith(current) ? merged.slice(current.length) : incoming;
+}
+
 function sameTextMessage(left: ChatMessage, right: ChatMessage): boolean {
   if (left.kind !== "text" || right.kind !== "text") return false;
   if (left.conversationId !== right.conversationId) return false;
@@ -120,9 +125,12 @@ function shouldDropStreamForPersisted(
       persistedMessage.id ||
       "",
   );
+  const terminalPersisted = ["completed", "done", "failed", "cancelled"].includes(
+    String(persistedMessage.status || persistedMessage.streamState || ""),
+  );
 
   if (streamMessageId && persistedMessageId && streamMessageId === persistedMessageId) {
-    return true;
+    return terminalPersisted || Boolean(persistedMessage.content.trim());
   }
   if (samePersistedMessage(streamMessage, persistedMessage)) {
     return true;
@@ -131,7 +139,9 @@ function shouldDropStreamForPersisted(
     return true;
   }
   return Boolean(
-    persistedMessage.role === "assistant" &&
+    terminalPersisted &&
+      persistedMessage.content.trim() &&
+      persistedMessage.role === "assistant" &&
       persistedSenderId &&
       streamAgentId === persistedSenderId,
   );
@@ -160,10 +170,23 @@ export function useStreamingMessages(conversationId?: string) {
   const [displayOrder, setDisplayOrder] = useState<string[]>([]);
   const streamingMessagesRef = useRef(streamingMessages);
   const hiddenStreamKeysRef = useRef<Set<string>>(new Set());
+  const tokenQueuesRef = useRef<Map<string, string[]>>(new Map());
+  const tokenTimersRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     streamingMessagesRef.current = streamingMessages;
   }, [streamingMessages]);
+
+  useEffect(
+    () => () => {
+      for (const timer of tokenTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      tokenTimersRef.current.clear();
+      tokenQueuesRef.current.clear();
+    },
+    [],
+  );
 
   const activeStreamingMessages = useMemo(() => {
     const next = new Map<string, ChatMessage>();
@@ -254,7 +277,16 @@ export function useStreamingMessages(conversationId?: string) {
     return msg;
   };
 
-  const appendToken = (payload: Record<string, unknown>, token: string) => {
+  const clearQueuedStream = (key: string) => {
+    const timer = tokenTimersRef.current.get(key);
+    if (timer) {
+      window.clearTimeout(timer);
+      tokenTimersRef.current.delete(key);
+    }
+    tokenQueuesRef.current.delete(key);
+  };
+
+  const appendTokenNow = (payload: Record<string, unknown>, token: string) => {
     const key = scopedStreamKey(conversationId, payload);
     if (!key) return;
     if (!streamingMessagesRef.current.has(key)) {
@@ -265,10 +297,9 @@ export function useStreamingMessages(conversationId?: string) {
       if (!existing) return prev;
 
       const next = new Map(prev);
-      const rawText = mergeStreamText(
-        String(existing.rawContent?._streamRawText || existing.content || ""),
-        token,
-      );
+      const rawText = `${String(
+        existing.rawContent?._streamRawText || existing.content || "",
+      )}${token}`;
 
       next.set(key, {
         ...existing,
@@ -283,6 +314,67 @@ export function useStreamingMessages(conversationId?: string) {
 
     setDisplayOrder((prev) => (prev.includes(key) ? prev : [...prev, key]));
     bumpMessageVersion(key);
+  };
+
+  const scheduleTokenDrain = (
+    key: string,
+    payload: Record<string, unknown>,
+  ) => {
+    if (tokenTimersRef.current.has(key)) return;
+    const timer = window.setTimeout(() => {
+      tokenTimersRef.current.delete(key);
+      if (hiddenStreamKeysRef.current.has(key)) {
+        clearQueuedStream(key);
+        return;
+      }
+
+      const queue = tokenQueuesRef.current.get(key);
+      if (!queue?.length) {
+        tokenQueuesRef.current.delete(key);
+        return;
+      }
+
+      const batchSize =
+        queue.length > 120 ? 6 : queue.length > 60 ? 4 : queue.length > 24 ? 2 : 1;
+      const chunk = queue.splice(0, batchSize).join("");
+      appendTokenNow(payload, chunk);
+
+      if (queue.length) {
+        scheduleTokenDrain(key, payload);
+      } else {
+        tokenQueuesRef.current.delete(key);
+      }
+    }, 18);
+    tokenTimersRef.current.set(key, timer);
+  };
+
+  const appendToken = (payload: Record<string, unknown>, token: string) => {
+    const key = scopedStreamKey(conversationId, payload);
+    if (!key || !token) return;
+
+    const queued = tokenQueuesRef.current.get(key) || [];
+    const visibleRaw = String(
+      streamingMessagesRef.current.get(key)?.rawContent?._streamRawText ||
+        streamingMessagesRef.current.get(key)?.content ||
+        "",
+    );
+    const pendingRaw = `${visibleRaw}${queued.join("")}`;
+    const incremental = incrementalStreamText(pendingRaw, token);
+    if (!incremental) return;
+
+    const pieces = Array.from(incremental);
+    const first = pieces.shift();
+    if (first && queued.length === 0) {
+      appendTokenNow(payload, first);
+    } else if (first) {
+      pieces.unshift(first);
+    }
+    if (!pieces.length) return;
+
+    const queue = tokenQueuesRef.current.get(key) || [];
+    queue.push(...pieces);
+    tokenQueuesRef.current.set(key, queue);
+    scheduleTokenDrain(key, payload);
   };
 
   const appendThinking = (payload: Record<string, unknown>, thinking: string) => {
@@ -323,7 +415,10 @@ export function useStreamingMessages(conversationId?: string) {
 
     setStreamingMessages((prev) => {
       const next = new Map(prev);
-      pending.forEach(([key]) => next.delete(key));
+      pending.forEach(([key]) => {
+        clearQueuedStream(key);
+        next.delete(key);
+      });
       return next;
     });
     setDisplayOrder((prev) =>
@@ -365,6 +460,7 @@ export function useStreamingMessages(conversationId?: string) {
       const next = new Map(prev);
       for (const [key, message] of prev) {
         if (message.conversationId === targetConversationId) {
+          clearQueuedStream(key);
           next.delete(key);
         }
       }
@@ -429,6 +525,7 @@ export function useStreamingMessages(conversationId?: string) {
       setStreamingMessages((prev) => {
         if (!prev.has(key)) return prev;
         const next = new Map(prev);
+        clearQueuedStream(key);
         next.delete(key);
         return next;
       });
@@ -486,7 +583,10 @@ export function useStreamingMessages(conversationId?: string) {
       if (keysToHide.length) {
         setStreamingMessages((prev) => {
           const next = new Map(prev);
-          keysToHide.forEach((key) => next.delete(key));
+          keysToHide.forEach((key) => {
+            clearQueuedStream(key);
+            next.delete(key);
+          });
           return next;
         });
         setDisplayOrder((prev) =>
@@ -495,6 +595,48 @@ export function useStreamingMessages(conversationId?: string) {
       }
       if (!isActiveConversation(message.conversationId)) return;
       updateMessages((prev) => {
+        const duplicateIndex = prev.findIndex((item) =>
+          samePersistedMessage(item, message) || sameTextMessage(item, message),
+        );
+        if (duplicateIndex >= 0) {
+          const next = [...prev];
+          next[duplicateIndex] = message;
+          return next;
+        }
+        return [...prev, message];
+      });
+    },
+    onMessageUpdated: (message) => {
+      const keysToHide: string[] = [];
+      for (const [key, item] of streamingMessagesRef.current) {
+        if (shouldDropStreamForPersisted(item, message)) {
+          keysToHide.push(key);
+        }
+      }
+      keysToHide.forEach((key) => hiddenStreamKeysRef.current.add(key));
+      if (keysToHide.length) {
+        setStreamingMessages((prev) => {
+          const next = new Map(prev);
+          keysToHide.forEach((key) => {
+            clearQueuedStream(key);
+            next.delete(key);
+          });
+          return next;
+        });
+        setDisplayOrder((prev) =>
+          prev.filter((key) => !hiddenStreamKeysRef.current.has(key)),
+        );
+      }
+
+      if (!isActiveConversation(message.conversationId)) return;
+      updateMessages((prev) => {
+        const byIdIndex = prev.findIndex((item) => item.id === message.id);
+        if (byIdIndex >= 0) {
+          const next = [...prev];
+          next[byIdIndex] = message;
+          return next;
+        }
+
         const duplicateIndex = prev.findIndex((item) =>
           samePersistedMessage(item, message) || sameTextMessage(item, message),
         );

@@ -7,6 +7,7 @@ export type StreamAssistantHandlers = {
   onMessageEnd?: (message: Record<string, unknown>) => void;
   onMessageStop?: (message: Record<string, unknown>) => void;
   onMessageNew?: (message: ChatMessage) => void;
+  onMessageUpdated?: (message: ChatMessage) => void;
   onToolCallStart?: (payload: Record<string, unknown>) => void;
   onToolCallDone?: (payload: Record<string, unknown>) => void;
   onTaskStatusChanged?: (payload: Record<string, unknown>) => void;
