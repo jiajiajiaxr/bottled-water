@@ -176,6 +176,51 @@ class TestOrchestratorRun:
         assert archived[0]["decision"]["task_description"] == "实现登录接口"
 
     @pytest.mark.asyncio
+    async def test_parallel_agents_emit_reports_without_direct_message_persistence(
+        self, sample_agents, mock_provider, mock_persistence
+    ):
+        scheduler = SimpleScheduler(
+            [
+                SchedulingDecision(
+                    decision_type="parallel",
+                    target_agent_ids=["coder", "reviewer"],
+                    task_description="parallel hello",
+                ),
+                SchedulingDecision(decision_type="complete"),
+            ]
+        )
+        orch = Orchestrator(
+            session_id="sess_parallel",
+            agents=sample_agents,
+            scheduler=scheduler,
+            model_provider=mock_provider,
+            persistence=mock_persistence,
+        )
+        mock_provider.responses = [
+            ChatResponse(
+                content='coder done\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            ),
+            ChatResponse(
+                content='reviewer done\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            ),
+        ]
+
+        events = []
+        async for event in orch.run("hello"):
+            events.append(event)
+
+        completed = [event for event in events if event.type == "system.agent_completed"]
+        assert {event.payload["agent_id"] for event in completed} == {"coder", "reviewer"}
+        assert not [event for event in events if event.type == "system.agent_failed"]
+        assert mock_persistence.messages == []
+
+        bb = mock_persistence.blackboards["sess_parallel"]
+        work_items = [item for item in bb["raw_history"] if item.get("type") == "agent_work"]
+        assert {item["agent_id"] for item in work_items} == {"coder", "reviewer"}
+        assert "coder:sess_parallel" in mock_persistence.agent_contexts
+        assert "reviewer:sess_parallel" in mock_persistence.agent_contexts
+
+    @pytest.mark.asyncio
     async def test_agent_failure_is_reported_and_archived_to_blackboard(
         self, sample_agents, mock_provider, mock_persistence, monkeypatch
     ):

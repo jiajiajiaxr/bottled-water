@@ -11,7 +11,6 @@
 
 import asyncio
 from typing import Dict, List, Optional, AsyncIterator, Tuple
-from datetime import datetime
 
 from model_provider.core.interfaces import BaseModelProvider
 
@@ -22,7 +21,6 @@ from ..core.types import (
     AgentState,
     AgentWill,
     Event,
-    Message,
     SchedulingDecision,
 )
 from ..core.interfaces import PersistenceBackend, ToolExecutor
@@ -66,6 +64,7 @@ class Orchestrator:
         self._user_input_queue: asyncio.Queue[str] = asyncio.Queue()
         self._agent_loops: Dict[str, AgentLoop] = {}
         self._pending_agent_reports: Dict[str, AgentReport] = {}
+        self._persistence_lock = asyncio.Lock()
 
     async def run(self, user_message: str) -> AsyncIterator[Event]:
         """运行会话调度循环"""
@@ -422,8 +421,7 @@ class Orchestrator:
             self.watchdog.add_tokens(tokens_used)
 
             # 归档到 Blackboard
-            await self.blackboard_mgr.append_history(
-                self.session_id,
+            await self._append_blackboard_history(
                 {
                     "type": "agent_work",
                     "round": self.round_num,
@@ -435,28 +433,20 @@ class Orchestrator:
                         "confidence": status_report.confidence,
                         "rationale": status_report.rationale,
                     },
-                },
+                }
             )
 
             # 持久化助手消息到数据库
-            if self.persistence:
-                await self.persistence.save_message(
-                    Message(
-                        id=f"msg_{self.session_id}_agent_{agent_id}_{datetime.utcnow().timestamp()}",
-                        conversation_id=self.session_id,
-                        agent_id=agent_id,
-                        content=work_product,
-                        role="assistant",
-                        metadata={"sender_name": agent.name, "agent_name": agent.name},
-                    )
-                )
+            # Assistant chat messages are persisted by ConversationSessionManager
+            # from system.agent_completed. Do not write them here as well.
 
             # 持久化 Agent 上下文（保留记忆，不清空）
             if self.persistence:
                 archive = agent_ctx.archive()
-                await self.persistence.save_agent_context(
-                    agent_id, self.session_id, archive["frames"]
-                )
+                async with self._persistence_lock:
+                    await self.persistence.save_agent_context(
+                        agent_id, self.session_id, archive["frames"]
+                    )
 
             # 看门狗记录进展
             self.watchdog.record_progress(tokens_used)
@@ -663,7 +653,8 @@ class Orchestrator:
 
     async def _append_blackboard_history(self, entry: dict) -> None:
         try:
-            await self.blackboard_mgr.append_history(self.session_id, entry)
+            async with self._persistence_lock:
+                await self.blackboard_mgr.append_history(self.session_id, entry)
         except Exception:
             logger.warning(
                 "Blackboard runtime history archive failed",
