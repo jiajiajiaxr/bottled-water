@@ -160,11 +160,13 @@ class SchedulerAgent(AgentActor):
                         "agent_count": len(self.agents),
                     },
                 )
-                decision = self._normalize_decision(decision)
         except Exception as exc:
             logger.warning("SchedulerAgent fallback after decision failure", error=str(exc))
             decision = self._fallback_decision(reports)
             decision.fallback_reason = str(exc)[:500]
+
+        decision = self._normalize_decision(decision)
+        decision = self._repair_decision(decision, reports)
 
         await self._archive_decision(decision)
         await self.event_bus.publish(
@@ -280,7 +282,7 @@ class SchedulerAgent(AgentActor):
         )
 
     def _greeting_decision(self, reports: list[AgentReport]) -> SchedulingDecision | None:
-        if not _is_simple_greeting(self.current_task):
+        if not _is_simple_greeting_utf8(self.current_task):
             return None
         target = self._chat_agent_id() or _first_ready_agent_id(reports, self.scheduler_id)
         if not target:
@@ -340,6 +342,150 @@ class SchedulerAgent(AgentActor):
             decision.expected_outputs = ["Agent 可见成果", "Blackboard 运行记录"]
         return decision
 
+    def _repair_decision(
+        self,
+        decision: SchedulingDecision,
+        reports: list[AgentReport],
+    ) -> SchedulingDecision:
+        """Repair unsafe scheduler output with deterministic runtime guardrails."""
+        if self._mention_target_ids:
+            return decision
+
+        decision_text = "\n".join(
+            item
+            for item in (
+                self.current_task,
+                decision.task,
+                decision.task_description,
+                decision.rationale,
+                " ".join(decision.expected_outputs or []),
+            )
+            if item
+        )
+        named_targets = self._agent_ids_mentioned_in(decision_text)
+        is_multi_agent_task = self._looks_like_multi_agent_task(decision_text)
+
+        if decision.decision_type in {"assign", "parallel"}:
+            targets = self._valid_target_ids(decision.target_agent_ids)
+            if decision.target_agent_id:
+                targets.insert(0, decision.target_agent_id)
+            targets = self._valid_target_ids(targets)
+
+            if named_targets and (is_multi_agent_task or len(named_targets) > len(targets)):
+                targets = named_targets
+            elif is_multi_agent_task and not targets:
+                targets = self._ready_or_idle_agent_ids(reports) or self._schedulable_agent_ids()
+
+            if len(targets) > 1:
+                decision.decision_type = "parallel"
+                decision.action = "assign"
+                decision.target_agent_id = targets[0]
+                decision.target_agent_ids = targets
+                decision.rationale = _append_reason(
+                    decision.rationale,
+                    "Detected a multi-agent task; dispatching matching group members in parallel.",
+                )
+            elif targets:
+                decision.target_agent_id = targets[0]
+                decision.target_agent_ids = targets
+            return decision
+
+        if decision.decision_type == "complete" and is_multi_agent_task:
+            required_targets = named_targets or self._schedulable_agent_ids()
+            terminal_states = {AgentState.COMPLETED, AgentState.FAILED}
+            pending = [
+                agent_id
+                for agent_id in required_targets
+                if self.reports.get(
+                    agent_id,
+                    AgentReport(agent_id=agent_id, state=AgentState.READY, will=AgentWill.EXECUTE),
+                ).state
+                not in terminal_states
+            ]
+            if pending:
+                return SchedulingDecision(
+                    decision_type="parallel" if len(pending) > 1 else "assign",
+                    action="assign",
+                    target_agent_id=pending[0],
+                    target_agent_ids=pending,
+                    task=self.current_task,
+                    task_description=self.current_task,
+                    rationale=(
+                        "The scheduler tried to complete, but this is a multi-agent task and "
+                        "some requested members have not produced reports yet."
+                    ),
+                    expected_outputs=[
+                        "Each assigned Agent should produce a visible contribution.",
+                        "Reports are written back to the Blackboard before completion.",
+                    ],
+                    fallback_reason="complete_guard_pending_agents",
+                )
+        return decision
+
+    def _valid_target_ids(self, ids: list[str] | tuple[str, ...] | None) -> list[str]:
+        return [
+            agent_id
+            for agent_id in dict.fromkeys(str(item) for item in (ids or []) if item)
+            if agent_id in self.agents and agent_id != self.scheduler_id
+        ]
+
+    def _schedulable_agent_ids(self) -> list[str]:
+        return [
+            agent_id
+            for agent_id, config in self.agents.items()
+            if agent_id != self.scheduler_id and config.role != "leader"
+        ]
+
+    def _ready_or_idle_agent_ids(self, reports: list[AgentReport]) -> list[str]:
+        return [
+            report.agent_id
+            for report in reports
+            if report.agent_id in self.agents
+            and report.agent_id != self.scheduler_id
+            and report.state in {AgentState.READY, AgentState.IDLE, AgentState.UNKNOWN}
+        ]
+
+    def _agent_ids_mentioned_in(self, text: str) -> list[str]:
+        lowered = (text or "").lower()
+        matched: list[str] = []
+        for agent_id, config in self.agents.items():
+            if agent_id == self.scheduler_id or config.role == "leader":
+                continue
+            name = (config.name or "").lower()
+            role = (config.role or "").lower()
+            tokens = {name, role, agent_id.lower()}
+            tokens.update(part.strip().lower() for part in name.replace("-", " ").split())
+            if any(token and token in lowered for token in tokens):
+                matched.append(agent_id)
+        return self._valid_target_ids(matched)
+
+    def _looks_like_multi_agent_task(self, text: str) -> bool:
+        normalized = (text or "").lower()
+        if _is_simple_greeting_utf8(normalized):
+            return False
+        keywords = (
+            "多agent",
+            "多 agent",
+            "协作",
+            "协同",
+            "分工",
+            "各自角色",
+            "各自",
+            "分别",
+            "并行",
+            "frontend",
+            "backend",
+            "deploy",
+            "reviewer",
+            "前端",
+            "后端",
+            "部署",
+            "审查",
+            "验收",
+            "测试方案",
+        )
+        return any(keyword in normalized for keyword in keywords)
+
     def _initial_reports(self) -> dict[str, AgentReport]:
         return {
             agent_id: AgentReport(agent_id=agent_id, state=AgentState.READY, will=AgentWill.EXECUTE)
@@ -384,6 +530,35 @@ def _is_simple_greeting(text: str) -> bool:
         "晚上好",
     }
     return compact in greetings or compact.rstrip("呀啊哈") in greetings
+
+
+def _is_simple_greeting_utf8(text: str) -> bool:
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return False
+    compact = "".join(
+        char for char in normalized if char.isalnum() or "\u4e00" <= char <= "\u9fff"
+    )
+    greetings = {
+        "hi",
+        "hello",
+        "hey",
+        "你好",
+        "你们好",
+        "大家好",
+        "早上好",
+        "下午好",
+        "晚上好",
+    }
+    return compact in greetings or compact.rstrip("呀啊哈呢哦") in greetings
+
+
+def _append_reason(base: str, extra: str) -> str:
+    if not base:
+        return extra
+    if extra in base:
+        return base
+    return f"{base} {extra}"
 
 
 def _first_ready_agent_id(reports: list[AgentReport], scheduler_id: str) -> str | None:

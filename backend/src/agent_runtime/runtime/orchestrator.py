@@ -10,7 +10,7 @@
 """
 
 import asyncio
-from typing import Dict, List, Optional, AsyncIterator, Tuple
+from typing import Any, Dict, List, Optional, AsyncIterator, Tuple
 
 from model_provider.core.interfaces import BaseModelProvider
 
@@ -360,7 +360,12 @@ class Orchestrator:
     ) -> Tuple[bool, List[Event]]:
         """执行指派决策：让目标 Agent 执行任务"""
         events: List[Event] = []
-        agent_id = decision.target_agent_id
+        target_ids = self._decision_target_ids(decision.target_agent_id)
+        if len(target_ids) > 1:
+            decision.target_agent_ids = target_ids
+            decision.decision_type = "parallel"
+            return await self._execute_parallel(decision, current_task, blackboard_view)
+        agent_id = target_ids[0] if target_ids else None
         if not agent_id or agent_id not in self.agents:
             logger.error("指派目标无效", session_id=self.session_id, target=agent_id)
             return True, events
@@ -521,9 +526,11 @@ class Orchestrator:
     ) -> Tuple[bool, List[Event]]:
         """执行并行决策：多个 Agent 并发执行任务"""
         events: List[Event] = []
-        agent_ids = decision.target_agent_ids or decision.verification_agents or []
-        if not agent_ids and decision.target_agent_id:
-            agent_ids = [decision.target_agent_id]
+        agent_ids = self._decision_target_ids(
+            decision.target_agent_ids,
+            decision.verification_agents,
+            decision.target_agent_id,
+        )
 
         if not agent_ids:
             return True, events
@@ -580,9 +587,38 @@ class Orchestrator:
                 )
                 continue
             _cont, evs = result
-            events.extend(evs)
+            events.extend(self._compact_parallel_events(evs))
 
         return True, events
+
+    def _decision_target_ids(self, *values: Any) -> list[str]:
+        """Flatten scheduler target fields into valid unique Agent IDs."""
+        flattened: list[str] = []
+
+        def collect(value: Any) -> None:
+            if value is None:
+                return
+            if isinstance(value, (list, tuple, set)):
+                for item in value:
+                    collect(item)
+                return
+            agent_id = str(value)
+            if agent_id in self.agents:
+                flattened.append(agent_id)
+
+        for value in values:
+            collect(value)
+        return list(dict.fromkeys(flattened))
+
+    def _compact_parallel_events(self, events: list[Event]) -> list[Event]:
+        """Keep structural events when replaying finished parallel branches.
+
+        The legacy parallel executor gathers branch events and replays them after
+        all branches finish. Replaying every token delta at that point is no longer
+        real streaming and can block generation finalization for large outputs.
+        """
+        noisy_types = {"agent.token", "agent.delta", "content_block_delta"}
+        return [event for event in events if event.type not in noisy_types]
 
     def _collect_reports(self) -> List[AgentReport]:
         """收集各 Agent 的状态报告"""
