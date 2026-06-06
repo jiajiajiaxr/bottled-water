@@ -18,7 +18,11 @@ export type StreamAssistantHandlers = {
     token: string,
     payload?: Record<string, unknown>,
   ) => void;
-  onThinking?: (agentId: string, thinking: string) => void;
+  onThinking?: (
+    agentId: string,
+    thinking: string,
+    payload?: Record<string, unknown>,
+  ) => void;
   onRuntimeEvent?: (event: string, payload: Record<string, unknown>) => void;
 };
 

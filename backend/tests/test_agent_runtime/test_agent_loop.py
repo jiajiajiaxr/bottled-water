@@ -146,7 +146,7 @@ class TestAgentLoopBasic:
 
         assert [call["tool_name"] for call in mock_tool_executor.calls] == ["artifact.create_docx"]
         assert len(result["tool_events"]) == 1
-        assert mock_provider.call_count == 1
+        assert mock_provider.call_count == 2
         assert "Word" in result["work_product"]
 
     @pytest.mark.asyncio

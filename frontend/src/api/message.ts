@@ -241,7 +241,7 @@ function dispatchStreamEvent(
       const pt = data as Record<string, unknown>;
       const agentId = String(pt.agent_id || "");
       const thinking = String(pt.thinking || "");
-      if (agentId && thinking) handlers.onThinking?.(agentId, thinking);
+      if (agentId && thinking) handlers.onThinking?.(agentId, thinking, pt);
       break;
     }
     case "agent.token": {

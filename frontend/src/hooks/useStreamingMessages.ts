@@ -568,6 +568,14 @@ export function useStreamingMessages(conversationId?: string) {
   const appendThinking = (payload: Record<string, unknown>, thinking: string) => {
     const key = scopedStreamKey(conversationId, payload);
     if (!key) return;
+    const targetConversationId = conversationOf(conversationId, payload);
+    const conversationStore = useConversationStore.getState();
+    if (
+      conversationStore.thinkingEnabled.has(targetConversationId) &&
+      !conversationStore.getThinkingEnabled(targetConversationId)
+    ) {
+      return;
+    }
     if (!streamingMessagesRef.current.has(key)) {
       hiddenStreamKeysRef.current.delete(key);
     }
@@ -721,7 +729,8 @@ export function useStreamingMessages(conversationId?: string) {
       if (streamKey(payload) && delta) appendThinking(payload, delta);
     },
 
-    onThinking: (agentId, thinking) => appendThinking({ agent_id: agentId }, thinking),
+    onThinking: (agentId, thinking, payload) =>
+      appendThinking({ ...(payload || {}), agent_id: agentId }, thinking),
 
     onDone: (payload) => {
       const targetConversationId = conversationOf(conversationId, payload);

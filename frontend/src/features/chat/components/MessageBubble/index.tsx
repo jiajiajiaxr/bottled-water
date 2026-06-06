@@ -359,6 +359,7 @@ function MessageBubbleComponent({
 export const MessageBubble = React.memo(
   MessageBubbleComponent,
   (prev, next) =>
+    prev.message === next.message &&
     prev.version === next.version && prev.workspaceId === next.workspaceId,
 );
 

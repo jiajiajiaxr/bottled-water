@@ -213,6 +213,15 @@ async def test_unbound_capabilities_are_rejected_without_running_them() -> None:
     target_skill = skill(db, user)
     server = mcp_server(db, user)
     actor = agent(db, user, "No Permission Agent")
+    actor.config = {
+        **(actor.config or {}),
+        "capability_permissions_initialized": True,
+        "tools": [],
+        "skill_ids": [],
+        "mcp_server_ids": [],
+    }
+    db.add(actor)
+    db.commit()
     names = ["api.test", f"skill.{target_skill.id}", f"mcp.{server.id}.echo.lookup"]
 
     async def fake_stream(messages: list[dict[str, Any]], **_kwargs: Any) -> Any:

@@ -295,6 +295,7 @@ class AgentLoop:
         tool_round = 0
         forced_artifact_tool_name: str | None = None
         executed_artifact_tools: set[str] = set()
+        stream_message_id = f"stream-{self.agent.id}-{uuid.uuid4().hex[:12]}"
 
         while tool_round < self.MAX_TOOL_ROUNDS:
             tool_round += 1
@@ -306,6 +307,7 @@ class AgentLoop:
                         system_prompt=system_prompt,
                         tools=tools if tools else None,
                         _emit=_emit,
+                        stream_message_id=stream_message_id,
                     )
                 else:
                     response = await self.model.chat(
@@ -375,6 +377,8 @@ class AgentLoop:
 
                 break
 
+            tool_calls = self._normalize_tool_calls(tool_calls)
+
             # 处理工具调用
             logger.info(
                 "Agent 工具调用",
@@ -386,6 +390,7 @@ class AgentLoop:
                 "agent.tool_call",
                 {
                     "agent_id": self.agent.id,
+                    "agent_message_id": stream_message_id,
                     "tool_count": len(tool_calls),
                     "tools": [tc.get("function", {}).get("name", "unknown") for tc in tool_calls],
                 },
@@ -468,6 +473,7 @@ class AgentLoop:
                     "agent.tool_result",
                     {
                         "agent_id": self.agent.id,
+                        "agent_message_id": stream_message_id,
                         "tool": tool_name,
                         "success": result.success if isinstance(result, ToolResult) else True,
                         "result": result.result if isinstance(result, ToolResult) else result,
@@ -493,16 +499,12 @@ class AgentLoop:
             )
 
             if self._artifact_tool_succeeded(tool_results):
-                artifact_tool_name = self._artifact_tool_name(tool_results) or forced_artifact_tool_name
-                content = self._artifact_completion_message(artifact_tool_name)
-                messages.append(ChatMessage(role="assistant", content=content))
                 logger.info(
-                    "Agent completed after artifact tool success",
+                    "Agent artifact tool succeeded; requesting final answer from model",
                     agent_id=self.agent.id,
-                    tool=artifact_tool_name,
+                    tool=self._artifact_tool_name(tool_results) or forced_artifact_tool_name,
                     round=tool_round,
                 )
-                break
 
         # 如果达到工具调用上限
         if tool_round >= self.MAX_TOOL_ROUNDS:
@@ -604,6 +606,20 @@ class AgentLoop:
             for tool_call in tool_calls
             if str(tool_call.get("function", {}).get("name") or "") not in executed_artifact_tools
         ]
+
+    @staticmethod
+    def _normalize_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        for index, tool_call in enumerate(tool_calls):
+            item = dict(tool_call or {})
+            item.setdefault("type", "function")
+            function_info = dict(item.get("function") or {})
+            item["function"] = function_info
+            if not item.get("id"):
+                tool_name = str(function_info.get("name") or "tool").replace(".", "_")
+                item["id"] = f"call_{tool_name}_{index}_{uuid.uuid4().hex[:8]}"
+            normalized.append(item)
+        return normalized
 
     @staticmethod
     def _looks_like_artifact_argument_fragment(content: str) -> bool:
@@ -784,10 +800,26 @@ class AgentLoop:
         system_prompt: Optional[str],
         tools: Optional[List[Dict]],
         _emit,
+        stream_message_id: str,
     ) -> ChatResponse:
         """流式对话，emit agent.token 事件，组装成 ChatResponse"""
         content_parts: List[str] = []
         token_filter = _StatusReportStreamFilter()
+        stream_started = False
+
+        async def ensure_stream_started() -> None:
+            nonlocal stream_started
+            if stream_started:
+                return
+            stream_started = True
+            await _emit(
+                "message_start",
+                {
+                    "agent_id": self.agent.id,
+                    "agent_name": self.agent.name,
+                    "agent_message_id": stream_message_id,
+                },
+            )
         # tool_calls 在流式中可能分散在多个 chunk，需要积累
         tool_calls_acc: Dict[int, Dict[str, Any]] = {}
 
@@ -803,22 +835,26 @@ class AgentLoop:
                 content_parts.append(chunk.content)
                 visible_delta = token_filter.push(chunk.content)
                 if visible_delta:
+                    await ensure_stream_started()
                     await _emit(
                         "agent.token",
                         {
                             "agent_id": self.agent.id,
                             "agent_name": self.agent.name,
+                            "agent_message_id": stream_message_id,
                             "token": visible_delta,
                         },
                     )
 
             # 1.5 思考过程
             if chunk.reasoning:
+                await ensure_stream_started()
                 await _emit(
                     "agent.thinking",
                     {
                         "agent_id": self.agent.id,
                         "agent_name": self.agent.name,
+                        "agent_message_id": stream_message_id,
                         "thinking": chunk.reasoning,
                     },
                 )
@@ -847,6 +883,15 @@ class AgentLoop:
         final_tool_calls = (
             [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())] if tool_calls_acc else None
         )
+        if stream_started:
+            await _emit(
+                "message_stop",
+                {
+                    "agent_id": self.agent.id,
+                    "agent_name": self.agent.name,
+                    "agent_message_id": stream_message_id,
+                },
+            )
 
         return ChatResponse(
             content=full_content,
@@ -858,7 +903,12 @@ class AgentLoop:
         # 构建 Blackboard 视图文本
         bb_text = self._format_blackboard(blackboard_view)
 
-        return f"""你的当前任务：
+        return f"""你是当前 Agent：{self.agent.name}
+角色：{self.agent.role}
+
+请只代表你自己发言，不要冒充其他 Agent。若任务需要协作，只描述你负责的部分和可交付成果。
+
+你的当前任务：
 {task}
 
 全局上下文（只读）：

@@ -103,6 +103,17 @@ async def _save_user_message(
             )
         )
         if file_asset:
+            if file_asset.conversation_id and file_asset.conversation_id != conversation.id:
+                logger.warning(
+                    "拒绝跨会话附件引用",
+                    file_id=file_asset.id,
+                    source_conversation_id=file_asset.conversation_id,
+                    target_conversation_id=conversation.id,
+                    user_id=user.id,
+                )
+                continue
+            if not file_asset.conversation_id:
+                file_asset.conversation_id = conversation.id
             normalized_attachments.append(
                 {
                     "file_id": file_asset.id,

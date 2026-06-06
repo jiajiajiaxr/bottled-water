@@ -32,5 +32,5 @@ export async function previewFile(
   contentType: string;
   filename?: string;
 }> {
-  return await get(`/files/${fileId}/download`);
+  return await get(`/files/${fileId}/preview`);
 }

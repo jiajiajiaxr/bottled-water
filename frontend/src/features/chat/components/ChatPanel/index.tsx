@@ -120,12 +120,15 @@ export function ChatPanel({
     [modelConfigs],
   );
 
-  const submit = () => {
-    const value =
+  const submit = async () => {
+    let value =
       text.trim() || (pendingFiles.length ? "请结合上传附件继续处理。" : "");
+    if (!text.trim() && pendingFiles.length) {
+      value = "请结合上传附件继续处理。";
+    }
     if (!value || !active) return;
     setAwaitingResponse(true);
-    send(value, quoted, pendingFiles, thinkingEnabled, runtimeModelConfigId);
+    await send(value, quoted, pendingFiles, thinkingEnabled, runtimeModelConfigId);
     setText("");
     setQuoted(undefined);
     setPendingFiles([]);
@@ -177,7 +180,31 @@ export function ChatPanel({
   const messageListRef = useRef<HTMLDivElement>(null);
   const isAtBottom = useRef(true);
 
-  const uploadProps: UploadProps = {};
+  const uploadProps: UploadProps = {
+    multiple: true,
+    showUploadList: false,
+    beforeUpload: async (file) => {
+      if (!active?.id) {
+        message.warning("请先选择一个会话");
+        return Upload.LIST_IGNORE;
+      }
+      try {
+        const uploaded = await api.uploadFile(file, active.id);
+        setPendingFiles((current) => {
+          if (current.some((item) => item.id === uploaded.id)) return current;
+          return [...current, uploaded];
+        });
+        message.success(`${uploaded.original_filename || file.name} 已加入输入框`);
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : "文件上传失败");
+      }
+      return Upload.LIST_IGNORE;
+    },
+  };
+
+  useEffect(() => {
+    setPendingFiles([]);
+  }, [active?.id]);
 
   useEffect(() => {
     const el = messageListRef.current;

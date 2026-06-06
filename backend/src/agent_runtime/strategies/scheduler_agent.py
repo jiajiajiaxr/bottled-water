@@ -464,6 +464,7 @@ class SchedulerAgent(AgentActor):
         if _is_simple_greeting_utf8(normalized):
             return False
         keywords = (
+            "多智能体",
             "多agent",
             "多 agent",
             "协作",
@@ -478,6 +479,9 @@ class SchedulerAgent(AgentActor):
             "deploy",
             "reviewer",
             "前端",
+            "网页",
+            "页面",
+            "html",
             "后端",
             "部署",
             "审查",

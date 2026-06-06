@@ -64,6 +64,7 @@ class TechLeadScheduler(Scheduler):
 {{
   "decision_type": "assign|parallel|wait|escalate|user_input|complete",
   "target_agent_id": "xxx",
+  "target_agent_ids": ["xxx"],
   "task_description": "...",
   "rationale": "...",
   "requires_verification": true|false,
@@ -150,6 +151,7 @@ Agent 数量：{conversation_context.get("agent_count", 0)}
         return SchedulingDecision(
             decision_type=decision_data.get("decision_type", "wait"),
             target_agent_id=decision_data.get("target_agent_id"),
+            target_agent_ids=decision_data.get("target_agent_ids", []),
             task_description=decision_data.get("task_description", ""),
             rationale=decision_data.get("rationale", ""),
             requires_verification=decision_data.get("requires_verification", False),

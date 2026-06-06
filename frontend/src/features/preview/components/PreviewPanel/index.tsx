@@ -84,8 +84,14 @@ export function PreviewPanel({
   const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
-    setDraft(artifact?.code ?? "");
-  }, [artifact?.id, artifact?.code]);
+    const previewHtml =
+      artifact?.content?.preview_html ||
+      artifact?.content?.files?.["preview.html"] ||
+      artifact?.content?.files?.["index.html"] ||
+      artifact?.code ||
+      "";
+    setDraft(previewHtml);
+  }, [artifact?.id, artifact?.code, artifact?.content]);
 
   useEffect(() => {
     if (!artifact) return;
