@@ -16,13 +16,63 @@ export function filterNodes(
         node.path.toLowerCase().includes(normalized) ||
         (node.display_path ?? "").toLowerCase().includes(normalized);
       if (node.type === "directory") {
-        return children.length || (!normalized && source === "all")
+        return children.length || (sourceMatched && textMatched)
           ? { ...node, children }
           : undefined;
       }
       return sourceMatched && textMatched ? node : undefined;
     })
     .filter(Boolean) as WorkspaceFileNode[];
+}
+
+export function insertDirectoryNode(
+  nodes: WorkspaceFileNode[],
+  directory: WorkspaceFileNode,
+): WorkspaceFileNode[] {
+  const parts = directory.path.split("/").filter(Boolean);
+  if (!parts.length) return nodes;
+
+  const cloneNode = (node: WorkspaceFileNode): WorkspaceFileNode => ({
+    ...node,
+    children: (node.children ?? []).map(cloneNode),
+  });
+
+  const next = nodes.map(cloneNode);
+  let level = next;
+  let currentPath = "";
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    currentPath = currentPath ? `${currentPath}/${part}` : part;
+    let found = level.find((item) => item.path === currentPath && item.type === "directory");
+
+    if (!found) {
+      found =
+        index === parts.length - 1
+          ? {
+              ...directory,
+              children: directory.children ?? [],
+            }
+          : {
+              id: `dir:${encodeURIComponent(currentPath)}`,
+              name: part,
+              display_name: part,
+              type: "directory",
+              path: currentPath,
+              source: currentPath.split("/")[0] || directory.source || "workspace",
+              children: [],
+            };
+      level.push(found);
+    } else if (index === parts.length - 1) {
+      found.name = directory.name;
+      found.display_name = directory.display_name ?? directory.name;
+      found.source = directory.source || found.source;
+    }
+
+    level = found.children ?? (found.children = []);
+  }
+
+  return next;
 }
 
 export function walk(nodes: WorkspaceFileNode[], visit: (node: WorkspaceFileNode) => void) {

@@ -12,7 +12,7 @@ import { WorkspaceFileToolbar } from "./WorkspaceFileToolbar";
 import { WorkspaceFileMap } from "./WorkspaceFileMap";
 import type { PreviewState } from "./WorkspaceFilePreviewView";
 import { WorkspaceFilePreviewView } from "./WorkspaceFilePreviewView";
-import { filterNodes, sourceLabel, walk } from "./workspaceFileUtils";
+import { filterNodes, insertDirectoryNode, sourceLabel, walk } from "./workspaceFileUtils";
 
 type Props = {
   workspaceId?: string;
@@ -288,7 +288,34 @@ export function WorkspaceFilesContent({
       ),
       okText: "创建",
       onOk: async () => {
-        await api.createWorkspaceFolder(workspaceId, parent, name);
+        const created = await api.createWorkspaceFolder(workspaceId, parent, name);
+        const path = String(created.path || "").trim();
+        if (path) {
+          const node: WorkspaceFileNode = {
+            id: `dir:${encodeURIComponent(path)}`,
+            name: created.name || name,
+            display_name: created.display_name || created.name || name,
+            type: "directory",
+            path,
+            source: path.split("/")[0] || "workspace",
+            children: [],
+          };
+          setNodes((current) => insertDirectoryNode(current, node));
+          const expanded = path
+            .split("/")
+            .filter(Boolean)
+            .reduce<string[]>((items, part) => {
+              const previous = items.at(-1);
+              items.push(previous ? `${previous}/${part}` : part);
+              return items;
+            }, [])
+            .map((item) => `dir:${encodeURIComponent(item)}`);
+          setExpandedKeys((current) => {
+            const nextKeys = [...new Set([...current, ...expanded])];
+            window.localStorage.setItem(expandedStorageKey(workspaceId), JSON.stringify(nextKeys));
+            return nextKeys;
+          });
+        }
         message.success("文件夹已创建");
         await load();
       },
