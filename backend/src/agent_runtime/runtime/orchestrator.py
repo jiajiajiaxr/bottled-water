@@ -531,7 +531,7 @@ class Orchestrator:
     ) -> Tuple[bool, List[Event]]:
         """执行并行决策：多个 Agent 并发执行任务"""
         events: List[Event] = []
-        agent_ids = decision.verification_agents or []
+        agent_ids = decision.target_agent_ids or decision.verification_agents or []
         if not agent_ids and decision.target_agent_id:
             agent_ids = [decision.target_agent_id]
 

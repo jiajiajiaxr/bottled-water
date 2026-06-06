@@ -37,6 +37,7 @@ class WorkflowScheduler(Scheduler):
         self._state: WorkflowState = WorkflowState()
         self._last_decision_node_id: str | None = None
         self._last_decision_type: str = ""
+        self._last_parallel_node_ids: list[str] = []
 
     def reset(self) -> None:
         """重置 Workflow 遍历状态，支持 Session 复用。"""
@@ -44,6 +45,7 @@ class WorkflowScheduler(Scheduler):
         self._state = WorkflowState()
         self._last_decision_node_id = None
         self._last_decision_type = ""
+        self._last_parallel_node_ids = []
         if self._graph:
             start_node = self._graph.find_start_node()
             self._state.start(start_node)
@@ -89,6 +91,22 @@ class WorkflowScheduler(Scheduler):
             self._state.prompt = conversation_context["current_task"]
 
         while True:
+            if self._last_parallel_node_ids:
+                join_node_id = self._parallel_join_node()
+                for node_id in self._last_parallel_node_ids:
+                    node = self._graph.get_node(node_id) if self._graph else None
+                    node_type = workflow_node_type(node)
+                    self._state.get_or_create_node_state(node_id, node_type).mark_completed()
+                    self._state.visited_nodes.add(node_id)
+                self._last_parallel_node_ids = []
+                self._state.current_node_id = join_node_id
+                if not self._state.current_node_id:
+                    self._state.complete()
+                    return SchedulingDecision(
+                        decision_type="complete", rationale="workflow 并行节点执行完毕"
+                    )
+                continue
+
             # ---- 1. 检查是否需要推进（上一节点已执行完成） ----
             current_node_id = self._state.current_node_id
             if (
@@ -131,6 +149,10 @@ class WorkflowScheduler(Scheduler):
                 self._state.get_or_create_node_state(
                     current_node_id, node_type
                 ).mark_completed()
+
+                parallel_decision = self._build_parallel_decision_from_successors(current_node_id)
+                if parallel_decision:
+                    return parallel_decision
 
                 next_id = self._graph.next_node(
                     current_node_id,
@@ -315,6 +337,70 @@ class WorkflowScheduler(Scheduler):
             task_description=task_desc,
             rationale=rationale,
         )
+
+    def _build_parallel_decision_from_successors(
+        self,
+        node_id: str,
+    ) -> SchedulingDecision | None:
+        if not self._graph:
+            return None
+        successors = [
+            succ_id
+            for succ_id in self._graph.get_successors(node_id)
+            if succ_id not in self._state.visited_nodes
+        ]
+        if len(successors) < 2:
+            return None
+
+        target_agent_ids: list[str] = []
+        executable_node_ids: list[str] = []
+        for succ_id in successors:
+            node = self._graph.get_node(succ_id)
+            node_type = workflow_node_type(node)
+            if is_control_node(node_type):
+                continue
+            agent_id = node_agent_id(node) if node else None
+            if not agent_id or agent_id not in self.agents:
+                continue
+            self._state.record_visit(succ_id)
+            self._state.get_or_create_node_state(succ_id, node_type).mark_started()
+            executable_node_ids.append(succ_id)
+            target_agent_ids.append(agent_id)
+
+        target_agent_ids = list(dict.fromkeys(target_agent_ids))
+        if len(target_agent_ids) < 2:
+            return None
+
+        self._last_parallel_node_ids = executable_node_ids
+        self._last_decision_node_id = None
+        self._last_decision_type = "parallel"
+        self._state.current_node_id = None
+        return SchedulingDecision(
+            decision_type="parallel",
+            target_agent_id=target_agent_ids[0],
+            target_agent_ids=target_agent_ids,
+            verification_agents=target_agent_ids,
+            task_description=self._state.prompt,
+            task=self._state.prompt,
+            rationale="workflow 并行分支：同时调度多个 Agent 节点",
+            action="assign",
+            expected_outputs=["各 Agent 独立回复"],
+        )
+
+    def _parallel_join_node(self) -> str | None:
+        if not self._graph or not self._last_parallel_node_ids:
+            return None
+        common: set[str] | None = None
+        for node_id in self._last_parallel_node_ids:
+            successors = set(self._graph.get_successors(node_id))
+            common = successors if common is None else common & successors
+        if not common:
+            return None
+        for node_id in common:
+            node = self._graph.get_node(node_id)
+            if workflow_node_type(node) == "end":
+                return node_id
+        return next(iter(common), None)
 
     # ------------------------------------------------------------------
     # 重排

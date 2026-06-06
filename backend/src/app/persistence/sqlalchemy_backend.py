@@ -86,16 +86,32 @@ class SQLAlchemyBackend(PersistenceBackend):
             select(Conversation).where(Conversation.id == conversation_id)
         )
         conv = result.scalar_one_or_none()
+        default = {
+            "id": f"bb_{conversation_id}",
+            "conversation_id": conversation_id,
+            "raw_history": [],
+            "structured_summaries": [],
+            "kv_state": {},
+            "version": 0,
+        }
         if not conv or not conv.extra:
-            return {"raw_history": [], "structured_summaries": [], "kv_state": {}, "version": 0}
+            return default
 
         bb = conv.extra.get("blackboard", {})
-        return {
-            "raw_history": bb.get("raw_history", []),
-            "structured_summaries": bb.get("structured_summaries", []),
-            "kv_state": bb.get("kv_state", {}),
-            "version": bb.get("version", 0),
-        }
+        if isinstance(bb, dict):
+            default.update(
+                {
+                    "id": bb.get("id") or default["id"],
+                    "conversation_id": bb.get("conversation_id") or conversation_id,
+                    "raw_history": bb.get("raw_history", []),
+                    "structured_summaries": bb.get("structured_summaries", []),
+                    "kv_state": bb.get("kv_state", {}),
+                    "version": bb.get("version", 0),
+                    "created_at": bb.get("created_at"),
+                    "updated_at": bb.get("updated_at"),
+                }
+            )
+        return default
 
     async def save_blackboard(self, conversation_id: str, data: dict) -> None:
         """保存 Blackboard（写入 conversation.extra）"""

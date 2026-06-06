@@ -196,10 +196,57 @@ class TestBlackboardManager:
                 context = await backend.load_agent_context("agent-frontend", conversation_id)
 
             assert blackboard["version"] == 3
+            assert blackboard["conversation_id"] == conversation_id
+            assert blackboard["id"] == f"bb_{conversation_id}"
             assert blackboard["raw_history"][0]["content"] == "build dashboard"
             assert blackboard["kv_state"]["last_topic"] == "dashboard"
             assert blackboard["structured_summaries"][0]["title"] == "Round 1"
             assert context == [{"type": "task", "content": "Implement UI"}]
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_blackboard_manager_normalizes_legacy_persisted_payload(self, tmp_path):
+        db_url = f"sqlite+aiosqlite:///{(tmp_path / 'legacy_blackboard.db').as_posix()}"
+        engine = create_async_engine(db_url, future=True)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                user = User(
+                    id="legacy-bb-user",
+                    email="legacy-bb@example.com",
+                    username="legacy-bb",
+                    password_hash="x",
+                    display_name="Legacy BB",
+                )
+                conversation = Conversation(
+                    id="legacy-bb-conv",
+                    creator_id=user.id,
+                    chat_type="group",
+                    title="legacy blackboard",
+                    extra={
+                        "blackboard": {
+                            "raw_history": [{"type": "seed", "content": "old payload"}],
+                            "structured_summaries": [],
+                            "kv_state": {},
+                            "version": 7,
+                        }
+                    },
+                )
+                session.add_all([user, conversation])
+                await session.commit()
+
+                manager = BlackboardManager(persistence=SQLAlchemyBackend(session))
+                await manager.append_history("legacy-bb-conv", {"type": "user_message", "content": "hello"})
+                blackboard = await manager.get("legacy-bb-conv")
+
+            assert blackboard["conversation_id"] == "legacy-bb-conv"
+            assert blackboard["id"] == "bb_legacy-bb-conv"
+            assert blackboard["version"] == 8
+            assert blackboard["raw_history"][-1]["content"] == "hello"
         finally:
             await engine.dispose()
 

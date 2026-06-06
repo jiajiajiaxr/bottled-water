@@ -50,13 +50,14 @@ class BlackboardManager:
     async def get(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """获取 Blackboard（优先缓存，其次持久化）"""
         if conversation_id in self._cache:
-            return self._cache[conversation_id]
+            return self._normalize(conversation_id, self._cache[conversation_id])
         if self._persistence:
             try:
                 bb = await self._persistence.load_blackboard(conversation_id)
-                if bb and bb.get("raw_history"):
-                    self._cache[conversation_id] = bb
-                    return bb
+                if bb:
+                    normalized = self._normalize(conversation_id, bb)
+                    self._cache[conversation_id] = normalized
+                    return normalized
             except Exception:
                 logger.warning("Blackboard 加载失败", conversation_id=conversation_id, exc_info=True)
         return None
@@ -164,6 +165,7 @@ class BlackboardManager:
 
     async def _persist(self, blackboard: Dict[str, Any]):
         """持久化到存储 + 更新缓存"""
+        blackboard = self._normalize(str(blackboard.get("conversation_id") or ""), blackboard)
         self._cache[blackboard["conversation_id"]] = blackboard
         if self._persistence:
             try:
@@ -187,3 +189,31 @@ class BlackboardManager:
                     channel="internal",
                 )
             )
+
+    @staticmethod
+    def _normalize(conversation_id: str, blackboard: Dict[str, Any] | None) -> Dict[str, Any]:
+        """Normalize persisted/legacy blackboard payloads to the runtime shape.
+
+        Older records stored only raw_history/kv_state/version under
+        conversation.extra.blackboard. The runtime always needs conversation_id
+        for cache keys and persistence, so hydrate missing fields here instead
+        of letting legacy data crash the scheduler.
+        """
+        data = dict(blackboard or {})
+        cid = str(data.get("conversation_id") or conversation_id or "")
+        now = datetime.utcnow().isoformat()
+        data["conversation_id"] = cid
+        data.setdefault("id", f"bb_{cid}")
+        if not isinstance(data.get("raw_history"), list):
+            data["raw_history"] = []
+        if not isinstance(data.get("structured_summaries"), list):
+            data["structured_summaries"] = []
+        if not isinstance(data.get("kv_state"), dict):
+            data["kv_state"] = {}
+        try:
+            data["version"] = int(data.get("version") or 0)
+        except (TypeError, ValueError):
+            data["version"] = 0
+        data.setdefault("created_at", now)
+        data.setdefault("updated_at", now)
+        return data
