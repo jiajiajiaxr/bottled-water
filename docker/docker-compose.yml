@@ -4,8 +4,8 @@ services:
   # Nginx 反向代理 + 前端静态文件
   nginx:
     build:
-      context: .
-      dockerfile: Dockerfile.frontend
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
     ports:
       - "80:80"
     depends_on:
