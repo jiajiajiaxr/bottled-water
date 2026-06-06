@@ -5,6 +5,7 @@ from contextlib import suppress
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from agent_runtime.core.protocol import (
@@ -19,7 +20,7 @@ from app.services.conversation_session_manager import (
     ConversationSessionManager,
 )
 from db.base import Base
-from db.models import Conversation, User
+from db.models import Conversation, Message, User
 
 
 class _FakeAgentSession:
@@ -261,5 +262,49 @@ class TestConversationSessionManagerStatus:
             assert record["decisions"][0]["target"] == "frontend"
             assert record["agent_runs"][0]["status"] == "completed"
             assert record["agent_runs"][0]["output_preview"] == "HTML page completed"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_same_completion_text_creates_message_per_generation(self, tmp_path):
+        conversation_id = "conv-generation-repeat-artifact"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            mgr._sessions[conversation_id] = _FakeAgentSession(conversation_id)
+            event = RuntimeEvent(
+                type="system.agent_completed",
+                payload={
+                    "agent_id": "agent-a",
+                    "agent_name": "Frontend Worker",
+                    "work_product": "已生成真实 PDF 产物，可在预览卡片中查看和下载。",
+                },
+            )
+
+            async with factory() as session:
+                first = await mgr._persist_agent_report_message(
+                    session,
+                    conversation_id,
+                    "generation-1",
+                    event,
+                )
+            async with factory() as session:
+                second = await mgr._persist_agent_report_message(
+                    session,
+                    conversation_id,
+                    "generation-2",
+                    event,
+                )
+            async with factory() as session:
+                messages = (
+                    await session.execute(
+                        select(Message).where(Message.conversation_id == conversation_id)
+                    )
+                ).scalars().all()
+
+            assert first is not None
+            assert second is not None
+            assert first.id != second.id
+            assert len(messages) == 2
         finally:
             await engine.dispose()

@@ -429,6 +429,7 @@ class ConversationSessionManager:
                     Message.conversation_id == conversation_id,
                     Message.sender_type == "agent",
                     Message.sender_id == agent_id,
+                    Message.extra["runtime_generation_id"].as_string() == generation_id,
                     Message.content["text"].as_string() == work_product,
                     Message.deleted_at.is_(None),
                 )
