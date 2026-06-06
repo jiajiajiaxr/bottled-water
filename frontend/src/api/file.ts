@@ -5,10 +5,12 @@ export async function uploadFile(
   file: File,
   conversationId?: string,
   purpose = "attachment",
+  workspaceId?: string,
 ): Promise<UploadedFile> {
   const form = new FormData();
   form.append("file", file);
   if (conversationId) form.append("conversation_id", conversationId);
+  if (workspaceId) form.append("workspace_id", workspaceId);
   form.append("purpose", purpose);
   return await request<UploadedFile>("/files/upload", {
     method: "POST",

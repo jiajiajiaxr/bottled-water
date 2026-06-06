@@ -189,7 +189,12 @@ export function ChatPanel({
         return Upload.LIST_IGNORE;
       }
       try {
-        const uploaded = await api.uploadFile(file, active.id);
+        const uploaded = await api.uploadFile(
+          file,
+          active.id,
+          "attachment",
+          active.workspace_id,
+        );
         setPendingFiles((current) => {
           if (current.some((item) => item.id === uploaded.id)) return current;
           return [...current, uploaded];

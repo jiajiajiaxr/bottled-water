@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Key } from "react";
 import { FileOutlined, FolderOpenOutlined } from "@ant-design/icons";
-import { App as AntApp, Empty, Input, Modal, Select, Space, Spin, Tree } from "antd";
+import { App as AntApp, Empty, Input, Modal, Select, Space, Spin, Tree, Upload } from "antd";
+import type { UploadProps } from "antd";
 import type { DataNode } from "antd/es/tree";
 import { api } from "../../api";
 import type { WorkspaceFileNode } from "../../types";
@@ -14,12 +15,14 @@ import { filterNodes, sourceLabel, walk } from "./workspaceFileUtils";
 
 type Props = {
   workspaceId?: string;
+  activeConversationId?: string;
   onBack: () => void;
   onAttachReference: (snippet: string) => void;
 };
 
 export function WorkspaceFilesContent({
   workspaceId,
+  activeConversationId,
   onBack,
   onAttachReference,
 }: Props) {
@@ -188,6 +191,26 @@ export function WorkspaceFilesContent({
     if (!file.previewUrl) URL.revokeObjectURL(href);
   };
 
+  const handleUpload: UploadProps["beforeUpload"] = async (file) => {
+    if (!workspaceId) {
+      message.warning("请先选择一个工作区");
+      return Upload.LIST_IGNORE;
+    }
+    try {
+      const uploaded = await api.uploadFile(
+        file,
+        activeConversationId,
+        "attachment",
+        workspaceId,
+      );
+      message.success(`${uploaded.original_filename || file.name} 已上传到工作区文件`);
+      await load();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "文件上传失败");
+    }
+    return Upload.LIST_IGNORE;
+  };
+
   const handleRename = (node: WorkspaceFileNode) => {
     if (!workspaceId) return;
     let nextName = node.display_name ?? node.name;
@@ -339,6 +362,7 @@ export function WorkspaceFilesContent({
         onMoveSelected={moveSelected}
         onBulkDelete={bulkDelete}
         onReload={load}
+        onUploadFile={handleUpload}
       />
       <div className="workspace-file-table-head">
         <span>名称</span>

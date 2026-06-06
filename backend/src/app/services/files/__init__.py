@@ -43,6 +43,7 @@ async def save_upload(
     upload: UploadFile,
     conversation_id: str | None = None,
     purpose: str = "attachment",
+    workspace_id: str | None = None,
 ) -> FileAsset:
     await ensure_extension_tables(db)
     settings = get_settings()
@@ -52,7 +53,12 @@ async def save_upload(
         raise ValidationAppError(f"文件超过 {settings.max_upload_mb}MB 限制")
     checksum = hashlib.sha256(raw).hexdigest()
     name = safe_filename(upload.filename or "upload.bin")
-    folder = Path(settings.storage_dir) / "uploads" / user.id[:8]
+    if workspace_id:
+        from app.services.workspaces.filesystem import scoped_dir
+
+        folder = scoped_dir(workspace_id, "uploads", conversation_id=conversation_id)
+    else:
+        folder = Path(settings.storage_dir) / "uploads" / user.id[:8]
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{checksum[:12]}-{name}"
     path.write_bytes(raw)
@@ -65,6 +71,8 @@ async def save_upload(
         "tool_chain": ["file.upload", "file.extract_text"],
         **(extracted_result.get("metadata") or {}),
     }
+    if workspace_id:
+        metadata["workspace_id"] = workspace_id
 
     asset = FileAsset(
         owner_id=user.id,

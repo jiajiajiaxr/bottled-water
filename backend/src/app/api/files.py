@@ -11,7 +11,7 @@ from app.core.errors import ForbiddenError, NotFoundError
 from app.core.response import ok
 from app.deps import get_current_user
 from db import get_db
-from db.models import FileAsset, User, utcnow
+from db.models import FileAsset, User, Workspace, WorkspaceMember, utcnow
 from app.schemas.common import ApiResponse, FileAssetOut
 from app.services.files import save_upload
 from app.services.tools.builtins.file import (
@@ -38,16 +38,46 @@ async def _get_file(db: AsyncSession, user: User, file_id: str) -> FileAsset:
     return asset
 
 
+async def _ensure_workspace_access(
+    db: AsyncSession,
+    user: User,
+    workspace_id: str | None,
+) -> None:
+    if not workspace_id:
+        return
+    workspace = await db.get(Workspace, workspace_id)
+    if not workspace:
+        raise NotFoundError("工作区不存在")
+    if user.role == "admin" or workspace.owner_id == user.id:
+        return
+    member = await db.scalar(
+        select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == user.id,
+            WorkspaceMember.left_at.is_(None),
+        )
+    )
+    if not member:
+        raise ForbiddenError("无权访问该工作区")
+
+
 @router.post("/files/upload", response_model=ApiResponse[FileAssetOut])
 async def upload_file(
     file: UploadFile = File(...),
     conversation_id: str | None = Form(None),
+    workspace_id: str | None = Form(None),
     purpose: str = Form("attachment"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    await _ensure_workspace_access(db, user, workspace_id)
     asset = await save_upload(
-        db, user=user, upload=file, conversation_id=conversation_id, purpose=purpose
+        db,
+        user=user,
+        upload=file,
+        conversation_id=conversation_id,
+        purpose=purpose,
+        workspace_id=workspace_id,
     )
     return ok(file_asset_to_dict(asset), "文件上传成功")
 
@@ -56,11 +86,12 @@ async def upload_file(
 async def upload_file_alias(
     file: UploadFile = File(...),
     conversation_id: str | None = Form(None),
+    workspace_id: str | None = Form(None),
     purpose: str = Form("attachment"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return await upload_file(file, conversation_id, purpose, db, user)
+    return await upload_file(file, conversation_id, workspace_id, purpose, db, user)
 
 
 @router.get("/files", response_model=ApiResponse[dict])

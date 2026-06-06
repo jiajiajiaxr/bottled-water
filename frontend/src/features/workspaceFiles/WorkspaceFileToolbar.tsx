@@ -1,11 +1,13 @@
 import {
   ArrowLeftOutlined,
+  CloudUploadOutlined,
   DeleteOutlined,
   FolderAddOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
-import { Button, Input, Select, Space, Statistic, Typography } from "antd";
+import { Button, Input, Select, Space, Statistic, Typography, Upload } from "antd";
+import type { UploadProps } from "antd";
 
 const { Title, Text } = Typography;
 
@@ -23,6 +25,7 @@ type Props = {
   onMoveSelected: () => void;
   onBulkDelete: () => void;
   onReload: () => void;
+  onUploadFile: UploadProps["beforeUpload"];
 };
 
 export function WorkspaceFileToolbar({
@@ -39,6 +42,7 @@ export function WorkspaceFileToolbar({
   onMoveSelected,
   onBulkDelete,
   onReload,
+  onUploadFile,
 }: Props) {
   return (
     <>
@@ -65,6 +69,20 @@ export function WorkspaceFileToolbar({
           <Button icon={<FolderAddOutlined />} onClick={onCreateFolder}>
             新建文件夹
           </Button>
+          <Upload
+            multiple
+            showUploadList={false}
+            beforeUpload={onUploadFile}
+          >
+            <Button
+              type="primary"
+              icon={<CloudUploadOutlined />}
+              disabled={loading}
+              data-testid="workspace-file-upload"
+            >
+              上传文件
+            </Button>
+          </Upload>
           <Button disabled={!checkedCount} onClick={onMoveSelected}>
             移动
           </Button>

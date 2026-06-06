@@ -487,6 +487,7 @@ export function Workbench({
         ) : routeTab === "files" ? (
           <WorkspaceFilesContent
             workspaceId={activeWorkspaceId}
+            activeConversationId={active?.id}
             onBack={() => onRouteTabChange("chat")}
             onAttachReference={(snippet) => {
               if (active?.id) {
