@@ -305,19 +305,21 @@ class AgentLoop:
             await self._run_checkpoint(checkpoint, "before_llm", {"round": tool_round})
 
             try:
+                tools_for_round = None if self._artifact_tool_succeeded(tool_results) else (tools if tools else None)
                 if self.use_streaming:
                     response = await self._chat_streaming(
                         messages=messages,
                         system_prompt=system_prompt,
-                        tools=tools if tools else None,
+                        tools=tools_for_round,
                         _emit=_emit,
                         stream_message_id=stream_message_id,
+                        defer_stop_if_tool_calls=True,
                     )
                 else:
                     response = await self.model.chat(
                         messages=messages,
                         system_prompt=system_prompt,
-                        tools=tools if tools else None,
+                        tools=tools_for_round,
                     )
             except Exception as e:
                 logger.error("Agent LLM 调用失败", agent_id=self.agent.id, error=str(e))
@@ -567,10 +569,30 @@ class AgentLoop:
         if messages and messages[-1].role == "tool":
             try:
                 await self._run_checkpoint(checkpoint, "before_summary", {})
-                summary_response = await self.model.chat(
-                    messages=messages,
-                    system_prompt=system_prompt,
-                )
+                summary_messages = [
+                    *messages,
+                    ChatMessage(
+                        role="user",
+                        content=(
+                            "工具已经执行完成。请用自然中文给用户一个简洁最终回复，"
+                            "说明你完成了什么，以及用户可以通过产物卡片预览或下载。"
+                            "不要再次调用工具，不要输出 JSON 或代码块。"
+                        ),
+                    ),
+                ]
+                if self.use_streaming:
+                    summary_response = await self._chat_streaming(
+                        messages=summary_messages,
+                        system_prompt=system_prompt,
+                        tools=None,
+                        _emit=_emit,
+                        stream_message_id=stream_message_id,
+                    )
+                else:
+                    summary_response = await self.model.chat(
+                        messages=summary_messages,
+                        system_prompt=system_prompt,
+                    )
                 final_content = summary_response.content or ""
                 await self._run_checkpoint(
                     checkpoint,
@@ -583,6 +605,16 @@ class AgentLoop:
 
         status_report = self._extract_status_report(final_content)
         work_product = self._remove_status_report(final_content)
+        if self._artifact_tool_succeeded(tool_results) and (
+            not work_product.strip() or self._looks_like_artifact_argument_fragment(work_product)
+        ):
+            work_product = self._artifact_completion_message(
+                self._artifact_tool_name(tool_results) or forced_artifact_tool_name,
+                tool_results,
+                task,
+            )
+            if self.use_streaming:
+                await self._emit_text_response(_emit, stream_message_id, work_product)
 
         # 将本轮对话归档回 AgentContext
         if agent_ctx:
@@ -764,6 +796,37 @@ class AgentLoop:
             title = AgentLoop._title_from_task(task)
         return title[:80]
 
+    async def _emit_text_response(self, _emit, stream_message_id: str, text: str) -> None:
+        if not text.strip():
+            return
+        await _emit(
+            "message_start",
+            {
+                "agent_id": self.agent.id,
+                "agent_name": self.agent.name,
+                "agent_message_id": stream_message_id,
+            },
+        )
+        for index in range(0, len(text), 12):
+            await _emit(
+                "agent.token",
+                {
+                    "agent_id": self.agent.id,
+                    "agent_name": self.agent.name,
+                    "agent_message_id": stream_message_id,
+                    "token": text[index : index + 12],
+                },
+            )
+            await asyncio.sleep(0)
+        await _emit(
+            "message_stop",
+            {
+                "agent_id": self.agent.id,
+                "agent_name": self.agent.name,
+                "agent_message_id": stream_message_id,
+            },
+        )
+
     @staticmethod
     def _title_from_task(task: str) -> str:
         title = re.sub(r"\s+", " ", task or "").strip()
@@ -933,6 +996,7 @@ class AgentLoop:
         tools: Optional[List[Dict]],
         _emit,
         stream_message_id: str,
+        defer_stop_if_tool_calls: bool = False,
     ) -> ChatResponse:
         """流式对话，emit agent.token 事件，组装成 ChatResponse"""
         content_parts: List[str] = []
@@ -1015,7 +1079,7 @@ class AgentLoop:
         final_tool_calls = (
             [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())] if tool_calls_acc else None
         )
-        if stream_started:
+        if stream_started and not (defer_stop_if_tool_calls and final_tool_calls):
             await _emit(
                 "message_stop",
                 {
@@ -1039,6 +1103,10 @@ class AgentLoop:
 角色：{self.agent.role}
 
 请只代表你自己发言，不要冒充其他 Agent。若任务需要协作，只描述你负责的部分和可交付成果。
+工具使用规则：
+- 用户明确要求生成 PDF、Word、PPT、Excel、HTML、网页、可下载文件、预览卡片或正式产物时，才调用 artifact.create_* 工具。
+- 用户只是要求“写一段、介绍、说明、回答、总结文字”，或明确说“直接回复、不需要产物”时，必须直接用聊天文本回答，不要调用 artifact 工具。
+- 如果已经调用工具并成功生成产物，仍要给用户一段自然语言回复，说明完成了什么以及如何查看卡片。
 
 你的当前任务：
 {task}

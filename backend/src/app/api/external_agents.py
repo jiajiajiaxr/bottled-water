@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import ok
@@ -42,12 +43,22 @@ async def external_agent_runs(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    rows = await db.run_sync(
-        lambda session: list_recent_external_agent_runs(
-            session,
-            user,
-            workspace_id=workspace_id,
-            limit=max(1, min(limit, 100)),
+    try:
+        rows = await db.run_sync(
+            lambda session: list_recent_external_agent_runs(
+                session,
+                user,
+                workspace_id=workspace_id,
+                limit=max(1, min(limit, 100)),
+            )
         )
-    )
+    except (OperationalError, ProgrammingError):
+        return ok(
+            {
+                "items": [],
+                "total": 0,
+                "degraded": True,
+                "reason": "external_agent_runs 表尚未初始化，请执行 alembic upgrade head。",
+            }
+        )
     return ok({"items": rows, "total": len(rows)})

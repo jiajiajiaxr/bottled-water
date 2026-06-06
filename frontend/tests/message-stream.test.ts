@@ -182,7 +182,7 @@ describe("conversation WebSocket stream", () => {
       conversation_id: "conversation-token",
       status: "completed",
     });
-    await expect(promise).resolves.toBe("ok");
+    await expect(promise).resolves.toBe("completed");
   });
 
   it("dispatches actor agent.tool_call payloads for local progress", async () => {
@@ -218,6 +218,6 @@ describe("conversation WebSocket stream", () => {
       conversation_id: "conversation-tool",
       status: "completed",
     });
-    await expect(promise).resolves.toBe("ok");
+    await expect(promise).resolves.toBe("completed");
   });
 });

@@ -7,11 +7,14 @@ from db.models import Message
 
 
 def runtime_prompt_for_message(message: Message) -> str:
-    """构造发送给 agent_runtime 的用户输入。
+    """Build the runtime prompt for a user message.
 
-    聊天区仍然只展示用户原始文本；运行时额外附加当前消息附件的摘要、
-    file_id 和解析状态，避免新 runtime 只收到纯文本而误判“没有收到文件”。
+    The visible chat bubble keeps the user's original text. Runtime input adds
+    the current message attachments once, with file ids, parse status, and
+    extracted text summaries, so the Agent does not claim it did not receive the
+    file.
     """
+
     content = message.content if isinstance(message.content, dict) else {}
     text = str(content.get("text") or "").strip()
     attachments = content.get("attachments") if isinstance(content.get("attachments"), list) else []
@@ -28,7 +31,7 @@ def runtime_prompt_for_message(message: Message) -> str:
         sections.append(file_refs)
     if attachment_context:
         sections.append(attachment_context)
-    sections.append("请基于这些附件作答；如果附件无法解析，请说明具体原因，不要说没有收到文件。")
+    sections.append("请基于这些附件作答；如果某个附件无法解析，请说明具体原因，不要说没有收到文件。")
     return "\n\n".join(part for part in sections if part)
 
 
@@ -41,5 +44,5 @@ def _file_reference_lines(attachments: list[Any]) -> str:
         filename = str(item.get("filename") or item.get("original_filename") or file_id or "附件")
         parse_status = str(item.get("parse_status") or "unknown")
         if file_id:
-            lines.append(f"- {filename}：file_id={file_id}，parse_status={parse_status}")
+            lines.append(f"- {filename}：file_id={file_id}；parse_status={parse_status}")
     return "\n".join(lines)

@@ -9,11 +9,76 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import ValidationAppError
-from db.models import AuditLog, FileAsset, KnowledgeBase, KnowledgeDocument, User
 from app.services.tools.builtins.file import extract_text_from_path
+from db.models import AuditLog, FileAsset, KnowledgeBase, KnowledgeDocument, User
 
 
 SAFE_NAME = re.compile(r"[^a-zA-Z0-9._\-\u4e00-\u9fff]+")
+
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".txt",
+    ".md",
+    ".markdown",
+    ".json",
+    ".csv",
+    ".tsv",
+    ".html",
+    ".htm",
+    ".xml",
+    ".pdf",
+    ".docx",
+    ".xlsx",
+    ".pptx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".svg",
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".css",
+    ".scss",
+    ".zip",
+}
+
+BLOCKED_UPLOAD_EXTENSIONS = {
+    ".exe",
+    ".dll",
+    ".bat",
+    ".cmd",
+    ".ps1",
+    ".msi",
+    ".com",
+    ".scr",
+    ".vbs",
+    ".lnk",
+    ".reg",
+}
+
+ALLOWED_UPLOAD_CONTENT_TYPES = {
+    "application/pdf",
+    "application/json",
+    "application/xml",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "text/markdown",
+    "text/html",
+    "text/css",
+    "text/csv",
+    "text/javascript",
+    "application/javascript",
+}
+
+
 async def ensure_extension_tables(db: AsyncSession) -> None:
     for table in (
         FileAsset.__table__,
@@ -27,6 +92,22 @@ async def ensure_extension_tables(db: AsyncSession) -> None:
 def safe_filename(name: str) -> str:
     cleaned = SAFE_NAME.sub("_", name).strip("._")
     return cleaned or "upload.bin"
+
+
+def validate_upload_type(filename: str, content_type: str | None) -> None:
+    suffix = Path(filename).suffix.lower()
+    mime = (content_type or "").split(";")[0].strip().lower()
+    if suffix in BLOCKED_UPLOAD_EXTENSIONS:
+        raise ValidationAppError(f"暂不支持上传该文件类型：{suffix}")
+    if suffix in ALLOWED_UPLOAD_EXTENSIONS:
+        return
+    if mime.startswith("image/") or mime.startswith("text/"):
+        return
+    if mime in ALLOWED_UPLOAD_CONTENT_TYPES:
+        return
+    raise ValidationAppError(
+        "暂不支持上传该文件类型。支持文本、Markdown、JSON、CSV、HTML、PDF、Office 文档、图片、代码文件和 ZIP。"
+    )
 
 
 def attachment_path(file_asset: FileAsset) -> Path:
@@ -53,6 +134,8 @@ async def save_upload(
         raise ValidationAppError(f"文件超过 {settings.max_upload_mb}MB 限制")
     checksum = hashlib.sha256(raw).hexdigest()
     name = safe_filename(upload.filename or "upload.bin")
+    content_type = upload.content_type or "application/octet-stream"
+    validate_upload_type(name, content_type)
     if workspace_id:
         from app.services.workspaces.filesystem import scoped_dir
 
@@ -63,7 +146,6 @@ async def save_upload(
     path = folder / f"{checksum[:12]}-{name}"
     path.write_bytes(raw)
 
-    content_type = upload.content_type or "application/octet-stream"
     extracted_result = extract_text_from_path(path, content_type=content_type, filename=name)
     extracted = extracted_result["text"][:200_000]
     metadata = {

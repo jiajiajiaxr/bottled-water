@@ -54,10 +54,15 @@ function MessageBubbleComponent({
 }: MessageBubbleProps) {
   const author = message.author || "未知";
   const isUser = message.role === "user";
-  const agentAvatarUrl =
-    typeof message.rawContent?.agent_avatar_url === "string"
-      ? message.rawContent.agent_avatar_url
+  const senderAvatarUrl =
+    typeof message.sender_avatar_url === "string"
+      ? message.sender_avatar_url
       : undefined;
+  const agentAvatarUrl =
+    senderAvatarUrl ??
+    (typeof message.rawContent?.agent_avatar_url === "string"
+      ? message.rawContent.agent_avatar_url
+      : undefined);
   const isEvent =
     message.kind === "event" ||
     message.role === "system" ||
@@ -201,10 +206,10 @@ function MessageBubbleComponent({
       <div className={`message-row ${isUser ? "from-user" : "from-agent"}`}>
         <Avatar
           className="message-avatar"
-          src={!isUser ? agentAvatarUrl : undefined}
+          src={isUser ? senderAvatarUrl : agentAvatarUrl}
           icon={!isUser && !agentAvatarUrl ? <RobotOutlined /> : undefined}
         >
-          {isUser ? author.slice(0, 1) : undefined}
+          {isUser && !senderAvatarUrl ? author.slice(0, 1) : undefined}
         </Avatar>
         <div className="message-card">
           <Flex justify="space-between" align="center" gap={12}>

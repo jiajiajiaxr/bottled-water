@@ -100,10 +100,11 @@ export function WorkflowStudioContent({
         conversationId,
         studio.workflowInstruction,
       );
+      const nextWorkflow = layoutWorkflowPositions(generated);
       studio.setWorkflowDraft({
-        ...generated,
+        ...nextWorkflow,
         settings: {
-          ...workflowSettings(generated),
+          ...workflowSettings(nextWorkflow),
           generation_instruction: studio.workflowInstruction,
         },
       });

@@ -138,6 +138,7 @@ async def _save_user_message(
         sender_type="user",
         sender_id=user.id,
         sender_name=user.display_name,
+        sender_avatar_url=user.avatar_url,
         content_type=data.get("content_type") or "text",
         content={"text": text, "attachments": normalized_attachments},
         status="sent",

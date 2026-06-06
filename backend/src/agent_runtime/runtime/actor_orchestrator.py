@@ -132,8 +132,34 @@ class ActorOrchestrator:
             self._running = False
 
     async def handle_user_input(self, content: str) -> AsyncIterator[Event]:
-        async for event in self.run(content):
-            yield event
+        if not self._running:
+            async for event in self.run(content):
+                yield event
+            return
+
+        await self.blackboard_mgr.append_history(
+            self.session_id,
+            {"type": "user_input", "content": content, "interrupt": True},
+        )
+        yield Event(
+            type="user.input_queued",
+            payload={"session_id": self.session_id, "content": content},
+            source="user",
+            channel="all",
+        )
+        await self.event_bus.publish(
+            Event(
+                type=USER_INPUT,
+                payload={
+                    "session_id": self.session_id,
+                    "content": content,
+                    "mention_target_agent_ids": self._mention_targets(content),
+                    "interrupt": True,
+                },
+                source="user",
+                channel="all",
+            )
+        )
 
     async def cancel(self, reason: str = "user_cancelled") -> None:
         for agent_id in list(self.actors):
@@ -197,7 +223,7 @@ class ActorOrchestrator:
             actor.start()
 
     def _mention_targets(self, user_message: str) -> list[str]:
-        if not user_message or re.search(r"@(全员|所有人|大家)|全员|所有 Agent|协作", user_message, re.I):
+        if not user_message or re.search(r"@(全员|所有人|大家)|全员|所有\s*Agent|协作", user_message, re.I):
             return []
         targets: list[str] = []
         lowered = user_message.lower()
@@ -331,4 +357,4 @@ class ActorOrchestrator:
             "下午好",
             "晚上好",
         }
-        return compact in greetings or compact.rstrip("呀啊哈") in greetings
+        return compact in greetings or compact.rstrip("呀啊哈呢哦") in greetings

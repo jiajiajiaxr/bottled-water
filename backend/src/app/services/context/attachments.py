@@ -7,12 +7,12 @@ from app.services.context.compression import trim_text
 
 
 IMAGE_PROMPT_PATTERN = re.compile(
-    r"(图片|图像|照片|截图|看一下|识别|这是什么|是什么内容|describe|image|photo|picture)",
+    r"(图片|图像|照片|截图|看一下|识别|这是什么|什么内容|describe|image|photo|picture)",
     re.I,
 )
 VISION_EXTRACTORS = {"ocr", "vision", "vision_model", "image_ocr"}
 IMAGE_PLACEHOLDER_PATTERN = re.compile(
-    r"(可交给视觉模型|OCR 工具|未启用视觉|图片文件)",
+    r"(当前未启用视觉|未启用.*OCR|无法判断图片内容|图片附件；当前未启用|ready_for_vision_model)",
     re.I,
 )
 
@@ -38,7 +38,7 @@ def attachment_context_from_items(attachments: list[Any], *, max_chars: int = 12
             parts.append(f"{header}\n{trim_text(extracted, max_chars=3000)}")
         elif is_image_attachment(item):
             parts.append(
-                f"{header}：图片附件；当前未启用视觉解析或 OCR 解析，不能假装理解图片内容。"
+                f"{header}：图片附件；未启用视觉解析或未提取到可用 OCR/视觉文本，不能假装理解图片内容。"
             )
         else:
             parts.append(f"{header}：未提取到可读文本。")
@@ -53,13 +53,15 @@ def attachment_preflight_reply(prompt: str, attachments: list[Any]) -> str | Non
     unreadable_images = [item for item in normalized if is_unreadable_image(item)]
     if unreadable_images and (not readable or IMAGE_PROMPT_PATTERN.search(prompt)):
         names = "、".join(attachment_filename(item) for item in unreadable_images[:4])
+        metadata = unreadable_images[0].get("metadata") if isinstance(unreadable_images[0].get("metadata"), dict) else {}
+        hint = str(metadata.get("setup_hint") or "请安装 Tesseract OCR 或启用视觉模型后再自动识别图片。")
         return (
-            f"当前未启用视觉/OCR解析，无法判断图片内容（{names}）。"
-            "可先启用 OCR/视觉模型，或上传 PDF、Word、Excel、PPT、Markdown 等文本类文件。"
+            f"我已收到图片附件（{names}），但当前环境未提取到可用 OCR/视觉文本，无法判断图片内容。"
+            f"当前未启用视觉/OCR解析；{hint}"
         )
     if not readable and normalized:
         names = "、".join(attachment_filename(item) for item in normalized[:4])
-        return f"附件（{names}）未提取到可读文本，我无法基于文件内容总结。请换成可解析的文本类文件，或先启用对应解析能力。"
+        return f"附件（{names}）未提取到可读文本，我无法基于文件内容总结。请换成可解析的文本类文件，或启用对应解析能力。"
     return None
 
 
@@ -94,4 +96,4 @@ def has_real_image_text(item: dict[str, Any]) -> bool:
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     extractor = str(metadata.get("extractor") or "").lower()
     vision_status = str(metadata.get("vision_status") or "").lower()
-    return extractor in VISION_EXTRACTORS or vision_status in {"parsed", "succeeded", "success"}
+    return extractor in VISION_EXTRACTORS and vision_status in {"parsed", "succeeded", "success"}

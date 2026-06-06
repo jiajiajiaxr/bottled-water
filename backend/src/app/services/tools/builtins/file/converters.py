@@ -6,6 +6,8 @@ import html
 import io
 import json
 import re
+import shutil
+import subprocess
 import zipfile
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -157,6 +159,59 @@ def _text_from_pptx(path: Path) -> str:
     return "\n\n".join(parts)
 
 
+def _text_from_image(path: Path) -> tuple[str, dict[str, Any]]:
+    """Extract text from an image through a local OCR binary when available.
+
+    The platform keeps image understanding honest: if OCR is not installed we
+    return a clear degraded status instead of pretending the model saw pixels.
+    """
+
+    binary = shutil.which("tesseract")
+    if not binary:
+        return "", {
+            "extractor": "image_ocr",
+            "vision_status": "missing_tesseract",
+            "ocr_available": False,
+            "setup_hint": "安装 Tesseract OCR 后可自动识别 PNG/JPG 截图文字。",
+        }
+    try:
+        completed = subprocess.run(
+            [binary, str(path), "stdout", "-l", "chi_sim+eng"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=20,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "", {
+            "extractor": "image_ocr",
+            "vision_status": "timeout",
+            "ocr_available": True,
+            "error": "OCR 识别超时",
+        }
+    except Exception as exc:  # pragma: no cover - local binary diagnostics.
+        return "", {
+            "extractor": "image_ocr",
+            "vision_status": "failed",
+            "ocr_available": True,
+            "error": str(exc),
+        }
+
+    text = (completed.stdout or "").strip()
+    metadata: dict[str, Any] = {
+        "extractor": "image_ocr",
+        "vision_status": "parsed" if text else "empty",
+        "ocr_available": True,
+        "exit_code": completed.returncode,
+    }
+    if completed.returncode != 0 and not text:
+        metadata["vision_status"] = "failed"
+        metadata["error"] = (completed.stderr or "").strip()[:800]
+    return text, metadata
+
+
 def extract_text_from_path(path: Path, *, content_type: str = "", filename: str = "") -> dict[str, Any]:
     suffix = (path.suffix or Path(filename).suffix).lower()
     raw = path.read_bytes()
@@ -178,9 +233,8 @@ def extract_text_from_path(path: Path, *, content_type: str = "", filename: str 
         text = _text_from_pptx(path)
         metadata["extractor"] = "python-pptx"
     elif suffix in IMAGE_EXTENSIONS or content_type.startswith("image/"):
-        metadata["extractor"] = "vision_entry"
-        metadata["vision_status"] = "ready_for_vision_model"
-        text = ""
+        text, image_metadata = _text_from_image(path)
+        metadata.update(image_metadata)
     else:
         metadata["extractor"] = "unsupported"
     text = text.strip()

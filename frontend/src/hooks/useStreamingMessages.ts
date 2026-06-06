@@ -40,12 +40,16 @@ function samePersistedMessage(left: ChatMessage, right: ChatMessage): boolean {
 
 function streamKey(payload: Record<string, unknown>): string {
   return String(
-    payload.agent_id ||
-      payload.sender_id ||
-      payload.agent_message_id ||
+    payload.agent_message_id ||
       payload.message_id ||
+      payload.agent_id ||
+      payload.sender_id ||
       "",
   );
+}
+
+function agentIdentity(payload: Record<string, unknown>): string {
+  return String(payload.agent_id || payload.sender_id || "");
 }
 
 function conversationOf(
@@ -153,6 +157,27 @@ function shouldDropStreamForPersisted(
   }
   if (sameTextMessage(streamMessage, persistedMessage)) {
     return true;
+  }
+  if (
+    terminalPersisted &&
+    persistedMessage.kind === "text" &&
+    persistedMessage.role === "assistant" &&
+    persistedSenderId &&
+    streamAgentId === persistedSenderId
+  ) {
+    const streamText = String(
+      streamMessage.rawContent?._streamRawText || streamMessage.content || "",
+    ).trim();
+    const streamThinking = String(
+      streamMessage.rawContent?._streamRawThinking || streamMessage.thinking || "",
+    ).trim();
+    const persistedText = persistedMessage.content.trim();
+    if (!streamText || !persistedText || persistedText.includes(streamText) || streamText.includes(persistedText)) {
+      return true;
+    }
+    if (streamThinking && !streamText) {
+      return true;
+    }
   }
   return Boolean(
     terminalPersisted &&
@@ -318,7 +343,7 @@ export function useStreamingMessages(conversationId?: string) {
     if (existing) return existing;
 
     const targetConversationId = conversationOf(conversationId, payload);
-    const agentId = streamKey(payload) || agentKeyFromScopedKey(scopedKeyValue);
+    const agentId = agentIdentity(payload) || agentKeyFromScopedKey(scopedKeyValue);
     if (!targetConversationId || !agentId) return undefined;
     const conversationStore = useConversationStore.getState();
     const streamThinkingEnabled =
@@ -692,7 +717,7 @@ export function useStreamingMessages(conversationId?: string) {
 
   const streamHandlers: StreamAssistantHandlers = {
     onMessageStart: (payload) => {
-      const agentId = streamKey(payload);
+      const agentId = agentIdentity(payload) || streamKey(payload);
       const key = scopedStreamKey(conversationId, payload);
       const targetConversationId = conversationOf(conversationId, payload);
       const author = agentDisplayName(targetConversationId, agentId, payload);

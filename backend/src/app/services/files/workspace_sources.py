@@ -114,10 +114,24 @@ def project_nodes(db: Session, workspace_id: str) -> list[WorkspaceFileNode]:
 def filesystem_nodes(workspace_id: str, root: Path, seen_paths: set[str]) -> list[WorkspaceFileNode]:
     nodes: list[WorkspaceFileNode] = []
     for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
         relative_path = path.relative_to(root).as_posix()
         if relative_path.startswith(("artifacts/", "previews/")) or relative_path in seen_paths:
+            continue
+        if path.is_dir():
+            encoded = quote(relative_path, safe="")
+            nodes.append(
+                WorkspaceFileNode(
+                    id=f"dir:{encoded}",
+                    name=path.name,
+                    display_name=display_name(path.name, fallback_id=relative_path),
+                    type="directory",
+                    path=relative_path,
+                    source=source_from_path(relative_path, "workspace"),
+                    children=[],
+                )
+            )
+            continue
+        if not path.is_file():
             continue
         stat = path.stat()
         if should_hide_file(path.name, stat.st_size):

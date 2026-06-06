@@ -32,6 +32,22 @@ const { Content } = Layout;
 const { TextArea } = Input;
 const { Text } = Typography;
 const AGENT_MODEL_SENTINEL = "__agent_model__";
+const UPLOAD_ACCEPT =
+  ".txt,.md,.markdown,.json,.csv,.tsv,.html,.htm,.xml,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.py,.js,.jsx,.ts,.tsx,.css,.scss,.zip";
+const ALLOWED_UPLOAD_EXTENSIONS = new Set(UPLOAD_ACCEPT.split(","));
+const BLOCKED_UPLOAD_EXTENSIONS = new Set([
+  ".exe",
+  ".dll",
+  ".bat",
+  ".cmd",
+  ".ps1",
+  ".msi",
+  ".com",
+  ".scr",
+  ".vbs",
+  ".lnk",
+  ".reg",
+]);
 
 export function ChatPanel({
   active,
@@ -191,10 +207,21 @@ export function ChatPanel({
 
   const uploadProps: UploadProps = {
     multiple: true,
+    accept: UPLOAD_ACCEPT,
     showUploadList: false,
     beforeUpload: async (file) => {
       if (!active?.id) {
         message.warning("请先选择一个会话");
+        return Upload.LIST_IGNORE;
+      }
+      const suffix = file.name.includes(".")
+        ? `.${file.name.split(".").pop()!.toLowerCase()}`
+        : "";
+      if (
+        BLOCKED_UPLOAD_EXTENSIONS.has(suffix) ||
+        (suffix && !ALLOWED_UPLOAD_EXTENSIONS.has(suffix))
+      ) {
+        message.warning("暂不支持上传该文件类型");
         return Upload.LIST_IGNORE;
       }
       try {

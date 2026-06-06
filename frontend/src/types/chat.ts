@@ -147,6 +147,7 @@ export interface ChatMessage {
   conversationId: string; // 对话 ID，不清楚来源
   sender_id?: string; // 不清楚作用
   sender_type?: string; // 不清楚作用
+  sender_avatar_url?: string;
   role: MessageRole; // 不清楚作用
   kind: MessageKind; // 不清楚作用
   author: string; // 不清楚作用

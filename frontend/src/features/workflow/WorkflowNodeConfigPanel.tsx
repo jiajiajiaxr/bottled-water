@@ -69,10 +69,10 @@ export function WorkflowNodeConfigPanel({
               <Tag>{editingNodeState.progress}%</Tag>
             )}
           </Space>
-          <Form.Item name="title" label="名称" rules={[{ required: true }]}>
+          <Form.Item name="title" label="名称" rules={[{ required: true, message: "请输入节点名称" }]}>
             <Input maxLength={80} />
           </Form.Item>
-          <Form.Item name="type" label="节点类型" rules={[{ required: true }]}>
+          <Form.Item name="type" label="节点类型" rules={[{ required: true, message: "请选择节点类型" }]}>
             <Select
               options={[
                 { label: "Start", value: "start" },
@@ -98,30 +98,20 @@ export function WorkflowNodeConfigPanel({
           </Form.Item>
           <Form.Item
             name="input_mapping"
-            label="输入"
-            extra="支持 {{input}}、{{nodes.agent-frontend.text}}、{{upstream.text}}。"
+            label="输入映射"
+            extra="支持 {{input}}、{{nodes.agent-frontend.text}}、{{upstream.text}}"
           >
-            <TextArea
-              rows={3}
-              placeholder='例如 {"prompt": "{{input}}", "brief": "{{upstream.text}}"}'
-            />
+            <TextArea rows={3} placeholder='例如 {"prompt": "{{input}}", "brief": "{{upstream.text}}"}' />
           </Form.Item>
           <Form.Item
             name="output_mapping"
-            label="输出"
-            extra="节点执行结果可用 {{output.text}} / {{output.result}} 引用。"
+            label="输出映射"
+            extra="节点执行结果可用 {{output.text}} / {{output.result}} 引用"
           >
-            <TextArea
-              rows={3}
-              placeholder='例如 {"text": "{{output.text}}", "summary": "{{output.summary}}"}'
-            />
+            <TextArea rows={3} placeholder='例如 {"text": "{{output.text}}", "summary": "{{output.summary}}"}' />
           </Form.Item>
           <Space wrap>
-            <Form.Item
-              name="failure_strategy"
-              label="失败策略"
-              className="workflow-inline-form-item"
-            >
+            <Form.Item name="failure_strategy" label="失败策略" className="workflow-inline-form-item">
               <Select
                 options={[
                   { label: "停止后续", value: "stop" },
@@ -130,11 +120,7 @@ export function WorkflowNodeConfigPanel({
                 ]}
               />
             </Form.Item>
-            <Form.Item
-              name="retry"
-              label="重试次数"
-              className="workflow-inline-form-item"
-            >
+            <Form.Item name="retry" label="重试次数" className="workflow-inline-form-item">
               <Input type="number" min={0} max={3} />
             </Form.Item>
           </Space>
@@ -144,22 +130,13 @@ export function WorkflowNodeConfigPanel({
           {extraActions}
         </Form>
       ) : (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="点击画布节点后在这里配置"
-        />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击画布节点后在这里配置" />
       )}
-      {showRunState && (
-        <RunStateCard latestRun={latestRun} workflowEdges={workflowEdges} />
-      )}
+      {showRunState && <RunStateCard latestRun={latestRun} workflowEdges={workflowEdges} />}
       {showWorkflowJson && (
         <div className="workflow-json-panel">
           <Text strong>Workflow JSON</Text>
-          <TextArea
-            rows={10}
-            value={workflowJson}
-            onChange={(event) => onWorkflowJsonChange(event.target.value)}
-          />
+          <TextArea rows={10} value={workflowJson} onChange={(event) => onWorkflowJsonChange(event.target.value)} />
         </div>
       )}
     </aside>
@@ -185,12 +162,7 @@ function NodeTypeFields({
     <>
       {(type === "agent" || type === "review") && (
         <Form.Item name="agent_id" label="Agent">
-          <Select
-            allowClear
-            showSearch
-            options={agentOptions}
-            placeholder="选择群聊内 Agent"
-          />
+          <Select allowClear showSearch options={agentOptions} placeholder="选择群聊中的 Agent" />
         </Form.Item>
       )}
       {type === "tool" && (
@@ -227,7 +199,7 @@ function NodeTypeFields({
         <Form.Item name="artifact_type" label="产物类型">
           <Select
             options={["html", "pdf", "docx", "xlsx", "pptx"].map((value) => ({
-              label: value,
+              label: value.toUpperCase(),
               value,
             }))}
           />
@@ -253,29 +225,19 @@ function RunStateCard({
             <Tag color={statusTagColor(latestRun.status)}>{latestRun.status}</Tag>
             <Text type="secondary">{latestRun.progress}% complete</Text>
           </Space>
-          <Progress
-            percent={latestRun.progress}
-            status={
-              latestRun.status === "failed"
-                ? "exception"
-                : latestRun.status === "completed"
-                  ? "success"
-                  : "active"
-            }
-          />
+          <Progress percent={latestRun.progress} status={latestRun.status === "failed" ? "exception" : undefined} />
+          <div className="workflow-node-state-list">
+            {(latestRun.node_states ?? []).map((node) => (
+              <Tag key={node.id} color={statusTagColor(node.status)}>
+                {node.title ?? node.id} · {node.status}
+              </Tag>
+            ))}
+          </div>
         </>
       ) : (
-        <Text type="secondary">暂无运行记录</Text>
+        <Text type="secondary">尚未运行</Text>
       )}
-      <Space size={[4, 4]} wrap>
-        {workflowEdges.length ? (
-          workflowEdges.map(([from, to]) => (
-            <Tag key={`${from}-${to}`}>{from} → {to}</Tag>
-          ))
-        ) : (
-          <Tag>暂无连线</Tag>
-        )}
-      </Space>
+      <Text type="secondary">连线 {workflowEdges.length} 条</Text>
     </div>
   );
 }

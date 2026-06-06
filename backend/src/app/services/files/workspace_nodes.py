@@ -68,6 +68,19 @@ class _TreeBuilder:
                 )
                 self.nodes[parent_path].children.append(self.nodes[current_path])
             parent_path = current_path
+        if node.type == "directory":
+            label = self._directory_name(node.path, parts[-1] if parts else node.name)
+            node.name = label
+            node.display_name = label
+            if node.path in self.nodes:
+                current = self.nodes[node.path]
+                current.name = node.name or current.name
+                current.display_name = node.display_name or current.display_name
+                current.source = node.source or current.source
+                return
+            self.nodes[node.path] = node
+            self.nodes[parent_path].children.append(node)
+            return
         self.nodes[parent_path].children.append(node)
 
     def root(self) -> WorkspaceFileNode:
