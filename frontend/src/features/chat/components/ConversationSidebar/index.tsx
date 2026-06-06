@@ -250,6 +250,7 @@ export function ConversationSidebar({
                 setEditing(item);
                 editForm.setFieldsValue({
                   title: item.title,
+                  conversation_number: item.conversation_number || item.group_number || "",
                   folder: item.folder || item.category || "Default",
                   remark: item.remark || "",
                 });
@@ -432,6 +433,9 @@ export function ConversationSidebar({
         >
           <Form.Item name="title" label="Name" rules={[{ required: true }]}>
             <Input />
+          </Form.Item>
+          <Form.Item name="conversation_number" label="聊天编号">
+            <Input disabled />
           </Form.Item>
           <Form.Item name="folder" label="Folder / category">
             <Select options={selectCategoryOptions} placeholder="选择分类" />

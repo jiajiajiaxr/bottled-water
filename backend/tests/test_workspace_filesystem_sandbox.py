@@ -285,7 +285,12 @@ def test_workspace_file_tree_labels_conversation_uuid_folders(db: Session) -> No
         display_names = {str(item.get("display_name") or "") for item in _flatten(tree["root"])}
 
         assert conversation.id not in display_names
-        assert f"单聊：{conversation.title} · {conversation.id[:8]}" in display_names
+        assert any(
+            name.startswith(f"单聊：{conversation.title} · ")
+            and name.rsplit(" · ", 1)[-1].isdigit()
+            and len(name.rsplit(" · ", 1)[-1]) == 12
+            for name in display_names
+        )
     finally:
         _cleanup(workspace.id)
 

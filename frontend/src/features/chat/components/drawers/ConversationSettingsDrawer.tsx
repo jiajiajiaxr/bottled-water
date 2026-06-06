@@ -41,12 +41,14 @@ export function ConversationSettingsDrawer({
       .filter(Boolean) as string[],
   );
   const activeAgents = agents.filter((agent) => activeAgentIds.has(agent.id));
+  const isGroup = active?.chat_type === "group";
+  const titleLabel = isGroup ? "群聊名称" : "会话名称";
 
   useEffect(() => {
     if (!open) return;
     form.setFieldsValue({
       title: active?.title,
-      group_number: active?.group_number || "",
+      conversation_number: active?.conversation_number || active?.group_number || "",
       folder: active?.folder || active?.category || "Default",
       remark: active?.remark || "",
     });
@@ -64,25 +66,23 @@ export function ConversationSettingsDrawer({
       category: values.folder,
       remark: values.remark || "",
     });
-    message.success("群聊信息已保存");
+    message.success(isGroup ? "群聊信息已保存" : "会话信息已保存");
   };
 
   return (
-    <Drawer title="群聊设置" width={560} open={open} onClose={onClose}>
+    <Drawer title={isGroup ? "群聊设置" : "会话设置"} width={560} open={open} onClose={onClose}>
       <Form form={form} layout="vertical" onFinish={save}>
         <Form.Item
           name="title"
-          label="群聊名称"
-          rules={[{ required: true, message: "请输入群聊名称" }]}
+          label={titleLabel}
+          rules={[{ required: true, message: `请输入${titleLabel}` }]}
         >
-          <Input maxLength={80} placeholder="请输入群聊名称" />
+          <Input maxLength={80} placeholder={`请输入${titleLabel}`} />
         </Form.Item>
 
-        {active?.chat_type === "group" && (
-          <Form.Item name="group_number" label="群号">
-            <Input disabled />
-          </Form.Item>
-        )}
+        <Form.Item name="conversation_number" label="聊天编号">
+          <Input disabled />
+        </Form.Item>
 
         <Form.Item name="folder" label="分类/文件夹">
           <Select options={categorySelectOptions} placeholder="选择分类" />
@@ -92,7 +92,7 @@ export function ConversationSettingsDrawer({
           <TextArea rows={4} maxLength={300} placeholder="记录这个群聊的用途、范围或注意事项" />
         </Form.Item>
 
-        {active?.chat_type === "group" && (
+        {isGroup && (
           <div className="conversation-settings-members">
             <Text strong>当前 Agent</Text>
             <Space size={[6, 6]} wrap className="conversation-settings-members-list">

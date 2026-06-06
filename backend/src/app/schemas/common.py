@@ -133,6 +133,8 @@ class ConversationOut(ORMModel):
     conversation_id: str
     chat_type: str
     type: str
+    conversation_number: str | None = None
+    group_number: str | None = None
     title: str
     description: str = ""
     workspace_id: str | None = None

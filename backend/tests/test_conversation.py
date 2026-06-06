@@ -75,6 +75,9 @@ def test_conversations_are_isolated_by_workspace_and_workflow_matches_group_agen
     assert created_right.status_code == 200, created_right.text
     left_conversation = unwrap(created_left.json())
     right_conversation = unwrap(created_right.json())
+    assert str(left_conversation["conversation_number"]).isdigit()
+    assert len(str(left_conversation["conversation_number"])) == 12
+    assert left_conversation["group_number"] == left_conversation["conversation_number"]
 
     left_list = client.get(f"/api/v1/conversations?workspace_id={left_id}", headers=auth_headers)
     right_list = client.get(f"/api/v1/conversations?workspace_id={right_id}", headers=auth_headers)

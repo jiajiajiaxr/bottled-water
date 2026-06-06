@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Artifact, Conversation, User
-from app.services.conversation_identity import conversation_group_number
+from app.services.conversation_identity import conversation_number
 from app.services.files.workspace_naming import ROOT_LABELS, duplicate_suffix, readable_segment
 from app.services.files.workspace_node_types import WorkspaceFileNode
 from app.services.files.workspace_sources import artifact_nodes, filesystem_nodes, project_nodes, upload_nodes
@@ -77,6 +77,14 @@ class _TreeBuilder:
         self._mark_favorites(self.nodes[""])
         return self.nodes[""]
 
+    def _directory_name(self, path: str, part: str) -> str:
+        return (
+            self.directory_labels.get(path)
+            or ROOT_LABELS.get(path)
+            or ROOT_LABELS.get(part)
+            or readable_segment(part, path=path)
+        )
+
     def _sort(self, node: WorkspaceFileNode) -> None:
         node.children.sort(key=lambda item: (item.type != "directory", item.display_name.lower()))
         for child in node.children:
@@ -91,14 +99,6 @@ class _TreeBuilder:
                 _rename_duplicate_files(siblings)
         for child in node.children:
             self._dedupe_names(child)
-
-    def _directory_name(self, path: str, part: str) -> str:
-        return (
-            self.directory_labels.get(path)
-            or ROOT_LABELS.get(path)
-            or ROOT_LABELS.get(part)
-            or readable_segment(part, path=path)
-        )
 
     def _mark_favorites(self, node: WorkspaceFileNode) -> None:
         node.favorite = node.id in self.favorites or node.path in self.favorites
@@ -128,31 +128,38 @@ def _directory_labels(db: Session, root: Path, conversations: list[Conversation]
     discovered_conversations = _path_conversations(db, root, workspace_conversations)
     user_labels = _user_labels(db, discovered_conversations)
 
+    for area in ("uploads", "files", "sandbox", "exports", "artifacts"):
+        labels[f"{area}/conversations"] = "按会话归档"
+        labels[f"{area}/legacy"] = "历史文件"
+
     for conversation in discovered_conversations:
         conversation_label = _conversation_label(conversation)
         for area in ("uploads", "files", "sandbox", "exports", "artifacts"):
-            labels[f"{area}/conversations/{conversation.id}"] = conversation_label
+            prefix = f"{area}/conversations/{conversation.id}"
+            labels[prefix] = conversation_label
             labels[f"{area}/legacy/{conversation.id}"] = conversation_label
-            labels[f"{area}/conversations/{conversation.id}/agents"] = "Agent 输出"
-            labels[f"{area}/conversations/{conversation.id}/tasks"] = "任务输出"
+            labels[f"{prefix}/agents"] = "Agent 输出"
+            labels[f"{prefix}/tasks"] = "任务输出"
             if conversation.creator_id:
-                labels[f"{area}/conversations/{conversation.id}/{conversation.creator_id}"] = (
-                    user_labels.get(conversation.creator_id) or f"用户：{conversation.creator_id[:8]}"
+                labels[f"{prefix}/{conversation.creator_id}"] = (
+                    user_labels.get(conversation.creator_id)
+                    or f"用户：{conversation.creator_id[:8]}"
                 )
             for participant in conversation.participants:
                 if not participant.agent_id:
                     continue
                 agent_name = participant.agent.name if participant.agent else participant.agent_id[:8]
-                labels[f"{area}/conversations/{conversation.id}/agents/{participant.agent_id}"] = (
-                    f"Agent：{agent_name}"
-                )
+                labels[f"{prefix}/agents/{participant.agent_id}"] = f"Agent：{agent_name}"
 
     conversation_ids = {item.id for item in conversations}
     artifacts = db.scalars(
-        select(Artifact).where(Artifact.conversation_id.in_(conversation_ids), Artifact.deleted_at.is_(None))
+        select(Artifact).where(
+            Artifact.conversation_id.in_(conversation_ids),
+            Artifact.deleted_at.is_(None),
+        )
     ).all()
     for artifact in artifacts:
-        label = f"产物：{artifact.name or '未命名产物'} · {artifact.id[:8]}"
+        label = _artifact_label(artifact)
         labels[f"artifacts/{artifact.id}"] = label
         if artifact.conversation_id:
             labels[f"artifacts/conversations/{artifact.conversation_id}/{artifact.id}"] = label
@@ -161,9 +168,15 @@ def _directory_labels(db: Session, root: Path, conversations: list[Conversation]
 
 def _conversation_label(conversation: Conversation) -> str:
     kind = "群聊" if conversation.chat_type == "group" else "单聊"
-    number = conversation_group_number(conversation)
-    suffix = f"群号 {number}" if number else conversation.id[:8]
-    return f"{kind}：{conversation.title or '会话'} · {suffix}"
+    return f"{kind}：{conversation.title or '会话'} · {conversation_number(conversation)}"
+
+
+def _artifact_label(artifact: Artifact) -> str:
+    content = artifact.content if isinstance(artifact.content, dict) else {}
+    filename = str(content.get("filename") or "").strip()
+    fallback = Path(filename).stem if filename else ""
+    name = str(artifact.name or fallback or "未命名产物").strip()
+    return f"产物：{name} · {artifact.id[:8]}"
 
 
 def _user_labels(db: Session, conversations: list[Conversation]) -> dict[str, str]:

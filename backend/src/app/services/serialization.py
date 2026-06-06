@@ -35,7 +35,7 @@ from db.models import (
     WorkspaceMember,
     WorkflowRun,
 )
-from app.services.conversation_identity import conversation_group_number
+from app.services.conversation_identity import conversation_group_number, conversation_number
 
 
 def iso(value: datetime | None) -> str | None:
@@ -195,6 +195,7 @@ def conversation_to_dict(conversation: Conversation) -> dict[str, Any]:
         "conversation_id": conversation.id,
         "chat_type": conversation.chat_type,
         "type": conversation.chat_type,
+        "conversation_number": conversation_number(conversation),
         "group_number": conversation_group_number(conversation),
         "title": conversation.title,
         "description": conversation.description,

@@ -15,7 +15,7 @@ ROOT_LABELS = {
     "files": "兼容文件",
     "tools": "工具文件",
     "logs": "日志文件",
-    "conversations": "会话",
+    "conversations": "按会话归档",
     "agents": "Agent 输出",
     "tasks": "任务输出",
     "legacy": "历史文件",
@@ -34,7 +34,11 @@ def display_name(name: str, *, fallback_name: str | None = None, fallback_id: st
     if not candidate or UUID_PATTERN.match(Path(candidate).stem):
         suffix = Path(candidate).suffix
         readable = (fallback_name or "").strip()
-        candidate = f"{readable}{suffix}" if readable and suffix and not readable.endswith(suffix) else readable
+        candidate = (
+            f"{readable}{suffix}"
+            if readable and suffix and not readable.endswith(suffix)
+            else readable
+        )
         if not candidate:
             candidate = f"文件 {str(fallback_id)[:8]}{suffix}"
     return candidate[:180]
@@ -42,7 +46,7 @@ def display_name(name: str, *, fallback_name: str | None = None, fallback_id: st
 
 def readable_segment(part: str, *, path: str = "") -> str:
     if not UUID_PATTERN.match(part):
-        return part
+        return ROOT_LABELS.get(part, part)
     short_id = part[:8]
     if path.startswith("artifacts/"):
         return f"产物 {short_id}"
