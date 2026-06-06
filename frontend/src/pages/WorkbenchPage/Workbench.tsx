@@ -54,7 +54,13 @@ export function Workbench({
 }) {
   const { message } = AntApp.useApp();
   const [currentUser, setCurrentUser] = useState(user);
-  const { setMessages, clearMessages, historyMessages } = useMessageStore();
+  const setMessages = useMessageStore((s) => s.setMessages);
+  const setMessagesForConversation = useMessageStore(
+    (s) => s.setMessagesForConversation,
+  );
+  const clearMessages = useMessageStore((s) => s.clearMessages);
+  const historyMessages = useMessageStore((s) => s.historyMessages);
+  const getCachedMessages = useMessageStore((s) => s.getCachedMessages);
   const {
     localRunningConversationIds,
   } = useConversationStore();
@@ -296,20 +302,57 @@ export function Workbench({
 
   useEffect(() => {
     if (!activeId) return;
+    const conversationId = activeId;
+    let cancelled = false;
+    const cachedMessages = getCachedMessages(conversationId);
+
     setArtifactPanelOpen(false);
-    setLoadingMessages(true);
-    Promise.all([
-      api.messages(activeId),
-      api.artifact(activeId).catch(() => undefined),
-      api.files(activeId).catch(() => []),
-    ])
-      .then(([nextMessages, nextArtifact, nextFiles]) => {
-        setMessages(nextMessages);
-        setArtifact(nextArtifact);
-        setFiles(nextFiles);
+    setArtifact(undefined);
+    setFiles([]);
+
+    if (cachedMessages) {
+      setMessages(cachedMessages);
+      setLoadingMessages(false);
+    } else {
+      setMessages([]);
+      setLoadingMessages(true);
+    }
+
+    api.messages(conversationId)
+      .then((nextMessages) => {
+        if (cancelled) return;
+        if (useConversationStore.getState().activeId !== conversationId) return;
+        setMessagesForConversation(conversationId, nextMessages);
       })
-      .finally(() => setLoadingMessages(false));
-  }, [activeId, setArtifactPanelOpen, setArtifact, setFiles, setLoadingMessages, setMessages]);
+      .finally(() => {
+        if (!cancelled && useConversationStore.getState().activeId === conversationId) {
+          setLoadingMessages(false);
+        }
+      });
+
+    Promise.all([
+      api.artifact(conversationId).catch(() => undefined),
+      api.files(conversationId).catch(() => []),
+    ]).then(([nextArtifact, nextFiles]) => {
+      if (cancelled) return;
+      if (useConversationStore.getState().activeId !== conversationId) return;
+      setArtifact(nextArtifact);
+      setFiles(nextFiles);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeId,
+    getCachedMessages,
+    setArtifactPanelOpen,
+    setArtifact,
+    setFiles,
+    setLoadingMessages,
+    setMessages,
+    setMessagesForConversation,
+  ]);
 
   useEffect(() => {
     if (!active) return;
