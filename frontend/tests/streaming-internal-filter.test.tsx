@@ -267,4 +267,160 @@ describe("useStreamingMessages internal block filtering", () => {
     expect(useMessageStore.getState().historyMessages).toEqual([completed]);
     expect(result.current.streamingMessages.size).toBe(0);
   });
+
+  it("does not treat preview cards as the final streamed text reply", () => {
+    useConversationStore.getState().setConversations([
+      {
+        id: "conversation-1",
+        chat_type: "single",
+        title: "Daily Chat Agent",
+        participants: [
+          {
+            participant_type: "agent",
+            agent_id: "agent-1",
+            agent_name: "Daily Chat Agent",
+          },
+        ],
+        updatedAt: "2026-06-06T00:00:00Z",
+        pinned: false,
+        archived: false,
+        unread: 0,
+        tags: [],
+        lastMessage: "",
+      },
+    ]);
+    useConversationStore.getState().setActiveId("conversation-1");
+
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onToken?.("agent-1", "已为你生成 PDF", {
+        conversation_id: "conversation-1",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+
+    const preview = makeMessage({
+      conversationId: "conversation-1",
+      sender_id: "agent-1",
+      sender_type: "agent",
+      role: "assistant",
+      kind: "preview_card",
+      author: "Master Agent",
+      content: "预览产物：化学基础实验示例报告",
+      rawContent: {
+        artifact_id: "artifact-1",
+        agent_id: "agent-1",
+        title: "化学基础实验示例报告",
+        format: "pdf",
+      },
+      streamState: "done",
+      status: "completed",
+      state: "active",
+    });
+    preview.id = "preview-message-1";
+
+    act(() => {
+      result.current.streamHandlers.onMessageNew?.(preview);
+    });
+
+    expect(useMessageStore.getState().historyMessages).toEqual([preview]);
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe("已");
+    flushTypewriter();
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
+      "已为你生成 PDF",
+    );
+  });
+
+  it("shows artifact tool progress until the final agent reply arrives", () => {
+    useConversationStore.getState().setConversations([
+      {
+        id: "conversation-1",
+        chat_type: "single",
+        title: "Daily Chat Agent",
+        participants: [
+          {
+            participant_type: "agent",
+            agent_id: "agent-1",
+            agent_name: "Daily Chat Agent",
+          },
+        ],
+        updatedAt: "2026-06-06T00:00:00Z",
+        pinned: false,
+        archived: false,
+        unread: 0,
+        tags: [],
+        lastMessage: "",
+      },
+    ]);
+    useConversationStore.getState().setActiveId("conversation-1");
+
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onToolCallStart?.({
+        conversation_id: "conversation-1",
+        agent_id: "agent-1",
+        agent_name: "Daily Chat Agent",
+        tools: ["artifact.create_pdf"],
+      });
+    });
+
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
+      "正在生成 PDF 产物…",
+    );
+
+    const preview = makeMessage({
+      conversationId: "conversation-1",
+      sender_id: "agent-1",
+      sender_type: "agent",
+      role: "assistant",
+      kind: "preview_card",
+      author: "Master Agent",
+      content: "预览产物：化学基础实验示例报告",
+      rawContent: {
+        artifact_id: "artifact-1",
+        agent_id: "agent-1",
+        title: "化学基础实验示例报告",
+        format: "pdf",
+      },
+      streamState: "done",
+      status: "completed",
+      state: "active",
+    });
+    preview.id = "preview-message-1";
+
+    act(() => {
+      result.current.streamHandlers.onMessageNew?.(preview);
+    });
+
+    expect(result.current.streamingMessages.get("agent-1")?.content).toBe(
+      "正在生成 PDF 产物…",
+    );
+
+    const finalReply = makeMessage({
+      conversationId: "conversation-1",
+      sender_id: "agent-1",
+      sender_type: "agent",
+      role: "assistant",
+      kind: "text",
+      author: "Daily Chat Agent",
+      content: "已生成真实 PDF 产物，可在预览卡片中查看和下载。",
+      rawContent: { agent_id: "agent-1" },
+      streamState: "done",
+      status: "completed",
+      state: "active",
+    });
+    finalReply.id = "agent-final-message-1";
+
+    act(() => {
+      result.current.streamHandlers.onMessageNew?.(finalReply);
+    });
+
+    expect(result.current.streamingMessages.size).toBe(0);
+    expect(useMessageStore.getState().historyMessages).toEqual([
+      preview,
+      finalReply,
+    ]);
+  });
 });

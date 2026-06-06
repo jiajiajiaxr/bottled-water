@@ -141,6 +141,7 @@ function shouldDropStreamForPersisted(
   return Boolean(
     terminalPersisted &&
       persistedMessage.content.trim() &&
+      persistedMessage.kind === "text" &&
       persistedMessage.role === "assistant" &&
       persistedSenderId &&
       streamAgentId === persistedSenderId,
@@ -152,6 +153,51 @@ function isRepresentedByHistory(
   historyMessages: ChatMessage[],
 ): boolean {
   return historyMessages.some((item) => shouldDropStreamForPersisted(message, item));
+}
+
+function toolNamesFromPayload(payload: Record<string, unknown>): string[] {
+  const names = new Set<string>();
+  const addName = (value: unknown) => {
+    if (typeof value === "string" && value.trim()) {
+      names.add(value.trim());
+    }
+  };
+
+  addName(payload.tool);
+  addName(payload.tool_name);
+
+  const tools = payload.tools;
+  if (Array.isArray(tools)) {
+    tools.forEach((item) => {
+      if (typeof item === "string") {
+        addName(item);
+        return;
+      }
+      if (item && typeof item === "object") {
+        const record = item as Record<string, unknown>;
+        addName(record.name);
+        addName(record.tool);
+        addName(record.tool_name);
+        const fn = record.function as Record<string, unknown> | undefined;
+        addName(fn?.name);
+      }
+    });
+  }
+
+  return Array.from(names);
+}
+
+function artifactProgressText(payload: Record<string, unknown>): string | undefined {
+  const labels: Record<string, string> = {
+    "artifact.create_pdf": "PDF",
+    "artifact.create_docx": "Word",
+    "artifact.create_pptx": "PPT",
+    "artifact.create_xlsx": "Excel",
+    "artifact.create_html": "HTML",
+  };
+  const toolName = toolNamesFromPayload(payload).find((name) => labels[name]);
+  if (!toolName) return undefined;
+  return `正在生成 ${labels[toolName]} 产物…`;
 }
 
 /**
@@ -352,6 +398,29 @@ export function useStreamingMessages(conversationId?: string) {
     const key = scopedStreamKey(conversationId, payload);
     if (!key || !token) return;
 
+    const existing = streamingMessagesRef.current.get(key);
+    if (existing?.rawContent?._toolProgress) {
+      clearQueuedStream(key);
+      const resetMessage = {
+        ...existing,
+        content: "",
+        rawContent: {
+          ...(existing.rawContent || {}),
+          _streamRawText: "",
+          _toolProgress: false,
+        },
+      };
+      const nextRef = new Map(streamingMessagesRef.current);
+      nextRef.set(key, resetMessage);
+      streamingMessagesRef.current = nextRef;
+      setStreamingMessages((prev) => {
+        if (!prev.has(key)) return prev;
+        const next = new Map(prev);
+        next.set(key, resetMessage);
+        return next;
+      });
+    }
+
     const queued = tokenQueuesRef.current.get(key) || [];
     const visibleRaw = String(
       streamingMessagesRef.current.get(key)?.rawContent?._streamRawText ||
@@ -375,6 +444,39 @@ export function useStreamingMessages(conversationId?: string) {
     queue.push(...pieces);
     tokenQueuesRef.current.set(key, queue);
     scheduleTokenDrain(key, payload);
+  };
+
+  const appendToolProgress = (payload: Record<string, unknown>) => {
+    const text = artifactProgressText(payload);
+    const key = scopedStreamKey(conversationId, payload);
+    if (!text || !key) return;
+
+    setStreamingMessages((prev) => {
+      const existing = ensureMessage(prev, key, payload);
+      if (!existing) return prev;
+      const currentRaw = String(
+        existing.rawContent?._streamRawText || existing.content || "",
+      );
+      if (currentRaw.trim() && !existing.rawContent?._toolProgress) {
+        return prev;
+      }
+
+      clearQueuedStream(key);
+      const next = new Map(prev);
+      next.set(key, {
+        ...existing,
+        content: text,
+        rawContent: {
+          ...(existing.rawContent || {}),
+          _streamRawText: text,
+          _toolProgress: true,
+        },
+      });
+      return next;
+    });
+
+    setDisplayOrder((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    bumpMessageVersion(key);
   };
 
   const appendThinking = (payload: Record<string, unknown>, thinking: string) => {
@@ -441,6 +543,7 @@ export function useStreamingMessages(conversationId?: string) {
         }))
         .filter(
           (msg) =>
+            !msg.rawContent?._toolProgress &&
             msg.content.trim() &&
             !prev.some(
               (item) =>
@@ -648,7 +751,7 @@ export function useStreamingMessages(conversationId?: string) {
         return [...prev, message];
       });
     },
-    onToolCallStart: () => {},
+    onToolCallStart: (payload) => appendToolProgress(payload),
     onToolCallDone: () => {},
     onControl: () => {},
   };

@@ -184,4 +184,40 @@ describe("conversation WebSocket stream", () => {
     });
     await expect(promise).resolves.toBe("ok");
   });
+
+  it("dispatches actor agent.tool_call payloads for local progress", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    window.localStorage.setItem("agenthub_token", "test-token");
+    const onToolCallStart = vi.fn();
+    const promise = sendMessageWs(
+      "conversation-tool",
+      { content: { text: "生成 PDF" } },
+      { onToolCallStart },
+    );
+
+    await vi.waitFor(() => expect(FakeWebSocket.latest).toBeDefined());
+    const ws = FakeWebSocket.latest!;
+    await vi.waitFor(() => expect(ws.sent.length).toBeGreaterThan(0));
+    ws.emit("agent.tool_call", {
+      conversation_id: "conversation-tool",
+      agent_id: "agent-1",
+      agent_name: "Daily Chat Agent",
+      tools: ["artifact.create_pdf"],
+      tool_count: 1,
+    });
+
+    expect(onToolCallStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation_id: "conversation-tool",
+        agent_id: "agent-1",
+        tools: ["artifact.create_pdf"],
+      }),
+    );
+
+    ws.emit("generation_finished", {
+      conversation_id: "conversation-tool",
+      status: "completed",
+    });
+    await expect(promise).resolves.toBe("ok");
+  });
 });

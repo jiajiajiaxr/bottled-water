@@ -189,6 +189,10 @@ function dispatchStreamEvent(
     case "control.cancel":
       handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
+    case "agent.tool_call":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
+      handlers.onToolCallStart?.(data as Record<string, unknown>);
+      break;
     case "agent.tool_result": {
       const payload = data as Record<string, unknown>;
       handlers.onRuntimeEvent?.(event, payload);
@@ -217,10 +221,12 @@ function dispatchStreamEvent(
           );
           if (toolCallId && toolName) {
             handlers.onToolCallStart?.({
+              ...payload,
               tool_call_id: toolCallId,
               tool_name: toolName,
             });
             handlers.onToolCallDone?.({
+              ...payload,
               tool_call_id: toolCallId,
               tool_name: toolName,
             });
@@ -412,6 +418,9 @@ export function streamAssistantReply(
       "workflow:completed",
       "workflow:run_completed",
       "message:updated",
+      "agent.tool_call",
+      "agent.tool_result",
+      "agent.tool_calls_executed",
       "generation_finished",
       "generation:finished",
       "generation:cancelled",
