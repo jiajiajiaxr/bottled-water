@@ -398,6 +398,10 @@ class ConversationSessionManager:
                     or preview.deleted_at is not None
                 ):
                     continue
+                preview.created_at = utcnow()
+                preview.updated_at = utcnow()
+                await db.commit()
+                await db.refresh(preview)
                 await sink.emit(RuntimeEvent(type="message:new", payload=message_to_dict(preview)))
 
     async def _persist_agent_report_message(

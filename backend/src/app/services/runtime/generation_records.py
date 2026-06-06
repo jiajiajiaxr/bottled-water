@@ -172,8 +172,7 @@ async def finish_generation_record(
         record["cancelled_at"] = record.get("cancelled_at") or record["completed_at"]
     if error:
         record["error"] = error[:1000]
-    if terminal_status in {"failed", "cancelled"}:
-        _mark_running_agents(record, terminal_status, error)
+    _mark_open_agents_for_terminal_status(record, terminal_status, error)
     generations[index] = record
     runtime["generations"] = generations
     if runtime.get("active_generation_id") == generation_id:
@@ -311,11 +310,21 @@ def _record_watchdog_event(record: dict[str, Any], event: Event) -> None:
     record["watchdog_events"] = events[-MAX_DECISION_HISTORY:]
 
 
-def _mark_running_agents(record: dict[str, Any], status: str, error: str | None) -> None:
+def _mark_open_agents_for_terminal_status(
+    record: dict[str, Any],
+    status: str,
+    error: str | None,
+) -> None:
     updated = []
     for item in record.get("agent_runs") or []:
         agent_run = dict(item)
-        if agent_run.get("status") in {"queued", "running"}:
+        current = str(agent_run.get("status") or "").lower()
+        is_open = current in {"running", "waiting", "paused"}
+        is_pending = current in {"queued", "ready", "idle"}
+        if status == "completed" and is_open:
+            agent_run["status"] = "completed"
+            agent_run["completed_at"] = agent_run.get("completed_at") or _now_iso()
+        elif status in {"failed", "cancelled"} and (is_open or is_pending):
             agent_run["status"] = status
             agent_run["completed_at"] = agent_run.get("completed_at") or _now_iso()
             if error:

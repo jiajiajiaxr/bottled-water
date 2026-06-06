@@ -108,7 +108,7 @@ function AgentRunTag({
   agentNameMap: Map<string, string>;
 }) {
   const status = String(run.status || "queued").toLowerCase();
-  const name = run.agent_name || agentLabel(run.agent_id, agentNameMap);
+  const name = displayAgentRunName(run, agentNameMap);
   const title = [
     run.current_task ? `任务：${run.current_task}` : "",
     run.rationale ? `说明：${run.rationale}` : "",
@@ -155,6 +155,17 @@ function agentLabel(agentId: string, agentNameMap: Map<string, string>): string 
     return "Team Leader";
   }
   return agentNameMap.get(agentId) || agentId.slice(0, 8);
+}
+
+function displayAgentRunName(
+  run: ConversationRuntimeAgentRun,
+  agentNameMap: Map<string, string>,
+): string {
+  const fallback = agentLabel(run.agent_id, agentNameMap);
+  const name = String(run.agent_name || "").trim();
+  if (!name) return fallback;
+  if (name === run.agent_id || name === run.agent_id.slice(0, 8)) return fallback;
+  return name;
 }
 
 function latestGeneration(

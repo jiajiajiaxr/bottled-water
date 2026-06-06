@@ -181,6 +181,7 @@ class WebSocketSink(EventSink):
 
     def __init__(self, conversation_id: str):
         self.conversation_id = conversation_id
+        self.dedupe_key = f"websocket:{conversation_id}"
 
     def register(self, websocket: WebSocket) -> None:
         """注册 WebSocket 连接。"""

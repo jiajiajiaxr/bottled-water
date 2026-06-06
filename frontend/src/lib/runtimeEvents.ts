@@ -83,6 +83,7 @@ export function applyRuntimeEvent(
     generation.status = terminalStatus;
     generation.completed_at ||= new Date().toISOString();
     if (terminalStatus === "cancelled") generation.cancelled_at ||= generation.completed_at;
+    settleAgentRuns(generation, terminalStatus);
     runtime.active_generation_id = null;
   }
 
@@ -181,6 +182,25 @@ function upsertAgentRun(generation: ConversationRuntimeGeneration, agentId: stri
     generation.agent_runs = runs;
   }
   return run;
+}
+
+function settleAgentRuns(
+  generation: ConversationRuntimeGeneration,
+  terminalStatus: "completed" | "failed" | "cancelled",
+) {
+  const now = generation.completed_at || new Date().toISOString();
+  generation.agent_runs = (generation.agent_runs || []).map((run) => {
+    const status = String(run.status || "").toLowerCase();
+    const isOpen = ["running", "waiting", "paused"].includes(status);
+    const isPending = ["queued", "ready", "idle"].includes(status);
+    if (terminalStatus === "completed") {
+      return isOpen ? { ...run, status: "completed", completed_at: run.completed_at || now } : run;
+    }
+    if (isOpen || isPending) {
+      return { ...run, status: terminalStatus, completed_at: run.completed_at || now };
+    }
+    return run;
+  });
 }
 
 function agentIdFromPayload(payload: Record<string, unknown>): string | undefined {

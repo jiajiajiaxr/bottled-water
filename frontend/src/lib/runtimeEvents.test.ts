@@ -101,4 +101,32 @@ describe("applyRuntimeEvent", () => {
     expect(patch.runtime?.generations?.[0].status).toBe("completed");
     expect(patch.generation_status).toBe("idle");
   });
+
+  it("settles running agent runs when a generation completes", () => {
+    const patch = applyRuntimeEvent(
+      conversation({
+        generation_status: "running",
+        runtime: {
+          active_generation_id: "gen-1",
+          generations: [
+            {
+              id: "gen-1",
+              status: "running",
+              agent_runs: [
+                { agent_id: "team_leader", agent_name: "Team Leader Scheduler", status: "running" },
+                { agent_id: "agent-backend", agent_name: "Backend Worker", status: "ready" },
+                { agent_id: "agent-daily", agent_name: "Daily Chat Agent", status: "completed" },
+              ],
+            },
+          ],
+        },
+      }),
+      "system.session_completed",
+      { conversation_id: "conv-1" },
+    );
+
+    const runs = patch.runtime?.generations?.[0].agent_runs || [];
+    expect(runs.find((item) => item.agent_id === "team_leader")?.status).toBe("completed");
+    expect(runs.find((item) => item.agent_id === "agent-backend")?.status).toBe("ready");
+  });
 });

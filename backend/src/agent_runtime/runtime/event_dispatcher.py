@@ -76,6 +76,13 @@ class EventDispatcher:
                 - str: 通配符模式，如 "agent.*"、"system.*"
                 - Callable[[Event], bool]: 自定义过滤函数
         """
+        dedupe_key = getattr(sink, "dedupe_key", None)
+        if dedupe_key:
+            self._entries = [
+                entry
+                for entry in self._entries
+                if getattr(entry.sink, "dedupe_key", None) != dedupe_key
+            ]
         self._entries.append(_SinkEntry(sink, event_filter))
         return self
 

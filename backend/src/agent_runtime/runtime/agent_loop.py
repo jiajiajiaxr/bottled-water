@@ -492,6 +492,18 @@ class AgentLoop:
                 }
             )
 
+            if self._artifact_tool_succeeded(tool_results):
+                artifact_tool_name = self._artifact_tool_name(tool_results) or forced_artifact_tool_name
+                content = self._artifact_completion_message(artifact_tool_name)
+                messages.append(ChatMessage(role="assistant", content=content))
+                logger.info(
+                    "Agent completed after artifact tool success",
+                    agent_id=self.agent.id,
+                    tool=artifact_tool_name,
+                    round=tool_round,
+                )
+                break
+
         # 如果达到工具调用上限
         if tool_round >= self.MAX_TOOL_ROUNDS:
             logger.warning(

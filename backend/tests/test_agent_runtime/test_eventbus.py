@@ -33,3 +33,30 @@ async def test_eventbus_broadcast_and_target_routing():
 
 async def _append(target: list[Event], event: Event) -> None:
     target.append(event)
+
+
+@pytest.mark.asyncio
+async def test_eventbus_replaces_deduplicated_sink():
+    bus = EventDispatcher()
+    first: list[Event] = []
+    second: list[Event] = []
+
+    bus.register_sink(_ListSink(first, "websocket:conv-1"))
+    bus.register_sink(_ListSink(second, "websocket:conv-1"))
+
+    await bus.publish(Event(type="agent.token", payload={"token": "hi"}))
+
+    assert first == []
+    assert [event.type for event in second] == ["agent.token"]
+
+
+class _ListSink:
+    def __init__(self, target: list[Event], dedupe_key: str):
+        self.target = target
+        self.dedupe_key = dedupe_key
+
+    async def emit(self, event: Event) -> None:
+        self.target.append(event)
+
+    async def emit_batch(self, events: list[Event]) -> None:
+        self.target.extend(events)
