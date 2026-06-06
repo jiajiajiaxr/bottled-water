@@ -4,9 +4,11 @@ from types import SimpleNamespace
 import pytest
 
 from agent_runtime.core.protocol import CONTROL_CANCEL, CONTROL_PAUSE, CONTROL_RESUME
-from agent_runtime.core.types import AgentReport, AgentState, AgentWill, Event
+from agent_runtime.core.types import AgentConfig, AgentReport, AgentState, AgentWill, Event
+from agent_runtime.runtime.agent_loop import AgentLoop
 from agent_runtime.runtime.agent_stepper import AgentStepper
 from agent_runtime.runtime.mailbox import Mailbox
+from model_provider.core.interfaces import ChatResponse
 
 
 class FakeLoop:
@@ -68,3 +70,70 @@ async def test_agent_stepper_waits_while_paused_before_assignment():
     assert result.interrupted is False
     assert result.report.state == AgentState.COMPLETED
     assert loop.completed is True
+
+
+@pytest.mark.asyncio
+async def test_agent_stepper_cancels_after_model_before_tool_execution():
+    mailbox = Mailbox("worker")
+    model = CancelAfterModelProvider(mailbox)
+    executor = FakeToolExecutor()
+    agent_loop = AgentLoop(
+        AgentConfig(
+            id="worker",
+            name="Worker",
+            system_prompt="Use tools when needed.",
+            tools=["sandbox.run"],
+        ),
+        model,
+        use_streaming=False,
+    )
+    stepper = AgentStepper(agent_loop, mailbox)
+
+    result = await stepper.run_assignment(
+        "run code",
+        {},
+        tool_executor=executor,
+    )
+
+    assert result.interrupted is True
+    assert result.report.state == AgentState.FAILED
+    assert executor.calls == []
+
+
+class CancelAfterModelProvider:
+    def __init__(self, mailbox: Mailbox) -> None:
+        self.mailbox = mailbox
+
+    async def chat(self, **_kwargs):
+        await self.mailbox.send(Event(type=CONTROL_CANCEL, payload={}, target="worker"))
+        return ChatResponse(
+            content="",
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "sandbox.run", "arguments": "{}"},
+                }
+            ],
+        )
+
+
+class FakeToolExecutor:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def list_tools(self):
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "sandbox.run",
+                    "description": "Run code",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+
+    async def execute(self, tool_call):
+        self.calls.append(tool_call)
+        return {"status": "succeeded"}

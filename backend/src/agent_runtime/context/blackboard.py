@@ -18,7 +18,11 @@ logger = get_logger(__name__)
 
 
 class BlackboardManager:
-    """Blackboard 存储管理器"""
+    """Blackboard 存储管理器.
+
+    All runtime writes must go through append_history/add_summary/update_kv so
+    persistence and blackboard.updated events stay consistent.
+    """
 
     def __init__(
         self,

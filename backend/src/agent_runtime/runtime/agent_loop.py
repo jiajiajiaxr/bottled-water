@@ -8,8 +8,9 @@ Agent 执行循环
 - 状态自报告
 """
 
-import re
 import json
+import asyncio
+import re
 import uuid
 from typing import Dict, Any, Optional, List
 
@@ -172,6 +173,7 @@ class AgentLoop:
         tool_executor: Optional[ToolExecutor] = None,
         agent_ctx: Optional[AgentContext] = None,
         emit_event=None,
+        checkpoint=None,
     ) -> Dict[str, Any]:
         """
         执行 Agent 单轮任务。
@@ -212,7 +214,7 @@ class AgentLoop:
 
         try:
             result = await self._execute_loop(
-                task, blackboard_view, tool_executor, agent_ctx, _emit
+                task, blackboard_view, tool_executor, agent_ctx, _emit, checkpoint
             )
             self._set_state(AgentState.COMPLETED)
             return result
@@ -227,6 +229,7 @@ class AgentLoop:
         tool_executor: Optional[ToolExecutor],
         agent_ctx: Optional[AgentContext],
         _emit,
+        checkpoint=None,
     ) -> Dict[str, Any]:
         """内部执行循环（被 run() 和步进模式共用）"""
         # 虚拟工具智能体：跳过 LLM，直接执行工具
@@ -299,6 +302,7 @@ class AgentLoop:
 
         while tool_round < self.MAX_TOOL_ROUNDS:
             tool_round += 1
+            await self._run_checkpoint(checkpoint, "before_llm", {"round": tool_round})
 
             try:
                 if self.use_streaming:
@@ -319,6 +323,15 @@ class AgentLoop:
                 logger.error("Agent LLM 调用失败", agent_id=self.agent.id, error=str(e))
                 raise
 
+            await self._run_checkpoint(
+                checkpoint,
+                "after_llm",
+                {
+                    "round": tool_round,
+                    "has_tool_calls": bool(response.tool_calls),
+                    "content_length": len(response.content or ""),
+                },
+            )
             content = response.content or ""
             tool_calls = response.tool_calls
             if tool_calls and self._artifact_tool_succeeded(tool_results):
@@ -410,6 +423,15 @@ class AgentLoop:
                     break
 
                 tool_call, err = ToolCall.new(tc)
+                await self._run_checkpoint(
+                    checkpoint,
+                    "before_tool_call",
+                    {
+                        "round": tool_round,
+                        "tool": tc.get("function", {}).get("name", "unknown"),
+                        "call_id": getattr(tool_call, "call_id", None),
+                    },
+                )
 
                 if err:
                     logger.error("工具参数解析失败", tool=tool_call.tool_name, error=str(err))
@@ -480,6 +502,16 @@ class AgentLoop:
                         "error": result.error if isinstance(result, ToolResult) else None,
                     },
                 )
+                await self._run_checkpoint(
+                    checkpoint,
+                    "after_tool_call",
+                    {
+                        "round": tool_round,
+                        "tool": tool_name,
+                        "call_id": tool_call.call_id,
+                        "success": result.success if isinstance(result, ToolResult) else True,
+                    },
+                )
 
                 # 将工具结果加入消息列表
                 tool_msg = ChatMessage(
@@ -505,6 +537,11 @@ class AgentLoop:
                     tool=self._artifact_tool_name(tool_results) or forced_artifact_tool_name,
                     round=tool_round,
                 )
+            await self._run_checkpoint(
+                checkpoint,
+                "after_tool_round",
+                {"round": tool_round, "tool_count": len(tool_calls)},
+            )
 
         # 如果达到工具调用上限
         if tool_round >= self.MAX_TOOL_ROUNDS:
@@ -519,11 +556,17 @@ class AgentLoop:
         # 如果最后一条消息是 tool 消息，需要再调一次 LLM 获取总结
         if messages and messages[-1].role == "tool":
             try:
+                await self._run_checkpoint(checkpoint, "before_summary", {})
                 summary_response = await self.model.chat(
                     messages=messages,
                     system_prompt=system_prompt,
                 )
                 final_content = summary_response.content or ""
+                await self._run_checkpoint(
+                    checkpoint,
+                    "after_summary",
+                    {"content_length": len(final_content)},
+                )
             except Exception as e:
                 logger.error("Agent 总结调用失败", agent_id=self.agent.id, error=str(e))
                 final_content = "工具调用完成，但总结失败。"
@@ -554,6 +597,13 @@ class AgentLoop:
             "status_report": status_report,
             "tool_events": tool_events,
         }
+
+    @staticmethod
+    async def _run_checkpoint(checkpoint, stage: str, payload: Dict[str, Any]) -> None:
+        """Yield control and let AgentStepper inspect pending control events."""
+        await asyncio.sleep(0)
+        if checkpoint:
+            await checkpoint(stage, payload)
 
     @staticmethod
     def _artifact_tool_succeeded(tool_results: List[Dict[str, Any]]) -> bool:

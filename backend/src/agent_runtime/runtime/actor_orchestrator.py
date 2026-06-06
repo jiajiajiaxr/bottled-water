@@ -237,10 +237,6 @@ class ActorOrchestrator:
             "你好呀，我在。你可以直接告诉我需要生成文档、处理文件、运行工具，"
             "或者让多个 Agent 协作完成一个任务。"
         )
-        reply = (
-            "你好呀，我在。你可以直接告诉我需要生成文档、处理文件、运行工具，"
-            "或者让多个 Agent 协作完成一个任务。"
-        )
         decision = {
             "action": "assign",
             "target_agent_ids": [target_id],

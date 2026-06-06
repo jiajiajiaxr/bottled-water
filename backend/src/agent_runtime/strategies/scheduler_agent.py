@@ -26,6 +26,7 @@ from ..runtime.event_dispatcher import EventDispatcher
 from .tech_lead import TechLeadScheduler
 
 logger = get_logger(__name__)
+SCHEDULER_DECISION_TIMEOUT_SECONDS = 12.0
 
 TEAM_LEADER_RUNTIME_PROMPT = """你是 AgentHub 群聊中的 Team Leader Agent。
 你的职责是根据用户输入、Blackboard、各 Agent 状态报告，选择下一步调度动作：
@@ -54,7 +55,7 @@ class SchedulerAgent(AgentActor):
         super().__init__(
             session_id=session_id,
             agent_config=scheduler_config,
-            model_provider=model_provider,  # SchedulerAgent overrides run(); AgentLoop is not invoked here.
+            model_provider=None,  # SchedulerAgent overrides run(); AgentLoop is not invoked here.
             event_bus=event_bus,
             blackboard_mgr=blackboard_mgr,
             use_streaming=False,
@@ -150,15 +151,18 @@ class SchedulerAgent(AgentActor):
             if decision is None:
                 decision = self._greeting_decision(reports)
             if decision is None:
-                decision = await self._scheduler.make_decision(
-                    blackboard,
-                    reports,
-                    {
-                        "round": self.round_num,
-                        "session_id": self.session_id,
-                        "current_task": self.current_task,
-                        "agent_count": len(self.agents),
-                    },
+                decision = await asyncio.wait_for(
+                    self._scheduler.make_decision(
+                        blackboard,
+                        reports,
+                        {
+                            "round": self.round_num,
+                            "session_id": self.session_id,
+                            "current_task": self.current_task,
+                            "agent_count": len(self.agents),
+                        },
+                    ),
+                    timeout=SCHEDULER_DECISION_TIMEOUT_SECONDS,
                 )
         except Exception as exc:
             logger.warning("SchedulerAgent fallback after decision failure", error=str(exc))
@@ -513,27 +517,6 @@ class SchedulerAgent(AgentActor):
         if reports and all(report.state == AgentState.COMPLETED for report in reports):
             return SchedulingDecision(decision_type="complete", rationale="All Agents completed.")
         return SchedulingDecision(decision_type="wait", rationale="No ready Agent is available.")
-
-
-def _is_simple_greeting(text: str) -> bool:
-    normalized = (text or "").strip().lower()
-    if not normalized:
-        return False
-    compact = "".join(
-        char for char in normalized if char.isalnum() or "\u4e00" <= char <= "\u9fff"
-    )
-    greetings = {
-        "hi",
-        "hello",
-        "hey",
-        "你好",
-        "你们好",
-        "大家好",
-        "早上好",
-        "下午好",
-        "晚上好",
-    }
-    return compact in greetings or compact.rstrip("呀啊哈") in greetings
 
 
 def _is_simple_greeting_utf8(text: str) -> bool:

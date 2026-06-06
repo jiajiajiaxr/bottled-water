@@ -77,6 +77,7 @@ class AgentStepper:
                 tool_executor=tool_executor,
                 agent_ctx=agent_ctx,
                 emit_event=self._checkpoint_emitter(emit_event),
+                checkpoint=self._checkpoint,
             )
         except AgentControlInterrupt:
             return StepResult(
@@ -104,6 +105,13 @@ class AgentStepper:
                 raise AgentControlInterrupt()
 
         return _emit
+
+    async def _checkpoint(self, _stage: str, _payload: dict[str, Any] | None = None) -> None:
+        await asyncio.sleep(0)
+        await self._apply_pending_controls()
+        await self._wait_if_paused()
+        if self.cancel_requested or self.complete_requested:
+            raise AgentControlInterrupt()
 
     async def _apply_pending_controls(self) -> None:
         for event in self.mailbox.drain():
