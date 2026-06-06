@@ -20,6 +20,7 @@ from app.services.chat.scheduling import persist_scheduling_strategy, resolve_sc
 from app.services.serialization import message_to_dict
 from app.services.files.references import resolve_file_reference_attachments
 from app.services.chat.code_runner import run_message_code_block
+from app.services.chat.message_prompt import runtime_prompt_for_message
 
 
 router = APIRouter(tags=["messages"])
@@ -96,7 +97,8 @@ async def _send_async(
                     "content_type": file_asset.content_type,
                     "size": file_asset.size,
                     "parse_status": file_asset.parse_status,
-                    "extracted_text": file_asset.extracted_text[:12000],
+                    "extracted_text": (file_asset.extracted_text or "")[:12000],
+                    "metadata": file_asset.extra or {},
                 }
             )
     existing_file_ids = {str(item.get("file_id") or "") for item in normalized_attachments}
@@ -155,7 +157,11 @@ async def _send_async(
             model_config_id=payload.get("model_config_id"),
             event_sink=SseSink(str(conversation.id)),
         )
-        await session_manager.start_generation(conversation.id, text)
+        await session_manager.start_generation(
+            conversation.id,
+            text,
+            runtime_content=runtime_prompt_for_message(message),
+        )
 
     return message
 
@@ -204,7 +210,8 @@ def _send_sync(db, user: User, conversation_id: str, payload: dict, *, trigger_a
                     "content_type": file_asset.content_type,
                     "size": file_asset.size,
                     "parse_status": file_asset.parse_status,
-                    "extracted_text": file_asset.extracted_text[:12000],
+                    "extracted_text": (file_asset.extracted_text or "")[:12000],
+                    "metadata": file_asset.extra or {},
                 }
             )
     existing_file_ids = {str(item.get("file_id") or "") for item in normalized_attachments}
@@ -333,6 +340,7 @@ async def stream_conversation(
         await session_manager.start_generation(
             conversation_id,
             message.content.get("text", "") if isinstance(message.content, dict) else str(message.content),
+            runtime_content=runtime_prompt_for_message(message),
         )
 
         queue = sse_sink.get_queue()

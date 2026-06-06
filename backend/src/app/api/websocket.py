@@ -29,6 +29,7 @@ from app.services.conversation_session_manager import (
     ConversationSessionManager,
 )
 from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
+from app.services.chat.message_prompt import runtime_prompt_for_message
 from common.logger import get_logger
 
 logger = get_logger("app.api.websocket")
@@ -121,7 +122,8 @@ async def _save_user_message(
                     "content_type": file_asset.content_type,
                     "size": file_asset.size,
                     "parse_status": file_asset.parse_status,
-                    "extracted_text": file_asset.extracted_text[:12000],
+                    "extracted_text": (file_asset.extracted_text or "")[:12000],
+                    "metadata": file_asset.extra or {},
                 }
             )
 
@@ -271,8 +273,9 @@ async def _handle_chat_send(
                 if isinstance(message.content, dict)
                 else str(message.content)
             )
+            runtime_content = runtime_prompt_for_message(message)
             asyncio.create_task(
-                _send_user_input_async(session_manager, conversation_id, content),
+                _send_user_input_async(session_manager, conversation_id, content, runtime_content),
                 name=f"ws-send-{conversation_id}",
             )
 
@@ -299,10 +302,15 @@ async def _send_user_input_async(
     session_manager: ConversationSessionManager,
     conversation_id: str,
     content: str,
+    runtime_content: str | None = None,
 ) -> None:
     """异步发送用户输入到 Session（后台任务）。"""
     try:
-        await session_manager.send_user_input(conversation_id, content)
+        await session_manager.send_user_input(
+            conversation_id,
+            content,
+            runtime_content=runtime_content,
+        )
     except Exception as e:
         await WebSocketSink(conversation_id).emit(
             RuntimeEvent(

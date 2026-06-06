@@ -6,9 +6,15 @@ from typing import Any
 from app.services.context.compression import trim_text
 
 
-IMAGE_PROMPT_PATTERN = re.compile(r"(图片|图像|照片|截图|看一下|识别|这是什么|是什么内容|describe|image|photo|picture)", re.I)
+IMAGE_PROMPT_PATTERN = re.compile(
+    r"(图片|图像|照片|截图|看一下|识别|这是什么|是什么内容|describe|image|photo|picture)",
+    re.I,
+)
 VISION_EXTRACTORS = {"ocr", "vision", "vision_model", "image_ocr"}
-IMAGE_PLACEHOLDER_PATTERN = re.compile(r"(可交给视觉模型|OCR 工具|未启用视觉|图片文件)", re.I)
+IMAGE_PLACEHOLDER_PATTERN = re.compile(
+    r"(可交给视觉模型|OCR 工具|未启用视觉|图片文件)",
+    re.I,
+)
 
 
 def attachment_context_from_items(attachments: list[Any], *, max_chars: int = 12_000) -> str:
@@ -20,13 +26,22 @@ def attachment_context_from_items(attachments: list[Any], *, max_chars: int = 12
             continue
         filename = attachment_filename(item)
         content_type = attachment_content_type(item)
+        file_id = str(item.get("file_id") or item.get("id") or "").strip()
+        parse_status = str(item.get("parse_status") or "unknown")
+        header = f"- {filename} ({content_type or 'unknown'})"
+        if file_id:
+            header += f" file_id={file_id}"
+        header += f" parse_status={parse_status}"
+
         extracted = readable_attachment_text(item)
         if extracted:
-            parts.append(f"- {filename} ({content_type})\n{trim_text(extracted, max_chars=3000)}")
+            parts.append(f"{header}\n{trim_text(extracted, max_chars=3000)}")
         elif is_image_attachment(item):
-            parts.append(f"- {filename} ({content_type})：图片附件；当前未启用视觉解析/OCR解析，不能假装理解图片内容。")
+            parts.append(
+                f"{header}：图片附件；当前未启用视觉解析或 OCR 解析，不能假装理解图片内容。"
+            )
         else:
-            parts.append(f"- {filename} ({content_type})：未提取到可读文本。")
+            parts.append(f"{header}：未提取到可读文本。")
     return trim_text("\n\n".join(parts), max_chars=max_chars)
 
 

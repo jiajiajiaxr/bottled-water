@@ -149,6 +149,8 @@ class ConversationSessionManager:
         self,
         conversation_id: str,
         content: str,
+        *,
+        runtime_content: str | None = None,
     ) -> None:
         """启动 generation。
 
@@ -166,7 +168,7 @@ class ConversationSessionManager:
 
         generation_id = await self._create_generation_record(conversation_id, session, content)
         task = asyncio.create_task(
-            self._run_generation(session, conversation_id, generation_id, content),
+            self._run_generation(session, conversation_id, generation_id, runtime_content or content),
             name=f"generation-{conversation_id}",
         )
         self._running_tasks[conversation_id] = task
@@ -194,6 +196,8 @@ class ConversationSessionManager:
         self,
         conversation_id: str,
         content: str,
+        *,
+        runtime_content: str | None = None,
     ) -> None:
         """向 Session 发送用户输入。
 
@@ -211,7 +215,7 @@ class ConversationSessionManager:
             # 运行中：通过 send_message 插队
             logger.info("用户输入插队", conversation_id=conversation_id, content_preview=content[:50])
             generation_id = self._generation_ids.get(conversation_id)
-            async for event in session.send_message(content):
+            async for event in session.send_message(runtime_content or content):
                 if generation_id:
                     await self._record_generation_event(conversation_id, generation_id, event)
         else:
@@ -225,7 +229,7 @@ class ConversationSessionManager:
                     raise SessionAlreadyRunningError(
                         f"Conversation {conversation_id} is still finishing the previous generation"
                     ) from exc
-            await self.start_generation(conversation_id, content)
+            await self.start_generation(conversation_id, content, runtime_content=runtime_content)
 
     async def cancel_generation(self, conversation_id: str) -> bool:
         """取消当前 generation。

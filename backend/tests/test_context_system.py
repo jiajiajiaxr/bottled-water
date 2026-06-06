@@ -30,6 +30,7 @@ from app.services.context.memory import (
 )
 from app.services.context.state import conversation_state, update_conversation_state_after_turn
 from app.services.context.variables import artifact_reference_scope, resolve_value
+from app.services.chat.message_prompt import runtime_prompt_for_message
 
 
 def test_history_is_trimmed_and_summary_persisted() -> None:
@@ -81,6 +82,33 @@ def test_attachment_context_marks_text_and_images_honestly() -> None:
 
     assert "PDF 提取文本" in text
     assert "未启用视觉解析" in text
+
+
+def test_runtime_prompt_includes_uploaded_file_context() -> None:
+    message = Message(
+        conversation_id="conv",
+        sender_type="user",
+        sender_name="User",
+        content={
+            "text": "总结这个文件",
+            "attachments": [
+                {
+                    "file_id": "file-1",
+                    "filename": "report.pdf",
+                    "content_type": "application/pdf",
+                    "parse_status": "parsed",
+                    "extracted_text": "核心结论：本季度交付稳定。",
+                }
+            ],
+        },
+    )
+
+    prompt = runtime_prompt_for_message(message)
+
+    assert "总结这个文件" in prompt
+    assert "file_id=file-1" in prompt
+    assert "核心结论：本季度交付稳定。" in prompt
+    assert "不要说没有收到文件" in prompt
 
 
 def test_context_builder_orders_context_before_latest_input() -> None:
