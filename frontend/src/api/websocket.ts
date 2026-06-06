@@ -1,6 +1,10 @@
 import { getAuthToken } from "./client";
 
-export type MessageListener = (event: string, data: unknown) => void;
+export type MessageListener = (
+  event: string,
+  data: unknown,
+  requestId?: string,
+) => void;
 
 /**
  * 管理单个会话的 WebSocket 连接。
@@ -59,14 +63,14 @@ class ConversationWS {
       };
 
       this.ws.onmessage = (e) => {
-        let msg: { event?: string; data?: unknown };
+        let msg: { event?: string; data?: unknown; request_id?: string };
         try {
           msg = JSON.parse(e.data);
         } catch {
           return;
         }
         if (msg.event !== undefined) {
-          this.listeners.forEach((fn) => fn(msg.event!, msg.data));
+          this.listeners.forEach((fn) => fn(msg.event!, msg.data, msg.request_id));
         }
       };
 

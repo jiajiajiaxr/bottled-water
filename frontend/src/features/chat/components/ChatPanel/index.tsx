@@ -398,16 +398,27 @@ export function ChatPanel({
                 思考
               </Button>
             </Tooltip>
+            {isWorking && (
+              <Button
+                type="default"
+                danger
+                icon={<StopOutlined />}
+                loading={stopping}
+                onClick={stopResponse}
+                disabled={!active}
+                data-testid="stop-response"
+              >
+                停止
+              </Button>
+            )}
             <Button
-              type={isWorking ? "default" : "primary"}
-              danger={isWorking}
-              icon={isWorking ? <StopOutlined /> : <SendOutlined />}
-              loading={stopping}
-              onClick={isWorking ? stopResponse : submit}
+              type="primary"
+              icon={<SendOutlined />}
+              onClick={submit}
               disabled={!active}
               data-testid="send-message"
             >
-              {isWorking ? "\u505c\u6b62" : "\u53d1\u9001"}
+              发送
             </Button>
           </Space>
         </Flex>

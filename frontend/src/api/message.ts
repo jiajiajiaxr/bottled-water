@@ -3,6 +3,15 @@ import type { ChatMessage } from "@/types";
 import { API_BASE, get, post, sse } from "./client";
 import { getConversationWS } from "./websocket";
 
+type PendingAck = {
+  resolve: (value: string) => void;
+  timeout: number;
+};
+
+const wsStreamSubscriptions = new Map<string, () => void>();
+const wsStreamHandlers = new Map<string, StreamAssistantHandlers>();
+const wsPendingAcks = new Map<string, Map<string, PendingAck>>();
+
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
   const result = await get<{ items: ChatMessage[] } | ChatMessage[]>(
     `/conversations/${conversationId}/messages`,
@@ -464,7 +473,8 @@ export async function sendMessageWs(
   }
 
   const requestId = `req-${Date.now()}`;
-  let resolved = false;
+  wsStreamHandlers.set(conversationId, handlers);
+  ensureConversationStreamSubscription(conversationId, handlers);
 
   return new Promise((resolve) => {
     const stop = () => {
@@ -474,47 +484,88 @@ export async function sendMessageWs(
     handlers.onControl?.(stop);
 
     const timeout = window.setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        handlers.onDone?.();
-        resolve("timeout");
-      }
-    }, 120000);
-
-    const unsubscribe = ws.onMessage((event, data) => {
-      switch (event) {
-        case "system.session_completed":
-        case "generation_finished":
-        case "generation:finished":
-        case "generation:cancelled":
-        case "generation:failed":
-        case "cancelled":
-        case "failed":
-          window.clearTimeout(timeout);
-          if (!resolved) {
-            resolved = true;
-            unsubscribe();
-            dispatchStreamEvent(event, data, handlers);
-            resolve("ok");
-          }
-          break;
-        case "system.session_error":
-          window.clearTimeout(timeout);
-          if (!resolved) {
-            resolved = true;
-            unsubscribe();
-            dispatchStreamEvent(event, data, handlers);
-            resolve("error");
-          }
-          break;
-        default:
-          dispatchStreamEvent(event, data, handlers);
-          break;
-      }
-    });
+      resolvePendingAck(conversationId, requestId, "timeout");
+    }, 15000);
+    pendingAcksFor(conversationId).set(requestId, { resolve, timeout });
 
     ws.send("chat.send", body, requestId);
   });
+}
+
+function ensureConversationStreamSubscription(
+  conversationId: string,
+  handlers: StreamAssistantHandlers,
+): void {
+  if (wsStreamSubscriptions.has(conversationId)) return;
+
+  const ws = getConversationWS(conversationId);
+  const unsubscribe = ws.onMessage((event, data, requestId) => {
+    const activeHandlers = wsStreamHandlers.get(conversationId) ?? handlers;
+    if (event === "chat.ack") {
+      resolvePendingAck(conversationId, requestId, "ok");
+      return;
+    }
+
+    dispatchStreamEvent(event, data, activeHandlers);
+
+    if (isTerminalWsEvent(event)) {
+      clearConversationWsSubscription(conversationId);
+    }
+  });
+  wsStreamSubscriptions.set(conversationId, unsubscribe);
+}
+
+function pendingAcksFor(conversationId: string): Map<string, PendingAck> {
+  let pending = wsPendingAcks.get(conversationId);
+  if (!pending) {
+    pending = new Map();
+    wsPendingAcks.set(conversationId, pending);
+  }
+  return pending;
+}
+
+function resolvePendingAck(
+  conversationId: string,
+  requestId: string | undefined,
+  result: string,
+): void {
+  const pending = wsPendingAcks.get(conversationId);
+  if (!pending || pending.size === 0) return;
+  const key = requestId && pending.has(requestId) ? requestId : pending.keys().next().value;
+  if (!key) return;
+  const ack = pending.get(key);
+  if (!ack) return;
+  window.clearTimeout(ack.timeout);
+  pending.delete(key);
+  if (pending.size === 0) {
+    wsPendingAcks.delete(conversationId);
+  }
+  ack.resolve(result);
+}
+
+function clearConversationWsSubscription(conversationId: string): void {
+  wsStreamSubscriptions.get(conversationId)?.();
+  wsStreamSubscriptions.delete(conversationId);
+  wsStreamHandlers.delete(conversationId);
+  const pending = wsPendingAcks.get(conversationId);
+  pending?.forEach((ack) => {
+    window.clearTimeout(ack.timeout);
+    ack.resolve("completed");
+  });
+  wsPendingAcks.delete(conversationId);
+}
+
+function isTerminalWsEvent(event: string): boolean {
+  return [
+    "system.session_completed",
+    "generation_finished",
+    "generation:finished",
+    "generation:cancelled",
+    "generation:failed",
+    "cancelled",
+    "failed",
+    "system.session_error",
+  ].includes(event);
 }
 
 /**
