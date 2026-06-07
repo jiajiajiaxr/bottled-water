@@ -18,6 +18,7 @@ from app.events import SseSink
 from app.events import app_event_bus as event_bus
 from app.services.chat.mentions import normalize_agent_mentions, raw_agent_mentions
 from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
+from app.services.chat.user_messages import message_text, save_user_message
 from app.services.serialization import message_to_dict
 from app.services.files.attachments import (
     attachment_from_file_asset,
@@ -42,17 +43,12 @@ async def _get_conversation(db: AsyncSession, user: User, conversation_id: str) 
         )
     )
     if not conversation:
-        raise NotFoundError("会话不存在")
+        raise NotFoundError("Conversation not found")
     return conversation
 
 
 def _message_text(payload: dict) -> str:
-    content = payload.get("content")
-    if isinstance(content, dict):
-        return str(content.get("text") or content.get("content") or "")
-    if isinstance(content, str):
-        return content
-    return str(payload.get("prompt") or "")
+    return message_text(payload)
 
 
 async def _list_messages(db: AsyncSession, user: User, conversation_id: str) -> list[dict]:
@@ -71,93 +67,8 @@ async def _send_async(
     db: AsyncSession, user: User, conversation_id: str, payload: dict, *, trigger_agent: bool = True
 ) -> Message:
     conversation = await _get_conversation(db, user, conversation_id)
+    message = await save_user_message(db, user=user, conversation=conversation, payload=payload)
     text = _message_text(payload).strip()
-
-    if not text:
-        raise ValidationAppError("消息内容不能为空")
-
-    raw_content = payload.get("content") if isinstance(payload.get("content"), dict) else {}
-    attachments = raw_content.get("attachments") or payload.get("attachments") or []
-    normalized_attachments: list[dict] = []
-
-    for item in attachments:
-        file_id = item.get("file_id") or item.get("id") if isinstance(item, dict) else str(item)
-
-        if not file_id:
-            continue
-
-        file_asset = await db.scalar(
-            select(FileAsset).where(
-                FileAsset.id == file_id,
-                FileAsset.owner_id == user.id,
-                FileAsset.deleted_at.is_(None),
-            )
-        )
-
-        if file_asset:
-            refresh_attachment_text_if_needed(file_asset)
-            normalized_attachments.append(attachment_from_file_asset(file_asset))
-    existing_file_ids = {str(item.get("file_id") or "") for item in normalized_attachments}
-    reference_text = file_reference_text(
-        text,
-        raw_content.get("file_references") or payload.get("file_references"),
-    )
-    if reference_text:
-        referenced = await db.run_sync(
-            lambda session: resolve_file_reference_attachments(
-                session,
-                user=user,
-                conversation=conversation,
-                text=reference_text,
-                existing_file_ids=existing_file_ids,
-            )
-        )
-        normalized_attachments.extend(referenced)
-    normalized_agent_mentions = await db.run_sync(
-        lambda session: normalize_agent_mentions(
-            session,
-            conversation_id=conversation.id,
-            mentions=raw_agent_mentions(payload, raw_content),
-        )
-    )
-    # 调度策略：消息级 > 会话级 > workflow 群聊默认 > tech_lead
-    scheduling_strategy = resolve_scheduling_strategy(conversation, payload.get("scheduling_strategy"))
-
-    # 如果消息指定了新策略，持久化到会话
-    if payload.get("scheduling_strategy"):
-        persist_scheduling_strategy(conversation, scheduling_strategy)
-
-    message = Message(
-        client_message_id=payload.get("client_message_id") or str(uuid.uuid4()),
-        conversation_id=conversation.id,
-        sender_type="user",
-        sender_id=user.id,
-        sender_name=user.display_name,
-        sender_avatar_url=user.avatar_url,
-        content_type=payload.get("content_type") or "text",
-        content={
-            "text": text,
-            "attachments": normalized_attachments,
-            "agent_mentions": normalized_agent_mentions,
-        },
-        status="sent",
-        reply_to_message_id=payload.get("reply_to_message_id") or payload.get("quotedMessageId"),
-        extra={
-            "thinking_enabled": bool(payload.get("thinking_enabled")),
-            "scheduling_strategy": scheduling_strategy,
-            "model_config_id": payload.get("model_config_id"),
-        },
-    )
-
-    conversation.last_message_preview = text[:300]
-    conversation.last_message_sender = user.display_name
-    conversation.last_message_at = utcnow()
-    conversation.activity_score = min(100, conversation.activity_score + 5)
-    conversation.message_count += 1
-
-    db.add(message)
-    await db.commit()
-    await db.refresh(message)
 
     if trigger_agent:
         from app.services.conversation_session_manager import ConversationSessionManager
@@ -197,10 +108,10 @@ def _send_sync(db, user: User, conversation_id: str, payload: dict, *, trigger_a
         )
     )
     if not conversation:
-        raise NotFoundError("会话不存在")
+        raise NotFoundError("Conversation not found")
     text = _message_text(payload).strip()
     if not text:
-        raise ValidationAppError("消息内容不能为空")
+        raise ValidationAppError("Message content cannot be empty")
 
     raw_content = payload.get("content") if isinstance(payload.get("content"), dict) else {}
     attachments = raw_content.get("attachments") or payload.get("attachments") or []
@@ -273,7 +184,7 @@ def _send_sync(db, user: User, conversation_id: str, payload: dict, *, trigger_a
     db.commit()
     db.refresh(message)
     if trigger_agent:
-        raise ValidationAppError("同步 _send 仅用于不触发 Agent 的测试路径")
+        raise ValidationAppError("sync _send cannot trigger agents")
     return message
 
 
@@ -306,7 +217,7 @@ async def create_message(
         payload.model_dump(),
         trigger_agent=False,
     )
-    return ok(message_to_dict(message), "消息已保存")
+    return ok(message_to_dict(message), "Message saved")
 
 
 @router.post("/conversations/{conversation_id}/stream")
@@ -316,20 +227,25 @@ async def stream_conversation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """标准 SSE 流式接口（deprecated，请使用 WebSocket /ws/conversations/{id}）。
+    """Deprecated SSE streaming endpoint."""
 
-    保留用于向后兼容，内部事件仅通过 SseSink 推送。
-    """
+
+
     await _get_conversation(db, user, conversation_id)
 
     channel = f"conversation:{conversation_id}"
 
-    # 处理重新生成
+    # Handle regenerate requests through the same persisted user-message path.
     message_payload: dict = {}
 
     if payload.regenerate_message_id:
         original = db.get(Message, payload.regenerate_message_id)
-        prompt = f"请重新生成这条回复：{original.content.get('text', '')}" if original else ""
+        original_text = (
+            original.content.get("text", "")
+            if original and isinstance(original.content, dict)
+            else ""
+        )
+        prompt = f"Please regenerate based on the original message:\n{original_text}" if original_text else ""
         message_payload = {
             "client_message_id": str(uuid.uuid4()),
             "content": {"text": prompt},
@@ -337,14 +253,14 @@ async def stream_conversation(
     else:
         message_payload = payload.model_dump()
 
-    # 保存用户消息并触发统一 ConversationSessionManager 链路
+    # Save first, then start generation with the persisted message id.
     sse_sink = SseSink(conversation_id)
     message = await _send(db, user, conversation_id, message_payload, trigger_agent=False)
 
-    # 先推送用户消息事件（保留用于兼容）
+    # Publish the user message event for legacy SSE consumers.
     await event_bus.publish(channel, "message:new", message_to_dict(message))
 
-    # 返回 SSE 流：仅监听 SseSink
+    # Bridge runtime events into the SSE response stream.
     async def generator():
         from app.services.conversation_session_manager import ConversationSessionManager
 
@@ -392,19 +308,19 @@ async def cancel_stream(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """取消 generation（兼容 SSE 路径，同时影响 WebSocket 路径的 Session）。"""
+    """Cancel the active generation."""
     from app.services.conversation_session_manager import ConversationSessionManager
 
     conversation = await _get_conversation(db, user, conversation_id)
 
-    # 1. 取消旧 SSE 路径的 task
+    # Cancel the legacy SSE orchestration task if it is still running.
     task = ORCHESTRATION_TASKS.get(conversation.id)
     cancelled = False
     if task and not task.done():
         task.cancel()
         cancelled = True
 
-    # 2. 取消新 WebSocket 路径的 Session generation
+    # Cancel the shared conversation session generation as well.
     session_manager = ConversationSessionManager.get_instance()
     if session_manager.is_generation_running(conversation.id):
         await session_manager.cancel_generation(conversation.id)
@@ -430,9 +346,9 @@ async def run_message_code(
     user: User = Depends(get_current_user),
 ):
     if payload.conversation_id and payload.conversation_id != conversation_id:
-        raise ValidationAppError("conversation_id 与请求路径不一致")
+        raise ValidationAppError("conversation_id does not match request path")
     if payload.message_id and payload.message_id != message_id:
-        raise ValidationAppError("message_id 与请求路径不一致")
+        raise ValidationAppError("message_id does not match request path")
     result = await db.run_sync(
         lambda session: run_message_code_block(
             session,
@@ -446,7 +362,7 @@ async def run_message_code(
             workspace_id=payload.workspace_id,
         )
     )
-    return ok(result, "代码已在会话沙箱中执行")
+    return ok(result, "Code executed in conversation sandbox")
 
 
 # ---- compat routes ----
@@ -467,7 +383,7 @@ async def compat_cancel_stream(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """取消 generation（兼容路由，无 SSE）。"""
+    """Cancel the active generation for compatibility routes."""
     from app.services.conversation_session_manager import ConversationSessionManager
 
     conversation = await _get_conversation(db, user, conversation_id)

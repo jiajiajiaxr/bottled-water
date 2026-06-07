@@ -19,6 +19,7 @@ from agent_runtime.core.types import Event as RuntimeEvent
 from app.services.conversation_session_manager import (
     ConversationSessionManager,
 )
+from app.services.chat.user_messages import save_user_message
 from db.base import Base
 from db.models import Conversation, Message, User
 
@@ -293,6 +294,95 @@ class TestConversationSessionManagerStatus:
             assert record["decisions"][0]["target"] == "frontend"
             assert record["agent_runs"][0]["status"] == "completed"
             assert record["agent_runs"][0]["output_preview"] == "HTML page completed"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_generation_start_is_idempotent_for_same_user_message(self, tmp_path):
+        conversation_id = "conv-generation-idempotent"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            mgr._sessions[conversation_id] = _FakeAgentSession(conversation_id)
+
+            await mgr.start_generation(conversation_id, "hello", user_message_id="msg-1")
+            await mgr._running_tasks[conversation_id]
+            await asyncio.sleep(0.05)
+
+            await mgr.start_generation(conversation_id, "hello", user_message_id="msg-1")
+
+            async with factory() as session:
+                conversation = await session.get(Conversation, conversation_id)
+            runtime = (conversation.extra or {}).get("runtime") or {}
+            assert len(runtime["generations"]) == 1
+            assert runtime["generations"][0]["user_message_id"] == "msg-1"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_running_generation_ignores_duplicate_user_message(self, tmp_path):
+        conversation_id = "conv-generation-running-duplicate"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            mgr._sessions[conversation_id] = _FakeAgentSession(conversation_id, slow=True)
+
+            await mgr.start_generation(conversation_id, "long task", user_message_id="msg-1")
+            task = mgr._running_tasks[conversation_id]
+            await asyncio.sleep(0.05)
+            await mgr.send_user_input(conversation_id, "long task", user_message_id="msg-1")
+
+            assert mgr._queued_inputs.get(conversation_id) is None
+            assert await mgr.cancel_generation(conversation_id) is True
+            with suppress(asyncio.CancelledError):
+                await task
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_running_generation_queues_distinct_user_message_once(self, tmp_path):
+        conversation_id = "conv-generation-queue-dedupe"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            mgr._sessions[conversation_id] = _FakeAgentSession(conversation_id, slow=True)
+
+            await mgr.start_generation(conversation_id, "first", user_message_id="msg-1")
+            task = mgr._running_tasks[conversation_id]
+            await asyncio.sleep(0.05)
+            await mgr.send_user_input(conversation_id, "second", user_message_id="msg-2")
+            await mgr.send_user_input(conversation_id, "second", user_message_id="msg-2")
+
+            assert len(mgr._queued_inputs.get(conversation_id) or []) == 1
+            assert await mgr.cancel_generation(conversation_id) is True
+            with suppress(asyncio.CancelledError):
+                await task
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_save_user_message_reuses_client_message_id(self, tmp_path):
+        conversation_id = "conv-message-client-id"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            async with factory() as session:
+                user = await session.get(User, f"user-{conversation_id}")
+                conversation = await session.get(Conversation, conversation_id)
+                payload = {
+                    "client_message_id": "client-1",
+                    "content": {"text": "hello"},
+                }
+                first = await save_user_message(session, user=user, conversation=conversation, payload=payload)
+                second = await save_user_message(session, user=user, conversation=conversation, payload=payload)
+
+                messages = (
+                    await session.execute(select(Message).where(Message.conversation_id == conversation_id))
+                ).scalars().all()
+                await session.refresh(conversation)
+
+            assert first.id == second.id
+            assert len(messages) == 1
+            assert conversation.message_count == 1
         finally:
             await engine.dispose()
 

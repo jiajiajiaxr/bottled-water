@@ -291,14 +291,15 @@ async def _mark_workflow_failed(
     assistant: Message | None,
     channel: str,
 ) -> None:
+    failure_text = "Workflow execution failed; dependent nodes were stopped. Open the workflow canvas to inspect the failed node."
     task.status = "FAILED"
     task.progress = workflow_run.progress
     task.error_info = {"workflow_run_id": workflow_run.id, "events": workflow_run.events[-10:] if workflow_run.events else []}
     task.completed_at = utcnow()
     if assistant:
         assistant.status = "failed"
-        assistant.content = {"text": "工作流执行失败，已停止后续依赖节点。请打开群聊工作流画布查看失败节点。"}
-    conversation.last_message_preview = "工作流执行失败，已停止后续依赖节点。"
+        assistant.content = {"text": failure_text}
+    conversation.last_message_preview = failure_text
     conversation.last_message_sender = "Workflow Engine"
     conversation.last_message_at = utcnow()
     db.commit()
@@ -312,7 +313,7 @@ async def _mark_workflow_failed(
         channel=channel,
         status="failed",
         stop_reason="workflow_failed",
-        fallback_text="工作流执行失败，已停止后续节点。",
+        fallback_text=failure_text,
     )
     await event_bus.publish(channel, "generation_finished", {"conversation_id": conversation.id, "reason": "workflow_failed"})
 
@@ -338,7 +339,7 @@ async def _complete_independent_group(
         "agent_replies": agent_replies,
     }
     task.completed_at = utcnow()
-    conversation.last_message_preview = (summary or "多 Agent 已完成本轮回复。")[:300]
+    conversation.last_message_preview = (summary or "All agents completed this turn.")[:300]
     conversation.last_message_sender = "AgentHub"
     conversation.last_message_at = utcnow()
     conversation.activity_score = min(100, conversation.activity_score + 6)
@@ -350,7 +351,7 @@ async def _complete_independent_group(
         channel=channel,
         status="completed",
         stop_reason="workflow_completed",
-        fallback_text="本轮响应已结束。",
+        fallback_text="This turn has completed.",
     )
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
     await event_bus.publish(
@@ -376,12 +377,14 @@ async def _stream_master_response(
         {
             "role": "system",
             "content": (
-                "你是 AgentHub 主控 Agent。你可以在内部完成任务拆解、执行协调和审查，"
-                "但对用户只输出最终可读回复，不要输出内部阶段标题。"
-                "如果工具或 Skill 已返回结果，请融合为自然语言结论，不要粘贴内部 JSON。"
+                "You are the AgentHub master agent. Summarize completed tool and agent work for the user. "
+                "Only output the final readable answer; do not expose internal planning, JSON, or tool payloads."
             ),
         },
-        {"role": "system", "content": "可用工具执行摘要：" + json.dumps(tool_context, ensure_ascii=False)[:6000]},
+        {
+            "role": "system",
+            "content": "Available tool execution summary: " + json.dumps(tool_context, ensure_ascii=False)[:6000],
+        },
         {"role": "user", "content": prompt},
     ]
     thinking_enabled = (user_message.extra or {}).get("thinking_enabled") is True
@@ -417,17 +420,17 @@ async def _stream_master_response(
         elif event.type == "usage":
             await event_bus.publish(channel, "usage", {"agent_message_id": assistant.id, "usage": event.usage})
         elif event.type == "error":
-            stream_text += f"\n模型调用异常，已降级：{event.error}"
+            stream_text += f"\n[model-error] {event.error}"
 
     display_text = strip_internal_agent_output(stream_text)
     assistant.content = {
-        "text": display_text or "我已经完成处理，但本次模型没有返回可展示的最终回复。",
+        "text": display_text or "The task has completed, but no final text was produced.",
         "thinking": strip_internal_agent_output(reasoning_text) if reasoning_text else "",
     }
     assistant.status = "completed"
     db.commit()
     await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
-    conversation.last_message_preview = (display_text or "主控 Agent 已完成回复。")[:300]
+    conversation.last_message_preview = (display_text or "Master Agent completed this turn.")[:300]
     conversation.last_message_sender = "Master Agent"
     conversation.last_message_at = utcnow()
     conversation.activity_score = min(100, conversation.activity_score + 8)
@@ -494,11 +497,12 @@ async def _handle_cancelled(
         task.progress = min(task.progress or 0, 95)
         task.completed_at = utcnow()
         task.output = {**(task.output or {}), "cancelled": True}
+    cancel_text = strip_internal_agent_output(stream_text) or "This response was cancelled."
     if assistant:
         assistant.status = "cancelled"
-        assistant.content = {"text": strip_internal_agent_output(stream_text) or "已停止本次响应。"}
+        assistant.content = {"text": cancel_text}
     if conversation:
-        conversation.last_message_preview = "已停止本次响应。"
+        conversation.last_message_preview = cancel_text
         conversation.last_message_sender = "Master Agent"
         conversation.last_message_at = utcnow()
     if workflow_run:
@@ -521,7 +525,7 @@ async def _handle_cancelled(
         channel=channel,
         status="cancelled",
         stop_reason="cancelled",
-        fallback_text="已停止本次响应。",
+        fallback_text=cancel_text,
     )
     if workflow_run:
         await event_bus.publish(
@@ -534,9 +538,9 @@ async def _handle_cancelled(
 
 async def _review(prompt: str) -> str:
     try:
-        result = await ark_client.chat(
+        result = await ark_client.complete_stream_chat(
             [
-                {"role": "system", "content": "你是 Reviewer Agent，审查多 Agent 产物是否可演示。"},
+                {"role": "system", "content": "You are a reviewer agent. Check whether the multi-agent output is ready for the user."},
                 {"role": "user", "content": prompt},
             ],
             purpose="review",
@@ -544,4 +548,5 @@ async def _review(prompt: str) -> str:
         )
         return result.text
     except ArkProviderError as exc:
-        return f"[fallback-review] 方舟审查调用失败，使用规则审查通过：{exc}"
+        return f"[fallback-review] Reviewer call failed; using rule-based pass: {exc}"
+

@@ -8,7 +8,7 @@ from agent_runtime.core.types import AgentConfig, AgentReport, AgentState, Agent
 from agent_runtime.runtime.agent_loop import AgentLoop
 from agent_runtime.runtime.agent_stepper import AgentStepper
 from agent_runtime.runtime.mailbox import Mailbox
-from model_provider.core.interfaces import ChatResponse
+from model_provider.core.interfaces import ChatResponse, StreamChunk
 
 
 class FakeLoop:
@@ -116,6 +116,12 @@ class CancelAfterModelProvider:
                 }
             ],
         )
+
+    async def chat_stream(self, **kwargs):
+        response = await self.chat(**kwargs)
+        for tool_call in response.tool_calls or []:
+            yield StreamChunk(tool_call=tool_call)
+        yield StreamChunk(content=response.content or "", finish_reason="stop")
 
 
 class FakeToolExecutor:

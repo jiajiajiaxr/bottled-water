@@ -52,7 +52,16 @@ class MockModelProvider(BaseModelProvider):
         return ChatResponse(content="mock response")
 
     async def chat_stream(self, messages=None, system_prompt=None, tools=None, temperature=0.7, max_tokens=None):
-        yield StreamChunk(content="mock", finish_reason="stop")
+        response = await self.chat(
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        for tool_call in response.tool_calls or []:
+            yield StreamChunk(tool_call=tool_call)
+        yield StreamChunk(content=response.content or "", finish_reason="stop")
 
 
 @pytest.fixture

@@ -26,6 +26,7 @@ from app.services.llm.ark import LLMResult, LLMStreamEvent
 from app.services.llm.tool_calls import select_mock_tool_call
 from app.services.model_config_resolver import normalize_provider_type
 from model_provider.core.interfaces import ChatMessage
+from model_provider.core.streaming import collect_chat_stream
 
 
 async def stream_model_config_chat(
@@ -228,7 +229,8 @@ async def test_model_config(db: AsyncSession, model_config_id: str, prompt: str)
     )
 
     try:
-        response = await mp.chat(
+        response = await collect_chat_stream(
+            mp,
             messages=[ChatMessage(role="user", content=prompt)],
             temperature=model.temperature_default,
             max_tokens=min(model.max_output_tokens, 1024),

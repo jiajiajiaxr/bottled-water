@@ -34,6 +34,8 @@ from app.services.agents.async_tool_selection import (
 )
 from app.services.mcp import invoke_mcp_tool_recorded, tool_name
 from app.services.model_config_resolver import create_provider_from_db
+from model_provider.core.interfaces import ChatMessage
+from model_provider.core.streaming import collect_chat_stream
 from app.services.tools.builtins.registry import BUILTIN_TOOLS
 from app.services.tools.catalog import sync_builtin_tool_definitions
 from app.services.tools.executor import invoke_tool as invoke_tool_sync
@@ -107,10 +109,11 @@ async def execute_skill(
         provider = await create_provider_from_db(db)
         if not provider:
             raise RuntimeError("无可用模型配置")
-        response = await provider.chat(
+        response = await collect_chat_stream(
+            provider,
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps({"input": prompt, "skill": skill.name}, ensure_ascii=False)},
+                ChatMessage(role="system", content=system_prompt),
+                ChatMessage(role="user", content=json.dumps({"input": prompt, "skill": skill.name}, ensure_ascii=False)),
             ],
             temperature=0.2,
             max_tokens=600,

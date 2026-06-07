@@ -151,6 +151,11 @@ class FakeModelProvider:
     async def chat(self, **_kwargs):
         return ChatResponse(content="li", tool_calls=None)
 
+    async def chat_stream(self, **_kwargs):
+        from model_provider import StreamChunk
+
+        yield StreamChunk(content="li", finish_reason="stop")
+
 
 class FakeToolExecutor:
     def __init__(self) -> None:

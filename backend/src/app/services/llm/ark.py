@@ -214,6 +214,55 @@ class ArkClient:
                 errors.append({"model": model, "error": str(exc)})
         yield LLMStreamEvent(type="error", error=json.dumps(errors, ensure_ascii=False))
 
+    async def complete_stream_chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 1200,
+        purpose: str = "chat",
+        tools: list[dict[str, Any]] | None = None,
+        thinking: dict[str, Any] | None = None,
+    ) -> LLMResult:
+        """Use the streaming transport and collect the final text silently."""
+        text_parts: list[str] = []
+        usage: dict[str, Any] = {}
+        model = ""
+        raw_events: list[dict[str, Any]] = []
+
+        async for event in self.stream_chat(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            purpose=purpose,
+            tools=tools,
+            thinking=thinking,
+        ):
+            if event.type == "delta":
+                if event.text:
+                    text_parts.append(event.text)
+                if event.reasoning and not event.text:
+                    text_parts.append(event.reasoning)
+                model = event.model or model
+            elif event.type == "usage":
+                usage = event.usage or usage
+                model = event.model or model
+            elif event.type == "done":
+                usage = event.usage or usage
+                model = event.model or model
+            elif event.type == "tool_calls":
+                raw_events.append({"type": event.type, "tool_calls": event.tool_calls})
+                model = event.model or model
+            elif event.type == "error":
+                raise ArkProviderError(event.error or "stream_chat failed")
+
+        return LLMResult(
+            text="".join(text_parts),
+            model=model or "unknown",
+            usage=usage,
+            raw={"events": raw_events, "purpose": purpose},
+        )
+
     async def _post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         api_key = self._api_key()
         if not api_key:

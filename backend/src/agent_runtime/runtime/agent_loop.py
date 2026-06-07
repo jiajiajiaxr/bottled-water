@@ -16,6 +16,7 @@ import uuid
 from typing import Dict, Any, Optional, List
 
 from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatResponse
+from model_provider.core.streaming import collect_chat_stream
 
 from common.logger import get_logger
 from ..core.types import AgentConfig, AgentReport, AgentState, AgentWill, ToolCall, ToolResult
@@ -332,7 +333,8 @@ class AgentLoop:
                         defer_stop_if_tool_calls=True,
                     )
                 else:
-                    response = await self.model.chat(
+                    response = await collect_chat_stream(
+                        self.model,
                         messages=messages,
                         system_prompt=system_prompt,
                         tools=tools_for_round,
@@ -605,7 +607,8 @@ class AgentLoop:
                         stream_message_id=stream_message_id,
                     )
                 else:
-                    summary_response = await self.model.chat(
+                    summary_response = await collect_chat_stream(
+                        self.model,
                         messages=summary_messages,
                         system_prompt=system_prompt,
                     )

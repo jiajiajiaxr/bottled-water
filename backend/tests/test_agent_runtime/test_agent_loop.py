@@ -9,7 +9,7 @@
 
 import pytest
 
-from model_provider import ChatResponse
+from model_provider import ChatResponse, StreamChunk
 from agent_runtime.core.interfaces import AgentContextBuildResult
 from agent_runtime.runtime.agent_loop import AgentLoop, _StatusReportStreamFilter
 from agent_runtime.core.types import AgentConfig, AgentState, AgentWill
@@ -110,11 +110,12 @@ class TestAgentLoopBasic:
     async def test_run_uses_context_provider_messages(self, agent_config, mock_provider):
         captured: dict = {}
 
-        async def chat(messages=None, system_prompt=None, tools=None, temperature=0.7, max_tokens=None):
+        async def chat_stream(messages=None, system_prompt=None, tools=None, temperature=0.7, max_tokens=None):
             captured["messages"] = list(messages or [])
             captured["system_prompt"] = system_prompt
-            return ChatResponse(
-                content='context ok\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            yield StreamChunk(
+                content='context ok\n```status_report\n{"state": "completed", "will": "complete"}\n```',
+                finish_reason="stop",
             )
 
         class Provider:
@@ -128,7 +129,7 @@ class TestAgentLoopBasic:
                     ]
                 )
 
-        mock_provider.chat = chat
+        mock_provider.chat_stream = chat_stream
         loop = AgentLoop(agent_config, mock_provider)
         result = await loop.run(
             "runtime prompt with attachment context",
