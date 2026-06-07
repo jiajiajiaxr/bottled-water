@@ -1,7 +1,10 @@
 FROM python:3.11-slim
 
-# 从官方镜像复制 uv 二进制（不通过 pip 安装）
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+# 安装 uv（官方脚本）
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && ln -s /root/.cargo/bin/uv /usr/local/bin/uv \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
