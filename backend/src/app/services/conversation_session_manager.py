@@ -153,6 +153,7 @@ class ConversationSessionManager:
         runtime_content: str | None = None,
         thinking_enabled: bool = False,
         user_message_id: str | None = None,
+        client_message_id: str | None = None,
     ) -> None:
         """Start a generation if this user message has not already been handled."""
         user_message_key = str(user_message_id or "").strip()
@@ -189,6 +190,7 @@ class ConversationSessionManager:
                 conversation_id,
                 content,
                 user_message_id=user_message_id,
+                client_message_id=client_message_id,
             )
             task = asyncio.create_task(
                 self._run_generation(
@@ -232,6 +234,7 @@ class ConversationSessionManager:
         runtime_content: str | None = None,
         thinking_enabled: bool = False,
         user_message_id: str | None = None,
+        client_message_id: str | None = None,
     ) -> None:
         """Send user input to the active session with message-level idempotency."""
         user_message_key = str(user_message_id or "").strip()
@@ -261,6 +264,7 @@ class ConversationSessionManager:
                         "runtime_content": runtime_content,
                         "thinking_enabled": bool(thinking_enabled),
                         "user_message_id": user_message_key or None,
+                        "client_message_id": str(client_message_id or "") or None,
                     }
                 )
                 queued_payload = {
@@ -281,6 +285,7 @@ class ConversationSessionManager:
             runtime_content=runtime_content,
             thinking_enabled=thinking_enabled,
             user_message_id=user_message_id,
+            client_message_id=client_message_id,
         )
 
 
@@ -400,6 +405,7 @@ class ConversationSessionManager:
         content: str,
         *,
         user_message_id: str | None,
+        client_message_id: str | None = None,
     ) -> dict[str, str]:
         metadata = {
             "conversation_id": str(conversation_id),
@@ -408,6 +414,8 @@ class ConversationSessionManager:
         }
         if user_message_id:
             metadata["user_message_id"] = str(user_message_id)
+        if client_message_id:
+            metadata["client_message_id"] = str(client_message_id)
         return metadata
 
     async def _generation_exists_for_user_message(
@@ -600,6 +608,7 @@ class ConversationSessionManager:
         next_runtime_content = next_input.get("runtime_content")
         next_thinking_enabled = bool(next_input.get("thinking_enabled"))
         next_user_message_id = next_input.get("user_message_id")
+        next_client_message_id = next_input.get("client_message_id")
         if not next_content:
             return
 
@@ -610,6 +619,7 @@ class ConversationSessionManager:
                 runtime_content=next_runtime_content,
                 thinking_enabled=next_thinking_enabled,
                 user_message_id=str(next_user_message_id) if next_user_message_id else None,
+                client_message_id=str(next_client_message_id) if next_client_message_id else None,
             )
         except Exception as exc:
             logger.error("Queued input failed to start", conversation_id=conversation_id, error=str(exc))
@@ -639,6 +649,12 @@ class ConversationSessionManager:
         thinking_enabled = self._generation_thinking_enabled.get(generation_id, False)
 
         agent_id = str(payload.get("agent_id") or "")
+        stream_message_id = str(
+            payload.get("stream_message_id")
+            or payload.get("agent_message_id")
+            or payload.get("message_id")
+            or ""
+        )
         session = self._sessions.get(conversation_id)
         agent = session.agents.get(agent_id) if session and agent_id else None
         agent_name = getattr(agent, "name", None) or str(payload.get("agent_name") or "Agent")
@@ -675,6 +691,19 @@ class ConversationSessionManager:
                     }
                 if agent_avatar_url and not persisted.sender_avatar_url:
                     persisted.sender_avatar_url = agent_avatar_url
+                if isinstance(persisted.content, dict):
+                    content_patch = {}
+                    if agent_id and not persisted.content.get("agent_id"):
+                        content_patch["agent_id"] = agent_id
+                    if stream_message_id and not persisted.content.get("agent_message_id"):
+                        content_patch["agent_message_id"] = stream_message_id
+                        content_patch["message_id"] = stream_message_id
+                        content_patch["stream_message_id"] = stream_message_id
+                    if content_patch:
+                        persisted.content = {
+                            **persisted.content,
+                            **content_patch,
+                        }
                 conversation = await db.get(Conversation, conversation_id)
                 if conversation:
                     conversation.last_message_preview = work_product[:300]
@@ -698,6 +727,18 @@ class ConversationSessionManager:
 
         report = payload.get("report") if isinstance(payload.get("report"), dict) else {}
         thinking = self._latest_thinking.get((conversation_id, generation_id, agent_id), "").strip()
+        content = {
+            "text": work_product,
+            "thinking": thinking,
+            "thinking_enabled": thinking_enabled,
+            "runtime_report": report,
+        }
+        if agent_id:
+            content["agent_id"] = agent_id
+        if stream_message_id:
+            content["agent_message_id"] = stream_message_id
+            content["message_id"] = stream_message_id
+            content["stream_message_id"] = stream_message_id
         message = Message(
             conversation_id=conversation_id,
             sender_type="agent",
@@ -705,12 +746,7 @@ class ConversationSessionManager:
             sender_name=agent_name,
             sender_avatar_url=agent_avatar_url,
             content_type="text",
-            content={
-                "text": work_product,
-                "thinking": thinking,
-                "thinking_enabled": thinking_enabled,
-                "runtime_report": report,
-            },
+            content=content,
             status="completed",
             extra={
                 "runtime_generation_id": generation_id,

@@ -52,6 +52,44 @@ async def test_agent_actor_runs_assignment_and_publishes_report(mock_provider, m
 
 
 @pytest.mark.asyncio
+async def test_agent_actor_report_carries_stream_message_id(mock_provider, mock_tool_executor):
+    mock_provider.responses = [
+        ChatResponse(
+            content='done\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+        )
+    ]
+    bus = EventDispatcher()
+    events: list[Event] = []
+    bus.subscribe("*", lambda event: _append(events, event), target="*")
+    actor = AgentActor(
+        session_id="sess_actor_stream",
+        agent_config=AgentConfig(id="coder", name="Coder", system_prompt="You code."),
+        model_provider=mock_provider,
+        event_bus=bus,
+        tool_executor=mock_tool_executor,
+        use_streaming=True,
+    )
+    actor.start()
+
+    await bus.publish(
+        Event(
+            type=CONTROL_ASSIGN,
+            payload={"task": "write a helper"},
+            source="scheduler",
+            target="coder",
+        )
+    )
+    report_event = await _wait_for(events, AGENT_REPORT)
+    await actor.stop()
+
+    stream_id = str(report_event.payload.get("stream_message_id") or "")
+    start_event = next(event for event in events if event.type == "message_start")
+    assert stream_id.startswith("stream-coder-")
+    assert report_event.payload["agent_message_id"] == stream_id
+    assert start_event.payload["agent_message_id"] == stream_id
+
+
+@pytest.mark.asyncio
 async def test_agent_actor_passes_assignment_context_metadata(mock_provider, mock_tool_executor):
     captured: dict = {}
 
@@ -92,6 +130,7 @@ async def test_agent_actor_passes_assignment_context_metadata(mock_provider, moc
                 "context_metadata": {
                     "conversation_id": "conv-1",
                     "user_message_id": "msg-1",
+                    "client_message_id": "client-1",
                     "visible_content": "visible text",
                 },
             },
@@ -103,7 +142,11 @@ async def test_agent_actor_passes_assignment_context_metadata(mock_provider, moc
     await actor.stop()
 
     assert captured["request"].metadata["user_message_id"] == "msg-1"
+    assert captured["request"].metadata["client_message_id"] == "client-1"
     assert captured["request"].metadata["visible_content"] == "visible text"
+    thinking_event = next(event for event in events if event.type == "agent.thinking")
+    assert thinking_event.payload["user_message_id"] == "msg-1"
+    assert thinking_event.payload["client_message_id"] == "client-1"
 
 
 @pytest.mark.asyncio

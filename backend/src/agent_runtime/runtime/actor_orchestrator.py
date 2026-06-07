@@ -91,22 +91,19 @@ class ActorOrchestrator:
                 channel="all",
             )
         )
-        if self._is_simple_greeting(user_message):
-            await self._publish_direct_greeting(user_message, current_context_metadata)
-        else:
-            await self.event_bus.publish(
-                Event(
-                    type=USER_INPUT,
-                    payload={
-                        "session_id": self.session_id,
-                        "content": user_message,
-                        "mention_target_agent_ids": self._mention_targets(user_message),
-                        "context_metadata": current_context_metadata,
-                    },
-                    source="user",
-                    channel="all",
-                )
+        await self.event_bus.publish(
+            Event(
+                type=USER_INPUT,
+                payload={
+                    "session_id": self.session_id,
+                    "content": user_message,
+                    "mention_target_agent_ids": self._mention_targets(user_message),
+                    "context_metadata": current_context_metadata,
+                },
+                source="user",
+                channel="all",
             )
+        )
 
         loop = asyncio.get_running_loop()
         idle_deadline = loop.time() + self.max_runtime_seconds

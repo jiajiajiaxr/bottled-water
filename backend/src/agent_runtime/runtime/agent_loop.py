@@ -243,6 +243,7 @@ class AgentLoop:
 
         logger.info("Agent 执行开始", agent_id=self.agent.id, task=task[:50])
         self._set_state(AgentState.RUNNING)
+        stream_context = self._stream_context_payload(context_metadata)
         await _emit(
             "agent.thinking",
             {
@@ -250,6 +251,7 @@ class AgentLoop:
                 "agent_id": self.agent.id,
                 "agent_name": self.agent.name,
                 "thinking": self._build_initial_thinking(task),
+                **stream_context,
             },
         )
 
@@ -330,6 +332,7 @@ class AgentLoop:
                         tools=tools_for_round,
                         _emit=_emit,
                         stream_message_id=stream_message_id,
+                        stream_context=self._stream_context_payload(context_metadata),
                         defer_stop_if_tool_calls=True,
                     )
                 else:
@@ -436,6 +439,7 @@ class AgentLoop:
                     "agent_message_id": stream_message_id,
                     "tool_count": len(tool_calls),
                     "tools": [tc.get("function", {}).get("name", "unknown") for tc in tool_calls],
+                    **self._stream_context_payload(context_metadata),
                 },
             )
 
@@ -530,6 +534,7 @@ class AgentLoop:
                         "success": result.success if isinstance(result, ToolResult) else True,
                         "result": result.result if isinstance(result, ToolResult) else result,
                         "error": result.error if isinstance(result, ToolResult) else None,
+                        **self._stream_context_payload(context_metadata),
                     },
                 )
                 await self._run_checkpoint(
@@ -605,6 +610,7 @@ class AgentLoop:
                         tools=None,
                         _emit=_emit,
                         stream_message_id=stream_message_id,
+                        stream_context=self._stream_context_payload(context_metadata),
                     )
                 else:
                     summary_response = await collect_chat_stream(
@@ -633,7 +639,12 @@ class AgentLoop:
                 task,
             )
             if self.use_streaming:
-                await self._emit_text_response(_emit, stream_message_id, work_product)
+                await self._emit_text_response(
+                    _emit,
+                    stream_message_id,
+                    work_product,
+                    stream_context=self._stream_context_payload(context_metadata),
+                )
 
         # 将本轮对话归档回 AgentContext
         if agent_ctx:
@@ -657,6 +668,7 @@ class AgentLoop:
             "work_product": work_product,
             "status_report": status_report,
             "tool_events": tool_events,
+            "stream_message_id": stream_message_id,
         }
 
     @staticmethod
@@ -665,6 +677,18 @@ class AgentLoop:
         await asyncio.sleep(0)
         if checkpoint:
             await checkpoint(stage, payload)
+
+    @staticmethod
+    def _stream_context_payload(
+        context_metadata: Optional[dict[str, Any]],
+    ) -> dict[str, str]:
+        metadata = context_metadata or {}
+        payload: dict[str, str] = {}
+        for key in ("conversation_id", "user_message_id", "client_message_id"):
+            value = str(metadata.get(key) or "").strip()
+            if value:
+                payload[key] = value
+        return payload
 
     @staticmethod
     def _artifact_tool_succeeded(tool_results: List[Dict[str, Any]]) -> bool:
@@ -815,9 +839,16 @@ class AgentLoop:
             title = AgentLoop._title_from_task(task)
         return title[:80]
 
-    async def _emit_text_response(self, _emit, stream_message_id: str, text: str) -> None:
+    async def _emit_text_response(
+        self,
+        _emit,
+        stream_message_id: str,
+        text: str,
+        stream_context: Optional[Dict[str, Any]] = None,
+    ) -> None:
         if not text.strip():
             return
+        stream_context = stream_context or {}
         await _emit(
             "message_start",
             {
@@ -825,6 +856,7 @@ class AgentLoop:
                 "agent_name": self.agent.name,
                 "agent_avatar_url": (self.agent.model_config or {}).get("avatar_url"),
                 "agent_message_id": stream_message_id,
+                **stream_context,
             },
         )
         for index in range(0, len(text), 12):
@@ -836,6 +868,7 @@ class AgentLoop:
                     "agent_avatar_url": (self.agent.model_config or {}).get("avatar_url"),
                     "agent_message_id": stream_message_id,
                     "token": text[index : index + 12],
+                    **stream_context,
                 },
             )
             await asyncio.sleep(0)
@@ -845,6 +878,7 @@ class AgentLoop:
                 "agent_id": self.agent.id,
                 "agent_name": self.agent.name,
                 "agent_message_id": stream_message_id,
+                **stream_context,
             },
         )
 
@@ -1017,12 +1051,14 @@ class AgentLoop:
         tools: Optional[List[Dict]],
         _emit,
         stream_message_id: str,
+        stream_context: Optional[Dict[str, Any]] = None,
         defer_stop_if_tool_calls: bool = False,
     ) -> ChatResponse:
         """流式对话，emit agent.token 事件，组装成 ChatResponse"""
         content_parts: List[str] = []
         token_filter = _StatusReportStreamFilter()
         stream_started = False
+        stream_context = stream_context or {}
 
         async def ensure_stream_started() -> None:
             nonlocal stream_started
@@ -1036,6 +1072,7 @@ class AgentLoop:
                     "agent_name": self.agent.name,
                     "agent_avatar_url": (self.agent.model_config or {}).get("avatar_url"),
                     "agent_message_id": stream_message_id,
+                    **stream_context,
                 },
             )
         # tool_calls 在流式中可能分散在多个 chunk，需要积累
@@ -1062,6 +1099,7 @@ class AgentLoop:
                             "agent_avatar_url": (self.agent.model_config or {}).get("avatar_url"),
                             "agent_message_id": stream_message_id,
                             "token": visible_delta,
+                            **stream_context,
                         },
                     )
 
@@ -1076,6 +1114,7 @@ class AgentLoop:
                             "agent_avatar_url": (self.agent.model_config or {}).get("avatar_url"),
                             "agent_message_id": stream_message_id,
                             "thinking": chunk.reasoning,
+                            **stream_context,
                         },
                 )
 
@@ -1110,6 +1149,7 @@ class AgentLoop:
                     "agent_id": self.agent.id,
                     "agent_name": self.agent.name,
                     "agent_message_id": stream_message_id,
+                    **stream_context,
                 },
             )
 

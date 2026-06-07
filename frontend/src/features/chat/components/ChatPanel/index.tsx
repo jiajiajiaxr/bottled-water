@@ -35,6 +35,7 @@ import {
 } from "@/features/workspaceFiles/workspaceFileUtils";
 import { useMessageStore, useConversationStore } from "@/store";
 import { useMessageOperations } from "@/hooks";
+import { mergeVisibleMessagesForDisplay } from "@/lib/messageOrder";
 import type {
   ChatMessage,
   Conversation,
@@ -47,6 +48,7 @@ import type { MessageAgentMention, MessageFileReference } from "@/types/messages
 const { Content } = Layout;
 const { Text } = Typography;
 const AGENT_MODEL_SENTINEL = "__agent_model__";
+const QUEUED_SEND_LIMIT = 5;
 const UPLOAD_ACCEPT =
   ".txt,.md,.markdown,.json,.csv,.tsv,.html,.htm,.xml,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.py,.js,.jsx,.ts,.tsx,.css,.scss,.zip";
 const ALLOWED_UPLOAD_EXTENSIONS = new Set(UPLOAD_ACCEPT.split(","));
@@ -78,6 +80,17 @@ type AgentMentionOption = {
   agent: MessageAgentMention;
 };
 
+type QueuedComposerMessage = {
+  id: string;
+  content: string;
+  quoted?: ChatMessage;
+  attachments: UploadedFile[];
+  thinkingEnabled: boolean;
+  modelConfigId?: string;
+  fileReferences: MessageFileReference[];
+  agentMentions: MessageAgentMention[];
+};
+
 export function ChatPanel({
   active,
   loading,
@@ -107,8 +120,12 @@ export function ChatPanel({
   const [contextSelectOpen, setContextSelectOpen] = useState(false);
   const [contextSearchValue, setContextSearchValue] = useState("");
   const [awaitingResponse, setAwaitingResponse] = useState(false);
+  const [queuedMessagesByConversation, setQueuedMessagesByConversation] =
+    useState<Map<string, QueuedComposerMessage[]>>(new Map());
   const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
   const composerRef = useRef<HTMLDivElement>(null);
+  const queuedMessagesRef = useRef(queuedMessagesByConversation);
+  const dispatchingQueuedRef = useRef(false);
   const { message } = AntApp.useApp();
   const { send, cancel, streamingMessages, displayOrder } = useMessageOperations(
     userName,
@@ -144,6 +161,25 @@ export function ChatPanel({
   );
   const activeConversationId = active?.id;
   const activeGenerationStatus = active?.generation_status;
+  const activeQueuedMessages = useMemo(
+    () =>
+      activeConversationId
+        ? (queuedMessagesByConversation.get(activeConversationId) ?? [])
+        : [],
+    [activeConversationId, queuedMessagesByConversation],
+  );
+
+  useEffect(() => {
+    queuedMessagesRef.current = queuedMessagesByConversation;
+  }, [queuedMessagesByConversation]);
+
+  const commitQueuedMessages = useCallback(
+    (next: Map<string, QueuedComposerMessage[]>) => {
+      queuedMessagesRef.current = next;
+      setQueuedMessagesByConversation(next);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!active?.id) return;
@@ -196,9 +232,14 @@ export function ChatPanel({
   }, [activeConversationId, historyConversationId, historyMessages]);
 
   // 合并所有消息用于 quoted 查找
-  const allMessages = useMemo(
-    () => [...activeHistoryMessages, ...streamingMessages.values()],
-    [activeHistoryMessages, streamingMessages],
+  const visibleMessages = useMemo(
+    () =>
+      mergeVisibleMessagesForDisplay(
+        activeHistoryMessages,
+        streamingMessages,
+        displayOrder,
+      ),
+    [activeHistoryMessages, displayOrder, streamingMessages],
   );
   const chatDefaultModelConfigId =
     defaultModelConfigId ||
@@ -226,6 +267,78 @@ export function ChatPanel({
     [active?.participants],
   );
 
+  const clearComposerState = useCallback(() => {
+    setText("");
+    setQuoted(undefined);
+    setPendingFiles([]);
+    setContextReferences([]);
+    setAgentMentions([]);
+    setContextSelectOpen(false);
+    setContextSearchValue("");
+  }, []);
+
+  const restoreComposerMessage = useCallback((item: QueuedComposerMessage) => {
+    setText(item.content);
+    setQuoted(item.quoted);
+    setPendingFiles(item.attachments);
+    setContextReferences(item.fileReferences);
+    setAgentMentions(item.agentMentions);
+  }, []);
+
+  const removeQueuedMessage = useCallback(
+    (conversationId: string, itemId: string) => {
+      const current = queuedMessagesRef.current;
+      const queue = current.get(conversationId) ?? [];
+      const nextQueue = queue.filter((item) => item.id !== itemId);
+      const next = new Map(current);
+      if (nextQueue.length) {
+        next.set(conversationId, nextQueue);
+      } else {
+        next.delete(conversationId);
+      }
+      commitQueuedMessages(next);
+    },
+    [commitQueuedMessages],
+  );
+
+  const enqueueComposerMessage = useCallback(
+    (conversationId: string, item: QueuedComposerMessage) => {
+      const queue = queuedMessagesRef.current.get(conversationId) ?? [];
+      if (queue.length >= QUEUED_SEND_LIMIT) {
+        message.warning(`发送队列已满，最多 ${QUEUED_SEND_LIMIT} 条`);
+        return false;
+      }
+      const next = new Map(queuedMessagesRef.current);
+      next.set(conversationId, [...queue, item]);
+      commitQueuedMessages(next);
+      message.info("已加入发送队列");
+      return true;
+    },
+    [commitQueuedMessages, message],
+  );
+
+  const sendComposerMessage = useCallback(
+    async (item: QueuedComposerMessage, restoreOnError: boolean) => {
+      setAwaitingResponse(true);
+      try {
+        await send(
+          item.content,
+          item.quoted,
+          item.attachments,
+          item.thinkingEnabled,
+          item.modelConfigId,
+          item.fileReferences,
+          item.agentMentions,
+        );
+      } catch (error) {
+        setAwaitingResponse(false);
+        if (restoreOnError) restoreComposerMessage(item);
+        throw error;
+      }
+    },
+    [restoreComposerMessage, send],
+  );
+
   const submit = async () => {
     let value =
       text.trim() || (pendingFiles.length ? "请结合上传附件继续处理。" : "");
@@ -237,38 +350,42 @@ export function ChatPanel({
     const refsToSend = contextReferences;
     const mentionsToSend = agentMentions;
     const quotedMessage = quoted;
-    setAwaitingResponse(true);
-    setText("");
-    setQuoted(undefined);
-    setPendingFiles([]);
-    setContextReferences([]);
-    setAgentMentions([]);
-    setContextSelectOpen(false);
-    setContextSearchValue("");
+    const item: QueuedComposerMessage = {
+      id: `queued-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      content: value,
+      quoted: quotedMessage,
+      attachments: filesToSend,
+      thinkingEnabled,
+      modelConfigId: runtimeModelConfigId,
+      fileReferences: refsToSend,
+      agentMentions: mentionsToSend,
+    };
+    if (isWorking || activeQueuedMessages.length > 0 || dispatchingQueuedRef.current) {
+      if (enqueueComposerMessage(active.id, item)) {
+        clearComposerState();
+      }
+      return;
+    }
+    clearComposerState();
     try {
-      await send(
-        value,
-        quotedMessage,
-        filesToSend,
-        thinkingEnabled,
-        runtimeModelConfigId,
-        refsToSend,
-        mentionsToSend,
-      );
+      await sendComposerMessage(item, true);
     } catch (error) {
-      setText(value);
-      setQuoted(quotedMessage);
-      setPendingFiles(filesToSend);
-      setContextReferences(refsToSend);
-      setAgentMentions(mentionsToSend);
       throw error;
     }
   };
 
+  const hasActiveStreamingMessage = useMemo(
+    () =>
+      Array.from(streamingMessages.values()).some(
+        (message) =>
+          message.streamState === "streaming" || message.status === "streaming",
+      ),
+    [streamingMessages],
+  );
   const isWorking = Boolean(
     active &&
       (awaitingResponse ||
-        streamingMessages.size > 0 ||
+        hasActiveStreamingMessage ||
         localRunningConversationIds.has(active.id) ||
         active.generation_status === "running" ||
         active.generation_status === "executing"),
@@ -277,6 +394,62 @@ export function ChatPanel({
   const showThinkingIndicator = Boolean(
     active && isWorking && !hasVisibleStreamingMessage,
   );
+
+  useEffect(() => {
+    if (
+      !activeConversationId ||
+      loading ||
+      isWorking ||
+      streamingMessages.size > 0 ||
+      displayOrder.length > 0 ||
+      activeQueuedMessages.length === 0 ||
+      dispatchingQueuedRef.current
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (dispatchingQueuedRef.current) return;
+      if (useConversationStore.getState().activeId !== activeConversationId) return;
+      const queue = queuedMessagesRef.current.get(activeConversationId) ?? [];
+      const nextItem = queue[0];
+      if (!nextItem) return;
+
+      dispatchingQueuedRef.current = true;
+      const nextQueue = queue.slice(1);
+      const next = new Map(queuedMessagesRef.current);
+      if (nextQueue.length) {
+        next.set(activeConversationId, nextQueue);
+      } else {
+        next.delete(activeConversationId);
+      }
+      commitQueuedMessages(next);
+
+      sendComposerMessage(nextItem, false)
+        .catch((error) => {
+          message.error(error instanceof Error ? error.message : "队列消息发送失败");
+          if (useConversationStore.getState().activeId === activeConversationId) {
+            restoreComposerMessage(nextItem);
+          }
+        })
+        .finally(() => {
+          dispatchingQueuedRef.current = false;
+        });
+    }, 180);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    activeConversationId,
+    activeQueuedMessages.length,
+    commitQueuedMessages,
+    displayOrder.length,
+    isWorking,
+    loading,
+    message,
+    restoreComposerMessage,
+    sendComposerMessage,
+    streamingMessages.size,
+  ]);
 
   const stopResponse = async () => {
     if (!active || stopping) return;
@@ -300,11 +473,11 @@ export function ChatPanel({
   // 用 Map 缓存 quoted 查找，避免每条消息渲染时都做 O(n) 遍历
   const messageById = useMemo(() => {
     const map = new Map<string, ChatMessage>();
-    for (const item of allMessages) {
+    for (const item of visibleMessages) {
       map.set(item.id, item);
     }
     return map;
-  }, [allMessages]);
+  }, [visibleMessages]);
 
   const handleQuote = useCallback((msg: ChatMessage) => setQuoted(msg), []);
   const handleCopy = useCallback((value: string) => copy(value), [copy]);
@@ -430,7 +603,7 @@ export function ChatPanel({
     const el = messageListRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [activeHistoryMessages, displayOrder]);
+  }, [visibleMessages]);
 
   // 进入新对话且消息加载完成后，滚动到底部
   useEffect(() => {
@@ -497,14 +670,9 @@ export function ChatPanel({
       <div ref={messageListRef} className="message-list">
         {loading ? (
           <Spin />
-        ) : allMessages.length ? (
+        ) : visibleMessages.length ? (
           <>
-            {activeHistoryMessages.map(renderMessageBubble)}
-            {displayOrder.map((agentId) => {
-              const msg = streamingMessages.get(agentId);
-
-              return msg ? renderMessageBubble(msg) : null;
-            })}
+            {visibleMessages.map(renderMessageBubble)}
             {showThinkingIndicator && (
               <div className="thinking-indicator">
                 <div className="thinking-indicator-dots">
@@ -550,6 +718,22 @@ export function ChatPanel({
               >
                 {file.original_filename} · {Math.ceil(file.size / 1024)}KB ·{" "}
                 {file.parse_status}
+              </Tag>
+            ))}
+          </div>
+        )}
+        {activeQueuedMessages.length > 0 && activeConversationId && (
+          <div className="composer-send-queue" data-testid="composer-send-queue">
+            <Text type="secondary" className="composer-send-queue-label">
+              排队 {activeQueuedMessages.length}/{QUEUED_SEND_LIMIT}
+            </Text>
+            {activeQueuedMessages.map((item, index) => (
+              <Tag
+                key={item.id}
+                closable
+                onClose={() => removeQueuedMessage(activeConversationId, item.id)}
+              >
+                {index + 1}. {queuePreviewText(item.content)}
               </Tag>
             ))}
           </div>
@@ -751,6 +935,11 @@ function fileReferenceKey(reference: MessageFileReference) {
   return reference.file_id
     ? `file:${reference.file_id}`
     : `path:${reference.path}`;
+}
+
+function queuePreviewText(value: string) {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length > 28 ? `${text.slice(0, 28)}...` : text;
 }
 
 function agentMentionOptionsFromParticipants(

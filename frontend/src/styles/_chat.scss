@@ -519,6 +519,18 @@
   background: #f8fbff;
 }
 
+.composer-send-queue {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 $spacing-md;
+}
+
+.composer-send-queue-label {
+  font-size: 12px;
+}
+
 .composer-mentions {
   width: 100%;
   margin-bottom: $spacing-md;

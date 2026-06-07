@@ -37,7 +37,7 @@ async def test_actor_runtime_session_runs_scheduler_and_worker(mock_provider, mo
     )
 
     event_types = []
-    async for event in session.run("hello"):
+    async for event in session.run("build a page"):
         event_types.append(event.type)
 
     assert SCHEDULER_DECISION in event_types
@@ -45,6 +45,41 @@ async def test_actor_runtime_session_runs_scheduler_and_worker(mock_provider, mo
     assert AGENT_REPORT in event_types
     assert CONTROL_COMPLETE in event_types
     assert session.get_status()["runtime"] == "actor"
+
+
+@pytest.mark.asyncio
+async def test_actor_runtime_simple_greeting_uses_single_scheduler_path(mock_provider, mock_tool_executor):
+    mock_provider.responses = [
+        ChatResponse(
+            content='hello from model\n```status_report\n{"state":"completed","will":"complete","confidence":0.9}\n```'
+        ),
+    ]
+    session = Session.create(
+        agents=[
+            AgentConfig(id="daily", name="Daily Chat Agent", system_prompt="You are chat.", role="chat"),
+            AgentConfig(id="backend", name="Backend", system_prompt="You are backend."),
+        ],
+        scheduler_config={"strategy": "tech_lead", "runtime": "actor", "max_runtime_seconds": 5},
+        model_provider=mock_provider,
+        tool_executor=mock_tool_executor,
+        session_id="sess_actor_greeting",
+    )
+
+    events = []
+    async for event in session.run("hello"):
+        events.append(event)
+
+    assignments = [event for event in events if event.type == CONTROL_ASSIGN]
+    reports = [event for event in events if event.type == AGENT_REPORT and event.payload.get("work_product")]
+    decisions = [event for event in events if event.type == SCHEDULER_DECISION]
+
+    assert [event.target for event in assignments] == ["daily"]
+    assert decisions[0].payload["decision"]["decision_type"] == "assign"
+    assert decisions[-1].payload["decision"]["decision_type"] == "complete"
+    assert len(reports) == 1
+    assert reports[0].payload["agent_id"] == "daily"
+    assert "hello from model" in reports[0].payload["work_product"]
+    assert mock_provider.call_count == 1
 
 
 @pytest.mark.asyncio

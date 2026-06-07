@@ -178,6 +178,158 @@ describe("useStreamingMessages internal block filtering", () => {
     expect(result.current.streamingMessages.get(visibleKey)?.content).toBe("你好呀");
   });
 
+  it("merges provisional thinking bubbles into the later message id stream", () => {
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onThinking?.("agent-1", "thinking...", {
+        conversation_id: "conversation-1",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+    flushTypewriter();
+
+    expect(result.current.displayOrder).toEqual(["agent-1"]);
+    expect(result.current.streamingMessages.get("agent-1")?.thinking).toBe("thinking...");
+
+    act(() => {
+      result.current.streamHandlers.onMessageStart({
+        conversation_id: "conversation-1",
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        agent_name: "Daily Chat Agent",
+      });
+      result.current.streamHandlers.onToken?.("agent-1", "answer", {
+        conversation_id: "conversation-1",
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+
+    expect(result.current.displayOrder).toEqual(["message-1"]);
+    expect(result.current.streamingMessages.size).toBe(1);
+    expect(result.current.streamingMessages.get("message-1")?.id).toBe("message-1");
+    expect(result.current.streamingMessages.get("message-1")?.thinking).toBe("thinking...");
+    expect(result.current.streamingMessages.get("message-1")?.content).toBe("a");
+
+    flushTypewriter();
+    expect(result.current.streamingMessages.get("message-1")?.content).toBe("answer");
+  });
+
+  it("moves queued provisional thinking when message_start canonicalizes the stream", () => {
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onThinking?.("agent-1", "thinking", {
+        conversation_id: "conversation-1",
+        agent_name: "Daily Chat Agent",
+      });
+      result.current.streamHandlers.onMessageStart({
+        conversation_id: "conversation-1",
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        agent_name: "Daily Chat Agent",
+      });
+      result.current.streamHandlers.onToken?.("agent-1", "answer", {
+        conversation_id: "conversation-1",
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+
+    expect(result.current.displayOrder).toEqual(["message-1"]);
+    expect(result.current.streamingMessages.size).toBe(1);
+    flushTypewriter();
+
+    expect(result.current.streamingMessages.get("message-1")?.thinking).toBe("thinking");
+    expect(result.current.streamingMessages.get("message-1")?.content).toBe("answer");
+  });
+
+  it("anchors new streams to the latest store messages even when handlers are from the previous render", () => {
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+    const staleHandlers = result.current.streamHandlers;
+
+    act(() => {
+      useMessageStore.getState().setMessagesForConversation("conversation-1", [
+        {
+          id: "local-user-1",
+          conversationId: "conversation-1",
+          role: "user",
+          kind: "text",
+          author: "User",
+          content: "hello",
+          rawContent: {
+            client_message_id: "client-1",
+            clientMessageId: "client-1",
+          },
+          client_message_id: "client-1",
+          clientMessageId: "client-1",
+          createdAt: "2026-06-07T14:53:00.000Z",
+          streamState: "done",
+          state: "active",
+        },
+      ]);
+    });
+
+    act(() => {
+      staleHandlers.onMessageStart?.({
+        conversation_id: "conversation-1",
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+
+    const boundaryIds = result.current.streamingMessages.get("message-1")
+      ?.rawContent?._streamHistoryBoundaryIds as string[];
+    expect(boundaryIds).toContain("local-user-1");
+    expect(boundaryIds).toContain("client-1");
+  });
+
+  it("anchors the first thinking frame with payload client message ids", () => {
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onThinking?.("agent-1", "thinking", {
+        conversation_id: "conversation-1",
+        agent_name: "Daily Chat Agent",
+        client_message_id: "client-1",
+        user_message_id: "server-user-1",
+      });
+    });
+    flushTypewriter();
+
+    const boundaryIds = result.current.streamingMessages.get("agent-1")
+      ?.rawContent?._streamHistoryBoundaryIds as string[];
+    expect(boundaryIds).toContain("client-1");
+    expect(boundaryIds).toContain("server-user-1");
+  });
+
+  it("adds payload boundary ids when a provisional stream is canonicalized", () => {
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onThinking?.("agent-1", "thinking", {
+        conversation_id: "conversation-1",
+        agent_name: "Daily Chat Agent",
+      });
+      result.current.streamHandlers.onMessageStart({
+        conversation_id: "conversation-1",
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        agent_name: "Daily Chat Agent",
+        client_message_id: "client-1",
+      });
+    });
+    flushTypewriter();
+
+    const boundaryIds = result.current.streamingMessages.get("message-1")
+      ?.rawContent?._streamHistoryBoundaryIds as string[];
+    expect(boundaryIds).toContain("client-1");
+  });
+
   it("keeps explicit stream ids separate for repeated same-agent assignments", () => {
     const { result } = renderHook(() => useStreamingMessages("conversation-1"));
 
@@ -817,5 +969,55 @@ describe("useStreamingMessages internal block filtering", () => {
     expect(result.current.streamingMessages.size).toBe(0);
     expect(useMessageStore.getState().historyMessages).toHaveLength(1);
     expect(useMessageStore.getState().historyMessages[0]?.content).toBe("hello");
+  });
+
+  it("keeps runtime stream messages out of local history until the server message arrives", () => {
+    useConversationStore.getState().setActiveId("conversation-1");
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+    const payload = {
+      conversation_id: "conversation-1",
+      agent_id: "agent-1",
+      agent_message_id: "stream-agent-1",
+      agent_name: "Daily Chat Agent",
+    };
+
+    act(() => {
+      result.current.streamHandlers.onMessageStart(payload);
+      result.current.streamHandlers.onDelta?.("hello", payload);
+    });
+    flushTypewriter();
+
+    act(() => {
+      result.current.streamHandlers.onMessageEnd(payload);
+    });
+
+    expect(result.current.streamingMessages.size).toBe(1);
+    expect(currentStream(result)?.streamState).toBe("done");
+    expect(useMessageStore.getState().historyMessages).toEqual([]);
+
+    const persisted = makeMessage({
+      conversationId: "conversation-1",
+      sender_id: "agent-1",
+      sender_type: "agent",
+      role: "assistant",
+      kind: "text",
+      author: "Daily Chat Agent",
+      content: "hello",
+      rawContent: {
+        agent_id: "agent-1",
+        agent_message_id: "stream-agent-1",
+      },
+      streamState: "done",
+      status: "completed",
+      state: "active",
+    });
+    persisted.id = "persisted-message-1";
+
+    act(() => {
+      result.current.streamHandlers.onMessageNew?.(persisted);
+    });
+
+    expect(result.current.streamingMessages.size).toBe(0);
+    expect(useMessageStore.getState().historyMessages).toEqual([persisted]);
   });
 });

@@ -48,6 +48,74 @@ function clientMessageIdOf(message: ChatMessage): string {
   );
 }
 
+function messageBoundaryKeys(message: ChatMessage): string[] {
+  const raw = message.rawContent ?? {};
+  return [
+    message.id,
+    message.clientMessageId,
+    message.client_message_id,
+    raw.clientMessageId,
+    raw.client_message_id,
+  ]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
+}
+
+function currentConversationHistoryMessages(conversationId: string): ChatMessage[] {
+  const messageStore = useMessageStore.getState();
+  const cached = messageStore.getCachedMessages(conversationId);
+  if (cached) return cached;
+  if (messageStore.historyConversationId === conversationId) {
+    return messageStore.historyMessages.filter(
+      (message) => message.conversationId === conversationId,
+    );
+  }
+  return [];
+}
+
+function currentConversationBoundaryKeys(conversationId: string): string[] {
+  const keys = new Set<string>();
+  for (const message of currentConversationHistoryMessages(conversationId)) {
+    for (const key of messageBoundaryKeys(message)) {
+      keys.add(key);
+    }
+  }
+  return Array.from(keys);
+}
+
+function payloadBoundaryKeys(payload?: Record<string, unknown>): string[] {
+  if (!payload) return [];
+  return [
+    payload.user_message_id,
+    payload.userMessageId,
+    payload.client_message_id,
+    payload.clientMessageId,
+  ]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
+}
+
+function mergeUniqueStrings(...items: unknown[][]): string[] {
+  const next = new Set<string>();
+  for (const values of items) {
+    for (const value of values) {
+      const key = typeof value === "string" ? value.trim() : "";
+      if (key) next.add(key);
+    }
+  }
+  return Array.from(next);
+}
+
+function streamBoundaryKeys(
+  conversationId: string,
+  payload?: Record<string, unknown>,
+): string[] {
+  return mergeUniqueStrings(
+    currentConversationBoundaryKeys(conversationId),
+    payloadBoundaryKeys(payload),
+  );
+}
+
 function sameMessageId(left: ChatMessage, right: ChatMessage): boolean {
   const leftId = persistedMessageId(left);
   const rightId = persistedMessageId(right);
@@ -288,6 +356,45 @@ function isRepresentedByHistory(
   });
 }
 
+function isRuntimeStreamMessage(message: ChatMessage): boolean {
+  const id = persistedMessageId(message);
+  return id.startsWith("stream-");
+}
+
+function sameRuntimeFallbackMessage(
+  left: ChatMessage,
+  right: ChatMessage,
+): boolean {
+  if (left.conversationId !== right.conversationId) return false;
+  if (left.role !== "assistant" || right.role !== "assistant") return false;
+  if (left.kind !== "text" || right.kind !== "text") return false;
+  if (!isRuntimeStreamMessage(left) && !isRuntimeStreamMessage(right)) {
+    return false;
+  }
+
+  const leftAgentId = String(
+    left.rawContent?.agent_id || left.sender_id || "",
+  );
+  const rightAgentId = String(
+    right.rawContent?.agent_id || right.sender_id || "",
+  );
+  if (leftAgentId && rightAgentId && leftAgentId !== rightAgentId) {
+    return false;
+  }
+
+  const leftText = stripInternalAgentOutput(
+    String(left.rawContent?._streamRawText || left.content || ""),
+  ).trim();
+  const rightText = stripInternalAgentOutput(
+    String(right.rawContent?._streamRawText || right.content || ""),
+  ).trim();
+  return Boolean(
+    leftText &&
+      rightText &&
+      (leftText.includes(rightText) || rightText.includes(leftText)),
+  );
+}
+
 function upsertPersistedHistoryMessage(
   messages: ChatMessage[],
   message: ChatMessage,
@@ -297,6 +404,7 @@ function upsertPersistedHistoryMessage(
       sameMessageId(item, message) ||
       sameClientMessage(item, message) ||
       samePersistedMessage(item, message) ||
+      sameRuntimeFallbackMessage(item, message) ||
       sameOptimisticUserMessage(item, message),
   );
   if (existingIndex >= 0) {
@@ -387,6 +495,7 @@ export function useStreamingMessages(conversationId?: string) {
     new Map(),
   );
   const pendingPersistedMessagesRef = useRef<Map<string, ChatMessage>>(new Map());
+  const serverPersistFallbackTimersRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     streamingMessagesRef.current = streamingMessages;
@@ -406,6 +515,10 @@ export function useStreamingMessages(conversationId?: string) {
       thinkingQueuesRef.current.clear();
       pendingMessageEndPayloadsRef.current.clear();
       pendingPersistedMessagesRef.current.clear();
+      for (const timer of serverPersistFallbackTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      serverPersistFallbackTimersRef.current.clear();
     },
     [],
   );
@@ -477,9 +590,8 @@ export function useStreamingMessages(conversationId?: string) {
 
     const author = agentDisplayName(targetConversationId, agentId, payload);
     const agentAvatarUrl = payloadAgentAvatarUrl(payload);
-    const historyBoundaryIds = historyMessages
-      .filter((message) => message.conversationId === targetConversationId)
-      .map((message) => message.id);
+    const historyBoundaryIds =
+      streamBoundaryKeys(targetConversationId, payload);
     const msg = makeMessage({
       conversationId: targetConversationId,
       role: "assistant",
@@ -524,6 +636,14 @@ export function useStreamingMessages(conversationId?: string) {
     thinkingQueuesRef.current.delete(key);
   };
 
+  const clearServerPersistFallback = (key: string) => {
+    const timer = serverPersistFallbackTimersRef.current.get(key);
+    if (timer) {
+      window.clearTimeout(timer);
+      serverPersistFallbackTimersRef.current.delete(key);
+    }
+  };
+
   const hasPendingThinking = (key: string) =>
     Boolean(thinkingTimersRef.current.has(key) || thinkingQueuesRef.current.get(key)?.length);
 
@@ -544,7 +664,23 @@ export function useStreamingMessages(conversationId?: string) {
       );
       if (messageId && rawId === messageId) return itemKey;
     }
-    if (messageId) return key;
+    if (messageId) {
+      if (agentId) {
+        for (const [itemKey, message] of streamingMessagesRef.current) {
+          if (message.conversationId !== targetConversationId) continue;
+          const rawId = String(
+            message.rawContent?.agent_message_id ||
+              message.rawContent?.message_id ||
+              "",
+          );
+          const rawAgentId = String(
+            message.rawContent?.agent_id || message.sender_id || "",
+          );
+          if (!rawId && rawAgentId === agentId) return itemKey;
+        }
+      }
+      return key;
+    }
     if (!agentId) return key;
     for (const [itemKey, message] of streamingMessagesRef.current) {
       if (message.conversationId !== targetConversationId) continue;
@@ -585,6 +721,12 @@ export function useStreamingMessages(conversationId?: string) {
         agent_avatar_url:
           payloadAgentAvatarUrl(payload) || existing.rawContent?.agent_avatar_url,
         _streamRawText: rawText,
+        _streamHistoryBoundaryIds: mergeUniqueStrings(
+          Array.isArray(existing.rawContent?._streamHistoryBoundaryIds)
+            ? (existing.rawContent?._streamHistoryBoundaryIds as unknown[])
+            : [],
+          streamBoundaryKeys(existing.conversationId, payload),
+        ),
       },
     };
 
@@ -616,7 +758,6 @@ export function useStreamingMessages(conversationId?: string) {
     const pendingPayload = pendingMessageEndPayloadsRef.current.get(key);
     const suppressHistory = pendingPayload?._suppressHistory === true;
 
-    hiddenStreamKeysRef.current.add(key);
     clearQueuedStream(key);
     clearQueuedThinking(key);
 
@@ -625,6 +766,75 @@ export function useStreamingMessages(conversationId?: string) {
       pendingPersistedMessagesRef.current.delete(key);
     }
 
+    const completedMessage = pendingPersisted ?? {
+      ...msg,
+      content: stripInternalAgentOutput(
+        String(msg.rawContent?._streamRawText || msg.content || ""),
+      ),
+      rawContent: {
+        ...(msg.rawContent || {}),
+        _awaitingServerPersisted: isRuntimeStreamMessage(msg),
+      },
+      streamState: "done" as const,
+      status: msg.status === "failed" ? "failed" : "completed",
+    };
+
+    if (!pendingPersisted && isRuntimeStreamMessage(msg)) {
+      const next = new Map(streamingMessagesRef.current);
+      next.set(key, completedMessage);
+      streamingMessagesRef.current = next;
+      setStreamingMessages(next);
+      setDisplayOrder((prev) => (prev.includes(key) ? prev : [...prev, key]));
+      pendingMessageEndPayloadsRef.current.delete(key);
+
+      clearServerPersistFallback(key);
+      const timer = window.setTimeout(() => {
+        serverPersistFallbackTimersRef.current.delete(key);
+        const current = streamingMessagesRef.current.get(key);
+        if (!current) return;
+
+        const messageStore = useMessageStore.getState();
+        const history =
+          messageStore.getCachedMessages(current.conversationId) ??
+          (messageStore.historyConversationId === current.conversationId
+            ? messageStore.historyMessages
+            : []);
+        if (isRepresentedByHistory(current, history)) {
+          hiddenStreamKeysRef.current.add(key);
+          setStreamingMessages((prev) => {
+            if (!prev.has(key)) return prev;
+            const updated = new Map(prev);
+            updated.delete(key);
+            streamingMessagesRef.current = updated;
+            return updated;
+          });
+          setDisplayOrder((prev) => prev.filter((id) => id !== key));
+          return;
+        }
+
+        hiddenStreamKeysRef.current.add(key);
+        setStreamingMessages((prev) => {
+          if (!prev.has(key)) return prev;
+          const updated = new Map(prev);
+          updated.delete(key);
+          streamingMessagesRef.current = updated;
+          return updated;
+        });
+        setDisplayOrder((prev) => prev.filter((id) => id !== key));
+        if (!suppressHistory && current.content.trim()) {
+          updateMessagesForConversation(current.conversationId, (prev) =>
+            upsertPersistedHistoryMessage(prev, current),
+          );
+        }
+        updateMessageVersions(() => new Map());
+      }, 10000);
+      serverPersistFallbackTimersRef.current.set(key, timer);
+      updateMessageVersions(() => new Map());
+      return;
+    }
+
+    hiddenStreamKeysRef.current.add(key);
+    clearServerPersistFallback(key);
     setStreamingMessages((prev) => {
       if (!prev.has(key)) return prev;
       const next = new Map(prev);
@@ -636,15 +846,6 @@ export function useStreamingMessages(conversationId?: string) {
     pendingMessageEndPayloadsRef.current.delete(key);
 
     if (suppressHistory || !isActiveConversation(msg.conversationId)) return;
-
-    const completedMessage = pendingPersisted ?? {
-      ...msg,
-      content: stripInternalAgentOutput(
-        String(msg.rawContent?._streamRawText || msg.content || ""),
-      ),
-      streamState: "done" as const,
-      status: msg.status === "failed" ? "failed" : "completed",
-    };
 
     updateMessagesForConversation(msg.conversationId, (prev) =>
       upsertPersistedHistoryMessage(prev, completedMessage),
@@ -730,6 +931,12 @@ export function useStreamingMessages(conversationId?: string) {
           existing.rawContent?._streamThinkingEnabled ??
           existing.rawContent?.thinking_enabled ??
           (payload.thinking_enabled === true),
+        _streamHistoryBoundaryIds: mergeUniqueStrings(
+          Array.isArray(existing.rawContent?._streamHistoryBoundaryIds)
+            ? (existing.rawContent?._streamHistoryBoundaryIds as unknown[])
+            : [],
+          streamBoundaryKeys(existing.conversationId, payload),
+        ),
       },
     };
     next.set(key, nextMessage);
@@ -873,6 +1080,12 @@ export function useStreamingMessages(conversationId?: string) {
             payload.agent_id || payload.sender_id || existing.rawContent?.agent_id,
           _streamRawText: text,
           _toolProgress: true,
+          _streamHistoryBoundaryIds: mergeUniqueStrings(
+            Array.isArray(existing.rawContent?._streamHistoryBoundaryIds)
+              ? (existing.rawContent?._streamHistoryBoundaryIds as unknown[])
+              : [],
+            streamBoundaryKeys(existing.conversationId, payload),
+          ),
         },
       };
       next.set(key, nextMessage);
@@ -1109,6 +1322,7 @@ export function useStreamingMessages(conversationId?: string) {
         keysToHide.forEach((key) => {
           clearQueuedStream(key);
           clearQueuedThinking(key);
+          clearServerPersistFallback(key);
           pendingPersistedMessagesRef.current.delete(key);
           next.delete(key);
         });
@@ -1121,6 +1335,14 @@ export function useStreamingMessages(conversationId?: string) {
     }
     if (keysToDefer.length) {
       keysToDefer.forEach((key) => finishStreamMessage(key));
+      return;
+    }
+    if (keysToHide.length) {
+      if (isActiveConversation(mergedMessage.conversationId)) {
+        updateMessagesForConversation(mergedMessage.conversationId, (prev) =>
+          upsertPersistedHistoryMessage(prev, mergedMessage),
+        );
+      }
       return;
     }
     if (replayPersistedMessage(mergedMessage)) {
@@ -1152,6 +1374,7 @@ export function useStreamingMessages(conversationId?: string) {
       pending.forEach(([key]) => {
         clearQueuedStream(key);
         clearQueuedThinking(key);
+        clearServerPersistFallback(key);
         pendingPersistedMessagesRef.current.delete(key);
         next.delete(key);
       });
@@ -1181,6 +1404,7 @@ export function useStreamingMessages(conversationId?: string) {
         if (message.conversationId === targetConversationId) {
           clearQueuedStream(key);
           clearQueuedThinking(key);
+          clearServerPersistFallback(key);
           pendingPersistedMessagesRef.current.delete(key);
           next.delete(key);
         }
@@ -1230,6 +1454,58 @@ export function useStreamingMessages(conversationId?: string) {
     }
   };
 
+  const migrateStreamKeyState = (
+    fromKey: string,
+    toKey: string,
+    payload: Record<string, unknown>,
+  ) => {
+    if (!fromKey || fromKey === toKey) return;
+
+    const tokenQueue = tokenQueuesRef.current.get(fromKey);
+    if (tokenQueue?.length) {
+      const nextQueue = tokenQueuesRef.current.get(toKey) || [];
+      nextQueue.push(...tokenQueue);
+      tokenQueuesRef.current.set(toKey, nextQueue);
+      tokenQueuesRef.current.delete(fromKey);
+    }
+    const tokenTimer = tokenTimersRef.current.get(fromKey);
+    if (tokenTimer) {
+      window.clearTimeout(tokenTimer);
+      tokenTimersRef.current.delete(fromKey);
+      scheduleTokenDrain(toKey, payload);
+    }
+
+    const thinkingQueue = thinkingQueuesRef.current.get(fromKey);
+    if (thinkingQueue?.length) {
+      const nextQueue = thinkingQueuesRef.current.get(toKey) || [];
+      nextQueue.push(...thinkingQueue);
+      thinkingQueuesRef.current.set(toKey, nextQueue);
+      thinkingQueuesRef.current.delete(fromKey);
+    }
+    const thinkingTimer = thinkingTimersRef.current.get(fromKey);
+    if (thinkingTimer) {
+      window.clearTimeout(thinkingTimer);
+      thinkingTimersRef.current.delete(fromKey);
+      scheduleThinkingDrain(toKey, payload);
+    }
+
+    const pendingEnd = pendingMessageEndPayloadsRef.current.get(fromKey);
+    if (pendingEnd) {
+      pendingMessageEndPayloadsRef.current.set(toKey, pendingEnd);
+      pendingMessageEndPayloadsRef.current.delete(fromKey);
+    }
+    const pendingPersisted = pendingPersistedMessagesRef.current.get(fromKey);
+    if (pendingPersisted) {
+      pendingPersistedMessagesRef.current.set(toKey, pendingPersisted);
+      pendingPersistedMessagesRef.current.delete(fromKey);
+    }
+    if (hiddenStreamKeysRef.current.has(fromKey)) {
+      hiddenStreamKeysRef.current.add(toKey);
+      hiddenStreamKeysRef.current.delete(fromKey);
+    }
+    clearServerPersistFallback(fromKey);
+  };
+
   const streamHandlers: StreamAssistantHandlers = {
     onMessageStart: (payload) => {
       const agentId = agentIdentity(payload) || streamKey(payload);
@@ -1244,43 +1520,48 @@ export function useStreamingMessages(conversationId?: string) {
         hiddenStreamKeysRef.current.delete(key);
       }
 
-      setStreamingMessages((prev) => {
-        const currentKey = prev.has(key) ? key : existingKey;
-        if (currentKey && prev.has(currentKey)) {
-          const existing = prev.get(currentKey);
-          if (!existing) return prev;
-          const next = new Map(prev);
-          if (currentKey !== key) {
-            next.delete(currentKey);
-          }
-          next.set(key, {
-            ...existing,
-            id: String(payload.agent_message_id || payload.message_id || existing.id),
-            author,
-            sender_avatar_url: agentAvatarUrl || existing.sender_avatar_url,
-            rawContent: {
-              ...(existing.rawContent || {}),
-              agent_message_id: payload.agent_message_id || existing.rawContent?.agent_message_id,
-              message_id: payload.message_id || existing.rawContent?.message_id,
-              agent_id: payload.agent_id || existing.rawContent?.agent_id || agentId,
-              agent_avatar_url: agentAvatarUrl || existing.rawContent?.agent_avatar_url,
-              thinking_enabled:
-                existing.rawContent?.thinking_enabled ??
-                (payload.thinking_enabled === true),
-              _streamThinkingEnabled:
-                existing.rawContent?._streamThinkingEnabled ??
-                existing.rawContent?.thinking_enabled ??
-                (payload.thinking_enabled === true),
-            },
-          });
-          streamingMessagesRef.current = next;
-          return next;
+      const current = streamingMessagesRef.current;
+      const currentKey = current.has(key) ? key : existingKey;
+      if (currentKey && current.has(currentKey)) {
+        const existing = current.get(currentKey);
+        if (!existing) return;
+        const next = new Map(current);
+        if (currentKey !== key) {
+          next.delete(currentKey);
+          migrateStreamKeyState(currentKey, key, payload);
         }
-
-        const next = new Map(prev);
-        const historyBoundaryIds = historyMessages
-          .filter((message) => message.conversationId === targetConversationId)
-          .map((message) => message.id);
+        next.set(key, {
+          ...existing,
+          id: String(payload.agent_message_id || payload.message_id || existing.id),
+          author,
+          sender_avatar_url: agentAvatarUrl || existing.sender_avatar_url,
+          rawContent: {
+            ...(existing.rawContent || {}),
+            agent_message_id: payload.agent_message_id || existing.rawContent?.agent_message_id,
+            message_id: payload.message_id || existing.rawContent?.message_id,
+            agent_id: payload.agent_id || existing.rawContent?.agent_id || agentId,
+            agent_avatar_url: agentAvatarUrl || existing.rawContent?.agent_avatar_url,
+            thinking_enabled:
+              existing.rawContent?.thinking_enabled ??
+              (payload.thinking_enabled === true),
+            _streamThinkingEnabled:
+              existing.rawContent?._streamThinkingEnabled ??
+              existing.rawContent?.thinking_enabled ??
+              (payload.thinking_enabled === true),
+            _streamHistoryBoundaryIds: mergeUniqueStrings(
+              Array.isArray(existing.rawContent?._streamHistoryBoundaryIds)
+                ? (existing.rawContent?._streamHistoryBoundaryIds as unknown[])
+                : [],
+              streamBoundaryKeys(targetConversationId, payload),
+            ),
+          },
+        });
+        streamingMessagesRef.current = next;
+        setStreamingMessages(next);
+      } else {
+        const next = new Map(current);
+        const historyBoundaryIds =
+          streamBoundaryKeys(targetConversationId, payload);
         const msg = makeMessage({
           conversationId: targetConversationId,
           role: "assistant",
@@ -1309,8 +1590,8 @@ export function useStreamingMessages(conversationId?: string) {
         msg.id = String(payload.agent_message_id || payload.message_id || msg.id);
         next.set(key, msg);
         streamingMessagesRef.current = next;
-        return next;
-      });
+        setStreamingMessages(next);
+      }
 
       setDisplayOrder((prev) => {
         const withoutExisting =

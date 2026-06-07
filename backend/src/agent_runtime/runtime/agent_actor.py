@@ -141,6 +141,7 @@ class AgentActor:
             output = result.output
             report = result.report
             work_product = str(output.get("work_product") or "")
+            stream_message_id = str(output.get("stream_message_id") or "")
             history_type = "agent_control" if result.interrupted else "agent_work"
             await self.blackboard_mgr.append_history(
                 self.session_id,
@@ -151,9 +152,15 @@ class AgentActor:
                     "content": work_product,
                     "interrupted": result.interrupted,
                     "report": _report_payload(report),
+                    "stream_message_id": stream_message_id or None,
                 },
             )
-            await self._publish_report(report, work_product=work_product, task=task)
+            await self._publish_report(
+                report,
+                work_product=work_product,
+                task=task,
+                stream_message_id=stream_message_id or None,
+            )
             await self._set_state(report.state, reason="assignment_completed", task=task)
         except Exception as exc:
             logger.exception("AgentActor assignment failed", agent_id=self.config.id)
@@ -192,16 +199,22 @@ class AgentActor:
         *,
         work_product: str,
         task: str | None = None,
+        stream_message_id: str | None = None,
     ) -> None:
+        payload = {
+            "agent_id": self.config.id,
+            "task": task,
+            "work_product": work_product,
+            "report": _report_payload(report),
+        }
+        if stream_message_id:
+            payload["stream_message_id"] = stream_message_id
+            payload["agent_message_id"] = stream_message_id
+
         await self.event_bus.publish(
             Event(
                 type=AGENT_REPORT,
-                payload={
-                    "agent_id": self.config.id,
-                    "task": task,
-                    "work_product": work_product,
-                    "report": _report_payload(report),
-                },
+                payload=payload,
                 source=f"agent:{self.config.id}",
                 channel="all",
             )
