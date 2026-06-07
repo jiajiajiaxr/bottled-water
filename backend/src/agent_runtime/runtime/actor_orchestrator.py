@@ -63,11 +63,13 @@ class ActorOrchestrator:
         self.scheduler: SchedulerAgent | None = None
         self._event_queue: asyncio.Queue[Event] = asyncio.Queue()
         self._observer_subscription: str | None = self.event_bus.subscribe(None, self._event_queue.put, target="*")
+        self._pending_user_inputs: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._running = False
 
     async def run(self, user_message: str) -> AsyncIterator[Event]:
         self._ensure_observer_subscription()
         self._running = True
+        self._pending_user_inputs = asyncio.Queue()
         await self.blackboard_mgr.create(self.session_id)
         await self.blackboard_mgr.append_history(
             self.session_id,
@@ -102,13 +104,20 @@ class ActorOrchestrator:
         completed = False
         try:
             while asyncio.get_running_loop().time() < deadline:
+                await self._dispatch_pending_user_inputs()
                 timeout = max(0.01, deadline - asyncio.get_running_loop().time())
                 try:
                     event = await asyncio.wait_for(self._event_queue.get(), timeout=timeout)
                 except asyncio.TimeoutError:
                     break
+                if event.type == "internal.user_input_pending":
+                    await self._dispatch_pending_user_inputs()
+                    continue
                 yield event
                 if event.type == CONTROL_COMPLETE:
+                    if not self._pending_user_inputs.empty():
+                        await self._dispatch_pending_user_inputs()
+                        continue
                     completed = True
                     break
             final_event = Event(
@@ -141,23 +150,24 @@ class ActorOrchestrator:
             self.session_id,
             {"type": "user_input", "content": content, "interrupt": True},
         )
+        await self._pending_user_inputs.put(
+            {
+                "content": content,
+                "mention_target_agent_ids": self._mention_targets(content),
+            }
+        )
         yield Event(
             type="user.input_queued",
             payload={"session_id": self.session_id, "content": content},
             source="user",
             channel="all",
         )
-        await self.event_bus.publish(
+        await self._event_queue.put(
             Event(
-                type=USER_INPUT,
-                payload={
-                    "session_id": self.session_id,
-                    "content": content,
-                    "mention_target_agent_ids": self._mention_targets(content),
-                    "interrupt": True,
-                },
-                source="user",
-                channel="all",
+                type="internal.user_input_pending",
+                payload={"session_id": self.session_id},
+                source="system",
+                channel="internal",
             )
         )
 
@@ -198,6 +208,8 @@ class ActorOrchestrator:
         if self._observer_subscription is None:
             self._event_queue = asyncio.Queue()
             self._observer_subscription = self.event_bus.subscribe(None, self._event_queue.put, target="*")
+        if not hasattr(self, "_pending_user_inputs") or self._pending_user_inputs is None:
+            self._pending_user_inputs = asyncio.Queue()
 
     def _start_actors(self) -> None:
         self.scheduler = SchedulerAgent(
@@ -239,6 +251,23 @@ class ActorOrchestrator:
             if any(pattern.lower() in lowered for pattern in patterns):
                 targets.append(agent_id)
         return list(dict.fromkeys(targets))
+
+    async def _dispatch_pending_user_inputs(self) -> None:
+        while not self._pending_user_inputs.empty():
+            payload = await self._pending_user_inputs.get()
+            await self.event_bus.publish(
+                Event(
+                    type=USER_INPUT,
+                    payload={
+                        "session_id": self.session_id,
+                        "content": str(payload.get("content") or ""),
+                        "mention_target_agent_ids": payload.get("mention_target_agent_ids") or [],
+                        "interrupt": True,
+                    },
+                    source="user",
+                    channel="all",
+                )
+            )
 
     async def _stop_actors(self) -> None:
         if self.scheduler is not None:

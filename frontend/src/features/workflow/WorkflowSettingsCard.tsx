@@ -1,7 +1,4 @@
-import {
-  PlayCircleOutlined,
-  SaveOutlined,
-} from "@ant-design/icons";
+import { PlayCircleOutlined, SaveOutlined } from "@ant-design/icons";
 import { Button, Select, Space, Switch, Typography } from "antd";
 import type { ConversationWorkflow } from "../../types";
 import { workflowSettings } from "./utils";
@@ -26,6 +23,7 @@ export function WorkflowSettingsCard({
 }) {
   const settings = workflowSettings(workflow);
   const enabled = Boolean(settings.enabled);
+
   return (
     <Space direction="vertical" size={14} className="full-width">
       {validationIssues.length > 0 && (
@@ -43,6 +41,7 @@ export function WorkflowSettingsCard({
           ))}
         </div>
       )}
+
       <div className="workflow-floating-setting-row">
         <div>
           <Text strong>启用状态</Text>
@@ -55,6 +54,7 @@ export function WorkflowSettingsCard({
           onChange={(checked) => onPatchSettings({ enabled: checked })}
         />
       </div>
+
       <div className="workflow-floating-setting-row">
         <div>
           <Text strong>发布状态</Text>
@@ -67,6 +67,7 @@ export function WorkflowSettingsCard({
           onChange={(checked) => onPatchSettings({ published: checked })}
         />
       </div>
+
       <div className="workflow-floating-field">
         <Text strong>输出模式</Text>
         <Select
@@ -78,6 +79,7 @@ export function WorkflowSettingsCard({
           ]}
         />
       </div>
+
       <Space wrap>
         <Button
           type="primary"

@@ -1,6 +1,6 @@
 import {
-  ArrowLeftOutlined,
   AppstoreAddOutlined,
+  ArrowLeftOutlined,
   CloseOutlined,
   CompressOutlined,
   CopyOutlined,
@@ -13,18 +13,14 @@ import {
 } from "@ant-design/icons";
 import { Button, Space, Typography } from "antd";
 import type { FormInstance } from "antd";
-import type {
-  ConversationWorkflow,
-  WorkflowNode,
-  WorkflowRun,
-} from "../../types";
+import type { ConversationWorkflow, WorkflowNode, WorkflowRun } from "../../types";
+import type { WorkflowValidationIssue } from "./validation";
 import { WorkflowAIGenerateCard } from "./WorkflowAIGenerateCard";
 import { WorkflowFloatingButton } from "./WorkflowFloatingButton";
 import { WorkflowHistoryCard, WorkflowRunLogCard } from "./WorkflowRuntimeCards";
 import { WorkflowNodeConfigPanel } from "./WorkflowNodeConfigPanel";
 import { WorkflowNodeLibraryCard } from "./WorkflowNodeLibraryCard";
 import { WorkflowSettingsCard } from "./WorkflowSettingsCard";
-import type { WorkflowValidationIssue } from "./validation";
 
 const { Text } = Typography;
 
@@ -38,7 +34,7 @@ export type WorkflowFloatingPanelKey =
 
 const PANEL_TITLES: Record<WorkflowFloatingPanelKey, string> = {
   library: "节点库",
-  ai: "AI生成",
+  ai: "AI 生成",
   config: "当前节点配置",
   logs: "运行日志",
   settings: "工作流设置",
@@ -111,22 +107,25 @@ export function WorkflowFloatingPanels({
   onAddNode: (type: string) => void;
   onCopySelection: () => void;
   onDeleteSelection: () => void;
-  onSaveNode: () => void;
+  onSaveNode: () => void | Promise<unknown>;
   onWorkflowJsonChange: (value: string) => void;
 }) {
   const openPanel = (panel: WorkflowFloatingPanelKey) => {
     onActivePanelChange(activePanel === panel ? undefined : panel);
   };
+
   const leftMenuItems = [
     { key: "library", icon: <AppstoreAddOutlined />, disabled: generating },
     { key: "ai", icon: <RobotOutlined />, disabled: false },
     { key: "settings", icon: <SettingOutlined />, disabled: false },
     { key: "history", icon: <HistoryOutlined />, disabled: false },
   ] as const;
+
   const rightMenuItems = [
     { key: "config", icon: <SlidersOutlined />, disabled: !editingNode },
     { key: "logs", icon: <ProfileOutlined />, disabled: false },
   ] as const;
+
   const validationErrorCount = validationIssues.filter(
     (issue) => issue.severity === "error",
   ).length;
@@ -142,6 +141,7 @@ export function WorkflowFloatingPanels({
           onClick={onBack}
         />
         <div className="workflow-floating-toolbar-divider" />
+
         {leftMenuItems.map((item) => (
           <WorkflowFloatingButton
             key={item.key}
@@ -158,7 +158,9 @@ export function WorkflowFloatingPanels({
             onClick={() => openPanel(item.key)}
           />
         ))}
+
         <div className="workflow-floating-toolbar-divider" />
+
         <WorkflowFloatingButton
           title="适配画布"
           icon={<CompressOutlined />}
@@ -177,7 +179,9 @@ export function WorkflowFloatingPanels({
           disabled={!selectedNodeIds.length && !selectedEdgeIds.length}
           onClick={onDeleteSelection}
         />
+
         <div className="workflow-floating-toolbar-divider" />
+
         {rightMenuItems.map((item) => (
           <WorkflowFloatingButton
             key={item.key}
@@ -190,6 +194,7 @@ export function WorkflowFloatingPanels({
           />
         ))}
       </nav>
+
       <section
         className="workflow-floating-card"
         style={{
@@ -218,6 +223,7 @@ export function WorkflowFloatingPanels({
               }}
             />
           )}
+
           {activePanel === "ai" && (
             <WorkflowAIGenerateCard
               generating={generating}
@@ -226,6 +232,7 @@ export function WorkflowFloatingPanels({
               onGenerate={onGenerate}
             />
           )}
+
           {activePanel === "config" && (
             <WorkflowNodeConfigPanel
               nodeForm={nodeForm}
@@ -265,6 +272,7 @@ export function WorkflowFloatingPanels({
               }
             />
           )}
+
           {activePanel === "settings" && (
             <WorkflowSettingsCard
               workflow={workflow}
@@ -275,17 +283,21 @@ export function WorkflowFloatingPanels({
               onRun={onRun}
             />
           )}
+
           {activePanel === "history" && (
             <WorkflowHistoryCard workflowRuns={workflowRuns} />
           )}
         </div>
       </section>
+
       <section
         className="workflow-floating-bottom"
         style={{
           opacity: isBottomPanel ? 1 : 0,
           pointerEvents: isBottomPanel ? "auto" : "none",
-          transform: isBottomPanel ? "translateX(-50%) translateY(0)" : "translateX(-50%) translateY(20px)",
+          transform: isBottomPanel
+            ? "translateX(-50%) translateY(0)"
+            : "translateX(-50%) translateY(20px)",
           transition: "opacity 0.2s ease, transform 0.2s ease",
         }}
       >

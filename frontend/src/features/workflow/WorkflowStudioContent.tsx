@@ -7,7 +7,7 @@ import { conversationRoutePath } from "../../lib/workflowRoutes";
 import { useConversationStore } from "../../store";
 import type { ConversationWorkflow } from "../../types";
 import { workflowSettings } from "./utils";
-import { useWorkflowStudio } from "./useWorkflowStudio";
+import { validateWorkflowDefinition } from "./validation";
 import { WorkflowCanvasPanel } from "./WorkflowCanvasPanel";
 import {
   WorkflowFloatingPanels,
@@ -16,7 +16,7 @@ import {
 import { WorkflowNodeConfigPanel } from "./WorkflowNodeConfigPanel";
 import { WorkflowNodePalette } from "./WorkflowNodePalette";
 import { WorkflowStudioHeader } from "./WorkflowStudioHeader";
-import { validateWorkflowDefinition } from "./validation";
+import { useWorkflowStudio } from "./useWorkflowStudio";
 
 export function WorkflowStudioContent({
   workspaceId,
@@ -44,6 +44,7 @@ export function WorkflowStudioContent({
     nodeForm,
     onError,
   });
+
   const backPath = conversationRoutePath(workspaceId, conversationId);
   const validationIssues = useMemo(
     () => validateWorkflowDefinition(studio.workflow),
@@ -52,8 +53,9 @@ export function WorkflowStudioContent({
   const validationErrors = validationIssues.filter(
     (issue) => issue.severity === "error",
   );
-  const workflowErrorText = () =>
-    `当前工作流配置不完整，请先修复画布：${validationErrors
+
+  const workflowErrorText = (issues = validationErrors) =>
+    `当前工作流配置不完整，请先修复画布：${issues
       .map((issue) => issue.message)
       .join("；")}`;
 
@@ -63,23 +65,35 @@ export function WorkflowStudioContent({
     studio.setWorkflowDraft({
       ...studio.workflow,
       ...(typeof outputMode === "string" ? { output_mode: outputMode } : {}),
-      settings: { ...workflowSettings(studio.workflow), ...settingsPatch },
+      settings: {
+        ...workflowSettings(studio.workflow),
+        ...settingsPatch,
+      },
     });
   };
 
   const saveWorkflow = async () => {
     if (!studio.workflow || studio.workflowGenerating) return;
+
     let parsed: ConversationWorkflow;
-    try {
+    if (studio.editingNode) {
       parsed = layoutWorkflowPositions(
-        JSON.parse(studio.workflowJson) as ConversationWorkflow,
+        (await studio.saveWorkflowNode()) ?? studio.workflow,
       );
-    } catch {
-      onError("工作流 JSON 格式不正确");
-      return;
+    } else {
+      try {
+        parsed = layoutWorkflowPositions(
+          JSON.parse(studio.workflowJson) as ConversationWorkflow,
+        );
+      } catch {
+        onError("工作流 JSON 格式不正确");
+        return;
+      }
     }
+
     const saved = await api.saveConversationWorkflow(conversationId, parsed);
     const enabled = Boolean(workflowSettings(saved).enabled);
+
     if (typeof api.updateConversation === "function") {
       const conversation = await api.updateConversation(conversationId, {
         scheduling_strategy: enabled ? "workflow" : "tech_lead",
@@ -88,6 +102,7 @@ export function WorkflowStudioContent({
       });
       updateConversation(conversationId, conversation);
     }
+
     studio.setWorkflowDraft(saved);
     onSuccess("工作流已保存");
   };
@@ -118,12 +133,23 @@ export function WorkflowStudioContent({
 
   const runWorkflow = async () => {
     if (!studio.workflow) return;
-    if (validationErrors.length) {
-      onError(workflowErrorText());
+
+    const workflowToRun = studio.editingNode
+      ? layoutWorkflowPositions(
+          (await studio.saveWorkflowNode()) ?? studio.workflow,
+        )
+      : studio.workflow;
+
+    const nextValidationErrors = validateWorkflowDefinition(workflowToRun).filter(
+      (issue) => issue.severity === "error",
+    );
+    if (nextValidationErrors.length) {
+      onError(workflowErrorText(nextValidationErrors));
       setActivePanel("settings");
       return;
     }
-    const run = await api.startWorkflowRun(conversationId, studio.workflow);
+
+    const run = await api.startWorkflowRun(conversationId, workflowToRun);
     studio.setWorkflowRuns((current) => [run, ...current]);
     onSuccess("工作流运行已创建");
   };
@@ -140,10 +166,7 @@ export function WorkflowStudioContent({
     if (embedded) setActivePanel("config");
   };
 
-  const addWorkflowNode = (
-    type: string,
-    position?: { x: number; y: number },
-  ) => {
+  const addWorkflowNode = (type: string, position?: { x: number; y: number }) => {
     studio.setNewNodeType(type);
     studio.addWorkflowNode(type, position);
     if (embedded) setActivePanel("config");
@@ -162,21 +185,29 @@ export function WorkflowStudioContent({
   const handleDeleteSelection = async (removedNodeIds: string[]) => {
     const removedAgentIds = new Set<string>();
     for (const nodeId of removedNodeIds) {
-      const node = studio.workflow?.nodes.find((n) => n.id === nodeId);
+      const node = studio.workflow?.nodes.find((item) => item.id === nodeId);
       if (node && ["agent", "review"].includes(node.type ?? "") && node.agent_id) {
         removedAgentIds.add(node.agent_id);
       }
     }
+
     if (removedAgentIds.size > 0 && studio.workflow) {
       const removedNodeIdsSet = new Set(removedNodeIds);
-      const currentNodes = studio.workflow.nodes.filter((n) => !removedNodeIdsSet.has(n.id));
-      await studio.syncAgentsAfterNodeRemoval(Array.from(removedAgentIds), currentNodes);
+      const currentNodes = studio.workflow.nodes.filter(
+        (item) => !removedNodeIdsSet.has(item.id),
+      );
+      await studio.syncAgentsAfterNodeRemoval(
+        Array.from(removedAgentIds),
+        currentNodes,
+      );
     }
   };
 
   if (studio.loading) {
     return (
-      <main className={embedded ? "workflow-embedded-loading" : "workflow-studio-loading"}>
+      <main
+        className={embedded ? "workflow-embedded-loading" : "workflow-studio-loading"}
+      >
         <Spin />
       </main>
     );
@@ -202,11 +233,13 @@ export function WorkflowStudioContent({
       onSelectionChange={(nodeIds, edgeIds) => {
         studio.setSelectedNodeIds(nodeIds);
         studio.setSelectedEdgeIds(edgeIds);
+
         if (nodeIds.length === 1 && studio.workflow) {
-          const node = studio.workflow.nodes.find(
-            (item) => item.id === nodeIds[0],
-          );
-          if (node) studio.openNodeEditor(node);
+          const selectedId = nodeIds[0];
+          if (studio.editingNode?.id !== selectedId) {
+            const node = studio.workflow.nodes.find((item) => item.id === selectedId);
+            if (node) studio.openNodeEditor(node);
+          }
         } else if (nodeIds.length > 1 || edgeIds.length) {
           studio.setEditingNodeId(undefined);
         }

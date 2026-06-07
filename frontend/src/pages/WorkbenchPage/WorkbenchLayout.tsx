@@ -117,6 +117,38 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     });
   };
 
+  const deleteArchivedConversations = (items: Conversation[]) => {
+    const archivedItems = items.filter((item) => item.archived);
+    if (!archivedItems.length) {
+      return;
+    }
+    Modal.confirm({
+      title: "一键删除归档会话",
+      content: `确认删除这 ${archivedItems.length} 个归档会话吗？删除后将从列表移除。`,
+      okText: "全部删除",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await Promise.all(archivedItems.map((item) => api.deleteConversation(item.id)));
+        const deletedIds = new Set(archivedItems.map((item) => item.id));
+        updateConversations((current) =>
+          current.filter((conversation) => !deletedIds.has(conversation.id)),
+        );
+        if (activeId && deletedIds.has(activeId)) {
+          const remaining = conversations.find(
+            (conversation) => !deletedIds.has(conversation.id),
+          );
+          setActiveId(remaining?.id);
+          navigateToConversation(
+            remaining?.workspace_id || activeWorkspaceId,
+            remaining?.id,
+            true,
+          );
+        }
+        message.success("归档会话已删除");
+      },
+    });
+  };
+
   return (
     <Layout className="workbench">
       <ConversationSidebar
@@ -135,6 +167,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
         }
         onEdit={(item, patch) => patchConversation(item, patch)}
         onDelete={deleteConversation}
+        onDeleteArchived={deleteArchivedConversations}
       />
       <Layout className="center-layout">
         <div className="topbar">

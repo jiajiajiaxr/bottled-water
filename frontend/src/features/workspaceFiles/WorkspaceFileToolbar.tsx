@@ -1,4 +1,5 @@
 import {
+  ApartmentOutlined,
   ArrowLeftOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
@@ -25,6 +26,7 @@ type Props = {
   onMoveSelected: () => void;
   onBulkDelete: () => void;
   onReload: () => void;
+  onOpenMap: () => void;
   onUploadFile: UploadProps["beforeUpload"];
 };
 
@@ -42,6 +44,7 @@ export function WorkspaceFileToolbar({
   onMoveSelected,
   onBulkDelete,
   onReload,
+  onOpenMap,
   onUploadFile,
 }: Props) {
   return (
@@ -59,21 +62,20 @@ export function WorkspaceFileToolbar({
           </div>
         </Space>
         <Space wrap>
-          {stats && (
+          {stats ? (
             <Statistic
               className="workspace-file-stat"
               title="容量"
               value={`${formatBytes(stats.total_size)} / ${stats.file_count} 个文件`}
             />
-          )}
+          ) : null}
+          <Button icon={<ApartmentOutlined />} onClick={onOpenMap}>
+            文件地图
+          </Button>
           <Button icon={<FolderAddOutlined />} onClick={onCreateFolder}>
             新建文件夹
           </Button>
-          <Upload
-            multiple
-            showUploadList={false}
-            beforeUpload={onUploadFile}
-          >
+          <Upload multiple showUploadList={false} beforeUpload={onUploadFile}>
             <Button
               type="primary"
               icon={<CloudUploadOutlined />}

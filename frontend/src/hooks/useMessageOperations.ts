@@ -1,6 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { api } from "@/api";
-import { disconnectConversationWS } from "@/api/websocket";
 import {
   useConversationStore,
   useMessageStore,
@@ -19,22 +18,6 @@ export function useMessageOperations(userName?: string) {
   const { updateMessages } = useMessageStore();
   const streaming = useStreamingMessages(activeId);
   const pendingSendConversationIds = useRef(new Set<string>());
-
-  useEffect(() => {
-    return () => {
-      if (activeId) {
-        const store = useConversationStore.getState();
-        const conversation = store.conversations.find((item) => item.id === activeId);
-        const isRunning =
-          store.localRunningConversationIds.has(activeId) ||
-          conversation?.generation_status === "running" ||
-          conversation?.generation_status === "executing";
-        if (!isRunning) {
-          disconnectConversationWS(activeId);
-        }
-      }
-    };
-  }, [activeId]);
 
   const send = async (
     content: string,
@@ -175,6 +158,19 @@ function createStreamHandlers(
     onDone: (payload) => {
       baseHandlers.onDone?.(payload);
       clearConversationRunning(conversationId);
+      if (useConversationStore.getState().activeId !== conversationId) {
+        return;
+      }
+      api.messages(conversationId)
+        .then((nextMessages) => {
+          if (useConversationStore.getState().activeId !== conversationId) return;
+          useMessageStore
+            .getState()
+            .setMessagesForConversation(conversationId, nextMessages);
+        })
+        .catch(() => {
+          // keep current optimistic / streaming state if refresh fails
+        });
     },
   };
 }

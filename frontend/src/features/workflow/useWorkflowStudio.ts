@@ -117,6 +117,10 @@ export function useWorkflowStudio({
     nodeForm.setFieldsValue({
       title: node.title,
       type: workflowNodeType(node),
+      start_message:
+        typeof config.manual_input === "string"
+          ? config.manual_input
+          : "",
       agent_id: node.agent_id ?? config.agent_id,
       tool_name: config.tool_name,
       skill_id: config.skill_id,
@@ -129,6 +133,7 @@ export function useWorkflowStudio({
       retry: Number(config.retry ?? config.retry_count ?? 0),
       input_mapping: textFromConfigValue(config.input ?? config.inputs),
       output_mapping: textFromConfigValue(config.output ?? config.outputs),
+      end_message: typeof config.end_message === "string" ? config.end_message : "",
       meta: node.meta,
     });
   };
@@ -221,11 +226,14 @@ export function useWorkflowStudio({
     openNodeEditor(node);
   };
 
-  const saveWorkflowNode = async () => {
-    if (!workflow || !editingNodeId || workflowGenerating) return;
+  const saveWorkflowNode = async (): Promise<ConversationWorkflow | undefined> => {
+    if (!workflow || !editingNodeId || workflowGenerating) return workflow;
     const values = await nodeForm.validateFields();
     const type = values.type;
     const config: Record<string, unknown> = {};
+    if (type === "start") {
+      config.manual_input = String(values.start_message || "").trim();
+    }
     if (type === "agent" || type === "review") config.agent_id = values.agent_id;
     if (type === "tool") config.tool_name = values.tool_name;
     if (type === "skill") config.skill_id = values.skill_id;
@@ -239,6 +247,9 @@ export function useWorkflowStudio({
     }
     if (type === "loop") config.max_iterations = Number(values.max_iterations || 3);
     if (type === "artifact") config.artifact_type = values.artifact_type || "html";
+    if (type === "end") {
+      config.end_message = String(values.end_message || "").trim();
+    }
     const input = configValueFromText(values.input_mapping);
     const output = configValueFromText(values.output_mapping);
     if (input !== undefined) config.input = input;
@@ -259,7 +270,8 @@ export function useWorkflowStudio({
           }
         : node,
     );
-    setWorkflowDraft({ ...workflow, nodes });
+    const nextWorkflow = { ...workflow, nodes };
+    setWorkflowDraft(nextWorkflow);
     setSelectedNodeIds([editingNodeId]);
     setSelectedEdgeIds([]);
 
@@ -274,6 +286,7 @@ export function useWorkflowStudio({
         // 静默失败，不影响节点保存
       }
     }
+    return nextWorkflow;
   };
 
   const syncAgentsAfterNodeRemoval = async (

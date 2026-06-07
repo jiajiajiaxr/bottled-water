@@ -36,6 +36,7 @@ export function WorkspaceFilesContent({
   const [preview, setPreview] = useState<PreviewState>();
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
+  const [mapOpen, setMapOpen] = useState(false);
   const previewObjectUrl = preview?.objectUrl;
 
   const closePreview = useCallback(() => {
@@ -305,7 +306,7 @@ export function WorkspaceFilesContent({
             .split("/")
             .filter(Boolean)
             .reduce<string[]>((items, part) => {
-              const previous = items.at(-1);
+              const previous = items.length ? items[items.length - 1] : undefined;
               items.push(previous ? `${previous}/${part}` : part);
               return items;
             }, [])
@@ -390,9 +391,9 @@ export function WorkspaceFilesContent({
         onMoveSelected={moveSelected}
         onBulkDelete={bulkDelete}
         onReload={load}
+        onOpenMap={() => setMapOpen(true)}
         onUploadFile={handleUpload}
       />
-      <WorkspaceFileMap nodes={visibleNodes} />
       <div className="workspace-file-table-head">
         <span>名称</span>
         <span>来源</span>
@@ -445,6 +446,15 @@ export function WorkspaceFilesContent({
         width={960}
       >
         {preview && <WorkspaceFilePreviewView preview={preview} />}
+      </Modal>
+      <Modal
+        title="文件地图"
+        open={mapOpen}
+        onCancel={() => setMapOpen(false)}
+        footer={null}
+        width={980}
+      >
+        <WorkspaceFileMap nodes={visibleNodes} />
       </Modal>
     </section>
   );

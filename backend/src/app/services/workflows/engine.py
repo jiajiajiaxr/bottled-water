@@ -135,7 +135,11 @@ class WorkflowEngine:
         db = SessionLocal()
         try:
             conversation = db.get(Conversation, self.conversation.id)
-            user_message = db.get(Message, self.user_message.id)
+            user_message = (
+                db.get(Message, self.user_message.id)
+                if getattr(self.user_message, "id", None)
+                else self.user_message
+            )
             task = db.get(Task, self.task.id)
             workflow_run = db.get(WorkflowRun, self.workflow_run.id)
             agents = [

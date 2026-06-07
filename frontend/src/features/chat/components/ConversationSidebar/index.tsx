@@ -56,6 +56,7 @@ export function ConversationSidebar({
   onTogglePin,
   onToggleArchive,
   onDelete,
+  onDeleteArchived,
   onEdit,
 }: {
   currentUser: User;
@@ -70,6 +71,7 @@ export function ConversationSidebar({
   onTogglePin: (item: Conversation) => void;
   onToggleArchive: (item: Conversation) => void;
   onDelete: (item: Conversation) => void;
+  onDeleteArchived: (items: Conversation[]) => void;
   onEdit: (item: Conversation, patch: Partial<Conversation>) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -361,14 +363,27 @@ export function ConversationSidebar({
       />
       <div className="sidebar-toolbar">
         <Text type="secondary">会话列表</Text>
-        <Tooltip title="新建分类">
-          <Button
-            size="small"
-            shape="circle"
-            icon={<FolderAddOutlined />}
-            onClick={() => setCreatingFolder((value) => !value)}
-          />
-        </Tooltip>
+        <Space size={6}>
+          {filter === "archived" && filtered.length > 0 ? (
+            <Tooltip title="一键删除归档会话">
+              <Button
+                size="small"
+                shape="circle"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => onDeleteArchived(filtered)}
+              />
+            </Tooltip>
+          ) : null}
+          <Tooltip title="新建分类">
+            <Button
+              size="small"
+              shape="circle"
+              icon={<FolderAddOutlined />}
+              onClick={() => setCreatingFolder((value) => !value)}
+            />
+          </Tooltip>
+        </Space>
       </div>
       {creatingFolder && (
         <Input.Search

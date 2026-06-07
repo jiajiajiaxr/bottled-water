@@ -49,7 +49,7 @@ export function WorkflowNodeConfigPanel({
   skillOptions: Array<{ label: string; value: string }>;
   mcpServerOptions: Array<{ label: string; value: string }>;
   mcpToolOptions: Array<{ label: string; value: string }>;
-  onSaveNode: () => void;
+  onSaveNode: () => void | Promise<unknown>;
   onWorkflowJsonChange: (value: string) => void;
   className?: string;
   showRunState?: boolean;
@@ -60,7 +60,11 @@ export function WorkflowNodeConfigPanel({
     <aside className={className}>
       <Text strong>节点配置</Text>
       {editingNode ? (
-        <Form form={nodeForm} layout="vertical" className="workflow-node-config-form">
+        <Form
+          form={nodeForm}
+          layout="vertical"
+          className="workflow-node-config-form"
+        >
           <Space wrap>
             <Tag color={statusTagColor(editingNodeState?.status ?? editingNode.status)}>
               {editingNodeState?.status ?? editingNode.status ?? "queued"}
@@ -69,10 +73,20 @@ export function WorkflowNodeConfigPanel({
               <Tag>{editingNodeState.progress}%</Tag>
             )}
           </Space>
-          <Form.Item name="title" label="名称" rules={[{ required: true, message: "请输入节点名称" }]}>
+
+          <Form.Item
+            name="title"
+            label="名称"
+            rules={[{ required: true, message: "请输入节点名称" }]}
+          >
             <Input maxLength={80} />
           </Form.Item>
-          <Form.Item name="type" label="节点类型" rules={[{ required: true, message: "请选择节点类型" }]}>
+
+          <Form.Item
+            name="type"
+            label="节点类型"
+            rules={[{ required: true, message: "请选择节点类型" }]}
+          >
             <Select
               options={[
                 { label: "Start", value: "start" },
@@ -81,9 +95,11 @@ export function WorkflowNodeConfigPanel({
               ]}
             />
           </Form.Item>
+
           <Form.Item name="meta" label="说明">
             <TextArea rows={2} maxLength={300} />
           </Form.Item>
+
           <Form.Item shouldUpdate noStyle>
             {({ getFieldValue }) => (
               <NodeTypeFields
@@ -96,22 +112,35 @@ export function WorkflowNodeConfigPanel({
               />
             )}
           </Form.Item>
+
           <Form.Item
             name="input_mapping"
             label="输入映射"
             extra="支持 {{input}}、{{nodes.agent-frontend.text}}、{{upstream.text}}"
           >
-            <TextArea rows={3} placeholder='例如 {"prompt": "{{input}}", "brief": "{{upstream.text}}"}' />
+            <TextArea
+              rows={3}
+              placeholder='例如 {"prompt": "{{input}}", "brief": "{{upstream.text}}"}'
+            />
           </Form.Item>
+
           <Form.Item
             name="output_mapping"
             label="输出映射"
             extra="节点执行结果可用 {{output.text}} / {{output.result}} 引用"
           >
-            <TextArea rows={3} placeholder='例如 {"text": "{{output.text}}", "summary": "{{output.summary}}"}' />
+            <TextArea
+              rows={3}
+              placeholder='例如 {"text": "{{output.text}}", "summary": "{{output.summary}}"}'
+            />
           </Form.Item>
+
           <Space wrap>
-            <Form.Item name="failure_strategy" label="失败策略" className="workflow-inline-form-item">
+            <Form.Item
+              name="failure_strategy"
+              label="失败策略"
+              className="workflow-inline-form-item"
+            >
               <Select
                 options={[
                   { label: "停止后续", value: "stop" },
@@ -120,23 +149,37 @@ export function WorkflowNodeConfigPanel({
                 ]}
               />
             </Form.Item>
-            <Form.Item name="retry" label="重试次数" className="workflow-inline-form-item">
+            <Form.Item
+              name="retry"
+              label="重试次数"
+              className="workflow-inline-form-item"
+            >
               <Input type="number" min={0} max={3} />
             </Form.Item>
           </Space>
-          <Button type="primary" icon={<CheckCircleOutlined />} onClick={onSaveNode}>
+
+          <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => void onSaveNode()}>
             应用配置
           </Button>
           {extraActions}
         </Form>
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击画布节点后在这里配置" />
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="点击画布节点后在这里配置"
+        />
       )}
+
       {showRunState && <RunStateCard latestRun={latestRun} workflowEdges={workflowEdges} />}
+
       {showWorkflowJson && (
         <div className="workflow-json-panel">
           <Text strong>Workflow JSON</Text>
-          <TextArea rows={10} value={workflowJson} onChange={(event) => onWorkflowJsonChange(event.target.value)} />
+          <TextArea
+            rows={10}
+            value={workflowJson}
+            onChange={(event) => onWorkflowJsonChange(event.target.value)}
+          />
         </div>
       )}
     </aside>
@@ -160,21 +203,37 @@ function NodeTypeFields({
 }) {
   return (
     <>
+      {type === "start" && (
+        <Form.Item
+          name="start_message"
+          label="启动输入"
+          extra="点击运行画布时，会把这里的内容作为本次工作流的起始消息。"
+        >
+          <TextArea
+            rows={3}
+            placeholder="例如：请生成一个活动页，并让审查节点检查最终交付。"
+          />
+        </Form.Item>
+      )}
+
       {(type === "agent" || type === "review") && (
         <Form.Item name="agent_id" label="Agent">
           <Select allowClear showSearch options={agentOptions} placeholder="选择群聊中的 Agent" />
         </Form.Item>
       )}
+
       {type === "tool" && (
         <Form.Item name="tool_name" label="工具">
           <Select showSearch options={toolOptions} />
         </Form.Item>
       )}
+
       {type === "skill" && (
         <Form.Item name="skill_id" label="Skill">
           <Select showSearch options={skillOptions} />
         </Form.Item>
       )}
+
       {type === "mcp" && (
         <>
           <Form.Item name="mcp_server_id" label="MCP Server">
@@ -185,16 +244,19 @@ function NodeTypeFields({
           </Form.Item>
         </>
       )}
+
       {type === "condition" && (
         <Form.Item name="expression" label="条件表达式">
           <TextArea rows={2} placeholder="input.includes('需要审查')" />
         </Form.Item>
       )}
+
       {type === "loop" && (
         <Form.Item name="max_iterations" label="循环次数">
           <Input type="number" min={1} max={20} />
         </Form.Item>
       )}
+
       {type === "artifact" && (
         <Form.Item name="artifact_type" label="产物类型">
           <Select
@@ -202,6 +264,19 @@ function NodeTypeFields({
               label: value.toUpperCase(),
               value,
             }))}
+          />
+        </Form.Item>
+      )}
+
+      {type === "end" && (
+        <Form.Item
+          name="end_message"
+          label="结束说明"
+          extra="用于给结束节点补充汇总说明，可选。"
+        >
+          <TextArea
+            rows={2}
+            placeholder="例如：汇总所有上游节点输出，生成最终答复。"
           />
         </Form.Item>
       )}
@@ -218,14 +293,17 @@ function RunStateCard({
 }) {
   return (
     <div className="workflow-studio-run-card">
-      <Text strong>运行态</Text>
+      <Text strong>运行状态</Text>
       {latestRun ? (
         <>
           <Space wrap>
             <Tag color={statusTagColor(latestRun.status)}>{latestRun.status}</Tag>
             <Text type="secondary">{latestRun.progress}% complete</Text>
           </Space>
-          <Progress percent={latestRun.progress} status={latestRun.status === "failed" ? "exception" : undefined} />
+          <Progress
+            percent={latestRun.progress}
+            status={latestRun.status === "failed" ? "exception" : undefined}
+          />
           <div className="workflow-node-state-list">
             {(latestRun.node_states ?? []).map((node) => (
               <Tag key={node.id} color={statusTagColor(node.status)}>

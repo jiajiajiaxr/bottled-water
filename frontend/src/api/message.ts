@@ -515,7 +515,7 @@ function ensureConversationStreamSubscription(
     dispatchStreamEvent(event, data, activeHandlers);
 
     if (isTerminalWsEvent(event)) {
-      clearConversationWsSubscription(conversationId);
+      resolveConversationPendingAcks(conversationId, "completed");
     }
   });
   wsStreamSubscriptions.set(conversationId, unsubscribe);
@@ -549,16 +549,25 @@ function resolvePendingAck(
   ack.resolve(result);
 }
 
+function resolveConversationPendingAcks(
+  conversationId: string,
+  result: string,
+): void {
+  const pending = wsPendingAcks.get(conversationId);
+  if (!pending || pending.size === 0) return;
+  for (const [key, ack] of pending.entries()) {
+    window.clearTimeout(ack.timeout);
+    ack.resolve(result);
+    pending.delete(key);
+  }
+  wsPendingAcks.delete(conversationId);
+}
+
 function clearConversationWsSubscription(conversationId: string): void {
   wsStreamSubscriptions.get(conversationId)?.();
   wsStreamSubscriptions.delete(conversationId);
   wsStreamHandlers.delete(conversationId);
-  const pending = wsPendingAcks.get(conversationId);
-  pending?.forEach((ack) => {
-    window.clearTimeout(ack.timeout);
-    ack.resolve("completed");
-  });
-  wsPendingAcks.delete(conversationId);
+  resolveConversationPendingAcks(conversationId, "completed");
 }
 
 function isTerminalWsEvent(event: string): boolean {

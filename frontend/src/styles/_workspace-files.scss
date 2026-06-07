@@ -70,68 +70,139 @@
 }
 
 .workspace-file-map-body {
-  max-height: 260px;
+  max-height: 72vh;
   overflow: auto;
-  padding: $spacing-sm $spacing-lg $spacing-md;
+  padding: $spacing-lg;
 }
 
-.workspace-file-map-node {
-  min-width: 0;
-}
-
-.workspace-file-map-line {
-  min-height: 30px;
+.workspace-file-map-forest {
   display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-  min-width: 0;
+  align-items: flex-start;
+  justify-content: center;
+  gap: $spacing-xxl;
+  min-width: max-content;
+  padding-bottom: $spacing-lg;
+}
+
+.workspace-file-chart-node {
   position: relative;
-  color: $color-text-primary;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 180px;
 
   &.is-dir {
-    font-weight: 600;
+    .workspace-file-chart-card {
+      background: linear-gradient(180deg, #f6f9ff 0%, #ffffff 100%);
+      border-color: #d7e6ff;
+    }
   }
 
   &.is-file {
-    color: $color-text-secondary;
+    .workspace-file-chart-card {
+      background: #ffffff;
+      border-color: #e5e7eb;
+    }
   }
 }
 
-.workspace-file-map-branch {
-  width: 12px;
-  height: 18px;
-  border-left: 1px solid #d7e1f1;
-  border-bottom: 1px solid #d7e1f1;
-  border-bottom-left-radius: 5px;
-  flex: none;
+.workspace-file-chart-card {
+  position: relative;
+  z-index: 1;
+  min-width: 180px;
+  max-width: 220px;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid $color-border;
+  border-radius: $radius-md;
+  box-shadow: $shadow-sm;
+  background: $color-bg-white;
+  text-align: center;
 }
 
-.workspace-file-map-name {
+.workspace-file-chart-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-xs;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.workspace-file-map-source {
+.workspace-file-chart-icon {
+  color: #4f7cff;
   flex: none;
-  margin-inline-start: $spacing-xs;
 }
 
-.workspace-file-map-meta {
-  flex: none;
-  white-space: nowrap;
-}
-
-.workspace-file-map-path {
-  display: block;
+.workspace-file-chart-name {
+  display: inline-block;
+  min-width: 0;
   max-width: 100%;
-  margin-top: -4px;
-  margin-bottom: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 600;
+  color: $color-text-primary;
+}
+
+.workspace-file-chart-card-meta {
+  margin-top: $spacing-xs;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-xs;
+  flex-wrap: wrap;
   font-size: 12px;
+}
+
+.workspace-file-chart-tag {
+  margin-inline-end: 0;
+}
+
+.workspace-file-chart-children {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: $spacing-xl;
+  margin-top: 28px;
+  padding-top: 24px;
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 1px;
+    height: 24px;
+    background: #cdd8ea;
+    transform: translateX(-50%);
+  }
+
+  &::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 24px;
+    right: 24px;
+    height: 1px;
+    background: #cdd8ea;
+  }
+}
+
+.workspace-file-chart-child {
+  position: relative;
+  display: flex;
+  justify-content: center;
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: -24px;
+    left: 50%;
+    width: 1px;
+    height: 24px;
+    background: #cdd8ea;
+    transform: translateX(-50%);
+  }
 }
 
 .workspace-file-table-head,
@@ -279,6 +350,11 @@
   .workspace-file-map-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .workspace-file-map-forest,
+  .workspace-file-chart-children {
+    justify-content: flex-start;
   }
 
   .workspace-file-table-head,

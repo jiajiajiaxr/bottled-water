@@ -42,10 +42,12 @@ function edgePairs(workflow: ConversationWorkflow) {
 function reachableFromStart(workflow: ConversationWorkflow, startIds: string[]) {
   const outgoing = new Map<string, string[]>();
   const nodeIds = new Set((workflow.nodes ?? []).map((node) => node.id));
+
   edgePairs(workflow).forEach(({ source, target }) => {
     if (!nodeIds.has(source) || !nodeIds.has(target)) return;
     outgoing.set(source, [...(outgoing.get(source) ?? []), target]);
   });
+
   const reachable = new Set<string>();
   const queue = [...startIds];
   while (queue.length) {
@@ -54,6 +56,7 @@ function reachableFromStart(workflow: ConversationWorkflow, startIds: string[]) 
     reachable.add(current);
     queue.push(...(outgoing.get(current) ?? []));
   }
+
   return reachable;
 }
 
@@ -61,6 +64,7 @@ export function validateWorkflowDefinition(
   workflow?: ConversationWorkflow,
 ): WorkflowValidationIssue[] {
   const issues: WorkflowValidationIssue[] = [];
+
   if (!workflow) {
     return [
       {
@@ -88,6 +92,7 @@ export function validateWorkflowDefinition(
       message: "缺少 Start 节点。",
     });
   }
+
   if (!endNodes.length) {
     issues.push({
       id: "missing-end",
@@ -95,6 +100,7 @@ export function validateWorkflowDefinition(
       message: "缺少 End 节点。",
     });
   }
+
   if (!executableNodes.length) {
     issues.push({
       id: "missing-executable-node",
@@ -113,6 +119,7 @@ export function validateWorkflowDefinition(
       });
       return;
     }
+
     outgoing.set(source, (outgoing.get(source) ?? 0) + 1);
     incoming.set(target, (incoming.get(target) ?? 0) + 1);
   });
@@ -122,22 +129,24 @@ export function validateWorkflowDefinition(
       workflow,
       startNodes.map((node) => node.id),
     );
+
     nodes.forEach((node) => {
       if (workflowNodeType(node) === "start" || reachable.has(node.id)) return;
       issues.push({
         id: `unreachable-${node.id}`,
         severity: "error",
         nodeId: node.id,
-        message: `节点「${node.title}」无法从 Start 到达。`,
+        message: `节点“${node.title}”无法从 Start 到达。`,
       });
     });
+
     endNodes.forEach((node) => {
       if (reachable.has(node.id)) return;
       issues.push({
         id: `end-unreachable-${node.id}`,
         severity: "error",
         nodeId: node.id,
-        message: `End 节点「${node.title}」无法被到达。`,
+        message: `End 节点“${node.title}”无法被到达。`,
       });
     });
   }
@@ -145,46 +154,52 @@ export function validateWorkflowDefinition(
   nodes.forEach((node) => {
     const type = workflowNodeType(node);
     const config = node.config ?? {};
+
     if (type !== "start" && (incoming.get(node.id) ?? 0) === 0) {
       issues.push({
         id: `warning-no-input-${node.id}`,
         severity: "warning",
         nodeId: node.id,
-        message: `节点「${node.title}」没有入边，运行时不会收到上游数据。`,
+        message: `节点“${node.title}”没有入边，运行时不会收到上游数据。`,
       });
     }
+
     if (type !== "end" && (outgoing.get(node.id) ?? 0) === 0) {
       issues.push({
         id: `warning-no-output-${node.id}`,
         severity: "warning",
         nodeId: node.id,
-        message: `节点「${node.title}」没有出边，下游不会继续执行。`,
+        message: `节点“${node.title}”没有出边，下游不会继续执行。`,
       });
     }
+
     if ((type === "agent" || type === "review") && !agentId(node)) {
       issues.push({
         id: `missing-agent-${node.id}`,
         severity: "error",
         nodeId: node.id,
-        message: `节点「${node.title}」必须选择 Agent。`,
+        message: `节点“${node.title}”必须选择 Agent。`,
       });
     }
+
     if (type === "tool" && !hasText(config.tool_name)) {
       issues.push({
         id: `missing-tool-${node.id}`,
         severity: "error",
         nodeId: node.id,
-        message: `节点「${node.title}」必须选择工具名。`,
+        message: `节点“${node.title}”必须选择工具名。`,
       });
     }
+
     if (type === "skill" && !hasText(config.skill_id)) {
       issues.push({
         id: `missing-skill-${node.id}`,
         severity: "error",
         nodeId: node.id,
-        message: `节点「${node.title}」必须选择 Skill。`,
+        message: `节点“${node.title}”必须选择 Skill。`,
       });
     }
+
     if (
       type === "mcp" &&
       (!hasText(config.server_id) || !hasText(config.tool_name))
@@ -193,7 +208,7 @@ export function validateWorkflowDefinition(
         id: `missing-mcp-${node.id}`,
         severity: "error",
         nodeId: node.id,
-        message: `节点「${node.title}」必须选择 MCP 服务和工具。`,
+        message: `节点“${node.title}”必须选择 MCP 服务和工具。`,
       });
     }
   });

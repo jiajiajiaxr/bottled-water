@@ -6,6 +6,7 @@ Conversations API
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -15,6 +16,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.database import SessionLocal
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
@@ -24,6 +26,7 @@ from db.models import (
     Conversation,
     ConversationParticipant,
     Message,
+    Task,
     User,
     Workspace,
     WorkspaceMember,
@@ -42,13 +45,18 @@ from app.schemas.requests import (
 )
 from app.services.chat.scheduling import normalize_scheduling_strategy
 from app.services.conversation_identity import generate_conversation_number
+from app.services.realtime.event_bus import event_bus
 from app.services.serialization import (
     conversation_to_dict,
     participant_to_dict,
+    task_to_dict,
     workflow_run_to_dict,
 )
+from app.services.tasks.service import create_task_for_prompt
 from app.services.model_config_resolver import create_provider_from_db
-from app.services.workflows.runtime import build_edge_states, build_node_states
+from app.services.workflows.definition import _conversation_agents
+from app.services.workflows.engine import WorkflowEngine
+from app.services.workflows.runtime import _sync_workflow_run, build_edge_states, build_node_states
 from app.services.workflows.validator import format_workflow_validation_message, validate_workflow_graph
 
 router = APIRouter(tags=["conversations"])
@@ -613,6 +621,124 @@ def _sync_workflow_runtime(conversation: Conversation, run: WorkflowRun) -> None
     }
 
 
+def _manual_workflow_prompt(workflow: dict[str, Any]) -> str:
+    nodes = workflow.get("nodes") if isinstance(workflow.get("nodes"), list) else []
+    start_node = next(
+        (
+            node
+            for node in nodes
+            if isinstance(node, dict) and str(node.get("type") or node.get("role") or "").lower() == "start"
+        ),
+        None,
+    )
+    if not isinstance(start_node, dict):
+        return "请按当前工作流执行。"
+    config = start_node.get("config") if isinstance(start_node.get("config"), dict) else {}
+    for key in ("manual_input", "prompt", "message", "text"):
+        value = config.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "请按当前工作流执行。"
+
+
+async def _publish_manual_task_started(task: Task, channel: str) -> None:
+    await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+
+
+async def _execute_manual_workflow_run(
+    *,
+    conversation_id: str,
+    run_id: str,
+    prompt: str,
+) -> None:
+    db = SessionLocal()
+    try:
+        conversation = db.get(Conversation, conversation_id)
+        workflow_run = db.get(WorkflowRun, run_id)
+        if not conversation or not workflow_run:
+            return
+        workflow = workflow_run.workflow_snapshot if isinstance(workflow_run.workflow_snapshot, dict) else {}
+        channel = f"conversation:{conversation.id}"
+        task = create_task_for_prompt(db, conversation, prompt)
+        task.status = "EXECUTING"
+        task.started_at = utcnow()
+        task.progress = 20
+        db.commit()
+        await _publish_manual_task_started(task, channel)
+
+        transient_message = Message(
+            conversation_id=conversation.id,
+            sender_type="system",
+            sender_name="Workflow Canvas",
+            content_type="text",
+            content={"text": prompt, "attachments": []},
+            status="completed",
+            extra={"thinking_enabled": False},
+        )
+        agents = _conversation_agents(db, conversation)
+        engine = WorkflowEngine(
+            db,
+            conversation=conversation,
+            user_message=transient_message,
+            task=task,
+            workflow_run=workflow_run,
+            workflow=workflow,
+            prompt=prompt,
+            channel=channel,
+            agents=agents,
+        )
+        await engine.run()
+        db.refresh(workflow_run)
+        if workflow_run.status == "failed":
+            task.status = "FAILED"
+            task.completed_at = utcnow()
+            task.progress = max(task.progress or 0, workflow_run.progress or 0)
+            task.error_info = {
+                "workflow_run_id": workflow_run.id,
+                "events": (workflow_run.events or [])[-10:],
+            }
+        elif workflow_run.status == "cancelled":
+            task.status = "CANCELLED"
+            task.completed_at = utcnow()
+            task.progress = min(max(task.progress or 0, workflow_run.progress or 0), 95)
+        else:
+            task.status = "COMPLETED"
+            task.completed_at = utcnow()
+            task.progress = 100
+            task.output = {
+                "workflow_run_id": workflow_run.id,
+                "status": workflow_run.status,
+                "node_states": workflow_run.node_states or [],
+                "events": (workflow_run.events or [])[-20:],
+            }
+        db.commit()
+        await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+    except Exception as exc:
+        conversation = db.get(Conversation, conversation_id)
+        workflow_run = db.get(WorkflowRun, run_id)
+        if conversation and workflow_run:
+            workflow_run.status = "failed"
+            workflow_run.completed_at = utcnow()
+            workflow_run.events = [
+                *(workflow_run.events or []),
+                {
+                    "type": "run.failed",
+                    "at": utcnow().isoformat(),
+                    "error": str(exc),
+                    "source": "manual_workflow_run",
+                },
+            ][-300:]
+            _sync_workflow_run(conversation, workflow_run)
+            db.commit()
+            await event_bus.publish(
+                f"conversation:{conversation.id}",
+                "workflow:run_updated",
+                workflow_run_to_dict(workflow_run),
+            )
+    finally:
+        db.close()
+
+
 async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: dict) -> Conversation:
     conversation = await _get(db, user, conversation_id)
     action = payload.get("action")
@@ -858,6 +984,7 @@ async def start_workflow_run(
     validation = validate_workflow_graph(workflow, agents=agents)
     if not validation.ok:
         raise ValidationAppError(format_workflow_validation_message(validation))
+
     run = WorkflowRun(
         conversation_id=conversation.id,
         trigger_message_id=payload.get("trigger_message_id"),
@@ -871,48 +998,19 @@ async def start_workflow_run(
         progress=5,
         started_at=utcnow(),
     )
-    now = utcnow().isoformat()
-    node_states = []
-    for state in run.node_states or []:
-        node_type = str(state.get("type") or "")
-        next_state = dict(state)
-        if node_type in {"start", "end"}:
-            next_state.update(
-                {
-                    "status": "completed",
-                    "progress": 100,
-                    "started_at": next_state.get("started_at") or now,
-                    "completed_at": now,
-                    "message": "手动运行校验通过",
-                }
-            )
-        else:
-            next_state.update(
-                {
-                    "status": "skipped",
-                    "progress": 100,
-                    "completed_at": now,
-                    "message": "手动运行仅校验画布；发送群聊消息后会按该工作流真实执行。",
-                    "output": {
-                        **(next_state.get("output") or {}),
-                        "reason": "manual_run_validation_only",
-                    },
-                }
-            )
-        node_states.append(next_state)
-    run.node_states = node_states
-    run.status = "completed"
-    run.progress = 100
-    run.completed_at = utcnow()
-    run.events = [
-        *(run.events or []),
-        {"type": "run.completed", "at": now, "reason": "manual_validation_only"},
-    ]
     db.add(run)
     await db.flush()
     _sync_workflow_runtime(conversation, run)
     await db.commit()
     await db.refresh(run)
+
+    asyncio.create_task(
+        _execute_manual_workflow_run(
+            conversation_id=conversation.id,
+            run_id=run.id,
+            prompt=str(payload.get("prompt") or _manual_workflow_prompt(workflow)),
+        )
+    )
     return ok(workflow_run_to_dict(run), "Workflow run started")
 
 
@@ -1010,6 +1108,9 @@ async def delete_conversation(
     conversation_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
     conversation = await _get(db, user, conversation_id)
+    from app.services.conversation_session_manager import ConversationSessionManager
+
+    await ConversationSessionManager.get_instance().close_session(conversation_id)
     conversation.deleted_at = utcnow()
     conversation.status = "deleted"
     await db.commit()
