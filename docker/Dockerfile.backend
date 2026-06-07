@@ -19,6 +19,9 @@ COPY . .
 # 安装项目（包含所有依赖）
 RUN uv sync --frozen --no-dev
 
+# 虚拟环境 bin 加入 PATH，使 uvicorn / python 等可直接调用
+ENV PATH="/app/.venv/bin:${PATH}"
+
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8888/health')" || exit 1
