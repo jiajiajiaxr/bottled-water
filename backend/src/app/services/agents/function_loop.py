@@ -86,6 +86,7 @@ async def _publish_text_delta(
             "agent_message_id": assistant.id,
             "agent_id": agent.id,
             "agent_name": agent.name,
+            "agent_avatar_url": agent.avatar_url,
             "delta": {"type": delta_type, "text": text},
         },
     )
@@ -294,6 +295,7 @@ async def run_agent_function_call_loop(
             sender_type="agent",
             sender_id=agent.id,
             sender_name=agent.name,
+            sender_avatar_url=agent.avatar_url,
             content_type="text",
             content={"text": ""},
             status="streaming",
@@ -308,6 +310,7 @@ async def run_agent_function_call_loop(
                 "agent_message_id": assistant.id,
                 "agent_id": agent.id,
                 "agent_name": agent.name,
+                "agent_avatar_url": agent.avatar_url,
             },
         )
 

@@ -36,6 +36,7 @@ export interface AgentConfig {
 export interface AgentConfigDraft {
   name: string;
   description: string;
+  avatar_url?: string;
   capabilities: AgentCapability[];
   system_prompt: string;
   tools: string[];

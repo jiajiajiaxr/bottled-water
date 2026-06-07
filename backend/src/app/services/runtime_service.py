@@ -187,6 +187,7 @@ class OrchestratorService:
                 name=agent.name,
                 system_prompt=(agent.config or {}).get("system_prompt", "") or agent.description or f"你是 {agent.name}。",
                 role=agent.type or "worker",
+                model_config={**(agent.config or {}), "avatar_url": agent.avatar_url},
                 tools=_runtime_agent_tools(agent),
             )
             for agent in agents

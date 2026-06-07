@@ -88,6 +88,8 @@ export function AgentDirectoryDrawer({
   const editSkillValues = Form.useWatch("skill_ids", editForm) as string[] | undefined;
   const createMcpValues = Form.useWatch("mcp_server_ids", form) as string[] | undefined;
   const editMcpValues = Form.useWatch("mcp_server_ids", editForm) as string[] | undefined;
+  const createAvatarUrl = Form.useWatch("avatar_url", form) as string | undefined;
+  const editAvatarUrl = Form.useWatch("avatar_url", editForm) as string | undefined;
 
   const catalogToolNames = useMemo(
     () => dedupeToolCatalog(toolCatalog).map((tool) => tool.name),
@@ -342,6 +344,7 @@ export function AgentDirectoryDrawer({
     editForm.setFieldsValue({
       name: agent.name,
       display_name: agent.display_name,
+      avatar_url: agent.avatar_url,
       description: agent.description,
       status: agent.status,
       system_prompt: agent.config.custom_prompt_prefix,
@@ -367,6 +370,7 @@ export function AgentDirectoryDrawer({
     const updated = await api.updateAgent(editingAgent.id, {
       name: values.name,
       display_name: values.display_name,
+      avatar_url: values.avatar_url,
       description: values.description,
       status: values.status,
       system_prompt: values.system_prompt,
@@ -396,6 +400,7 @@ export function AgentDirectoryDrawer({
     const values = await form.validateFields();
     const created = await api.createAgent({
       name: values.name,
+      avatar_url: values.avatar_url,
       description: values.description,
       capabilities,
       system_prompt: values.system_prompt,
@@ -643,6 +648,17 @@ export function AgentDirectoryDrawer({
           >
             <Input maxLength={30} placeholder="数据库设计专家" />
           </Form.Item>
+          <Form.Item name="avatar_url" label="Agent 头像 URL">
+            <Flex align="center" gap={12}>
+              <Avatar
+                size={48}
+                src={createAvatarUrl}
+                icon={!createAvatarUrl ? <RobotOutlined /> : undefined}
+                style={{ background: "#1677ff" }}
+              />
+              <Input allowClear placeholder="https://example.com/avatar.png" />
+            </Flex>
+          </Form.Item>
           <Form.Item
             name="description"
             label="描述"
@@ -794,6 +810,17 @@ export function AgentDirectoryDrawer({
           </Form.Item>
           <Form.Item name="display_name" label="显示名称">
             <Input maxLength={30} />
+          </Form.Item>
+          <Form.Item name="avatar_url" label="Agent 头像 URL">
+            <Flex align="center" gap={12}>
+              <Avatar
+                size={48}
+                src={editAvatarUrl}
+                icon={!editAvatarUrl ? <RobotOutlined /> : undefined}
+                style={{ background: editingAgent?.avatar_color ?? "#1677ff" }}
+              />
+              <Input allowClear placeholder="https://example.com/avatar.png" />
+            </Flex>
           </Form.Item>
           <Form.Item
             name="description"

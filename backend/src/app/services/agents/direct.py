@@ -236,6 +236,7 @@ async def _run_direct_agent_without_function_calling(
         sender_type="agent",
         sender_id=agent.id,
         sender_name=agent.name,
+        sender_avatar_url=agent.avatar_url,
         content_type="text",
         content={"text": ""},
         status="streaming",
@@ -246,7 +247,12 @@ async def _run_direct_agent_without_function_calling(
     await event_bus.publish(
         channel,
         "message_start",
-        {"agent_message_id": assistant.id, "agent_id": agent.id, "agent_name": agent.name},
+        {
+            "agent_message_id": assistant.id,
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "agent_avatar_url": agent.avatar_url,
+        },
     )
 
     stream_text = ""

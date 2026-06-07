@@ -552,6 +552,11 @@ class ConversationSessionManager:
         session = self._sessions.get(conversation_id)
         agent = session.agents.get(agent_id) if session and agent_id else None
         agent_name = getattr(agent, "name", None) or str(payload.get("agent_name") or "Agent")
+        agent_avatar_url = (
+            str((getattr(agent, "model_config", {}) or {}).get("avatar_url") or "")
+            or str(payload.get("agent_avatar_url") or payload.get("sender_avatar_url") or "")
+            or None
+        )
         if event.type == "system.agent_completed":
             persisted = await db.scalar(
                 select(Message)
@@ -578,6 +583,8 @@ class ConversationSessionManager:
                         **persisted.content,
                         "thinking_enabled": thinking_enabled,
                     }
+                if agent_avatar_url and not persisted.sender_avatar_url:
+                    persisted.sender_avatar_url = agent_avatar_url
                 conversation = await db.get(Conversation, conversation_id)
                 if conversation:
                     conversation.last_message_preview = work_product[:300]
@@ -606,6 +613,7 @@ class ConversationSessionManager:
             sender_type="agent",
             sender_id=agent_id or None,
             sender_name=agent_name,
+            sender_avatar_url=agent_avatar_url,
             content_type="text",
             content={
                 "text": work_product,

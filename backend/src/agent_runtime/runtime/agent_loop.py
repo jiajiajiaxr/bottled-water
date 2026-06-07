@@ -836,6 +836,7 @@ class AgentLoop:
             {
                 "agent_id": self.agent.id,
                 "agent_name": self.agent.name,
+                "agent_avatar_url": (self.agent.model_config or {}).get("avatar_url"),
                 "agent_message_id": stream_message_id,
             },
         )
@@ -845,6 +846,7 @@ class AgentLoop:
                 {
                     "agent_id": self.agent.id,
                     "agent_name": self.agent.name,
+                    "agent_avatar_url": (self.agent.model_config or {}).get("avatar_url"),
                     "agent_message_id": stream_message_id,
                     "token": text[index : index + 12],
                 },
@@ -1045,6 +1047,7 @@ class AgentLoop:
                 {
                     "agent_id": self.agent.id,
                     "agent_name": self.agent.name,
+                    "agent_avatar_url": (self.agent.model_config or {}).get("avatar_url"),
                     "agent_message_id": stream_message_id,
                 },
             )
@@ -1069,6 +1072,7 @@ class AgentLoop:
                         {
                             "agent_id": self.agent.id,
                             "agent_name": self.agent.name,
+                            "agent_avatar_url": (self.agent.model_config or {}).get("avatar_url"),
                             "agent_message_id": stream_message_id,
                             "token": visible_delta,
                         },
@@ -1079,12 +1083,13 @@ class AgentLoop:
                 await ensure_stream_started()
                 await _emit(
                     "agent.thinking",
-                    {
-                        "agent_id": self.agent.id,
-                        "agent_name": self.agent.name,
-                        "agent_message_id": stream_message_id,
-                        "thinking": chunk.reasoning,
-                    },
+                        {
+                            "agent_id": self.agent.id,
+                            "agent_name": self.agent.name,
+                            "agent_avatar_url": (self.agent.model_config or {}).get("avatar_url"),
+                            "agent_message_id": stream_message_id,
+                            "thinking": chunk.reasoning,
+                        },
                 )
 
             # 2. tool_call 增量（可能跨多个 chunk）

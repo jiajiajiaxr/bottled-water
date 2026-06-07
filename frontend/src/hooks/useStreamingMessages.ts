@@ -96,6 +96,11 @@ function agentIdentity(payload: Record<string, unknown>): string {
   return String(payload.agent_id || payload.sender_id || "");
 }
 
+function payloadAgentAvatarUrl(payload: Record<string, unknown>) {
+  const value = payload.agent_avatar_url || payload.sender_avatar_url;
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 function conversationOf(
   fallbackConversationId: string | undefined,
   payload?: Record<string, unknown>,
@@ -471,6 +476,7 @@ export function useStreamingMessages(conversationId?: string) {
       conversationThinkingMode.get(targetConversationId) === true;
 
     const author = agentDisplayName(targetConversationId, agentId, payload);
+    const agentAvatarUrl = payloadAgentAvatarUrl(payload);
     const historyBoundaryIds = historyMessages
       .filter((message) => message.conversationId === targetConversationId)
       .map((message) => message.id);
@@ -480,10 +486,12 @@ export function useStreamingMessages(conversationId?: string) {
       kind: "text",
       author,
       content: "",
+      sender_avatar_url: agentAvatarUrl,
       rawContent: {
         agent_message_id: payload.agent_message_id,
         message_id: payload.message_id,
         agent_id: payload.agent_id || agentId,
+        agent_avatar_url: agentAvatarUrl,
         thinking_enabled: streamThinkingEnabled,
         _streamRawText: "",
         _streamThinkingEnabled: streamThinkingEnabled,
@@ -563,6 +571,8 @@ export function useStreamingMessages(conversationId?: string) {
     const nextMessage = {
       ...existing,
       id: String(payload.agent_message_id || payload.message_id || existing.id),
+      sender_avatar_url:
+        payloadAgentAvatarUrl(payload) || existing.sender_avatar_url,
       content: stripInternalAgentOutput(rawText),
       rawContent: {
         ...(existing.rawContent || {}),
@@ -571,6 +581,8 @@ export function useStreamingMessages(conversationId?: string) {
         message_id: payload.message_id || existing.rawContent?.message_id,
         agent_id:
           payload.agent_id || payload.sender_id || existing.rawContent?.agent_id,
+        agent_avatar_url:
+          payloadAgentAvatarUrl(payload) || existing.rawContent?.agent_avatar_url,
         _streamRawText: rawText,
       },
     };
@@ -697,6 +709,8 @@ export function useStreamingMessages(conversationId?: string) {
     const nextMessage = {
       ...existing,
       id: String(payload.agent_message_id || payload.message_id || existing.id),
+      sender_avatar_url:
+        payloadAgentAvatarUrl(payload) || existing.sender_avatar_url,
       thinking: stripInternalAgentOutput(rawThinking),
       rawContent: {
         ...(existing.rawContent || {}),
@@ -705,6 +719,8 @@ export function useStreamingMessages(conversationId?: string) {
         message_id: payload.message_id || existing.rawContent?.message_id,
         agent_id:
           payload.agent_id || payload.sender_id || existing.rawContent?.agent_id,
+        agent_avatar_url:
+          payloadAgentAvatarUrl(payload) || existing.rawContent?.agent_avatar_url,
         _streamRawThinking: rawThinking,
         thinking_enabled:
           existing.rawContent?.thinking_enabled ??
@@ -1218,6 +1234,7 @@ export function useStreamingMessages(conversationId?: string) {
       const existingKey = existingKeyForPayload(payload);
       const targetConversationId = conversationOf(conversationId, payload);
       const author = agentDisplayName(targetConversationId, agentId, payload);
+      const agentAvatarUrl = payloadAgentAvatarUrl(payload);
 
       if (!agentId || !key) return;
       if (!streamingMessagesRef.current.has(existingKey || key)) {
@@ -1237,11 +1254,13 @@ export function useStreamingMessages(conversationId?: string) {
             ...existing,
             id: String(payload.agent_message_id || payload.message_id || existing.id),
             author,
+            sender_avatar_url: agentAvatarUrl || existing.sender_avatar_url,
             rawContent: {
               ...(existing.rawContent || {}),
               agent_message_id: payload.agent_message_id || existing.rawContent?.agent_message_id,
               message_id: payload.message_id || existing.rawContent?.message_id,
               agent_id: payload.agent_id || existing.rawContent?.agent_id || agentId,
+              agent_avatar_url: agentAvatarUrl || existing.rawContent?.agent_avatar_url,
               thinking_enabled:
                 existing.rawContent?.thinking_enabled ??
                 (payload.thinking_enabled === true),
@@ -1265,10 +1284,12 @@ export function useStreamingMessages(conversationId?: string) {
           kind: "text",
           author,
           content: "",
+          sender_avatar_url: agentAvatarUrl,
           rawContent: {
             agent_message_id: payload.agent_message_id,
             message_id: payload.message_id,
             agent_id: payload.agent_id,
+            agent_avatar_url: agentAvatarUrl,
             thinking_enabled:
               payload.thinking_enabled === true ||
               conversationThinkingMode.get(targetConversationId) === true,
