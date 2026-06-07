@@ -16,6 +16,9 @@ RUN uv sync --frozen --no-install-project --no-dev
 # 复制源码
 COPY . .
 
+# src/ 目录加入 Python 路径，使 import app 正常工作
+ENV PYTHONPATH="/app/src"
+
 # 安装项目（包含所有依赖）
 RUN uv sync --frozen --no-dev
 
