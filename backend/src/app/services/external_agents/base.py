@@ -21,7 +21,6 @@ class ExternalAgentProbe:
         return {
             "provider": self.provider,
             "installed": self.installed,
-            "command_path": self.command_path,
             "command_source": self.command_source,
             "reason": self.reason,
             "setup_hint": self.setup_hint,

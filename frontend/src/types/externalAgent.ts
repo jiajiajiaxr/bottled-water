@@ -1,7 +1,6 @@
 export interface ExternalAgentProbe {
   provider: "codex" | "claude_code" | string;
   installed: boolean;
-  command_path?: string | null;
   command_source?: string;
   reason?: string | null;
   setup_hint?: string;

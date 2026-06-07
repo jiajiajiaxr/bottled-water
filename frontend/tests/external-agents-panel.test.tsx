@@ -20,7 +20,6 @@ describe("ExternalAgentsPanel", () => {
         {
           provider: "codex",
           installed: true,
-          command_path: "C:/tools/codex.exe",
           command_source: "env:CODEX_CLI_PATH",
           capabilities: ["code_edit"],
         },
@@ -64,7 +63,6 @@ describe("ExternalAgentsPanel", () => {
         {
           provider: "codex",
           installed: true,
-          command_path: "C:/tools/codex.exe",
           command_source: "env:CODEX_CLI_PATH",
           capabilities: ["code_edit"],
         },
@@ -80,7 +78,10 @@ describe("ExternalAgentsPanel", () => {
     await waitFor(() =>
       expect(api.reprobeExternalAgent).toHaveBeenCalledWith("codex"),
     );
-    expect(await screen.findByText("C:/tools/codex.exe")).toBeInTheDocument();
+    expect(
+      await screen.findByText("已通过环境变量配置（路径已隐藏）"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("C:/tools/codex.exe")).not.toBeInTheDocument();
   });
 });
 

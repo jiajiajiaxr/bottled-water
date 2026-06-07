@@ -139,7 +139,7 @@ export function ExternalAgentStatusCards({
                 命令来源：{probe.command_source || "未探测"}
               </Text>
               <Text className="external-agent-command" ellipsis>
-                {probe.command_path || probe.reason || "command_not_found"}
+                {commandProbeSummary(probe)}
               </Text>
               {!probe.installed && (
                 <Text type="warning">
@@ -241,6 +241,15 @@ function mergeProbeResults(
 
 function providerLabel(provider: string) {
   return PROVIDER_LABELS[provider] ?? provider;
+}
+
+function commandProbeSummary(probe: ExternalAgentProbe) {
+  if (!probe.installed) return probe.reason || "command_not_found";
+  if (probe.command_source === "PATH") return "已通过 PATH 配置（路径已隐藏）";
+  if (probe.command_source?.startsWith("env:")) {
+    return "已通过环境变量配置（路径已隐藏）";
+  }
+  return "已配置（路径已隐藏）";
 }
 
 function statusColor(status: string) {

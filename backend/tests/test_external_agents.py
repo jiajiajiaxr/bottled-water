@@ -45,6 +45,18 @@ def test_probe_codex_missing_returns_degraded(monkeypatch: pytest.MonkeyPatch) -
     assert probe.setup_hint
 
 
+def test_probe_payload_redacts_resolved_command_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CODEX_CLI_PATH", sys.executable)
+
+    probe = get_external_agent_adapter("codex").probe()
+    payload = probe.to_dict()
+
+    assert probe.installed is True
+    assert probe.command_path == sys.executable
+    assert "command_path" not in payload
+    assert payload["command_source"] == "env:CODEX_CLI_PATH"
+
+
 def test_fake_codex_run_persists_events_and_changed_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
