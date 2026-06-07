@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import ValidationAppError
 from app.services.tools.builtins.file import extract_text_from_path
+from app.services.workspaces.filesystem import scoped_dir, workspace_id_from_conversation
 from db.models import AuditLog, FileAsset, KnowledgeBase, KnowledgeDocument, User
 
 
@@ -117,6 +118,21 @@ def attachment_path(file_asset: FileAsset) -> Path:
     return path
 
 
+async def _resolve_upload_workspace_id(
+    db: AsyncSession,
+    *,
+    conversation_id: str | None,
+    workspace_id: str | None,
+) -> str | None:
+    if workspace_id or not conversation_id:
+        return workspace_id
+    if hasattr(db, "run_sync"):
+        return await db.run_sync(
+            lambda session: workspace_id_from_conversation(session, conversation_id)
+        )
+    return workspace_id_from_conversation(db, conversation_id)
+
+
 async def save_upload(
     db: AsyncSession,
     *,
@@ -136,10 +152,13 @@ async def save_upload(
     name = safe_filename(upload.filename or "upload.bin")
     content_type = upload.content_type or "application/octet-stream"
     validate_upload_type(name, content_type)
-    if workspace_id:
-        from app.services.workspaces.filesystem import scoped_dir
-
-        folder = scoped_dir(workspace_id, "uploads", conversation_id=conversation_id)
+    resolved_workspace_id = await _resolve_upload_workspace_id(
+        db,
+        conversation_id=conversation_id,
+        workspace_id=workspace_id,
+    )
+    if resolved_workspace_id:
+        folder = scoped_dir(resolved_workspace_id, "uploads", conversation_id=conversation_id)
     else:
         folder = Path(settings.storage_dir) / "uploads" / user.id[:8]
     folder.mkdir(parents=True, exist_ok=True)
@@ -153,8 +172,8 @@ async def save_upload(
         "tool_chain": ["file.upload", "file.extract_text"],
         **(extracted_result.get("metadata") or {}),
     }
-    if workspace_id:
-        metadata["workspace_id"] = workspace_id
+    if resolved_workspace_id:
+        metadata["workspace_id"] = resolved_workspace_id
 
     asset = FileAsset(
         owner_id=user.id,

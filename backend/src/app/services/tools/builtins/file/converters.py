@@ -52,6 +52,34 @@ TEXT_TYPES = {
 }
 
 
+def _content_type_base(content_type: str) -> str:
+    return (content_type or "").split(";", 1)[0].strip().lower()
+
+
+def can_extract_text_from_path(
+    path: Path,
+    *,
+    content_type: str = "",
+    filename: str = "",
+) -> bool:
+    suffix = (path.suffix or Path(filename).suffix).lower()
+    normalized_type = _content_type_base(content_type)
+    return (
+        normalized_type in TEXT_TYPES
+        or suffix in TEXT_EXTENSIONS
+        or suffix == ".pdf"
+        or normalized_type == "application/pdf"
+        or suffix == ".docx"
+        or normalized_type.endswith("wordprocessingml.document")
+        or suffix == ".xlsx"
+        or normalized_type.endswith("spreadsheetml.sheet")
+        or suffix == ".pptx"
+        or normalized_type.endswith("presentationml.presentation")
+        or suffix in IMAGE_EXTENSIONS
+        or normalized_type.startswith("image/")
+    )
+
+
 @dataclass(frozen=True)
 class GeneratedFile:
     content: bytes
@@ -78,6 +106,9 @@ class _HTMLTextParser(HTMLParser):
         text = re.sub(r"\s*\n\s*", "\n", text)
         text = re.sub(r"[ \t]{2,}", " ", text)
         return text.strip()
+
+
+_RAPID_OCR_ENGINE: Any | None = None
 
 
 def _decode(raw: bytes) -> str:
@@ -159,7 +190,7 @@ def _text_from_pptx(path: Path) -> str:
     return "\n\n".join(parts)
 
 
-def _text_from_image(path: Path) -> tuple[str, dict[str, Any]]:
+def _text_from_image_tesseract(path: Path) -> tuple[str, dict[str, Any]]:
     """Extract text from an image through a local OCR binary when available.
 
     The platform keeps image understanding honest: if OCR is not installed we
@@ -212,27 +243,140 @@ def _text_from_image(path: Path) -> tuple[str, dict[str, Any]]:
     return text, metadata
 
 
+def _text_from_image(path: Path) -> tuple[str, dict[str, Any]]:
+    rapid_text, rapid_metadata = _text_from_image_rapidocr(path)
+    if rapid_text:
+        return rapid_text, rapid_metadata
+
+    tesseract_text, tesseract_metadata = _text_from_image_tesseract(path)
+    if tesseract_text:
+        return tesseract_text, {
+            **tesseract_metadata,
+            "ocr_engine": "tesseract",
+            "fallback_from": rapid_metadata,
+        }
+
+    ocr_available = bool(
+        rapid_metadata.get("ocr_available") or tesseract_metadata.get("ocr_available")
+    )
+    status = "empty" if ocr_available else "missing_ocr"
+    if (
+        rapid_metadata.get("vision_status") == "failed"
+        and tesseract_metadata.get("vision_status") == "failed"
+    ):
+        status = "failed"
+    return "", {
+        "extractor": "image_ocr",
+        "vision_status": status,
+        "ocr_available": ocr_available,
+        "ocr_engine": "rapidocr",
+        "engines": [rapid_metadata, tesseract_metadata],
+        "setup_hint": (
+            "OCR ran but did not return readable text. Try a sharper image, "
+            "or install Tesseract OCR as an optional fallback."
+        )
+        if ocr_available
+        else "Install rapidocr-onnxruntime or Tesseract OCR to recognize image text.",
+    }
+
+
+def _text_from_image_rapidocr(path: Path) -> tuple[str, dict[str, Any]]:
+    try:
+        ocr = _rapid_ocr_engine()
+    except Exception as exc:  # pragma: no cover - depends on local runtime.
+        return "", {
+            "extractor": "image_ocr",
+            "vision_status": "rapidocr_unavailable",
+            "ocr_available": False,
+            "ocr_engine": "rapidocr",
+            "error": str(exc)[:800],
+        }
+
+    try:
+        result = ocr(str(path))
+    except Exception as exc:  # pragma: no cover - model/runtime diagnostics.
+        return "", {
+            "extractor": "image_ocr",
+            "vision_status": "failed",
+            "ocr_available": True,
+            "ocr_engine": "rapidocr",
+            "error": str(exc)[:800],
+        }
+
+    detections = result[0] if isinstance(result, tuple) and result else result
+    lines: list[str] = []
+    confidences: list[float] = []
+    for item in detections or []:
+        text = _rapidocr_detection_text(item)
+        if text:
+            lines.append(text)
+        score = _rapidocr_detection_score(item)
+        if score is not None:
+            confidences.append(score)
+
+    metadata: dict[str, Any] = {
+        "extractor": "image_ocr",
+        "vision_status": "parsed" if lines else "empty",
+        "ocr_available": True,
+        "ocr_engine": "rapidocr",
+        "line_count": len(lines),
+    }
+    if confidences:
+        metadata["confidence_avg"] = round(sum(confidences) / len(confidences), 4)
+    return "\n".join(lines), metadata
+
+
+def _rapid_ocr_engine() -> Any:
+    global _RAPID_OCR_ENGINE
+    if _RAPID_OCR_ENGINE is None:
+        from rapidocr_onnxruntime import RapidOCR
+
+        _RAPID_OCR_ENGINE = RapidOCR()
+    return _RAPID_OCR_ENGINE
+
+
+def _rapidocr_detection_text(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("text") or item.get("rec_text") or "").strip()
+    if isinstance(item, (list, tuple)) and len(item) >= 2:
+        return str(item[1] or "").strip()
+    return ""
+
+
+def _rapidocr_detection_score(item: Any) -> float | None:
+    value: Any = None
+    if isinstance(item, dict):
+        value = item.get("score") or item.get("confidence")
+    elif isinstance(item, (list, tuple)) and len(item) >= 3:
+        value = item[2]
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def extract_text_from_path(path: Path, *, content_type: str = "", filename: str = "") -> dict[str, Any]:
     suffix = (path.suffix or Path(filename).suffix).lower()
+    normalized_type = _content_type_base(content_type)
     raw = path.read_bytes()
     metadata: dict[str, Any] = {"extension": suffix, "extractor": "none", "byte_size": len(raw)}
     text = ""
-    if content_type in TEXT_TYPES or suffix in TEXT_EXTENSIONS:
-        text = _text_from_html(raw) if suffix in {".html", ".htm"} or content_type == "text/html" else _decode(raw)
+    if normalized_type in TEXT_TYPES or suffix in TEXT_EXTENSIONS:
+        text = _text_from_html(raw) if suffix in {".html", ".htm"} or normalized_type == "text/html" else _decode(raw)
         metadata["extractor"] = "native_text"
-    elif suffix == ".pdf" or content_type == "application/pdf":
+    elif suffix == ".pdf" or normalized_type == "application/pdf":
         text = _text_from_pdf(path)
         metadata["extractor"] = "pypdf"
-    elif suffix == ".docx" or content_type.endswith("wordprocessingml.document"):
+    elif suffix == ".docx" or normalized_type.endswith("wordprocessingml.document"):
         text = _text_from_docx(path)
         metadata["extractor"] = "python-docx"
-    elif suffix == ".xlsx" or content_type.endswith("spreadsheetml.sheet"):
+    elif suffix == ".xlsx" or normalized_type.endswith("spreadsheetml.sheet"):
         text = _text_from_xlsx(path)
         metadata["extractor"] = "openpyxl"
-    elif suffix == ".pptx" or content_type.endswith("presentationml.presentation"):
+    elif suffix == ".pptx" or normalized_type.endswith("presentationml.presentation"):
         text = _text_from_pptx(path)
         metadata["extractor"] = "python-pptx"
-    elif suffix in IMAGE_EXTENSIONS or content_type.startswith("image/"):
+    elif suffix in IMAGE_EXTENSIONS or normalized_type.startswith("image/"):
         text, image_metadata = _text_from_image(path)
         metadata.update(image_metadata)
     else:
@@ -248,10 +392,11 @@ def extract_text_from_path(path: Path, *, content_type: str = "", filename: str 
 def preview_payload(path: Path, *, content_type: str = "", filename: str = "") -> dict[str, Any]:
     extracted = extract_text_from_path(path, content_type=content_type, filename=filename)
     suffix = (path.suffix or Path(filename).suffix).lower()
+    normalized_type = _content_type_base(content_type)
     mode = "text"
-    if suffix == ".pdf" or content_type == "application/pdf":
+    if suffix == ".pdf" or normalized_type == "application/pdf":
         mode = "pdf"
-    elif suffix in IMAGE_EXTENSIONS or content_type.startswith("image/"):
+    elif suffix in IMAGE_EXTENSIONS or normalized_type.startswith("image/"):
         mode = "image"
     elif suffix in {".docx", ".xlsx", ".pptx"}:
         mode = "office_text"

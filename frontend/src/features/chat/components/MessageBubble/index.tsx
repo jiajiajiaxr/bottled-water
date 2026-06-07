@@ -4,6 +4,7 @@ import {
   CloudUploadOutlined,
   CopyOutlined,
   EyeOutlined,
+  FileImageOutlined,
   LoadingOutlined,
   MessageOutlined,
   RobotOutlined,
@@ -36,6 +37,7 @@ const { Text, Paragraph } = Typography;
 interface MessageBubbleProps {
   message: ChatMessage;
   workspaceId?: string;
+  currentUserAvatarUrl?: string;
   version?: number;
   quoted?: ChatMessage;
   onQuote?: (message: ChatMessage) => void;
@@ -46,6 +48,7 @@ interface MessageBubbleProps {
 function MessageBubbleComponent({
   message,
   workspaceId,
+  currentUserAvatarUrl,
   quoted,
   onQuote,
   onCopy,
@@ -57,6 +60,7 @@ function MessageBubbleComponent({
     typeof message.sender_avatar_url === "string"
       ? message.sender_avatar_url
       : undefined;
+  const userAvatarUrl = senderAvatarUrl || currentUserAvatarUrl;
   const agentAvatarUrl =
     senderAvatarUrl ??
     (typeof message.rawContent?.agent_avatar_url === "string"
@@ -72,6 +76,7 @@ function MessageBubbleComponent({
         previewUrl?: string;
         previewText?: string;
         contentType?: string;
+        downloadUrl?: string;
         previewError?: string;
       })
     | undefined
@@ -88,19 +93,21 @@ function MessageBubbleComponent({
   }, [previewAttachment?.previewUrl]);
 
   const openAttachment = async (attachment: MessageAttachment) => {
+    const image = isImageAttachment(attachment);
+    const directUrl = attachment.public_url ?? attachment.url;
     const next = {
       ...attachment,
       contentType: attachment.content_type,
       previewText: attachment.extracted_text,
-      previewUrl: attachment.public_url ?? attachment.url,
+      previewUrl: directUrl,
+      downloadUrl: attachment.download_url,
     };
     setPreviewAttachment(next);
     const fileId = attachment.file_id ?? attachment.id;
     if (
       !fileId ||
-      attachment.extracted_text ||
-      attachment.public_url ||
-      attachment.url
+      (!image && (attachment.extracted_text || directUrl)) ||
+      (image && directUrl)
     ) {
       return;
     }
@@ -206,10 +213,10 @@ function MessageBubbleComponent({
       <div className={`message-row ${isUser ? "from-user" : "from-agent"}`}>
         <Avatar
           className="message-avatar"
-          src={isUser ? senderAvatarUrl : agentAvatarUrl}
+          src={isUser ? userAvatarUrl : agentAvatarUrl}
           icon={!isUser && !agentAvatarUrl ? <RobotOutlined /> : undefined}
         >
-          {isUser && !senderAvatarUrl ? author.slice(0, 1) : undefined}
+          {isUser && !userAvatarUrl ? author.slice(0, 1) : undefined}
         </Avatar>
         <div className="message-card">
           <Flex justify="space-between" align="center" gap={12}>
@@ -250,21 +257,11 @@ function MessageBubbleComponent({
               data-testid="message-attachments"
             >
               {attachments.map((file) => (
-                <button
-                  type="button"
+                <AttachmentButton
                   key={file.file_id ?? file.id ?? attachmentName(file)}
-                  className="message-attachment"
-                  onClick={() => openAttachment(file)}
-                  data-testid="message-attachment-preview"
-                >
-                  <CloudUploadOutlined />
-                  <span className="message-attachment-name">
-                    {attachmentName(file)}
-                  </span>
-                  <span className="message-attachment-meta">
-                    {formatFileSize(file.size)} · {file.parse_status ?? "stored"}
-                  </span>
-                </button>
+                  file={file}
+                  onOpen={openAttachment}
+                />
               ))}
             </div>
           )}
@@ -332,15 +329,20 @@ function MessageBubbleComponent({
             <Spin />
           ) : previewAttachment?.previewError ? (
             <Text type="danger">{previewAttachment.previewError}</Text>
+          ) : previewUrl && previewType.startsWith("image/") ? (
+            <>
+              <img
+                src={previewUrl}
+                alt={
+                  previewAttachment ? attachmentName(previewAttachment) : "附件"
+                }
+              />
+              {previewAttachment?.previewText ? (
+                <pre>{previewAttachment.previewText}</pre>
+              ) : null}
+            </>
           ) : previewAttachment?.previewText ? (
             <pre>{previewAttachment.previewText}</pre>
-          ) : previewUrl && previewType.startsWith("image/") ? (
-            <img
-              src={previewUrl}
-              alt={
-                previewAttachment ? attachmentName(previewAttachment) : "附件"
-              }
-            />
           ) : previewUrl && previewType.includes("pdf") ? (
             <iframe
               title={
@@ -372,8 +374,90 @@ export const MessageBubble = React.memo(
   MessageBubbleComponent,
   (prev, next) =>
     prev.message === next.message &&
-    prev.version === next.version && prev.workspaceId === next.workspaceId,
+    prev.version === next.version &&
+    prev.workspaceId === next.workspaceId &&
+    prev.currentUserAvatarUrl === next.currentUserAvatarUrl,
 );
+
+function AttachmentButton({
+  file,
+  onOpen,
+}: {
+  file: MessageAttachment;
+  onOpen: (file: MessageAttachment) => void;
+}) {
+  const fileId = file.file_id ?? file.id;
+  const image = isImageAttachment(file);
+  const directUrl = file.public_url ?? file.url ?? "";
+  const [thumbnailUrl, setThumbnailUrl] = useState(directUrl);
+  const [thumbnailError, setThumbnailError] = useState(false);
+
+  useEffect(() => {
+    setThumbnailUrl(directUrl);
+    setThumbnailError(false);
+  }, [directUrl, fileId]);
+
+  useEffect(() => {
+    if (!image || directUrl || !fileId) return undefined;
+
+    let alive = true;
+    let objectUrl = "";
+    api
+      .previewFile(fileId)
+      .then((preview) => {
+        if (!preview.previewUrl) {
+          if (alive) setThumbnailError(true);
+          return;
+        }
+        if (!alive) {
+          if (preview.previewUrl.startsWith("blob:")) {
+            URL.revokeObjectURL(preview.previewUrl);
+          }
+          return;
+        }
+        objectUrl = preview.previewUrl;
+        setThumbnailUrl(preview.previewUrl);
+      })
+      .catch(() => {
+        if (alive) setThumbnailError(true);
+      });
+
+    return () => {
+      alive = false;
+      if (objectUrl.startsWith("blob:")) URL.revokeObjectURL(objectUrl);
+    };
+  }, [directUrl, fileId, image]);
+
+  return (
+    <button
+      type="button"
+      className={`message-attachment ${image ? "image" : ""}`}
+      onClick={() => onOpen(file)}
+      data-testid="message-attachment-preview"
+    >
+      {image && thumbnailUrl ? (
+        <img
+          className="message-attachment-thumb"
+          src={thumbnailUrl}
+          alt={attachmentName(file)}
+        />
+      ) : image ? (
+        <FileImageOutlined />
+      ) : (
+        <CloudUploadOutlined />
+      )}
+      <span className="message-attachment-name">{attachmentName(file)}</span>
+      <span className="message-attachment-meta">
+        {formatFileSize(file.size)} · {file.parse_status ?? "stored"}
+        {thumbnailError ? " · preview unavailable" : ""}
+      </span>
+    </button>
+  );
+}
+
+function isImageAttachment(file: MessageAttachment) {
+  return String(file.content_type || "").toLowerCase().startsWith("image/");
+}
 
 function codeRunsFromMessage(message: ChatMessage): Record<string, CodeRunRecord> {
   const raw = message.rawContent?.code_runs;

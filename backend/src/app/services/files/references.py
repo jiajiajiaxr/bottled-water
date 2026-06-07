@@ -98,11 +98,16 @@ def _attachment_from_file_asset(asset: FileAsset, workspace_id: str) -> dict[str
         }
     )
     if not extracted and Path(asset.storage_path).is_file():
-        extracted = extract_text_from_path(
+        result = extract_text_from_path(
             Path(asset.storage_path),
             content_type=asset.content_type,
             filename=asset.original_filename,
-        )["text"]
+        )
+        extracted = result["text"]
+        metadata = {**metadata, **(result.get("metadata") or {})}
+        asset.extracted_text = extracted
+        asset.parse_status = result["status"]
+        asset.extra = {**metadata, "tool_chain": ["file.extract_text"]}
     return {
         "file_id": asset.id,
         "filename": asset.original_filename,
@@ -125,15 +130,17 @@ def _attachment_from_workspace_path(workspace_id: str, raw_path: str) -> dict[st
     if not path.exists() or not path.is_file():
         raise ValidationAppError(f"文件引用不存在：{relative_path}")
     content_type = _guess_mime(path.name)
-    extracted = extract_text_from_path(path, content_type=content_type, filename=path.name)["text"]
+    result = extract_text_from_path(path, content_type=content_type, filename=path.name)
+    extracted = result["text"]
     return {
         "file_id": f"workspace:{relative_path}",
         "filename": path.name,
         "content_type": content_type,
         "size": path.stat().st_size,
-        "parse_status": "parsed" if extracted else "unsupported",
+        "parse_status": result["status"],
         "extracted_text": extracted[:12000],
         "metadata": {
+            **(result.get("metadata") or {}),
             "workspace_id": workspace_id,
             "reference_type": "workspace_file",
             "path": relative_path,

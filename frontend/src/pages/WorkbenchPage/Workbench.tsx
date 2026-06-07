@@ -405,6 +405,7 @@ export function Workbench({
                 active={active}
                 loading={loadingMessages}
                 userName={currentUser.name}
+                userAvatarUrl={currentUser.avatar_url ?? currentUser.avatar}
                 defaultModelConfigId={currentUser.default_model_config_id}
                 onPreviewArtifact={openArtifactPreview}
               />

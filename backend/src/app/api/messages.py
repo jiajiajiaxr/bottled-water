@@ -18,6 +18,10 @@ from app.events import SseSink
 from app.events import app_event_bus as event_bus
 from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
 from app.services.serialization import message_to_dict
+from app.services.files.attachments import (
+    attachment_from_file_asset,
+    refresh_attachment_text_if_needed,
+)
 from app.services.files.references import resolve_file_reference_attachments
 from app.services.chat.code_runner import run_message_code_block
 from app.services.chat.message_prompt import runtime_prompt_for_message
@@ -90,17 +94,8 @@ async def _send_async(
         )
 
         if file_asset:
-            normalized_attachments.append(
-                {
-                    "file_id": file_asset.id,
-                    "filename": file_asset.original_filename,
-                    "content_type": file_asset.content_type,
-                    "size": file_asset.size,
-                    "parse_status": file_asset.parse_status,
-                    "extracted_text": (file_asset.extracted_text or "")[:12000],
-                    "metadata": file_asset.extra or {},
-                }
-            )
+            refresh_attachment_text_if_needed(file_asset)
+            normalized_attachments.append(attachment_from_file_asset(file_asset))
     existing_file_ids = {str(item.get("file_id") or "") for item in normalized_attachments}
     if "@file(" in text:
         referenced = await db.run_sync(
@@ -205,17 +200,8 @@ def _send_sync(db, user: User, conversation_id: str, payload: dict, *, trigger_a
             )
         )
         if file_asset:
-            normalized_attachments.append(
-                {
-                    "file_id": file_asset.id,
-                    "filename": file_asset.original_filename,
-                    "content_type": file_asset.content_type,
-                    "size": file_asset.size,
-                    "parse_status": file_asset.parse_status,
-                    "extracted_text": (file_asset.extracted_text or "")[:12000],
-                    "metadata": file_asset.extra or {},
-                }
-            )
+            refresh_attachment_text_if_needed(file_asset)
+            normalized_attachments.append(attachment_from_file_asset(file_asset))
     existing_file_ids = {str(item.get("file_id") or "") for item in normalized_attachments}
     if "@file(" in text:
         normalized_attachments.extend(

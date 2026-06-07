@@ -22,6 +22,7 @@ from app.services.tools.builtins.file import (
     summarize_text,
 )
 from app.services.serialization import file_asset_to_dict
+from app.services.workspaces.filesystem import workspace_id_from_conversation
 
 
 router = APIRouter(tags=["files"])
@@ -61,6 +62,18 @@ async def _ensure_workspace_access(
         raise ForbiddenError("无权访问该工作区")
 
 
+async def _resolve_upload_workspace_id(
+    db: AsyncSession,
+    conversation_id: str | None,
+    workspace_id: str | None,
+) -> str | None:
+    if workspace_id or not conversation_id:
+        return workspace_id
+    return await db.run_sync(
+        lambda session: workspace_id_from_conversation(session, conversation_id)
+    )
+
+
 @router.post("/files/upload", response_model=ApiResponse[FileAssetOut])
 async def upload_file(
     file: UploadFile = File(...),
@@ -70,14 +83,19 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await _ensure_workspace_access(db, user, workspace_id)
+    resolved_workspace_id = await _resolve_upload_workspace_id(
+        db,
+        conversation_id,
+        workspace_id,
+    )
+    await _ensure_workspace_access(db, user, resolved_workspace_id)
     asset = await save_upload(
         db,
         user=user,
         upload=file,
         conversation_id=conversation_id,
         purpose=purpose,
-        workspace_id=workspace_id,
+        workspace_id=resolved_workspace_id,
     )
     return ok(file_asset_to_dict(asset), "文件上传成功")
 

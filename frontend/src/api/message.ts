@@ -546,6 +546,12 @@ function normalizeChatMessage(message: ChatMessage): ChatMessage {
         : typeof record.senderId === "string"
           ? record.senderId
           : undefined,
+    sender_avatar_url:
+      typeof record.sender_avatar_url === "string"
+        ? record.sender_avatar_url
+        : typeof record.senderAvatarUrl === "string"
+          ? record.senderAvatarUrl
+          : undefined,
     role: String(record.role ?? "assistant") as ChatMessage["role"],
     kind: String(record.kind ?? record.content_type ?? "text") as ChatMessage["kind"],
     author: String(

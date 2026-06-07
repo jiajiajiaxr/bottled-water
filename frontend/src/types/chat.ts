@@ -111,7 +111,9 @@ export interface MessageAttachment {
   size?: number;
   parse_status?: string;
   extracted_text?: string;
+  metadata?: Record<string, unknown>;
   public_url?: string;
+  download_url?: string;
   url?: string;
 }
 

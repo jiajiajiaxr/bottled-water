@@ -53,12 +53,14 @@ export function ChatPanel({
   active,
   loading,
   userName,
+  userAvatarUrl,
   defaultModelConfigId,
   onPreviewArtifact,
 }: {
   active?: Conversation;
   loading: boolean;
   userName?: string;
+  userAvatarUrl?: string;
   defaultModelConfigId?: string;
   onPreviewArtifact?: (message: ChatMessage) => void;
 }) {
@@ -68,7 +70,10 @@ export function ChatPanel({
   const [awaitingResponse, setAwaitingResponse] = useState(false);
   const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
   const { message } = AntApp.useApp();
-  const { send, cancel, streamingMessages, displayOrder } = useMessageOperations(userName);
+  const { send, cancel, streamingMessages, displayOrder } = useMessageOperations(
+    userName,
+    userAvatarUrl,
+  );
   const localRunningConversationIds = useConversationStore(
     (s) => s.localRunningConversationIds,
   );
@@ -318,6 +323,7 @@ export function ChatPanel({
         key={item.id}
         message={item}
         workspaceId={active?.workspace_id}
+        currentUserAvatarUrl={userAvatarUrl}
         version={messageVersions.get(item.id) ?? 0}
         quoted={
           item.quotedMessageId

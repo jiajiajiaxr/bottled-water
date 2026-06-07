@@ -30,6 +30,10 @@ from app.services.conversation_session_manager import (
 )
 from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
 from app.services.chat.message_prompt import runtime_prompt_for_message
+from app.services.files.attachments import (
+    attachment_from_file_asset,
+    refresh_attachment_text_if_needed,
+)
 from common.logger import get_logger
 
 logger = get_logger("app.api.websocket")
@@ -115,17 +119,8 @@ async def _save_user_message(
                 continue
             if not file_asset.conversation_id:
                 file_asset.conversation_id = conversation.id
-            normalized_attachments.append(
-                {
-                    "file_id": file_asset.id,
-                    "filename": file_asset.original_filename,
-                    "content_type": file_asset.content_type,
-                    "size": file_asset.size,
-                    "parse_status": file_asset.parse_status,
-                    "extracted_text": (file_asset.extracted_text or "")[:12000],
-                    "metadata": file_asset.extra or {},
-                }
-            )
+            refresh_attachment_text_if_needed(file_asset)
+            normalized_attachments.append(attachment_from_file_asset(file_asset))
 
     # 调度策略
     scheduling_strategy = resolve_scheduling_strategy(conversation, data.get("scheduling_strategy"))

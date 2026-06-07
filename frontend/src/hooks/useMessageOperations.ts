@@ -56,7 +56,7 @@ function mergeThinkingFromLocal(
 /**
  * 封装聊天消息发送与流式响应状态同步。
  */
-export function useMessageOperations(userName?: string) {
+export function useMessageOperations(userName?: string, userAvatarUrl?: string) {
   const { activeId } = useConversationStore();
   const { updateMessagesForConversation } = useMessageStore();
   const streaming = useStreamingMessages(activeId);
@@ -92,6 +92,7 @@ export function useMessageOperations(userName?: string) {
       kind: "text",
       author: userName || "我",
       content,
+      sender_avatar_url: userAvatarUrl,
       rawContent: {
         client_message_id: clientMessageId,
         clientMessageId,
@@ -185,7 +186,10 @@ function normalizeAttachments(files: UploadedFile[]): MessageAttachment[] {
     content_type: file.content_type,
     size: file.size,
     parse_status: file.parse_status,
+    extracted_text: file.extracted_text,
     public_url: file.public_url,
+    download_url: file.download_url,
+    metadata: file.metadata,
   }));
 }
 

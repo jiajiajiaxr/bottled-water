@@ -241,6 +241,7 @@ class FileAssetOut(ORMModel):
     conversation_id: str | None = None
     message_id: str | None = None
     artifact_id: str | None = None
+    workspace_id: str | None = None
     filename: str
     original_filename: str
     content_type: str
@@ -249,6 +250,7 @@ class FileAssetOut(ORMModel):
     purpose: str
     parse_status: str
     public_url: str | None = None
+    download_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str
     updated_at: str

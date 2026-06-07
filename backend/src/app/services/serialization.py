@@ -417,12 +417,14 @@ def deployment_to_dict(deployment: Deployment) -> dict[str, Any]:
 
 
 def file_asset_to_dict(file_asset: FileAsset) -> dict[str, Any]:
+    metadata = file_asset.extra or {}
     return {
         "id": file_asset.id,
         "file_id": file_asset.id,
         "conversation_id": file_asset.conversation_id,
         "message_id": file_asset.message_id,
         "artifact_id": file_asset.artifact_id,
+        "workspace_id": metadata.get("workspace_id") if isinstance(metadata, dict) else None,
         "filename": file_asset.filename,
         "original_filename": file_asset.original_filename,
         "content_type": file_asset.content_type,
@@ -431,7 +433,8 @@ def file_asset_to_dict(file_asset: FileAsset) -> dict[str, Any]:
         "purpose": file_asset.purpose,
         "parse_status": file_asset.parse_status,
         "public_url": file_asset.public_url,
-        "metadata": file_asset.extra or {},
+        "download_url": f"/api/v1/files/{file_asset.id}/download",
+        "metadata": metadata,
         "created_at": iso(file_asset.created_at),
         "updated_at": iso(file_asset.updated_at),
     }
