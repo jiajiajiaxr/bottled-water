@@ -20,7 +20,7 @@ services:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
     environment:
-      - DATABASE_URL=postgresql://agenthub:agenthub_secret@postgres:5432/agenthub
+      - DATABASE_URL=postgresql+psycopg://agenthub:agenthub_secret@postgres:5432/agenthub
       - REDIS_URL=redis://redis:6379/0
       - LOG_LEVEL=INFO
     depends_on:
