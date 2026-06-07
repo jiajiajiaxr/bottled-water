@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..context.agent_ctx import AgentContext
-from ..core.interfaces import ToolExecutor
+from ..core.interfaces import AgentContextProvider, ToolExecutor
 from ..core.protocol import (
     CONTROL_ASSIGN,
     CONTROL_CANCEL,
@@ -57,6 +57,8 @@ class AgentStepper:
         tool_executor: ToolExecutor | None = None,
         agent_ctx: AgentContext | None = None,
         emit_event=None,
+        context_provider: AgentContextProvider | None = None,
+        context_metadata: dict[str, Any] | None = None,
     ) -> StepResult:
         self.current_task = task
         await self._apply_pending_controls()
@@ -78,6 +80,8 @@ class AgentStepper:
                 agent_ctx=agent_ctx,
                 emit_event=self._checkpoint_emitter(emit_event),
                 checkpoint=self._checkpoint,
+                context_provider=context_provider,
+                context_metadata=context_metadata,
             )
         except AgentControlInterrupt:
             return StepResult(

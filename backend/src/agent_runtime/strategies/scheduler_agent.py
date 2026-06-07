@@ -68,6 +68,7 @@ class SchedulerAgent(AgentActor):
         self._subscriptions: list[str] = []
         self._scheduler = TechLeadScheduler(agents=agents, model_provider=model_provider)
         self._mention_target_ids: list[str] = []
+        self._context_metadata: dict[str, Any] = {}
         self._bind()
 
     def _bind(self) -> None:
@@ -111,6 +112,7 @@ class SchedulerAgent(AgentActor):
                 for item in (event.payload.get("mention_target_agent_ids") or [])
                 if str(item) in self.agents
             ]
+            self._context_metadata = _dict_payload(event.payload.get("context_metadata"))
             return bool(self.current_task)
         if event.type == AGENT_REPORT:
             report = _report_from_payload(event.payload.get("report") or {}, event.payload.get("agent_id"))
@@ -249,6 +251,7 @@ class SchedulerAgent(AgentActor):
                     "task": decision.task_description or self.current_task,
                     "rationale": decision.rationale,
                     "requires_verification": decision.requires_verification,
+                    "context_metadata": self._context_metadata,
                 },
                 source=f"scheduler:{self.scheduler_id}",
                 target=target,
@@ -572,6 +575,10 @@ def _report_from_payload(payload: dict[str, Any], fallback_agent_id: str | None)
         rationale=str(payload.get("rationale") or ""),
         expected_duration=payload.get("expected_duration"),
     )
+
+
+def _dict_payload(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _state(value: Any) -> AgentState:

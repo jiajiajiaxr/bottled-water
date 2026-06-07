@@ -10,6 +10,7 @@ Agent 执行循环
 
 import json
 import asyncio
+import inspect
 import re
 import uuid
 from typing import Dict, Any, Optional, List
@@ -18,7 +19,12 @@ from model_provider.core.interfaces import BaseModelProvider, ChatMessage, ChatR
 
 from common.logger import get_logger
 from ..core.types import AgentConfig, AgentReport, AgentState, AgentWill, ToolCall, ToolResult
-from ..core.interfaces import ToolExecutor
+from ..core.interfaces import (
+    AgentContextBuildRequest,
+    AgentContextBuildResult,
+    AgentContextProvider,
+    ToolExecutor,
+)
 from ..context.agent_ctx import AgentContext
 from .status_report import parse_agent_status_report
 
@@ -198,6 +204,8 @@ class AgentLoop:
         agent_ctx: Optional[AgentContext] = None,
         emit_event=None,
         checkpoint=None,
+        context_provider: Optional[AgentContextProvider] = None,
+        context_metadata: Optional[dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         执行 Agent 单轮任务。
@@ -246,7 +254,14 @@ class AgentLoop:
 
         try:
             result = await self._execute_loop(
-                task, blackboard_view, tool_executor, agent_ctx, _emit, checkpoint
+                task,
+                blackboard_view,
+                tool_executor,
+                agent_ctx,
+                _emit,
+                checkpoint,
+                context_provider,
+                context_metadata,
             )
             self._set_state(AgentState.COMPLETED)
             return result
@@ -262,52 +277,21 @@ class AgentLoop:
         agent_ctx: Optional[AgentContext],
         _emit,
         checkpoint=None,
+        context_provider: Optional[AgentContextProvider] = None,
+        context_metadata: Optional[dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """内部执行循环（被 run() 和步进模式共用）"""
         # 虚拟工具智能体：跳过 LLM，直接执行工具
         if self.agent.system_prompt == "" and self.agent.role.endswith("_executor"):
             return await self._execute_virtual_agent(task, tool_executor, _emit)
 
-        # 构建系统提示词
-        system_prompt = self.agent.system_prompt
-
-        # 构建消息列表
-        messages: List[ChatMessage] = []
-
-        # 注入 AgentContext 历史帧（如果提供），先做 Token 截断
-        if agent_ctx:
-            agent_ctx.trim(max_tokens=4000)
-            for frame in agent_ctx.frames:
-                if frame.frame_type == "thought":
-                    messages.append(ChatMessage(role="assistant", content=str(frame.content)))
-                elif frame.frame_type == "tool_call":
-                    # tool_call 帧存储为 dict，尝试恢复
-                    tc = frame.content
-                    if isinstance(tc, dict):
-                        name = (
-                            tc.get("tool_name")
-                            or tc.get("function", {}).get("name")
-                            or "unknown"
-                        )
-                        messages.append(
-                            ChatMessage(role="assistant", content=f"历史工具调用：{name}")
-                        )
-                elif frame.frame_type == "tool_result":
-                    # tool_result 帧存储为 dict 或字符串
-                    tr = frame.content
-                    if isinstance(tr, dict):
-                        messages.append(
-                            ChatMessage(
-                                role="assistant",
-                                content=f"历史工具结果 {tr.get('tool', 'unknown')}：{tr.get('result', tr.get('error', ''))}",
-                            )
-                        )
-                    else:
-                        messages.append(ChatMessage(role="assistant", content=f"历史工具结果：{tr}"))
-
-        # 构建用户提示词
-        user_prompt = self._build_prompt(task, blackboard_view)
-        messages.append(ChatMessage(role="user", content=user_prompt))
+        system_prompt, messages = await self._build_model_context(
+            task=task,
+            blackboard_view=blackboard_view,
+            agent_ctx=agent_ctx,
+            context_provider=context_provider,
+            context_metadata=context_metadata,
+        )
 
         # 获取可用工具（按 AgentConfig.tools 过滤）
         tools = []
@@ -1130,6 +1114,110 @@ class AgentLoop:
             content=full_content,
             tool_calls=final_tool_calls,
         )
+
+    async def _build_model_context(
+        self,
+        *,
+        task: str,
+        blackboard_view: dict,
+        agent_ctx: Optional[AgentContext],
+        context_provider: Optional[AgentContextProvider],
+        context_metadata: Optional[dict[str, Any]],
+    ) -> tuple[str, List[ChatMessage]]:
+        system_prompt = self.agent.system_prompt
+        metadata = dict(context_metadata or {})
+        prompt_task = str(metadata.get("visible_content") or task)
+        user_prompt = self._build_prompt(prompt_task, blackboard_view)
+
+        if context_provider:
+            request = AgentContextBuildRequest(
+                session_id=str(metadata.get("conversation_id") or ""),
+                agent=self.agent,
+                task=task,
+                base_system_prompt=system_prompt,
+                base_user_prompt=user_prompt,
+                blackboard_view=blackboard_view,
+                metadata=metadata,
+            )
+            if not request.session_id:
+                request.session_id = str(metadata.get("session_id") or "")
+            try:
+                result = context_provider.build_agent_context(request)
+                if inspect.isawaitable(result):
+                    result = await result
+                if isinstance(result, AgentContextBuildResult) and result.messages:
+                    return self._normalize_context_messages(result, system_prompt)
+            except Exception as exc:
+                logger.warning(
+                    "Agent context provider failed; falling back to runtime context",
+                    agent_id=self.agent.id,
+                    error=str(exc),
+                    exc_info=True,
+                )
+
+        messages = self._agent_context_messages(agent_ctx)
+        messages.append(ChatMessage(role="user", content=self._build_prompt(task, blackboard_view)))
+        return system_prompt, messages
+
+    def _agent_context_messages(self, agent_ctx: Optional[AgentContext]) -> List[ChatMessage]:
+        messages: List[ChatMessage] = []
+        if not agent_ctx:
+            return messages
+        agent_ctx.trim(max_tokens=4000)
+        for frame in agent_ctx.frames:
+            if frame.frame_type == "thought":
+                messages.append(ChatMessage(role="assistant", content=str(frame.content)))
+            elif frame.frame_type == "tool_call":
+                tc = frame.content
+                if isinstance(tc, dict):
+                    name = (
+                        tc.get("tool_name")
+                        or tc.get("function", {}).get("name")
+                        or "unknown"
+                    )
+                    messages.append(ChatMessage(role="assistant", content=f"历史工具调用：{name}"))
+            elif frame.frame_type == "tool_result":
+                tr = frame.content
+                if isinstance(tr, dict):
+                    messages.append(
+                        ChatMessage(
+                            role="assistant",
+                            content=f"历史工具结果 {tr.get('tool', 'unknown')}：{tr.get('result', tr.get('error', ''))}",
+                        )
+                    )
+                else:
+                    messages.append(ChatMessage(role="assistant", content=f"历史工具结果：{tr}"))
+        return messages
+
+    def _normalize_context_messages(
+        self,
+        result: AgentContextBuildResult,
+        fallback_system_prompt: str,
+    ) -> tuple[str, List[ChatMessage]]:
+        system_parts: list[str] = []
+        messages: List[ChatMessage] = []
+        if result.system_prompt:
+            system_parts.append(str(result.system_prompt))
+        for raw in result.messages:
+            if not isinstance(raw, dict):
+                continue
+            role = str(raw.get("role") or "").strip() or "user"
+            content = str(raw.get("content") or "")
+            if role == "system":
+                if content:
+                    system_parts.append(content)
+                continue
+            messages.append(
+                ChatMessage(
+                    role=role,
+                    content=content,
+                    name=raw.get("name"),
+                    tool_calls=raw.get("tool_calls"),
+                    tool_call_id=raw.get("tool_call_id"),
+                )
+            )
+        system_prompt = "\n\n".join(part for part in system_parts if part) or fallback_system_prompt
+        return system_prompt, messages
 
     def _build_prompt(self, task: str, blackboard_view: dict) -> str:
         """构建用户提示词"""

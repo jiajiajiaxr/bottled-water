@@ -307,6 +307,7 @@ async def _handle_chat_send(
                     content,
                     runtime_content,
                     bool(data.get("thinking_enabled")),
+                    str(message.id),
                 ),
                 name=f"ws-send-{conversation_id}",
             )
@@ -336,6 +337,7 @@ async def _send_user_input_async(
     content: str,
     runtime_content: str | None = None,
     thinking_enabled: bool = False,
+    user_message_id: str | None = None,
 ) -> None:
     """异步发送用户输入到 Session（后台任务）。"""
     try:
@@ -344,6 +346,7 @@ async def _send_user_input_async(
             content,
             runtime_content=runtime_content,
             thinking_enabled=thinking_enabled,
+            user_message_id=user_message_id,
         )
     except Exception as e:
         await WebSocketSink(conversation_id).emit(

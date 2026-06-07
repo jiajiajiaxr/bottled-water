@@ -31,7 +31,14 @@ from .core.types import (
     ToolCall,
     ToolResult,
 )
-from .core.interfaces import PersistenceBackend, EventSink, ToolExecutor
+from .core.interfaces import (
+    AgentContextBuildRequest,
+    AgentContextBuildResult,
+    AgentContextProvider,
+    PersistenceBackend,
+    EventSink,
+    ToolExecutor,
+)
 from .runtime.session import Session
 from .runtime.agent_actor import AgentActor
 from .runtime.actor_orchestrator import ActorOrchestrator
@@ -62,6 +69,9 @@ __all__ = [
     "PersistenceBackend",
     "EventSink",
     "ToolExecutor",
+    "AgentContextBuildRequest",
+    "AgentContextBuildResult",
+    "AgentContextProvider",
     # 运行时
     "Session",
     "AgentActor",

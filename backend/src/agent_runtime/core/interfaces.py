@@ -5,9 +5,42 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict
+from dataclasses import dataclass, field
+from typing import Any, List, Dict, Protocol
 
-from .types import Event, Message, ToolCall, ToolResult
+from .types import AgentConfig, Event, Message, ToolCall, ToolResult
+
+
+@dataclass
+class AgentContextBuildRequest:
+    """Runtime-neutral request for building an Agent model context."""
+
+    session_id: str
+    agent: AgentConfig
+    task: str
+    base_system_prompt: str
+    base_user_prompt: str
+    blackboard_view: dict[str, Any]
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AgentContextBuildResult:
+    """Messages returned by an app-layer context builder."""
+
+    messages: list[dict[str, Any]]
+    system_prompt: str | None = None
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+
+
+class AgentContextProvider(Protocol):
+    """Optional bridge from agent_runtime to a richer app-layer context system."""
+
+    async def build_agent_context(
+        self,
+        request: AgentContextBuildRequest,
+    ) -> AgentContextBuildResult | None:
+        ...
 
 
 class PersistenceBackend(ABC):

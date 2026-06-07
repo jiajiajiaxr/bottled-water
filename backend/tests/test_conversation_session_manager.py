@@ -27,11 +27,13 @@ class _FakeAgentSession:
     def __init__(self, conversation_id: str, *, slow: bool = False):
         self.session_id = conversation_id
         self.slow = slow
+        self.last_context_metadata = None
         self.agents = {
             "agent-a": SimpleNamespace(id="agent-a", name="Frontend Worker", role="frontend")
         }
 
-    async def run(self, content: str):
+    async def run(self, content: str, context_metadata: dict | None = None):
+        self.last_context_metadata = context_metadata
         yield RuntimeEvent(
             type="system.agent_started",
             payload={"round": 1, "agent_id": "agent-a", "agent_name": "Frontend Worker", "task": content},
@@ -65,11 +67,13 @@ class _FakeAgentSession:
 class _FakeActorSession:
     def __init__(self, conversation_id: str):
         self.session_id = conversation_id
+        self.last_context_metadata = None
         self.agents = {
             "frontend": SimpleNamespace(id="frontend", name="Frontend Worker", role="frontend")
         }
 
-    async def run(self, content: str):
+    async def run(self, content: str, context_metadata: dict | None = None):
+        self.last_context_metadata = context_metadata
         yield RuntimeEvent(
             type=SYSTEM_SESSION_STARTED,
             payload={"session_id": self.session_id, "runtime": "actor"},
@@ -204,6 +208,33 @@ class TestConversationSessionManagerStatus:
             assert record["decisions"][0]["decision"] == "assign"
             assert record["agent_runs"][0]["status"] == "completed"
             assert record["agent_runs"][0]["output_preview"] == "已完成前端页面。"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_generation_passes_user_message_context_metadata(self, tmp_path):
+        conversation_id = "conv-generation-context"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            session = _FakeAgentSession(conversation_id)
+            mgr._sessions[conversation_id] = session
+
+            await mgr.start_generation(
+                conversation_id,
+                "visible prompt",
+                runtime_content="runtime prompt with attachment context",
+                user_message_id="msg-1",
+            )
+            task = mgr._running_tasks[conversation_id]
+            await task
+
+            assert session.last_context_metadata == {
+                "conversation_id": conversation_id,
+                "session_id": conversation_id,
+                "visible_content": "visible prompt",
+                "user_message_id": "msg-1",
+            }
         finally:
             await engine.dispose()
 

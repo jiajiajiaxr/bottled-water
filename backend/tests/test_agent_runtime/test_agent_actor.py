@@ -4,6 +4,7 @@ import pytest
 from model_provider import ChatResponse
 
 from agent_runtime.context.blackboard import BlackboardManager
+from agent_runtime.core.interfaces import AgentContextBuildResult
 from agent_runtime.core.protocol import AGENT_REPORT, CONTROL_ASSIGN, CONTROL_COMPLETE
 from agent_runtime.core.types import AgentConfig, AgentState, Event
 from agent_runtime.runtime.agent_actor import AgentActor
@@ -48,6 +49,61 @@ async def test_agent_actor_runs_assignment_and_publishes_report(mock_provider, m
     stored = await blackboard.get("sess_actor")
     assert stored is not None
     assert any(item.get("type") == "agent_work" for item in stored["raw_history"])
+
+
+@pytest.mark.asyncio
+async def test_agent_actor_passes_assignment_context_metadata(mock_provider, mock_tool_executor):
+    captured: dict = {}
+
+    class Provider:
+        async def build_agent_context(self, request):
+            captured["request"] = request
+            return AgentContextBuildResult(
+                messages=[
+                    {"role": "system", "content": "system with context"},
+                    {"role": "user", "content": "user with memory"},
+                ]
+            )
+
+    mock_provider.responses = [
+        ChatResponse(
+            content='done\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+        )
+    ]
+    bus = EventDispatcher()
+    events: list[Event] = []
+    bus.subscribe("*", lambda event: _append(events, event), target="*")
+    actor = AgentActor(
+        session_id="sess_actor_context",
+        agent_config=AgentConfig(id="coder", name="Coder", system_prompt="You code."),
+        model_provider=mock_provider,
+        event_bus=bus,
+        tool_executor=mock_tool_executor,
+        use_streaming=False,
+        context_provider=Provider(),
+    )
+    actor.start()
+
+    await bus.publish(
+        Event(
+            type=CONTROL_ASSIGN,
+            payload={
+                "task": "write a helper",
+                "context_metadata": {
+                    "conversation_id": "conv-1",
+                    "user_message_id": "msg-1",
+                    "visible_content": "visible text",
+                },
+            },
+            source="scheduler",
+            target="coder",
+        )
+    )
+    await _wait_for(events, AGENT_REPORT)
+    await actor.stop()
+
+    assert captured["request"].metadata["user_message_id"] == "msg-1"
+    assert captured["request"].metadata["visible_content"] == "visible text"
 
 
 @pytest.mark.asyncio

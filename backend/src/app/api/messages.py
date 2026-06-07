@@ -174,6 +174,7 @@ async def _send_async(
             text,
             runtime_content=runtime_prompt_for_message(message),
             thinking_enabled=bool(payload.get("thinking_enabled")),
+            user_message_id=str(message.id),
         )
 
     return message
@@ -360,6 +361,7 @@ async def stream_conversation(
             message.content.get("text", "") if isinstance(message.content, dict) else str(message.content),
             runtime_content=runtime_prompt_for_message(message),
             thinking_enabled=bool(message_payload.get("thinking_enabled")),
+            user_message_id=str(message.id),
         )
 
         queue = sse_sink.get_queue()

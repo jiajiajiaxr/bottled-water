@@ -56,6 +56,7 @@ def _agent(agent_id: str = "agent-1"):
         type="worker",
         description="Worker agent",
         config={"tools": []},
+        avatar_url=None,
     )
 
 
@@ -97,6 +98,7 @@ async def test_create_session_honors_explicit_workflow_strategy() -> None:
 
     assert captured["scheduler_config"]["strategy"] == "workflow"
     assert captured["scheduler_config"]["workflow"]["nodes"]
+    assert captured["context_provider"] is not None
 
 
 @pytest.mark.asyncio

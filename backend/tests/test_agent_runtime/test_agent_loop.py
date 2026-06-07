@@ -10,6 +10,7 @@
 import pytest
 
 from model_provider import ChatResponse
+from agent_runtime.core.interfaces import AgentContextBuildResult
 from agent_runtime.runtime.agent_loop import AgentLoop, _StatusReportStreamFilter
 from agent_runtime.core.types import AgentConfig, AgentState, AgentWill
 
@@ -104,6 +105,52 @@ class TestAgentLoopBasic:
         assert result["tool_events"][0]["agent_id"] == "coder"
         assert result["status_report"].state == AgentState.COMPLETED
         assert mock_provider.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_run_uses_context_provider_messages(self, agent_config, mock_provider):
+        captured: dict = {}
+
+        async def chat(messages=None, system_prompt=None, tools=None, temperature=0.7, max_tokens=None):
+            captured["messages"] = list(messages or [])
+            captured["system_prompt"] = system_prompt
+            return ChatResponse(
+                content='context ok\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            )
+
+        class Provider:
+            async def build_agent_context(self, request):
+                captured["request"] = request
+                return AgentContextBuildResult(
+                    messages=[
+                        {"role": "system", "content": "context system"},
+                        {"role": "assistant", "content": "remembered turn"},
+                        {"role": "user", "content": "context user"},
+                    ]
+                )
+
+        mock_provider.chat = chat
+        loop = AgentLoop(agent_config, mock_provider)
+        result = await loop.run(
+            "runtime prompt with attachment context",
+            {},
+            None,
+            context_provider=Provider(),
+            context_metadata={
+                "conversation_id": "conv-1",
+                "user_message_id": "msg-1",
+                "visible_content": "visible user text",
+            },
+        )
+
+        assert result["status_report"].state == AgentState.COMPLETED
+        assert captured["system_prompt"] == "context system"
+        assert [message.content for message in captured["messages"]] == [
+            "remembered turn",
+            "context user",
+        ]
+        assert captured["request"].metadata["user_message_id"] == "msg-1"
+        assert "visible user text" in captured["request"].base_user_prompt
+        assert "runtime prompt with attachment context" not in captured["request"].base_user_prompt
 
     @pytest.mark.asyncio
     async def test_run_dedupes_repeated_artifact_create_calls(

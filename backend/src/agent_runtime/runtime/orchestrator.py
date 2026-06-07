@@ -23,7 +23,7 @@ from ..core.types import (
     Event,
     SchedulingDecision,
 )
-from ..core.interfaces import PersistenceBackend, ToolExecutor
+from ..core.interfaces import AgentContextProvider, PersistenceBackend, ToolExecutor
 from ..strategies.base import Scheduler
 from ..context.blackboard import BlackboardManager
 from ..context.agent_ctx import AgentContextManager
@@ -45,6 +45,7 @@ class Orchestrator:
         persistence: Optional[PersistenceBackend] = None,
         tool_executor: Optional[ToolExecutor] = None,
         watchdog_config: Optional[WatchdogConfig] = None,
+        context_provider: Optional[AgentContextProvider] = None,
     ):
         self.session_id = session_id
         self.agents = agents
@@ -52,6 +53,7 @@ class Orchestrator:
         self.model_provider = model_provider
         self.persistence = persistence
         self.tool_executor = tool_executor
+        self.context_provider = context_provider
         self.watchdog = Watchdog(watchdog_config)
 
         # 上下文管理
@@ -61,18 +63,23 @@ class Orchestrator:
         # 状态
         self.status = "idle"  # idle | running | paused | completed | failed
         self.round_num = 0
-        self._user_input_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._user_input_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._agent_loops: Dict[str, AgentLoop] = {}
         self._pending_agent_reports: Dict[str, AgentReport] = {}
         self._persistence_lock = asyncio.Lock()
+        self._current_context_metadata: dict[str, Any] = {}
 
-    async def run(self, user_message: str) -> AsyncIterator[Event]:
+    async def run(
+        self,
+        user_message: str,
+        context_metadata: Optional[dict[str, Any]] = None,
+    ) -> AsyncIterator[Event]:
         """运行会话调度循环"""
         self.status = "running"
         logger.info("调度循环开始", session_id=self.session_id, agents=list(self.agents.keys()))
 
         # 1. 初始化
-        await self._initialize(user_message)
+        await self._initialize(user_message, context_metadata=context_metadata)
 
         yield Event(
             type="system.session_started",
@@ -113,7 +120,11 @@ class Orchestrator:
             },
         )
 
-    async def _initialize(self, user_message: str):
+    async def _initialize(
+        self,
+        user_message: str,
+        context_metadata: Optional[dict[str, Any]] = None,
+    ):
         """初始化 Blackboard 和 Agent 上下文"""
         # 重置调度器与看门狗状态（支持 Session 复用场景）
         self.scheduler.reset()
@@ -124,6 +135,10 @@ class Orchestrator:
         self._pending_agent_reports.clear()
         self._agent_loops.clear()
         self._user_input_queue = asyncio.Queue()
+        self._current_context_metadata = self._normalize_context_metadata(
+            user_message,
+            context_metadata,
+        )
 
         # 加载已有 Blackboard，不存在则创建
         blackboard = await self.blackboard_mgr.get(self.session_id)
@@ -180,9 +195,14 @@ class Orchestrator:
             # --- 0. 检查用户中途输入 ---
             try:
                 user_input = self._user_input_queue.get_nowait()
-                await self._handle_user_input_to_blackboard(user_input)
-                current_task = user_input  # 用户输入成为新任务
-                yield Event(type="user.input_received", payload={"content": user_input})
+                content = str(user_input.get("content") or "")
+                self._current_context_metadata = self._normalize_context_metadata(
+                    content,
+                    user_input.get("context_metadata"),
+                )
+                await self._handle_user_input_to_blackboard(content)
+                current_task = content  # 用户输入成为新任务
+                yield Event(type="user.input_received", payload={"content": content})
             except asyncio.QueueEmpty:
                 pass
 
@@ -408,6 +428,8 @@ class Orchestrator:
                 tool_executor=self.tool_executor,
                 agent_ctx=agent_ctx,
                 emit_event=_emit_agent_event,
+                context_provider=self.context_provider,
+                context_metadata=self._current_context_metadata,
             )
 
             # 将内部事件混入事件流
@@ -699,19 +721,40 @@ class Orchestrator:
                 exc_info=True,
             )
 
-    async def handle_user_input(self, content: str) -> AsyncIterator[Event]:
+    async def handle_user_input(
+        self,
+        content: str,
+        context_metadata: Optional[dict[str, Any]] = None,
+    ) -> AsyncIterator[Event]:
         """处理用户中途输入。
 
         如果会话正在运行，输入放入队列等待下一轮调度处理。
         如果会话已完成，重新激活并启动调度循环。
         """
-        await self._user_input_queue.put(content)
+        await self._user_input_queue.put(
+            {
+                "content": content,
+                "context_metadata": self._normalize_context_metadata(content, context_metadata),
+            }
+        )
         yield Event(type="user.input_queued", payload={"content": content})
 
         if self.status != "running":
             self.status = "running"
             async for event in self._scheduling_loop(content):
                 yield event
+
+    def _normalize_context_metadata(
+        self,
+        content: str,
+        metadata: Optional[dict[str, Any]],
+    ) -> dict[str, Any]:
+        normalized = dict(metadata or {})
+        normalized.setdefault("conversation_id", self.session_id)
+        normalized.setdefault("session_id", self.session_id)
+        if content:
+            normalized.setdefault("visible_content", content)
+        return normalized
 
     def get_status(self) -> dict:
         """获取当前状态"""

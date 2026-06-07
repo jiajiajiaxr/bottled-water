@@ -12,7 +12,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from agent_runtime import AgentConfig, Session as AgentSession, ToolCall
+from agent_runtime import (
+    AgentConfig,
+    AgentContextBuildRequest,
+    AgentContextBuildResult,
+    Session as AgentSession,
+    ToolCall,
+)
 from agent_runtime.core.interfaces import ToolExecutor
 from agent_runtime.core.types import Event as RuntimeEvent
 from agent_runtime.workflow.replanner import sanitize_workflow
@@ -23,6 +29,7 @@ from db.models import Agent, Artifact, Conversation, Message, User
 from db.session import AsyncSessionLocal
 from app.persistence.sqlalchemy_backend import SQLAlchemyBackend
 from app.events import SseSink, WebSocketSink
+from app.services.context.builder import ContextBuilder
 from app.services.agents.capability_permissions import (
     agent_uses_default_full_permissions,
     configured_tool_names,
@@ -69,6 +76,64 @@ class _MockModelProvider(BaseModelProvider):
         yield StreamChunk(
             content=content,
             finish_reason="stop",
+        )
+
+
+class _ContextBuilderProvider:
+    """App-layer bridge that feeds ContextBuilder output into agent_runtime."""
+
+    def __init__(self, session_factory=AsyncSessionLocal):
+        self._session_factory = session_factory
+
+    async def build_agent_context(
+        self,
+        request: AgentContextBuildRequest,
+    ) -> AgentContextBuildResult | None:
+        metadata = request.metadata or {}
+        conversation_id = str(metadata.get("conversation_id") or request.session_id or "")
+        user_message_id = str(metadata.get("user_message_id") or "")
+        if not conversation_id or not user_message_id:
+            return None
+
+        async with self._session_factory() as db:
+            return await db.run_sync(
+                lambda sync_db: self._build_sync(
+                    sync_db,
+                    request=request,
+                    conversation_id=conversation_id,
+                    user_message_id=user_message_id,
+                )
+            )
+
+    @staticmethod
+    def _build_sync(
+        sync_db,
+        *,
+        request: AgentContextBuildRequest,
+        conversation_id: str,
+        user_message_id: str,
+    ) -> AgentContextBuildResult | None:
+        conversation = sync_db.get(Conversation, conversation_id)
+        user_message = sync_db.get(Message, user_message_id)
+        agent = sync_db.get(Agent, request.agent.id)
+        if not conversation or not user_message or not agent:
+            return None
+
+        bundle = ContextBuilder(sync_db).build_agent_messages(
+            conversation=conversation,
+            user_message=user_message,
+            agent=agent,
+            system_prompt=request.base_system_prompt,
+            prompt=request.base_user_prompt,
+            mode="agent_runtime",
+        )
+        return AgentContextBuildResult(
+            messages=bundle.messages,
+            diagnostics={
+                **bundle.diagnostics,
+                "sections": bundle.sections,
+                "source": "ContextBuilder",
+            },
         )
 
 
@@ -214,6 +279,7 @@ class OrchestratorService:
         tool_executor = _ToolExecutorAdapter(
             db, primary_agent, user, conversation, {agent.id: agent for agent in agents}
         ) if primary_agent else None
+        context_provider = _ContextBuilderProvider()
 
         # ---- Workflow 模式 ----
         # Strategy resolution is centralized in services.chat.scheduling.
@@ -259,6 +325,7 @@ class OrchestratorService:
                 persistence=SQLAlchemyBackend(db),
                 event_sink=event_sink,
                 tool_executor=tool_executor,
+                context_provider=context_provider,
                 session_id=str(conversation.id),
             )
 
@@ -271,6 +338,7 @@ class OrchestratorService:
                 persistence=SQLAlchemyBackend(db),
                 event_sink=event_sink,
                 tool_executor=tool_executor,
+                context_provider=context_provider,
                 session_id=str(conversation.id),
             )
 
@@ -285,6 +353,7 @@ class OrchestratorService:
             persistence=SQLAlchemyBackend(db),
             event_sink=event_sink,
             tool_executor=tool_executor,
+            context_provider=context_provider,
             session_id=str(conversation.id),
         )
 

@@ -12,7 +12,7 @@ from model_provider.core.interfaces import BaseModelProvider
 
 from common.logger import get_logger
 from ..core.types import AgentConfig, Event
-from ..core.interfaces import PersistenceBackend, EventSink, ToolExecutor
+from ..core.interfaces import AgentContextProvider, PersistenceBackend, EventSink, ToolExecutor
 from .orchestrator import Orchestrator
 from .actor_orchestrator import ActorOrchestrator
 from .event_dispatcher import EventDispatcher
@@ -42,12 +42,14 @@ class Session:
         persistence: Optional[PersistenceBackend] = None,
         event_sink: Optional[EventSink] = None,
         tool_executor: Optional[ToolExecutor] = None,
+        context_provider: Optional[AgentContextProvider] = None,
     ):
         self.session_id = session_id
         self.agents = {a.id: a for a in agents}
         self.model_provider = model_provider
         self.persistence = persistence
         self.tool_executor = tool_executor or _NullToolExecutor()
+        self.context_provider = context_provider
 
         # 内部创建 scheduler（调度器从属于 Session）
         self.scheduler = self._create_scheduler(scheduler_config)
@@ -65,6 +67,7 @@ class Session:
                 persistence=persistence,
                 tool_executor=self.tool_executor,
                 max_runtime_seconds=float(scheduler_config.get("max_runtime_seconds") or 1200.0),
+                context_provider=context_provider,
             )
         else:
             self.orchestrator = Orchestrator(
@@ -74,6 +77,7 @@ class Session:
                 model_provider=model_provider,
                 persistence=persistence,
                 tool_executor=self.tool_executor,
+                context_provider=context_provider,
             )
 
     def _create_scheduler(self, config: Dict[str, Any]) -> Scheduler:
@@ -108,6 +112,7 @@ class Session:
         persistence: Optional[PersistenceBackend] = None,
         event_sink: Optional[EventSink] = None,
         tool_executor: Optional[ToolExecutor] = None,
+        context_provider: Optional[AgentContextProvider] = None,
         session_id: Optional[str] = None,
     ) -> "Session":
         """工厂方法，自动分配 session_id（可外部传入）"""
@@ -128,9 +133,14 @@ class Session:
             persistence=persistence,
             event_sink=event_sink,
             tool_executor=tool_executor,
+            context_provider=context_provider,
         )
 
-    async def run(self, user_message: str) -> AsyncIterator[Event]:
+    async def run(
+        self,
+        user_message: str,
+        context_metadata: Optional[dict[str, Any]] = None,
+    ) -> AsyncIterator[Event]:
         """
         运行会话
 
@@ -138,7 +148,10 @@ class Session:
         """
         logger.info("Session 运行开始", session_id=self.session_id, message_len=len(user_message))
         try:
-            async for event in self.orchestrator.run(user_message):
+            async for event in self.orchestrator.run(
+                user_message,
+                context_metadata=context_metadata,
+            ):
                 # 分发到所有注册的 Sink（不阻塞 yield）
                 await self.event_dispatcher.dispatch(event)
                 yield event
@@ -147,9 +160,16 @@ class Session:
             raise
         logger.info("Session 运行结束", session_id=self.session_id)
 
-    async def send_message(self, content: str) -> AsyncIterator[Event]:
+    async def send_message(
+        self,
+        content: str,
+        context_metadata: Optional[dict[str, Any]] = None,
+    ) -> AsyncIterator[Event]:
         """向运行中的会话发送新消息"""
-        async for event in self.orchestrator.handle_user_input(content):
+        async for event in self.orchestrator.handle_user_input(
+            content,
+            context_metadata=context_metadata,
+        ):
             await self.event_dispatcher.dispatch(event)
             yield event
 

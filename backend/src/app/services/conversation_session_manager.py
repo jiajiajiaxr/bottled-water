@@ -155,6 +155,7 @@ class ConversationSessionManager:
         *,
         runtime_content: str | None = None,
         thinking_enabled: bool = False,
+        user_message_id: str | None = None,
     ) -> None:
         """启动 generation。
 
@@ -172,8 +173,19 @@ class ConversationSessionManager:
 
         generation_id = await self._create_generation_record(conversation_id, session, content)
         self._generation_thinking_enabled[generation_id] = bool(thinking_enabled)
+        context_metadata = self._generation_context_metadata(
+            conversation_id,
+            content,
+            user_message_id=user_message_id,
+        )
         task = asyncio.create_task(
-            self._run_generation(session, conversation_id, generation_id, runtime_content or content),
+            self._run_generation(
+                session,
+                conversation_id,
+                generation_id,
+                runtime_content or content,
+                context_metadata=context_metadata,
+            ),
             name=f"generation-{conversation_id}",
         )
         self._running_tasks[conversation_id] = task
@@ -189,12 +201,14 @@ class ConversationSessionManager:
         conversation_id: str,
         generation_id: str,
         content: str,
+        *,
+        context_metadata: dict[str, str] | None = None,
     ) -> None:
         """在后台运行 Session generation。
 
         事件已通过 EventDispatcher 分发到各 Sink，这里只需消费迭代器。
         """
-        async for event in session.run(content):
+        async for event in session.run(content, context_metadata=context_metadata):
             await self._record_generation_event(conversation_id, generation_id, event)
 
     async def send_user_input(
@@ -204,6 +218,7 @@ class ConversationSessionManager:
         *,
         runtime_content: str | None = None,
         thinking_enabled: bool = False,
+        user_message_id: str | None = None,
     ) -> None:
         """向 Session 发送用户输入。
 
@@ -223,6 +238,7 @@ class ConversationSessionManager:
                     "content": content,
                     "runtime_content": runtime_content,
                     "thinking_enabled": bool(thinking_enabled),
+                    "user_message_id": user_message_id,
                 }
             )
             await WebSocketSink(conversation_id).emit(
@@ -243,6 +259,7 @@ class ConversationSessionManager:
                 content,
                 runtime_content=runtime_content,
                 thinking_enabled=thinking_enabled,
+                user_message_id=user_message_id,
             )
 
     async def cancel_generation(self, conversation_id: str) -> bool:
@@ -351,6 +368,22 @@ class ConversationSessionManager:
         """检查是否有运行中的 generation。"""
         task = self._running_tasks.get(conversation_id)
         return task is not None and not task.done()
+
+    @staticmethod
+    def _generation_context_metadata(
+        conversation_id: str,
+        content: str,
+        *,
+        user_message_id: str | None,
+    ) -> dict[str, str]:
+        metadata = {
+            "conversation_id": str(conversation_id),
+            "session_id": str(conversation_id),
+            "visible_content": str(content or ""),
+        }
+        if user_message_id:
+            metadata["user_message_id"] = str(user_message_id)
+        return metadata
 
     async def _create_generation_record(
         self,
@@ -511,6 +544,7 @@ class ConversationSessionManager:
         next_content = str(next_input.get("content") or "").strip()
         next_runtime_content = next_input.get("runtime_content")
         next_thinking_enabled = bool(next_input.get("thinking_enabled"))
+        next_user_message_id = next_input.get("user_message_id")
         if not next_content:
             return
 
@@ -520,6 +554,7 @@ class ConversationSessionManager:
                 next_content,
                 runtime_content=next_runtime_content,
                 thinking_enabled=next_thinking_enabled,
+                user_message_id=str(next_user_message_id) if next_user_message_id else None,
             )
         except Exception as exc:
             logger.error("排队输入续跑失败", conversation_id=conversation_id, error=str(exc))

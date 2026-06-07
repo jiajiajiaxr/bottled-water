@@ -362,6 +362,8 @@ class TestOrchestratorUserInput:
             if event.type == "user.input_queued":
                 # 在调度循环消费队列前检查
                 assert orch._user_input_queue.qsize() == 1
-                assert orch._user_input_queue.get_nowait() == "新消息"
+                queued = orch._user_input_queue.get_nowait()
+                assert queued["content"] == "新消息"
+                assert queued["context_metadata"]["conversation_id"] == "sess_1"
 
         assert events[0].type == "user.input_queued"

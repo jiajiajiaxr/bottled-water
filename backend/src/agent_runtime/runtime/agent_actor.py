@@ -10,7 +10,7 @@ from model_provider.core.interfaces import BaseModelProvider
 from common.logger import get_logger
 from ..context.agent_ctx import AgentContextManager
 from ..context.blackboard import BlackboardManager
-from ..core.interfaces import ToolExecutor
+from ..core.interfaces import AgentContextProvider, ToolExecutor
 from ..core.protocol import (
     AGENT_FAILED,
     AGENT_REPORT,
@@ -43,6 +43,7 @@ class AgentActor:
         blackboard_mgr: BlackboardManager | None = None,
         agent_context_mgr: AgentContextManager | None = None,
         use_streaming: bool = True,
+        context_provider: AgentContextProvider | None = None,
     ) -> None:
         self.session_id = session_id
         self.config = agent_config
@@ -50,6 +51,7 @@ class AgentActor:
         self.tool_executor = tool_executor
         self.blackboard_mgr = blackboard_mgr or BlackboardManager()
         self.agent_context_mgr = agent_context_mgr or AgentContextManager()
+        self.context_provider = context_provider
         self.mailbox = Mailbox(agent_config.id)
         self.mailbox.bind(event_bus, event_filter="control.*", target=agent_config.id)
         self.loop = AgentLoop(agent_config, model_provider, use_streaming=use_streaming)
@@ -133,6 +135,8 @@ class AgentActor:
                 tool_executor=self.tool_executor,
                 agent_ctx=agent_ctx,
                 emit_event=emit_event,
+                context_provider=self.context_provider,
+                context_metadata=_dict_payload(source_event.payload.get("context_metadata")),
             )
             output = result.output
             report = result.report
@@ -237,3 +241,7 @@ def _report_payload(report: AgentReport) -> dict[str, Any]:
         "rationale": report.rationale,
         "expected_duration": report.expected_duration,
     }
+
+
+def _dict_payload(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}

@@ -17,7 +17,7 @@ from model_provider.core.interfaces import BaseModelProvider
 from common.logger import get_logger
 from ..context.agent_ctx import AgentContextManager
 from ..context.blackboard import BlackboardManager
-from ..core.interfaces import PersistenceBackend, ToolExecutor
+from ..core.interfaces import AgentContextProvider, PersistenceBackend, ToolExecutor
 from ..core.protocol import (
     AGENT_REPORT,
     CONTROL_CANCEL,
@@ -49,6 +49,7 @@ class ActorOrchestrator:
         persistence: PersistenceBackend | None = None,
         tool_executor: ToolExecutor | None = None,
         max_runtime_seconds: float = 1200.0,
+        context_provider: AgentContextProvider | None = None,
     ) -> None:
         self.session_id = session_id
         self.agents = agents
@@ -56,6 +57,7 @@ class ActorOrchestrator:
         self.persistence = persistence
         self.tool_executor = tool_executor
         self.max_runtime_seconds = max_runtime_seconds
+        self.context_provider = context_provider
         self.event_bus = EventDispatcher()
         self.blackboard_mgr = BlackboardManager(persistence=persistence, event_bus=self.event_bus)
         self.agent_context_mgr = AgentContextManager()
@@ -66,9 +68,14 @@ class ActorOrchestrator:
         self._pending_user_inputs: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._running = False
 
-    async def run(self, user_message: str) -> AsyncIterator[Event]:
+    async def run(
+        self,
+        user_message: str,
+        context_metadata: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Event]:
         self._ensure_observer_subscription()
         self._running = True
+        current_context_metadata = self._normalize_context_metadata(user_message, context_metadata)
         self._pending_user_inputs = asyncio.Queue()
         await self.blackboard_mgr.create(self.session_id)
         await self.blackboard_mgr.append_history(
@@ -85,7 +92,7 @@ class ActorOrchestrator:
             )
         )
         if self._is_simple_greeting(user_message):
-            await self._publish_direct_greeting(user_message)
+            await self._publish_direct_greeting(user_message, current_context_metadata)
         else:
             await self.event_bus.publish(
                 Event(
@@ -94,6 +101,7 @@ class ActorOrchestrator:
                         "session_id": self.session_id,
                         "content": user_message,
                         "mention_target_agent_ids": self._mention_targets(user_message),
+                        "context_metadata": current_context_metadata,
                     },
                     source="user",
                     channel="all",
@@ -146,9 +154,13 @@ class ActorOrchestrator:
                 self._observer_subscription = None
             self._running = False
 
-    async def handle_user_input(self, content: str) -> AsyncIterator[Event]:
+    async def handle_user_input(
+        self,
+        content: str,
+        context_metadata: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Event]:
         if not self._running:
-            async for event in self.run(content):
+            async for event in self.run(content, context_metadata=context_metadata):
                 yield event
             return
 
@@ -160,6 +172,7 @@ class ActorOrchestrator:
             {
                 "content": content,
                 "mention_target_agent_ids": self._mention_targets(content),
+                "context_metadata": self._normalize_context_metadata(content, context_metadata),
             }
         )
         yield Event(
@@ -236,6 +249,7 @@ class ActorOrchestrator:
                 blackboard_mgr=self.blackboard_mgr,
                 agent_context_mgr=self.agent_context_mgr,
                 use_streaming=True,
+                context_provider=self.context_provider,
             )
             self.actors[agent_id] = actor
             actor.start()
@@ -268,6 +282,10 @@ class ActorOrchestrator:
                         "session_id": self.session_id,
                         "content": str(payload.get("content") or ""),
                         "mention_target_agent_ids": payload.get("mention_target_agent_ids") or [],
+                        "context_metadata": self._normalize_context_metadata(
+                            str(payload.get("content") or ""),
+                            payload.get("context_metadata"),
+                        ),
                         "interrupt": True,
                     },
                     source="user",
@@ -282,7 +300,11 @@ class ActorOrchestrator:
         await asyncio.gather(*(actor.stop() for actor in self.actors.values()), return_exceptions=True)
         self.actors.clear()
 
-    async def _publish_direct_greeting(self, user_message: str) -> None:
+    async def _publish_direct_greeting(
+        self,
+        user_message: str,
+        context_metadata: dict[str, Any],
+    ) -> None:
         target_id, target = self._chat_agent()
         if not target_id or target is None:
             await self.event_bus.publish(
@@ -329,6 +351,7 @@ class ActorOrchestrator:
                     "task": user_message,
                     "rationale": "Simple greeting fast path.",
                     "direct": True,
+                    "context_metadata": context_metadata,
                 },
                 source="scheduler:team_leader",
                 channel="all",
@@ -372,6 +395,18 @@ class ActorOrchestrator:
         for agent_id, config in self.agents.items():
             return agent_id, config
         return None, None
+
+    def _normalize_context_metadata(
+        self,
+        content: str,
+        metadata: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        normalized = dict(metadata or {})
+        normalized.setdefault("conversation_id", self.session_id)
+        normalized.setdefault("session_id", self.session_id)
+        if content:
+            normalized.setdefault("visible_content", content)
+        return normalized
 
     @staticmethod
     def _is_simple_greeting(text: str) -> bool:
