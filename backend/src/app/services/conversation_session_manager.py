@@ -61,8 +61,10 @@ class ConversationSessionManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._generation_ids: dict[str, str] = {}
-        self._queued_inputs: dict[str, list[dict[str, str | None]]] = {}
+        self._queued_inputs: dict[str, list[dict[str, str | bool | None]]] = {}
         self._pending_preview_message_ids: dict[str, list[str]] = {}
+        self._latest_thinking: dict[tuple[str, str, str], str] = {}
+        self._generation_thinking_enabled: dict[str, bool] = {}
         self._session_factory = session_factory or AsyncSessionLocal
 
     @classmethod
@@ -152,6 +154,7 @@ class ConversationSessionManager:
         content: str,
         *,
         runtime_content: str | None = None,
+        thinking_enabled: bool = False,
     ) -> None:
         """启动 generation。
 
@@ -168,6 +171,7 @@ class ConversationSessionManager:
                 raise SessionAlreadyRunningError(f"Conversation {conversation_id} 已有运行中的 generation")
 
         generation_id = await self._create_generation_record(conversation_id, session, content)
+        self._generation_thinking_enabled[generation_id] = bool(thinking_enabled)
         task = asyncio.create_task(
             self._run_generation(session, conversation_id, generation_id, runtime_content or content),
             name=f"generation-{conversation_id}",
@@ -199,6 +203,7 @@ class ConversationSessionManager:
         content: str,
         *,
         runtime_content: str | None = None,
+        thinking_enabled: bool = False,
     ) -> None:
         """向 Session 发送用户输入。
 
@@ -217,6 +222,7 @@ class ConversationSessionManager:
                 {
                     "content": content,
                     "runtime_content": runtime_content,
+                    "thinking_enabled": bool(thinking_enabled),
                 }
             )
             await WebSocketSink(conversation_id).emit(
@@ -232,7 +238,12 @@ class ConversationSessionManager:
         else:
             # 已完成：重新启动 generation
             logger.info("用户输入重启 generation", conversation_id=conversation_id, content_preview=content[:50])
-            await self.start_generation(conversation_id, content, runtime_content=runtime_content)
+            await self.start_generation(
+                conversation_id,
+                content,
+                runtime_content=runtime_content,
+                thinking_enabled=thinking_enabled,
+            )
 
     async def cancel_generation(self, conversation_id: str) -> bool:
         """取消当前 generation。
@@ -258,6 +269,8 @@ class ConversationSessionManager:
             generation_id = self._generation_ids.pop(conversation_id, None)
             if generation_id:
                 self._pending_preview_message_ids.pop(generation_id, None)
+                self._clear_generation_thinking(generation_id)
+                self._generation_thinking_enabled.pop(generation_id, None)
                 await self._record_generation_event(conversation_id, generation_id, cancel_event)
                 await self._finish_generation(
                     conversation_id,
@@ -319,6 +332,8 @@ class ConversationSessionManager:
         generation_id = self._generation_ids.pop(conversation_id, None)
         if generation_id:
             self._pending_preview_message_ids.pop(generation_id, None)
+            self._clear_generation_thinking(generation_id)
+            self._generation_thinking_enabled.pop(generation_id, None)
         self._queued_inputs.pop(conversation_id, None)
         self._locks.pop(conversation_id, None)
 
@@ -358,7 +373,7 @@ class ConversationSessionManager:
         self._generation_ids[conversation_id] = generation_id
         return generation_id
 
-    def _dequeue_next_input(self, conversation_id: str) -> dict[str, str | None] | None:
+    def _dequeue_next_input(self, conversation_id: str) -> dict[str, str | bool | None] | None:
         queue = self._queued_inputs.get(conversation_id)
         if not queue:
             return None
@@ -374,6 +389,7 @@ class ConversationSessionManager:
         event: RuntimeEvent,
     ) -> None:
         self._collect_preview_message_id(generation_id, event)
+        self._collect_thinking(conversation_id, generation_id, event)
         async with self._session_factory() as db:
             await record_generation_event(db, conversation_id, generation_id, event)
             message = await self._persist_agent_report_message(
@@ -391,6 +407,8 @@ class ConversationSessionManager:
             if self._generation_ids.get(conversation_id) == generation_id:
                 self._generation_ids.pop(conversation_id, None)
                 self._pending_preview_message_ids.pop(generation_id, None)
+                self._clear_generation_thinking(generation_id)
+                self._generation_thinking_enabled.pop(generation_id, None)
                 await self._finish_generation(
                     conversation_id,
                     generation_id,
@@ -414,6 +432,36 @@ class ConversationSessionManager:
         pending = self._pending_preview_message_ids.setdefault(generation_id, [])
         if preview_id not in pending:
             pending.append(preview_id)
+
+    def _collect_thinking(
+        self,
+        conversation_id: str,
+        generation_id: str,
+        event: RuntimeEvent,
+    ) -> None:
+        if event.type != "agent.thinking":
+            return
+        payload = event.payload or {}
+        agent_id = str(payload.get("agent_id") or "")
+        thinking = str(payload.get("thinking") or "").strip()
+        if not generation_id or not agent_id or not thinking:
+            return
+        key = (conversation_id, generation_id, agent_id)
+        existing = str(self._latest_thinking.get(key) or "").strip()
+        if not existing:
+            self._latest_thinking[key] = thinking
+            return
+        if thinking == existing or existing.endswith(thinking):
+            return
+        if thinking.startswith(existing):
+            self._latest_thinking[key] = thinking
+            return
+        self._latest_thinking[key] = f"{existing}{thinking}"
+
+    def _clear_generation_thinking(self, generation_id: str) -> None:
+        stale_keys = [key for key in self._latest_thinking if key[1] == generation_id]
+        for key in stale_keys:
+            self._latest_thinking.pop(key, None)
 
     async def _publish_pending_preview_messages(
         self,
@@ -455,11 +503,13 @@ class ConversationSessionManager:
             status=status,
             error=error,
         )
+        self._clear_generation_thinking(generation_id)
         if not next_input:
             return
 
         next_content = str(next_input.get("content") or "").strip()
         next_runtime_content = next_input.get("runtime_content")
+        next_thinking_enabled = bool(next_input.get("thinking_enabled"))
         if not next_content:
             return
 
@@ -468,6 +518,7 @@ class ConversationSessionManager:
                 conversation_id,
                 next_content,
                 runtime_content=next_runtime_content,
+                thinking_enabled=next_thinking_enabled,
             )
         except Exception as exc:
             logger.error("排队输入续跑失败", conversation_id=conversation_id, error=str(exc))
@@ -494,6 +545,7 @@ class ConversationSessionManager:
         work_product = str(payload.get("work_product") or "").strip()
         if not work_product:
             return None
+        thinking_enabled = self._generation_thinking_enabled.get(generation_id, False)
 
         agent_id = str(payload.get("agent_id") or "")
         session = self._sessions.get(conversation_id)
@@ -513,6 +565,18 @@ class ConversationSessionManager:
                 .order_by(Message.created_at.desc())
             )
             if persisted:
+                thinking = self._latest_thinking.get((conversation_id, generation_id, agent_id), "").strip()
+                if thinking and isinstance(persisted.content, dict) and not str(persisted.content.get("thinking") or "").strip():
+                    persisted.content = {
+                        **persisted.content,
+                        "thinking": thinking,
+                        "thinking_enabled": thinking_enabled,
+                    }
+                elif isinstance(persisted.content, dict) and persisted.content.get("thinking_enabled") is None:
+                    persisted.content = {
+                        **persisted.content,
+                        "thinking_enabled": thinking_enabled,
+                    }
                 conversation = await db.get(Conversation, conversation_id)
                 if conversation:
                     conversation.last_message_preview = work_product[:300]
@@ -535,6 +599,7 @@ class ConversationSessionManager:
             return None
 
         report = payload.get("report") if isinstance(payload.get("report"), dict) else {}
+        thinking = self._latest_thinking.get((conversation_id, generation_id, agent_id), "").strip()
         message = Message(
             conversation_id=conversation_id,
             sender_type="agent",
@@ -543,6 +608,8 @@ class ConversationSessionManager:
             content_type="text",
             content={
                 "text": work_product,
+                "thinking": thinking,
+                "thinking_enabled": thinking_enabled,
                 "runtime_report": report,
             },
             status="completed",
@@ -594,3 +661,4 @@ class ConversationSessionManager:
                 },
             )
         )
+        self._generation_thinking_enabled.pop(generation_id, None)

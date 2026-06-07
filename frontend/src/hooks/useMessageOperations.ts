@@ -5,7 +5,11 @@ import {
 } from "@/store";
 import { makeMessage } from "@/lib";
 import { applyRuntimeEvent } from "@/lib/runtimeEvents";
-import { useStreamingMessages } from "./useStreamingMessages";
+import {
+  clearConversationThinkingMode,
+  setConversationThinkingMode,
+  useStreamingMessages,
+} from "./useStreamingMessages";
 import type { ChatMessage, UploadedFile, MessageAttachment } from "@/types";
 import type { MessageBody, StreamAssistantHandlers } from "@/types/messages";
 
@@ -31,12 +35,18 @@ function mergeThinkingFromLocal(
     if (!localThinking) {
       return message;
     }
+    const localThinkingEnabled =
+      local?.rawContent?._streamThinkingEnabled === true ||
+      local?.rawContent?.thinking_enabled === true;
     return {
       ...message,
       thinking: localThinking,
       rawContent: {
         ...(message.rawContent || {}),
-        _streamThinkingEnabled: true,
+        thinking_enabled:
+          message.rawContent?.thinking_enabled ?? localThinkingEnabled,
+        _streamThinkingEnabled:
+          message.rawContent?._streamThinkingEnabled ?? localThinkingEnabled,
         _streamRawThinking: localThinking,
       },
     };
@@ -105,14 +115,21 @@ export function useMessageOperations(userName?: string) {
     };
 
     markConversationRunning(conversationId);
+    setConversationThinkingMode(conversationId, Boolean(thinkingEnabled));
 
     try {
       await api.sendMessageWs(
         conversationId,
         body,
-        createStreamHandlers(conversationId, streaming.streamHandlers),
+        createStreamHandlers(
+          conversationId,
+          streaming.streamHandlers,
+          streaming.waitForConversationStreams,
+          streaming.ingestPersistedMessages,
+        ),
       );
     } catch {
+      clearConversationThinkingMode(conversationId);
       clearConversationRunning(conversationId);
     }
   };
@@ -123,6 +140,7 @@ export function useMessageOperations(userName?: string) {
       api.cancelAssistantReplyWs(conversationId);
       await api.cancelAssistantReply(conversationId);
     } finally {
+      clearConversationThinkingMode(conversationId);
       streaming.clearPendingStreams(conversationId);
       clearConversationRunning(conversationId);
       updateMessages((prev) =>
@@ -164,6 +182,11 @@ function normalizeAttachments(files: UploadedFile[]): MessageAttachment[] {
 function createStreamHandlers(
   conversationId: string,
   baseHandlers: StreamAssistantHandlers,
+  waitForConversationStreams: (
+    conversationId?: string,
+    timeoutMs?: number,
+  ) => Promise<void>,
+  ingestPersistedMessages: (messages: ChatMessage[]) => void,
 ): StreamAssistantHandlers {
   return {
     ...baseHandlers,
@@ -178,25 +201,24 @@ function createStreamHandlers(
         );
       }
       if (isTerminalRuntimeEvent(event)) {
+        clearConversationThinkingMode(conversationId);
         clearConversationRunning(conversationId);
       }
     },
     onDone: (payload) => {
       baseHandlers.onDone?.(payload);
+      clearConversationThinkingMode(conversationId);
       clearConversationRunning(conversationId);
       if (useConversationStore.getState().activeId !== conversationId) {
         return;
       }
-      api.messages(conversationId)
+      waitForConversationStreams(conversationId)
+        .then(() => new Promise((resolve) => window.setTimeout(resolve, 350)))
+        .then(() => api.messages(conversationId))
         .then((nextMessages) => {
           if (useConversationStore.getState().activeId !== conversationId) return;
           const localMessages = useMessageStore.getState().historyMessages;
-          useMessageStore
-            .getState()
-            .setMessagesForConversation(
-              conversationId,
-              mergeThinkingFromLocal(nextMessages, localMessages),
-            );
+          ingestPersistedMessages(mergeThinkingFromLocal(nextMessages, localMessages));
         })
         .catch(() => {
           // keep current optimistic / streaming state if refresh fails

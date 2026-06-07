@@ -276,7 +276,13 @@ async def _handle_chat_send(
             )
             runtime_content = runtime_prompt_for_message(message)
             asyncio.create_task(
-                _send_user_input_async(session_manager, conversation_id, content, runtime_content),
+                _send_user_input_async(
+                    session_manager,
+                    conversation_id,
+                    content,
+                    runtime_content,
+                    bool(data.get("thinking_enabled")),
+                ),
                 name=f"ws-send-{conversation_id}",
             )
 
@@ -304,6 +310,7 @@ async def _send_user_input_async(
     conversation_id: str,
     content: str,
     runtime_content: str | None = None,
+    thinking_enabled: bool = False,
 ) -> None:
     """异步发送用户输入到 Session（后台任务）。"""
     try:
@@ -311,6 +318,7 @@ async def _send_user_input_async(
             conversation_id,
             content,
             runtime_content=runtime_content,
+            thinking_enabled=thinking_enabled,
         )
     except Exception as e:
         await WebSocketSink(conversation_id).emit(

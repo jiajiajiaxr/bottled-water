@@ -27,7 +27,6 @@ import {
   messageAttachments,
   stripInternalAgentOutput,
 } from "@/lib/message";
-import { useConversationStore } from "@/store";
 import type { ChatMessage, CodeRunRecord, MessageAttachment } from "@/types";
 import ThinkingBlock from "./ThinkingBlock";
 import { ToolCallSummary } from "./ToolCallSummary";
@@ -67,9 +66,6 @@ function MessageBubbleComponent({
     message.kind === "event" ||
     message.role === "system" ||
     message.role === "tool";
-  const thinkingEnabled = useConversationStore((s) =>
-    s.getThinkingEnabled(message.conversationId),
-  );
   const attachments = messageAttachments(message);
   const [previewAttachment, setPreviewAttachment] = useState<
     | (MessageAttachment & {
@@ -176,10 +172,14 @@ function MessageBubbleComponent({
   const visibleMessageContent = stripInternalAgentOutput(message.content);
   const thinkingText = String(message.thinking || "").trim();
   const streamThinkingEnabled = message.rawContent?._streamThinkingEnabled === true;
+  const messageThinkingEnabled =
+    message.rawContent?.thinking_enabled === true ||
+    streamThinkingEnabled;
   const showThinkingBlock = Boolean(
-    thinkingEnabled &&
-      !isUser &&
-      (thinkingText || (message.streamState === "streaming" && streamThinkingEnabled)),
+    !isUser &&
+      messageThinkingEnabled &&
+      (thinkingText ||
+        (message.streamState === "streaming" && streamThinkingEnabled)),
   );
   const activeToolCalls = message.rawContent?._activeToolCalls as
     | Array<{ toolName: string }>
