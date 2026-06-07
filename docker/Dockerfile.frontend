@@ -23,8 +23,9 @@ FROM nginx:alpine
 # 复制构建产物
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# 复制 nginx 配置
+# 复制 nginx 配置，并删除默认配置避免冲突
 COPY docker/nginx.conf /etc/nginx/nginx.conf
+RUN rm -f /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
