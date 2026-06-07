@@ -5,6 +5,18 @@ from agent_runtime import AgentConfig, Session
 from agent_runtime.core.protocol import AGENT_REPORT, CONTROL_ASSIGN, CONTROL_COMPLETE, SCHEDULER_DECISION
 
 
+def test_actor_runtime_default_idle_timeout_is_extended(mock_provider, mock_tool_executor):
+    session = Session.create(
+        agents=[AgentConfig(id="frontend", name="Frontend", system_prompt="You are frontend.")],
+        scheduler_config={"strategy": "tech_lead", "runtime": "actor"},
+        model_provider=mock_provider,
+        tool_executor=mock_tool_executor,
+        session_id="sess_actor_timeout_default",
+    )
+
+    assert session.orchestrator.max_runtime_seconds == 1200.0
+
+
 @pytest.mark.asyncio
 async def test_actor_runtime_session_runs_scheduler_and_worker(mock_provider, mock_tool_executor):
     mock_provider.responses = [

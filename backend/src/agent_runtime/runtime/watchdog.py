@@ -25,7 +25,7 @@ class WatchdogConfig:
     """看门狗配置"""
 
     max_rounds: int = 50  # 最大调度轮数
-    max_idle_seconds: int = 300  # 最大空闲时间（秒）
+    max_idle_seconds: int = 1200  # 最大空闲时间（秒）
     max_total_tokens: int = 500000  # Token 预算上限
     deadlock_threshold: int = 3  # 死锁检测：连续 N 轮无进展
     min_progress_interval: int = 10  # 最小进展间隔（秒）
@@ -128,17 +128,18 @@ class Watchdog:
         else:
             self.state.consecutive_idle_rounds = 0
 
-        # 4. 运行超时
-        elapsed = (datetime.utcnow() - self.started_at).total_seconds()
+        # 4. 空闲超时：按最近一次进展计算，而不是按会话总运行时长计算。
+        last_activity = self.state.last_progress_time or self.started_at
+        elapsed = (datetime.utcnow() - last_activity).total_seconds()
         if elapsed > self.config.max_idle_seconds:
             logger.warning(
-                "看门狗触发：运行超时", elapsed=elapsed, max_seconds=self.config.max_idle_seconds
+                "看门狗触发：空闲超时", elapsed=elapsed, max_seconds=self.config.max_idle_seconds
             )
             return Event(
                 type="control.watchdog_triggered",
                 payload={
-                    "reason": "timeout",
-                    "elapsed_seconds": elapsed,
+                    "reason": "idle_timeout",
+                    "idle_seconds": elapsed,
                     "max_seconds": self.config.max_idle_seconds,
                 },
             )
@@ -220,6 +221,11 @@ class Watchdog:
             "total_tokens_used": self.state.total_tokens_used,
             "consecutive_idle_rounds": self.state.consecutive_idle_rounds,
             "started_at": self.started_at.isoformat(),
+            "last_progress_time": (
+                self.state.last_progress_time.isoformat()
+                if self.state.last_progress_time
+                else None
+            ),
             "config": {
                 "max_rounds": self.config.max_rounds,
                 "max_idle_seconds": self.config.max_idle_seconds,

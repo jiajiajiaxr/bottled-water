@@ -48,7 +48,7 @@ class ActorOrchestrator:
         model_provider: BaseModelProvider,
         persistence: PersistenceBackend | None = None,
         tool_executor: ToolExecutor | None = None,
-        max_runtime_seconds: float = 120.0,
+        max_runtime_seconds: float = 1200.0,
     ) -> None:
         self.session_id = session_id
         self.agents = agents
@@ -100,19 +100,24 @@ class ActorOrchestrator:
                 )
             )
 
-        deadline = asyncio.get_running_loop().time() + self.max_runtime_seconds
+        loop = asyncio.get_running_loop()
+        idle_deadline = loop.time() + self.max_runtime_seconds
         completed = False
         try:
-            while asyncio.get_running_loop().time() < deadline:
+            while True:
                 await self._dispatch_pending_user_inputs()
-                timeout = max(0.01, deadline - asyncio.get_running_loop().time())
+                timeout = max(0.01, idle_deadline - loop.time())
+                if timeout <= 0.01 and loop.time() >= idle_deadline:
+                    break
                 try:
                     event = await asyncio.wait_for(self._event_queue.get(), timeout=timeout)
                 except asyncio.TimeoutError:
                     break
                 if event.type == "internal.user_input_pending":
+                    idle_deadline = loop.time() + self.max_runtime_seconds
                     await self._dispatch_pending_user_inputs()
                     continue
+                idle_deadline = loop.time() + self.max_runtime_seconds
                 yield event
                 if event.type == CONTROL_COMPLETE:
                     if not self._pending_user_inputs.empty():
@@ -125,7 +130,8 @@ class ActorOrchestrator:
                 payload={
                     "session_id": self.session_id,
                     "runtime": "actor",
-                    "reason": "completed" if completed else "timeout",
+                    "reason": "completed" if completed else "idle_timeout",
+                    "max_idle_seconds": self.max_runtime_seconds,
                 },
                 source="orchestrator",
                 channel="all",

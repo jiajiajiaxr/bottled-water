@@ -64,7 +64,7 @@ class Session:
                 model_provider=model_provider,
                 persistence=persistence,
                 tool_executor=self.tool_executor,
-                max_runtime_seconds=float(scheduler_config.get("max_runtime_seconds") or 120.0),
+                max_runtime_seconds=float(scheduler_config.get("max_runtime_seconds") or 1200.0),
             )
         else:
             self.orchestrator = Orchestrator(

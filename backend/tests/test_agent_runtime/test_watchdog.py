@@ -3,6 +3,7 @@
 """
 
 import pytest
+from datetime import datetime, timedelta
 
 from agent_runtime.runtime.watchdog import Watchdog, WatchdogConfig
 from agent_runtime.core.types import AgentReport, AgentState, AgentWill, SchedulingDecision
@@ -14,7 +15,7 @@ class TestWatchdogConfig:
     def test_defaults(self):
         config = WatchdogConfig()
         assert config.max_rounds == 50
-        assert config.max_idle_seconds == 300
+        assert config.max_idle_seconds == 1200
         assert config.max_total_tokens == 500000
         assert config.deadlock_threshold == 3
         assert config.min_progress_interval == 10
@@ -23,7 +24,7 @@ class TestWatchdogConfig:
         config = WatchdogConfig(max_rounds=10, deadlock_threshold=2)
         assert config.max_rounds == 10
         assert config.deadlock_threshold == 2
-        assert config.max_idle_seconds == 300  # 默认值不变
+        assert config.max_idle_seconds == 1200  # 默认值不变
 
 
 class TestWatchdogCheckBeforeDecision:
@@ -98,6 +99,27 @@ class TestWatchdogCheckBeforeDecision:
         result = watchdog.check_before_decision({}, reports)
         assert result is not None
         assert result.payload["reason"] == "token_budget_exhausted"
+
+    def test_timeout_uses_last_progress_instead_of_session_start(self):
+        watchdog = Watchdog(WatchdogConfig(max_idle_seconds=10))
+        watchdog.started_at = datetime.utcnow() - timedelta(seconds=60)
+        watchdog.record_progress()
+        reports = [AgentReport(agent_id="a1", state=AgentState.READY, will=AgentWill.EXECUTE)]
+
+        result = watchdog.check_before_decision({}, reports)
+
+        assert result is None
+
+    def test_idle_timeout_after_last_progress(self):
+        watchdog = Watchdog(WatchdogConfig(max_idle_seconds=10))
+        watchdog.state.last_progress_time = datetime.utcnow() - timedelta(seconds=11)
+        reports = [AgentReport(agent_id="a1", state=AgentState.READY, will=AgentWill.EXECUTE)]
+
+        result = watchdog.check_before_decision({}, reports)
+
+        assert result is not None
+        assert result.payload["reason"] == "idle_timeout"
+        assert result.payload["idle_seconds"] >= 10
 
 
 class TestWatchdogCheckAfterDecision:
