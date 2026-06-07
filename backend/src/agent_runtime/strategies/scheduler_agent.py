@@ -68,6 +68,7 @@ class SchedulerAgent(AgentActor):
         self._subscriptions: list[str] = []
         self._scheduler = TechLeadScheduler(agents=agents, model_provider=model_provider)
         self._mention_target_ids: list[str] = []
+        self._mention_dispatched_ids: set[str] = set()
         self._context_metadata: dict[str, Any] = {}
         self._bind()
 
@@ -112,6 +113,7 @@ class SchedulerAgent(AgentActor):
                 for item in (event.payload.get("mention_target_agent_ids") or [])
                 if str(item) in self.agents
             ]
+            self._mention_dispatched_ids = set()
             self._context_metadata = _dict_payload(event.payload.get("context_metadata"))
             return bool(self.current_task)
         if event.type == AGENT_REPORT:
@@ -243,6 +245,8 @@ class SchedulerAgent(AgentActor):
                 await self._assign(decision.target_agent_id, decision)
 
     async def _assign(self, target: str, decision: SchedulingDecision) -> None:
+        if target in self._mention_target_ids:
+            self._mention_dispatched_ids.add(target)
         await self.event_bus.publish(
             Event(
                 type=CONTROL_ASSIGN,
@@ -277,16 +281,53 @@ class SchedulerAgent(AgentActor):
         ]
         if not targets:
             return None
+        pending = [
+            agent_id
+            for agent_id in targets
+            if agent_id not in self._mention_dispatched_ids
+            and not self._mention_target_terminal(agent_id)
+        ]
+        if not pending:
+            unfinished = [
+                agent_id
+                for agent_id in targets
+                if not self._mention_target_terminal(agent_id)
+            ]
+            if unfinished:
+                return SchedulingDecision(
+                    decision_type="wait",
+                    action="wait",
+                    target_agent_id=unfinished[0],
+                    target_agent_ids=unfinished,
+                    task=self.current_task,
+                    task_description=self.current_task,
+                    rationale="User-mentioned Agent has already been assigned; waiting for its report.",
+                )
+            return SchedulingDecision(
+                decision_type="complete",
+                action="complete",
+                target_agent_id=targets[0],
+                target_agent_ids=targets,
+                task=self.current_task,
+                task_description=self.current_task,
+                rationale="User-mentioned Agent reached a terminal report; ending this turn.",
+            )
         return SchedulingDecision(
-            decision_type="parallel" if len(targets) > 1 else "assign",
+            decision_type="parallel" if len(pending) > 1 else "assign",
             action="assign",
-            target_agent_id=targets[0],
-            target_agent_ids=targets,
+            target_agent_id=pending[0],
+            target_agent_ids=pending,
             task=self.current_task,
             task_description=self.current_task,
             rationale="用户 @ 指定了目标 Agent，本轮只调度被指定成员。",
             expected_outputs=["目标 Agent 的直接回复"],
         )
+
+    def _mention_target_terminal(self, agent_id: str) -> bool:
+        report = self.reports.get(agent_id)
+        if not report:
+            return False
+        return report.state in {AgentState.COMPLETED, AgentState.FAILED}
 
     def _greeting_decision(self, reports: list[AgentReport]) -> SchedulingDecision | None:
         if not _is_simple_greeting_utf8(self.current_task):

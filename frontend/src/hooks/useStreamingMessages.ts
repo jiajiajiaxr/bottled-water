@@ -544,6 +544,7 @@ export function useStreamingMessages(conversationId?: string) {
       );
       if (messageId && rawId === messageId) return itemKey;
     }
+    if (messageId) return key;
     if (!agentId) return key;
     for (const [itemKey, message] of streamingMessagesRef.current) {
       if (message.conversationId !== targetConversationId) continue;
@@ -1024,10 +1025,8 @@ export function useStreamingMessages(conversationId?: string) {
     const messageId = String(
       persistedMessage.rawContent?.agent_message_id ||
         persistedMessage.rawContent?.message_id ||
-        persistedMessage.id ||
         streamMessage.rawContent?.agent_message_id ||
         streamMessage.rawContent?.message_id ||
-        streamMessage.id ||
         "",
     );
     const thinkingEnabled = Boolean(
@@ -1040,10 +1039,14 @@ export function useStreamingMessages(conversationId?: string) {
     const payload = {
       conversation_id: persistedMessage.conversationId,
       agent_id: agentId,
-      agent_message_id: messageId,
-      message_id: messageId,
       agent_name: persistedMessage.author || streamMessage.author,
       thinking_enabled: thinkingEnabled,
+      ...(messageId
+        ? {
+            agent_message_id: messageId,
+            message_id: messageId,
+          }
+        : {}),
     };
 
     if (thinkingEnabled && persistedThinking) {

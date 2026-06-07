@@ -178,6 +178,40 @@ describe("useStreamingMessages internal block filtering", () => {
     expect(result.current.streamingMessages.get(visibleKey)?.content).toBe("你好呀");
   });
 
+  it("keeps explicit stream ids separate for repeated same-agent assignments", () => {
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+
+    act(() => {
+      result.current.streamHandlers.onMessageStart({
+        conversation_id: "conversation-1",
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        agent_name: "Daily Chat Agent",
+      });
+      result.current.streamHandlers.onToken?.("agent-1", "first", {
+        conversation_id: "conversation-1",
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+    flushTypewriter();
+
+    act(() => {
+      result.current.streamHandlers.onToken?.("agent-1", "second", {
+        conversation_id: "conversation-1",
+        agent_id: "agent-1",
+        agent_message_id: "message-2",
+        agent_name: "Daily Chat Agent",
+      });
+    });
+    flushTypewriter();
+
+    expect(result.current.displayOrder).toEqual(["message-1", "message-2"]);
+    expect(result.current.streamingMessages.get("message-1")?.content).toBe("first");
+    expect(result.current.streamingMessages.get("message-2")?.content).toBe("second");
+  });
+
   it("drains thinking before showing answer content", () => {
     const { result } = renderHook(() => useStreamingMessages("conversation-1"));
 

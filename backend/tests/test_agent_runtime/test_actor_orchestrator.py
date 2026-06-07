@@ -45,3 +45,29 @@ async def test_actor_runtime_session_runs_scheduler_and_worker(mock_provider, mo
     assert AGENT_REPORT in event_types
     assert CONTROL_COMPLETE in event_types
     assert session.get_status()["runtime"] == "actor"
+
+
+@pytest.mark.asyncio
+async def test_actor_runtime_mention_assigns_once_and_completes(mock_provider, mock_tool_executor):
+    session = Session.create(
+        agents=[
+            AgentConfig(id="frontend", name="Frontend", system_prompt="You are frontend."),
+            AgentConfig(id="backend", name="Backend", system_prompt="You are backend."),
+        ],
+        scheduler_config={"strategy": "tech_lead", "runtime": "actor", "max_runtime_seconds": 5},
+        model_provider=mock_provider,
+        tool_executor=mock_tool_executor,
+        session_id="sess_actor_mention",
+    )
+
+    events = []
+    async for event in session.run("@Frontend hello"):
+        events.append(event)
+
+    assignments = [event for event in events if event.type == CONTROL_ASSIGN]
+    decisions = [event for event in events if event.type == SCHEDULER_DECISION]
+
+    assert [event.target for event in assignments] == ["frontend"]
+    assert decisions[0].payload["decision"]["decision_type"] == "assign"
+    assert decisions[-1].payload["decision"]["decision_type"] == "complete"
+    assert CONTROL_COMPLETE in [event.type for event in events]
