@@ -20,7 +20,7 @@ export function useWorkbenchActions(
 ) {
   const { message } = AntApp.useApp();
   const { activeId, setActiveId, updateConversations } = useConversationStore();
-  const { clearMessages } = useMessageStore();
+  const { setMessagesForConversation } = useMessageStore();
   const {
     artifact,
     files,
@@ -67,9 +67,9 @@ export function useWorkbenchActions(
     });
     saveCategories([...conversationCategories, payload.folder]);
     updateConversations((current) => [created, ...current]);
+    setMessagesForConversation(created.id, []);
     setActiveId(created.id);
     navigateToConversation(created.workspace_id || activeWorkspaceId, created.id);
-    clearMessages();
     setCreateOpen({ open: false });
     message.success("会话已创建");
   };

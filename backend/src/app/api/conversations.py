@@ -202,11 +202,11 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
             "runtime_mode": runtime_mode,
             "workflow_enabled": workflow_enabled and scheduling_strategy == "workflow",
         },
-        last_message_preview="会话已创建，可以发送任务开始协作。",
-        last_message_sender="System",
-        last_message_at=utcnow(),
+        last_message_preview="",
+        last_message_sender="",
+        last_message_at=None,
         activity_score=50,
-        message_count=1,
+        message_count=0,
     )
     db.add(conversation)
     await db.flush()
@@ -225,16 +225,6 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
             participant_type="user",
             user_id=user.id,
             role="owner",
-        )
-    )
-    db.add(
-        Message(
-            conversation_id=conversation.id,
-            sender_type="system",
-            sender_name="System",
-            content_type="event",
-            content={"text": f"会话已创建，已加入 {len(selected)} 个 Agent。"},
-            status="completed",
         )
     )
     await db.commit()

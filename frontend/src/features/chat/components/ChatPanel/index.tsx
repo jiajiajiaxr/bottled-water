@@ -107,12 +107,17 @@ export function ChatPanel({
 
   // 历史消息从 Store 读取
   const historyMessages = useMessageStore((s) => s.historyMessages);
+  const historyConversationId = useMessageStore((s) => s.historyConversationId);
   const messageVersions = useMessageStore((s) => s.messageVersions);
+  const activeHistoryMessages = useMemo(() => {
+    if (!active?.id || historyConversationId !== active.id) return [];
+    return historyMessages.filter((item) => item.conversationId === active.id);
+  }, [active?.id, historyConversationId, historyMessages]);
 
   // 合并所有消息用于 quoted 查找
   const allMessages = useMemo(
-    () => [...historyMessages, ...streamingMessages.values()],
-    [historyMessages, streamingMessages],
+    () => [...activeHistoryMessages, ...streamingMessages.values()],
+    [activeHistoryMessages, streamingMessages],
   );
   const chatDefaultModelConfigId =
     defaultModelConfigId ||
@@ -266,7 +271,7 @@ export function ChatPanel({
     const el = messageListRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [historyMessages, displayOrder]);
+  }, [activeHistoryMessages, displayOrder]);
 
   // 进入新对话且消息加载完成后，滚动到底部
   useEffect(() => {
@@ -334,7 +339,7 @@ export function ChatPanel({
           <Spin />
         ) : allMessages.length ? (
           <>
-            {historyMessages.map(renderMessageBubble)}
+            {activeHistoryMessages.map(renderMessageBubble)}
             {displayOrder.map((agentId) => {
               const msg = streamingMessages.get(agentId);
 

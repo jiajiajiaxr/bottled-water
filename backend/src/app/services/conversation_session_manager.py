@@ -400,7 +400,8 @@ class ConversationSessionManager:
             )
         if message:
             sink = WebSocketSink(conversation_id)
-            await sink.emit(RuntimeEvent(type="message:new", payload=message_to_dict(message)))
+            event_type = "message:updated" if event.type == "system.agent_completed" else "message:new"
+            await sink.emit(RuntimeEvent(type=event_type, payload=message_to_dict(message)))
             await self._publish_pending_preview_messages(sink, conversation_id, generation_id)
         if event.type == "control.watchdog_triggered":
             reason = str((event.payload or {}).get("reason") or "watchdog_triggered")

@@ -54,7 +54,6 @@ export function Workbench({
 }) {
   const { message } = AntApp.useApp();
   const [currentUser, setCurrentUser] = useState(user);
-  const setMessages = useMessageStore((s) => s.setMessages);
   const setMessagesForConversation = useMessageStore(
     (s) => s.setMessagesForConversation,
   );
@@ -149,6 +148,9 @@ export function Workbench({
     const target = conversations.find((item) => item.id === conversationId);
     const workspaceId =
       target?.workspace_id || activeWorkspaceId || activeWorkspace?.id;
+    const cachedMessages = getCachedMessages(conversationId);
+    setMessagesForConversation(conversationId, cachedMessages ?? []);
+    setLoadingMessages(!cachedMessages);
     setActiveId(conversationId);
     navigateToConversation(workspaceId, conversationId, replace);
   };
@@ -311,10 +313,10 @@ export function Workbench({
     setFiles([]);
 
     if (cachedMessages) {
-      setMessages(cachedMessages);
+      setMessagesForConversation(conversationId, cachedMessages);
       setLoadingMessages(false);
     } else {
-      setMessages([]);
+      setMessagesForConversation(conversationId, []);
       setLoadingMessages(true);
     }
 
@@ -322,7 +324,10 @@ export function Workbench({
       .then((nextMessages) => {
         if (cancelled) return;
         if (useConversationStore.getState().activeId !== conversationId) return;
-        setMessagesForConversation(conversationId, nextMessages);
+        setMessagesForConversation(
+          conversationId,
+          nextMessages.filter((item) => item.conversationId === conversationId),
+        );
       })
       .finally(() => {
         if (!cancelled && useConversationStore.getState().activeId === conversationId) {
@@ -350,7 +355,6 @@ export function Workbench({
     setArtifact,
     setFiles,
     setLoadingMessages,
-    setMessages,
     setMessagesForConversation,
   ]);
 

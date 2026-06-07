@@ -17,7 +17,8 @@ export async function messages(conversationId: string): Promise<ChatMessage[]> {
     `/conversations/${conversationId}/messages`,
   );
 
-  return Array.isArray(result) ? result : result.items;
+  const items = Array.isArray(result) ? result : result.items;
+  return items.map(normalizeChatMessage);
 }
 
 /**
@@ -140,10 +141,10 @@ function dispatchStreamEvent(
       handlers.onTaskStatusChanged?.(data as Record<string, unknown>);
       break;
     case "message:new":
-      handlers.onMessageNew?.(data as ChatMessage);
+      handlers.onMessageNew?.(normalizeChatMessage(data as ChatMessage));
       break;
     case "message:updated":
-      handlers.onMessageUpdated?.(data as ChatMessage);
+      handlers.onMessageUpdated?.(normalizeChatMessage(data as ChatMessage));
       break;
     case "generation_finished":
     case "generation:finished":
@@ -496,6 +497,84 @@ export async function sendMessageWs(
 
     ws.send("chat.send", body, requestId);
   });
+}
+
+function normalizeChatMessage(message: ChatMessage): ChatMessage {
+  const record =
+    message && typeof message === "object"
+      ? (message as unknown as Record<string, unknown>)
+      : {};
+  const rawContent =
+    (record.rawContent as Record<string, unknown> | undefined) ??
+    (record.raw_content as Record<string, unknown> | undefined);
+  const clientMessageId = stringValue(
+    record.client_message_id ??
+      record.clientMessageId ??
+      rawContent?.client_message_id ??
+      rawContent?.clientMessageId,
+  );
+  const normalizedRawContent =
+    (rawContent || clientMessageId)
+      ? {
+          ...(rawContent || {}),
+          ...(clientMessageId
+            ? {
+                client_message_id: clientMessageId,
+                clientMessageId,
+              }
+            : {}),
+        }
+      : undefined;
+  const attachments = Array.isArray(record.attachments)
+    ? (record.attachments as ChatMessage["attachments"])
+    : [];
+  const toolEvents = Array.isArray(record.toolEvents)
+    ? record.toolEvents
+    : Array.isArray(record.tool_events)
+      ? record.tool_events
+      : undefined;
+
+  return {
+    ...(message as ChatMessage),
+    id: String(record.id ?? record.message_id ?? ""),
+    conversationId: String(
+      record.conversationId ?? record.conversation_id ?? "",
+    ),
+    sender_id:
+      typeof record.sender_id === "string"
+        ? record.sender_id
+        : typeof record.senderId === "string"
+          ? record.senderId
+          : undefined,
+    role: String(record.role ?? "assistant") as ChatMessage["role"],
+    kind: String(record.kind ?? record.content_type ?? "text") as ChatMessage["kind"],
+    author: String(
+      record.author ?? record.sender_name ?? record.senderName ?? record.sender_type ?? "Agent",
+    ),
+    content: String(record.content ?? ""),
+    thinking:
+      typeof record.thinking === "string" ? record.thinking : undefined,
+    rawContent: normalizedRawContent,
+    client_message_id: clientMessageId || undefined,
+    clientMessageId: clientMessageId || undefined,
+    attachments,
+    toolEvents: toolEvents as ChatMessage["toolEvents"],
+    createdAt: String(record.createdAt ?? record.created_at ?? new Date().toISOString()),
+    quotedMessageId:
+      typeof record.quotedMessageId === "string"
+        ? record.quotedMessageId
+        : typeof record.reply_to_message_id === "string"
+          ? record.reply_to_message_id
+          : undefined,
+    status:
+      typeof record.status === "string" ? record.status : undefined,
+    streamState:
+      typeof record.streamState === "string"
+        ? (record.streamState as ChatMessage["streamState"])
+        : undefined,
+    state:
+      record.state === "inactive" ? "inactive" : "active",
+  };
 }
 
 function ensureConversationStreamSubscription(

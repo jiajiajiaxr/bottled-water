@@ -58,7 +58,7 @@ function mergeThinkingFromLocal(
  */
 export function useMessageOperations(userName?: string) {
   const { activeId } = useConversationStore();
-  const { updateMessages } = useMessageStore();
+  const { updateMessagesForConversation } = useMessageStore();
   const streaming = useStreamingMessages(activeId);
 
   const send = async (
@@ -82,6 +82,9 @@ export function useMessageOperations(userName?: string) {
           ? "workflow"
           : "tech_lead";
     const localAttachments = normalizeAttachments(attachments);
+    const clientMessageId = `client-${Date.now()}-${Math.random()
+      .toString(16)
+      .slice(2)}`;
 
     const userMessage = makeMessage({
       conversationId,
@@ -89,12 +92,19 @@ export function useMessageOperations(userName?: string) {
       kind: "text",
       author: userName || "我",
       content,
+      rawContent: {
+        client_message_id: clientMessageId,
+        clientMessageId,
+        attachments: localAttachments,
+      },
+      clientMessageId,
+      client_message_id: clientMessageId,
       streamState: "done",
       state: "active",
       attachments: localAttachments,
       quotedMessageId: quoted?.id,
     });
-    updateMessages((prev) => [...prev, userMessage]);
+    updateMessagesForConversation(conversationId, (prev) => [...prev, userMessage]);
 
     const body: MessageBody = {
       content_type: "text",
@@ -110,7 +120,7 @@ export function useMessageOperations(userName?: string) {
       reply_to_message_id: quoted?.id,
       thinking_enabled: thinkingEnabled,
       model_config_id: modelConfigId,
-      client_message_id: `client-${Date.now()}`,
+      client_message_id: clientMessageId,
       scheduling_strategy: schedulingStrategy,
     };
 
@@ -143,7 +153,7 @@ export function useMessageOperations(userName?: string) {
       clearConversationThinkingMode(conversationId);
       streaming.clearPendingStreams(conversationId);
       clearConversationRunning(conversationId);
-      updateMessages((prev) =>
+      updateMessagesForConversation(conversationId, (prev) =>
         prev.map((item) =>
           item.conversationId === conversationId &&
           (item.status === "streaming" || item.streamState === "streaming")
@@ -217,7 +227,12 @@ function createStreamHandlers(
         .then(() => api.messages(conversationId))
         .then((nextMessages) => {
           if (useConversationStore.getState().activeId !== conversationId) return;
-          const localMessages = useMessageStore.getState().historyMessages;
+          const messageStore = useMessageStore.getState();
+          const localMessages =
+            messageStore.getCachedMessages(conversationId) ??
+            (messageStore.historyConversationId === conversationId
+              ? messageStore.historyMessages
+              : []);
           ingestPersistedMessages(mergeThinkingFromLocal(nextMessages, localMessages));
         })
         .catch(() => {

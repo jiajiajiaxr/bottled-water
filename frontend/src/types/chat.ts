@@ -154,6 +154,8 @@ export interface ChatMessage {
   content: string; // 消息内容
   thinking?: string; // LLM思考内容
   rawContent?: Record<string, unknown>; // 不清楚作用
+  clientMessageId?: string;
+  client_message_id?: string;
   attachments?: MessageAttachment[]; // 消息附件
   toolEvents?: ToolEventRecord[]; // 工具执行事件
   createdAt: string; // 不清楚作用
