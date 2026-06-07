@@ -424,8 +424,8 @@ export function ChatPanel({
           <Space>
             <Tooltip title={thinkingEnabled ? "已开启思考模式" : "思考模式"}>
               <Button
-                type={thinkingEnabled ? "primary" : "default"}
-                ghost={thinkingEnabled}
+                type="default"
+                className={thinkingEnabled ? "thinking-toggle-button active" : "thinking-toggle-button"}
                 icon={<BulbOutlined />}
                 onClick={() => setThinkingEnabled(!thinkingEnabled)}
                 disabled={!active}

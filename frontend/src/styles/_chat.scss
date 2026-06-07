@@ -442,6 +442,31 @@
   }
 }
 
+.thinking-toggle-button {
+  border-color: #d9e2f2;
+  color: #475569;
+
+  &:hover,
+  &:focus {
+    border-color: #16a34a !important;
+    color: #166534 !important;
+  }
+
+  &.active {
+    background: #16a34a !important;
+    border-color: #16a34a !important;
+    color: #ffffff !important;
+    box-shadow: 0 8px 20px rgba(22, 163, 74, 0.22);
+
+    &:hover,
+    &:focus {
+      background: #15803d !important;
+      border-color: #15803d !important;
+      color: #ffffff !important;
+    }
+  }
+}
+
 .thinking-chevron {
   margin-left: auto;
   font-size: 12px;

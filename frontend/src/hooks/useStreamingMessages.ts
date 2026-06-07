@@ -189,6 +189,36 @@ function shouldDropStreamForPersisted(
   );
 }
 
+function mergePersistedWithStreamThinking(
+  persistedMessage: ChatMessage,
+  streamMessage: ChatMessage | undefined,
+): ChatMessage {
+  if (!streamMessage) return persistedMessage;
+  const persistedThinking = String(persistedMessage.thinking || "").trim();
+  if (persistedThinking) return persistedMessage;
+
+  const streamThinking = String(
+    streamMessage.thinking ||
+      streamMessage.rawContent?._streamRawThinking ||
+      "",
+  ).trim();
+  if (!streamThinking) return persistedMessage;
+
+  return {
+    ...persistedMessage,
+    thinking: streamThinking,
+    rawContent: {
+      ...(persistedMessage.rawContent || {}),
+      _streamThinkingEnabled:
+        persistedMessage.rawContent?._streamThinkingEnabled ??
+        streamMessage.rawContent?._streamThinkingEnabled ??
+        true,
+      _streamRawThinking:
+        persistedMessage.rawContent?._streamRawThinking || streamThinking,
+    },
+  };
+}
+
 function isRepresentedByHistory(
   message: ChatMessage,
   historyMessages: ChatMessage[],
@@ -760,6 +790,9 @@ export function useStreamingMessages(conversationId?: string) {
             message_id: payload.message_id,
             agent_id: payload.agent_id,
             _streamRawText: "",
+            _streamThinkingEnabled:
+              useConversationStore.getState().thinkingEnabled.has(targetConversationId) &&
+              useConversationStore.getState().getThinkingEnabled(targetConversationId),
           },
           streamState: "streaming",
           state: "active",
@@ -805,10 +838,12 @@ export function useStreamingMessages(conversationId?: string) {
       finalizePendingStreams(targetConversationId);
     },
     onMessageNew: (message) => {
+      let mergedMessage = message;
       const keysToHide: string[] = [];
       for (const [key, item] of streamingMessagesRef.current) {
         if (shouldDropStreamForPersisted(item, message)) {
           keysToHide.push(key);
+          mergedMessage = mergePersistedWithStreamThinking(mergedMessage, item);
         }
       }
       keysToHide.forEach((key) => hiddenStreamKeysRef.current.add(key));
@@ -828,28 +863,30 @@ export function useStreamingMessages(conversationId?: string) {
       }
       if (!isActiveConversation(message.conversationId)) return;
       updateMessages((prev) => {
-        const byIdIndex = prev.findIndex((item) => sameMessageId(item, message));
+        const byIdIndex = prev.findIndex((item) => sameMessageId(item, mergedMessage));
         if (byIdIndex >= 0) {
           const next = [...prev];
-          next[byIdIndex] = message;
+          next[byIdIndex] = mergedMessage;
           return next;
         }
         const duplicateIndex = prev.findIndex((item) =>
-          samePersistedMessage(item, message) || sameTextMessage(item, message),
+          samePersistedMessage(item, mergedMessage) || sameTextMessage(item, mergedMessage),
         );
         if (duplicateIndex >= 0) {
           const next = [...prev];
-          next[duplicateIndex] = message;
+          next[duplicateIndex] = mergedMessage;
           return next;
         }
-        return [...prev, message];
+        return [...prev, mergedMessage];
       });
     },
     onMessageUpdated: (message) => {
+      let mergedMessage = message;
       const keysToHide: string[] = [];
       for (const [key, item] of streamingMessagesRef.current) {
         if (shouldDropStreamForPersisted(item, message)) {
           keysToHide.push(key);
+          mergedMessage = mergePersistedWithStreamThinking(mergedMessage, item);
         }
       }
       keysToHide.forEach((key) => hiddenStreamKeysRef.current.add(key));
@@ -870,22 +907,22 @@ export function useStreamingMessages(conversationId?: string) {
 
       if (!isActiveConversation(message.conversationId)) return;
       updateMessages((prev) => {
-        const byIdIndex = prev.findIndex((item) => item.id === message.id);
+        const byIdIndex = prev.findIndex((item) => item.id === mergedMessage.id);
         if (byIdIndex >= 0) {
           const next = [...prev];
-          next[byIdIndex] = message;
+          next[byIdIndex] = mergedMessage;
           return next;
         }
 
         const duplicateIndex = prev.findIndex((item) =>
-          samePersistedMessage(item, message) || sameTextMessage(item, message),
+          samePersistedMessage(item, mergedMessage) || sameTextMessage(item, mergedMessage),
         );
         if (duplicateIndex >= 0) {
           const next = [...prev];
-          next[duplicateIndex] = message;
+          next[duplicateIndex] = mergedMessage;
           return next;
         }
-        return [...prev, message];
+        return [...prev, mergedMessage];
       });
     },
     onToolCallStart: (payload) => appendToolProgress(payload),

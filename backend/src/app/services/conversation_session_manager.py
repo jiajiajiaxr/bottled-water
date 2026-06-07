@@ -61,6 +61,7 @@ class ConversationSessionManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._generation_ids: dict[str, str] = {}
+        self._queued_inputs: dict[str, list[dict[str, str | None]]] = {}
         self._pending_preview_message_ids: dict[str, list[str]] = {}
         self._session_factory = session_factory or AsyncSessionLocal
 
@@ -208,27 +209,29 @@ class ConversationSessionManager:
         if not session:
             raise SessionNotFoundError(f"Conversation {conversation_id} 没有活跃 Session")
 
-        status_info = session.get_status()
-        status = status_info.get("status") or ("running" if status_info.get("running") else "idle")
-
-        if status == "running":
-            # 运行中：通过 send_message 插队
+        task = self._running_tasks.get(conversation_id)
+        if task and not task.done():
+            # 运行中：进入 conversation 级队列，等当前轮结束后续跑
             logger.info("用户输入插队", conversation_id=conversation_id, content_preview=content[:50])
-            generation_id = self._generation_ids.get(conversation_id)
-            async for event in session.send_message(runtime_content or content):
-                if generation_id:
-                    await self._record_generation_event(conversation_id, generation_id, event)
+            self._queued_inputs.setdefault(conversation_id, []).append(
+                {
+                    "content": content,
+                    "runtime_content": runtime_content,
+                }
+            )
+            await WebSocketSink(conversation_id).emit(
+                RuntimeEvent(
+                    type="user.input_queued",
+                    payload={
+                        "conversation_id": conversation_id,
+                        "content_preview": content[:80],
+                    },
+                )
+            )
+            return
         else:
             # 已完成：重新启动 generation
             logger.info("用户输入重启 generation", conversation_id=conversation_id, content_preview=content[:50])
-            task = self._running_tasks.get(conversation_id)
-            if task and not task.done():
-                try:
-                    await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
-                except asyncio.TimeoutError as exc:
-                    raise SessionAlreadyRunningError(
-                        f"Conversation {conversation_id} is still finishing the previous generation"
-                    ) from exc
             await self.start_generation(conversation_id, content, runtime_content=runtime_content)
 
     async def cancel_generation(self, conversation_id: str) -> bool:
@@ -262,6 +265,7 @@ class ConversationSessionManager:
                     status="cancelled",
                     error="user_cancelled",
                 )
+            self._queued_inputs.pop(conversation_id, None)
 
             return True
         return False
@@ -287,9 +291,16 @@ class ConversationSessionManager:
         if self._generation_ids.get(conversation_id) != generation_id:
             return
         self._generation_ids.pop(conversation_id, None)
+        next_input = self._dequeue_next_input(conversation_id)
         try:
             asyncio.create_task(
-                self._finish_generation(conversation_id, generation_id, status=status, error=error)
+                self._finish_generation_and_continue(
+                    conversation_id,
+                    generation_id,
+                    status=status,
+                    error=error,
+                    next_input=next_input,
+                )
             )
         except RuntimeError:
             logger.warning("Generation 终态持久化任务创建失败", conversation_id=conversation_id)
@@ -308,6 +319,7 @@ class ConversationSessionManager:
         generation_id = self._generation_ids.pop(conversation_id, None)
         if generation_id:
             self._pending_preview_message_ids.pop(generation_id, None)
+        self._queued_inputs.pop(conversation_id, None)
         self._locks.pop(conversation_id, None)
 
         if session:
@@ -345,6 +357,15 @@ class ConversationSessionManager:
             )
         self._generation_ids[conversation_id] = generation_id
         return generation_id
+
+    def _dequeue_next_input(self, conversation_id: str) -> dict[str, str | None] | None:
+        queue = self._queued_inputs.get(conversation_id)
+        if not queue:
+            return None
+        next_input = queue.pop(0)
+        if not queue:
+            self._queued_inputs.pop(conversation_id, None)
+        return next_input
 
     async def _record_generation_event(
         self,
@@ -418,6 +439,47 @@ class ConversationSessionManager:
                 await db.commit()
                 await db.refresh(preview)
                 await sink.emit(RuntimeEvent(type="message:new", payload=message_to_dict(preview)))
+
+    async def _finish_generation_and_continue(
+        self,
+        conversation_id: str,
+        generation_id: str,
+        *,
+        status: str,
+        error: str | None,
+        next_input: dict[str, str | None] | None,
+    ) -> None:
+        await self._finish_generation(
+            conversation_id,
+            generation_id,
+            status=status,
+            error=error,
+        )
+        if not next_input:
+            return
+
+        next_content = str(next_input.get("content") or "").strip()
+        next_runtime_content = next_input.get("runtime_content")
+        if not next_content:
+            return
+
+        try:
+            await self.start_generation(
+                conversation_id,
+                next_content,
+                runtime_content=next_runtime_content,
+            )
+        except Exception as exc:
+            logger.error("排队输入续跑失败", conversation_id=conversation_id, error=str(exc))
+            await WebSocketSink(conversation_id).emit(
+                RuntimeEvent(
+                    type="generation:failed",
+                    payload={
+                        "conversation_id": conversation_id,
+                        "error": str(exc),
+                    },
+                )
+            )
 
     async def _persist_agent_report_message(
         self,

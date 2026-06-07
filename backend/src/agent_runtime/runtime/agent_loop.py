@@ -155,6 +155,30 @@ class AgentLoop:
         """当前状态（只读）"""
         return self._state
 
+    def _build_initial_thinking(self, task: str) -> str:
+        text = (task or "").strip()
+        compact = re.sub(r"\s+", "", text.lower())
+        if not compact:
+            return "我先确认这轮输入的目标，再决定是直接回答，还是结合上下文或工具继续处理。"
+
+        greetings = {"你好", "您好", "hi", "hello", "嗨", "哈喽", "在吗", "你好吗"}
+        if compact in greetings:
+            return "这是一个简单的问候场景，用户暂时没有提出具体任务；我先自然回应，并简要说明我当前能提供的帮助范围。"
+
+        if any(keyword in compact for keyword in ("pdf", "word", "docx", "ppt", "xlsx", "excel", "html", "网页", "文档", "报告", "方案")):
+            return "用户希望生成文档或网页类产物；我会先判断目标格式和交付形式，再决定是否调用对应工具，并在回复里说明生成结果和后续可操作项。"
+
+        if any(keyword in compact for keyword in ("总结", "概括", "提取", "摘要", "文件", "附件")):
+            return "这轮更像是文件理解或内容总结任务；我会先判断有没有附件或现成上下文，再提炼关键信息，最后输出简洁结论。"
+
+        if any(keyword in compact for keyword in ("代码", "运行", "脚本", "python", "javascript", "调试", "报错", "接口", "测试")):
+            return "这是代码或执行类请求；我会先判断是否需要调用沙箱、测试或其他工具，再根据执行结果组织最终回复。"
+
+        if any(keyword in compact for keyword in ("介绍", "解释", "分析", "怎么", "为什么", "会什么", "能做什么", "什么")):
+            return "用户需要解释、介绍或分析型回答；我会先识别问题焦点和期望深度，再组织成清晰、可直接阅读的自然语言回复。"
+
+        return "我正在分析这轮需求的目标、上下文和是否需要工具参与，然后给出最合适的回复路径。"
+
     def _set_state(self, new_state: AgentState):
         """设置状态并记录日志"""
         if self._state != new_state:
@@ -210,7 +234,15 @@ class AgentLoop:
 
         logger.info("Agent 执行开始", agent_id=self.agent.id, task=task[:50])
         self._set_state(AgentState.RUNNING)
-        await _emit("agent.thinking", {"task": task, "agent_id": self.agent.id})
+        await _emit(
+            "agent.thinking",
+            {
+                "task": task,
+                "agent_id": self.agent.id,
+                "agent_name": self.agent.name,
+                "thinking": self._build_initial_thinking(task),
+            },
+        )
 
         try:
             result = await self._execute_loop(

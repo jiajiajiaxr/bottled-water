@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import { api } from "@/api";
 import {
   useConversationStore,
@@ -10,6 +9,40 @@ import { useStreamingMessages } from "./useStreamingMessages";
 import type { ChatMessage, UploadedFile, MessageAttachment } from "@/types";
 import type { MessageBody, StreamAssistantHandlers } from "@/types/messages";
 
+function mergeThinkingFromLocal(
+  fetchedMessages: ChatMessage[],
+  localMessages: ChatMessage[],
+): ChatMessage[] {
+  return fetchedMessages.map((message) => {
+    if (message.role !== "assistant" || String(message.thinking || "").trim()) {
+      return message;
+    }
+    const local = localMessages.find(
+      (item) =>
+        item.id === message.id ||
+        (item.role === message.role &&
+          item.sender_id === message.sender_id &&
+          item.content.trim() &&
+          item.content.trim() === message.content.trim()),
+    );
+    const localThinking = String(
+      local?.thinking || local?.rawContent?._streamRawThinking || "",
+    ).trim();
+    if (!localThinking) {
+      return message;
+    }
+    return {
+      ...message,
+      thinking: localThinking,
+      rawContent: {
+        ...(message.rawContent || {}),
+        _streamThinkingEnabled: true,
+        _streamRawThinking: localThinking,
+      },
+    };
+  });
+}
+
 /**
  * 封装聊天消息发送与流式响应状态同步。
  */
@@ -17,7 +50,6 @@ export function useMessageOperations(userName?: string) {
   const { activeId } = useConversationStore();
   const { updateMessages } = useMessageStore();
   const streaming = useStreamingMessages(activeId);
-  const pendingSendConversationIds = useRef(new Set<string>());
 
   const send = async (
     content: string,
@@ -29,10 +61,6 @@ export function useMessageOperations(userName?: string) {
     if (!activeId) return;
 
     const conversationId = activeId;
-    if (pendingSendConversationIds.current.has(conversationId)) {
-      return;
-    }
-    pendingSendConversationIds.current.add(conversationId);
     const activeConversation = useConversationStore
       .getState()
       .conversations.find((item) => item.id === conversationId);
@@ -86,8 +114,6 @@ export function useMessageOperations(userName?: string) {
       );
     } catch {
       clearConversationRunning(conversationId);
-    } finally {
-      pendingSendConversationIds.current.delete(conversationId);
     }
   };
 
@@ -164,9 +190,13 @@ function createStreamHandlers(
       api.messages(conversationId)
         .then((nextMessages) => {
           if (useConversationStore.getState().activeId !== conversationId) return;
+          const localMessages = useMessageStore.getState().historyMessages;
           useMessageStore
             .getState()
-            .setMessagesForConversation(conversationId, nextMessages);
+            .setMessagesForConversation(
+              conversationId,
+              mergeThinkingFromLocal(nextMessages, localMessages),
+            );
         })
         .catch(() => {
           // keep current optimistic / streaming state if refresh fails
