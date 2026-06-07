@@ -440,7 +440,7 @@ class WorkflowUpdatePayload(BaseModel):
 
     mode: str | None = None
     nodes: list[dict[str, Any]] = Field(default_factory=list)
-    edges: list[list[str]] = Field(default_factory=list)
+    edges: list[list[str] | dict[str, Any]] = Field(default_factory=list)
     settings: dict[str, Any] = Field(default_factory=dict)
 
 

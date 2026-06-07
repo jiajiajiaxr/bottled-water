@@ -161,9 +161,9 @@ async def _create(db: AsyncSession, user: User, payload: dict) -> Conversation:
     if workspace_id:
         await _accessible_workspace(db, user, str(workspace_id))
     chat_type = (
-        payload.get("chat_type")
-        or payload.get("type")
-        or ("group" if payload.get("group") else "single")
+        payload.get("type")
+        if payload.get("type") is not None
+        else payload.get("chat_type") or ("group" if payload.get("group") else "single")
     )
     agents = (await db.scalars(select(Agent).where(Agent.deleted_at.is_(None)))).all()
     requested = payload.get("participant_agent_ids") or payload.get("agent_ids") or []

@@ -159,3 +159,53 @@ def test_workflow_preserves_dify_style_node_config_and_runtime_state(
     assert by_id["cond"]["output"]["matched_branch"] == "review"
     assert by_id["loop"]["type"] == "loop"
     assert by_id["loop"]["output"]["max_iterations"] == 4
+
+
+def test_workflow_update_accepts_canvas_object_edges_and_enables_runtime(
+    client: Any,
+    auth_headers: dict[str, str],
+) -> None:
+    created = client.post(
+        "/api/v1/conversations",
+        json={"title": "Canvas object edge group", "chat_type": "group"},
+        headers=auth_headers,
+    )
+    assert created.status_code == 200, created.text
+    conversation_id = unwrap(created.json())["id"]
+    workflow = {
+        "mode": "manual",
+        "nodes": [
+            {"id": "start", "title": "Start", "type": "start", "status": "ready"},
+            {"id": "end", "title": "End", "type": "end", "status": "ready"},
+        ],
+        "edges": [
+            {
+                "source": "start",
+                "target": "end",
+                "sourceHandle": "output",
+                "targetHandle": "input",
+                "config": {"source_handle": "output", "target_handle": "input"},
+            }
+        ],
+        "settings": {"enabled": True},
+    }
+
+    saved = client.patch(
+        f"/api/v1/conversations/{conversation_id}/workflow",
+        json=workflow,
+        headers=auth_headers,
+    )
+
+    assert saved.status_code == 200, saved.text
+    saved_body = unwrap(saved.json())
+    assert saved_body["settings"]["enabled"] is True
+    assert saved_body["edges"][0]["from"] == "start"
+    assert saved_body["edges"][0]["to"] == "end"
+    assert saved_body["edges"][0]["sourceHandle"] == "output"
+
+    conversations = client.get("/api/v1/conversations", headers=auth_headers)
+    assert conversations.status_code == 200, conversations.text
+    current = next(item for item in unwrap(conversations.json())["items"] if item["id"] == conversation_id)
+    assert current["workflow_enabled"] is True
+    assert current["scheduling_strategy"] == "workflow"
+    assert current["runtime_mode"] == "legacy"

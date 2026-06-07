@@ -20,6 +20,7 @@ import {
   RobotOutlined,
 } from "@ant-design/icons";
 import { api } from "@/api";
+import { useConversationStore } from "@/store";
 import type { Conversation, ConversationWorkflow, WorkflowRun } from "@/types";
 
 interface WorkflowBoardPanelProps {
@@ -28,6 +29,7 @@ interface WorkflowBoardPanelProps {
 
 export function WorkflowBoardPanel({ activeConversation }: WorkflowBoardPanelProps) {
   const { message } = AntApp.useApp();
+  const updateConversation = useConversationStore((state) => state.updateConversation);
 
   const [conversationWorkflow, setConversationWorkflow] =
     useState<ConversationWorkflow>();
@@ -143,6 +145,13 @@ export function WorkflowBoardPanel({ activeConversation }: WorkflowBoardPanelPro
                     activeConversation.id,
                     workflow,
                   );
+                  const enabled = Boolean(saved.settings?.enabled);
+                  const updated = await api.updateConversation(activeConversation.id, {
+                    scheduling_strategy: enabled ? "workflow" : "tech_lead",
+                    runtime_mode: enabled ? "legacy" : "actor",
+                    workflow_enabled: enabled,
+                  });
+                  updateConversation(activeConversation.id, updated);
                   setConversationWorkflow(saved);
                   setWorkflowJson(JSON.stringify(saved, null, 2));
                   message.success("工作流已保存");
