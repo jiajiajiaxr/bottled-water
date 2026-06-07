@@ -7,7 +7,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.frontend
     ports:
-      - "80:80"
+      - "8080:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -31,7 +31,7 @@ services:
     networks:
       - agenthub
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8888/health')"]
+      test: ["CMD", "uv", "run", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
       retries: 5
