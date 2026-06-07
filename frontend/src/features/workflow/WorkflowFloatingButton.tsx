@@ -10,6 +10,7 @@ export function WorkflowFloatingButton({
   loading,
   badgeCount,
   placement = "right",
+  testId,
   onClick,
 }: {
   title: string;
@@ -20,6 +21,7 @@ export function WorkflowFloatingButton({
   loading?: boolean;
   badgeCount?: number;
   placement?: "left" | "right";
+  testId?: string;
   onClick: () => void;
 }) {
   return (
@@ -33,6 +35,7 @@ export function WorkflowFloatingButton({
           disabled={disabled}
           loading={loading}
           icon={icon}
+          data-testid={testId}
           onPointerDown={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => {

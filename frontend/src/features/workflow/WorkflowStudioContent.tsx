@@ -6,7 +6,7 @@ import { layoutWorkflowPositions } from "../../lib/workflowLayout";
 import { conversationRoutePath } from "../../lib/workflowRoutes";
 import { useConversationStore } from "../../store";
 import type { ConversationWorkflow } from "../../types";
-import { workflowSettings } from "./utils";
+import { normalizeWorkflowForRun, workflowSettings } from "./utils";
 import { validateWorkflowDefinition } from "./validation";
 import { WorkflowCanvasPanel } from "./WorkflowCanvasPanel";
 import {
@@ -59,17 +59,50 @@ export function WorkflowStudioContent({
       .map((issue) => issue.message)
       .join("；")}`;
 
-  const patchWorkflowSettings = (patch: Record<string, unknown>) => {
+  const persistWorkflow = async (workflow: ConversationWorkflow) => {
+    const saved = await api.saveConversationWorkflow(conversationId, workflow);
+    const enabled = Boolean(workflowSettings(saved).enabled);
+    const patch = {
+      scheduling_strategy: enabled ? "workflow" : "tech_lead",
+      runtime_mode: enabled ? "legacy" : "actor",
+      workflow_enabled: enabled,
+    } as const;
+
+    if (typeof api.updateConversation === "function") {
+      const conversation = await api.updateConversation(conversationId, patch);
+      updateConversation(conversationId, conversation);
+    } else {
+      updateConversation(conversationId, patch);
+    }
+
+    studio.setWorkflowDraft(saved);
+    return saved;
+  };
+
+  const patchWorkflowSettings = async (patch: Record<string, unknown>) => {
     if (!studio.workflow) return;
     const { output_mode: outputMode, ...settingsPatch } = patch;
-    studio.setWorkflowDraft({
+    const nextWorkflow = {
       ...studio.workflow,
       ...(typeof outputMode === "string" ? { output_mode: outputMode } : {}),
       settings: {
         ...workflowSettings(studio.workflow),
         ...settingsPatch,
       },
-    });
+    };
+    studio.setWorkflowDraft(nextWorkflow);
+    if ("enabled" in settingsPatch) {
+      try {
+        await persistWorkflow(layoutWorkflowPositions(nextWorkflow));
+        onSuccess(
+          Boolean(settingsPatch.enabled)
+            ? "Workflow chat enabled"
+            : "Workflow chat disabled",
+        );
+      } catch (error) {
+        onError(error instanceof Error ? error.message : "Workflow setting save failed");
+      }
+    }
   };
 
   const saveWorkflow = async () => {
@@ -91,19 +124,7 @@ export function WorkflowStudioContent({
       }
     }
 
-    const saved = await api.saveConversationWorkflow(conversationId, parsed);
-    const enabled = Boolean(workflowSettings(saved).enabled);
-
-    if (typeof api.updateConversation === "function") {
-      const conversation = await api.updateConversation(conversationId, {
-        scheduling_strategy: enabled ? "workflow" : "tech_lead",
-        runtime_mode: enabled ? "legacy" : "actor",
-        workflow_enabled: enabled,
-      });
-      updateConversation(conversationId, conversation);
-    }
-
-    studio.setWorkflowDraft(saved);
+    await persistWorkflow(parsed);
     onSuccess("工作流已保存");
   };
 
@@ -134,11 +155,13 @@ export function WorkflowStudioContent({
   const runWorkflow = async () => {
     if (!studio.workflow) return;
 
-    const workflowToRun = studio.editingNode
-      ? layoutWorkflowPositions(
-          (await studio.saveWorkflowNode()) ?? studio.workflow,
-        )
-      : studio.workflow;
+    const workflowToRun = normalizeWorkflowForRun(
+      studio.editingNode
+        ? layoutWorkflowPositions(
+            (await studio.saveWorkflowNode()) ?? studio.workflow,
+          )
+        : studio.workflow,
+    );
 
     const nextValidationErrors = validateWorkflowDefinition(workflowToRun).filter(
       (issue) => issue.severity === "error",

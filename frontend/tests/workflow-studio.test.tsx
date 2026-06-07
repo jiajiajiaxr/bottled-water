@@ -22,6 +22,7 @@ vi.mock("../src/api", () => ({
     skills: vi.fn(),
     mcpServers: vi.fn(),
     saveConversationWorkflow: vi.fn(),
+    updateConversation: vi.fn(),
     generateConversationWorkflow: vi.fn(),
     startWorkflowRun: vi.fn(),
   },
@@ -104,6 +105,11 @@ const generatedWorkflow: ConversationWorkflow = {
   ),
 };
 
+const disabledWorkflow: ConversationWorkflow = {
+  ...workflow,
+  settings: { ...workflow.settings, enabled: false },
+};
+
 const run: WorkflowRun = {
   id: "run1",
   conversation_id: "c1",
@@ -151,6 +157,12 @@ describe("embedded workflow studio", () => {
     vi.mocked(api.skills).mockResolvedValue([]);
     vi.mocked(api.mcpServers).mockResolvedValue([]);
     vi.mocked(api.saveConversationWorkflow).mockResolvedValue(workflow);
+    vi.mocked(api.updateConversation).mockResolvedValue({
+      ...conversation,
+      scheduling_strategy: "workflow",
+      runtime_mode: "legacy",
+      workflow_enabled: true,
+    });
     vi.mocked(api.generateConversationWorkflow).mockResolvedValue(generatedWorkflow);
     vi.mocked(api.startWorkflowRun).mockResolvedValue(run);
   });
@@ -176,17 +188,50 @@ describe("embedded workflow studio", () => {
       expect(api.saveConversationWorkflow).toHaveBeenCalledWith("c1", expect.any(Object));
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "AI生成" }));
+    fireEvent.click(screen.getByRole("button", { name: /AI\s*生成/ }));
     fireEvent.click(screen.getByTestId("workflow-generate"));
     expect(await screen.findByText("Generated Agent")).toBeInTheDocument();
     expect(api.generateConversationWorkflow).toHaveBeenCalledWith("c1", "");
 
     fireEvent.click(screen.getByRole("button", { name: "工作流设置" }));
+    const workflowRunsBeforeRun = vi.mocked(api.workflowRuns).mock.calls.length;
     fireEvent.click(screen.getByTestId("workflow-run"));
     await waitFor(() => {
       expect(api.startWorkflowRun).toHaveBeenCalledWith("c1", expect.any(Object));
     });
-    fireEvent.click(screen.getByRole("button", { name: "运行日志" }));
-    expect((await screen.findAllByText("running")).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(api.workflowRuns).toHaveBeenCalledTimes(workflowRunsBeforeRun + 1);
+    });
+    expect(api.workflowRuns).toHaveBeenCalledWith("c1");
+  });
+
+  it("persists workflow chat mode when the enabled switch is clicked", async () => {
+    vi.mocked(api.conversationWorkflow).mockResolvedValue(disabledWorkflow);
+    vi.mocked(api.saveConversationWorkflow).mockImplementation(async (_id, next) => next);
+
+    renderEmbeddedWorkflow();
+
+    await screen.findByTestId("workflow-canvas");
+    fireEvent.click(screen.getByTestId("workflow-settings"));
+    fireEvent.click(screen.getByTestId("workflow-enabled-switch"));
+
+    await waitFor(() => {
+      expect(api.saveConversationWorkflow).toHaveBeenCalledWith(
+        "c1",
+        expect.objectContaining({
+          settings: expect.objectContaining({ enabled: true }),
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(api.updateConversation).toHaveBeenCalledWith(
+        "c1",
+        expect.objectContaining({
+          scheduling_strategy: "workflow",
+          runtime_mode: "legacy",
+          workflow_enabled: true,
+        }),
+      );
+    });
   });
 });

@@ -2,14 +2,23 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models import Conversation, WorkflowRun, utcnow
 from app.services.workflows.graph import WorkflowGraph
 
 _RUN_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def mark_json_field_modified(model: Any, field_name: str) -> None:
+    try:
+        flag_modified(model, field_name)
+    except Exception:
+        return
 
 
 def _run_lock(run_id: str) -> asyncio.Lock:
@@ -40,10 +49,11 @@ def _sync_workflow_run(conversation: Conversation, run: WorkflowRun) -> None:
             "run_id": run.id,
             "status": run.status,
             "progress": run.progress,
-            "node_states": run.node_states or [],
+            "node_states": deepcopy(run.node_states or []),
             "updated_at": utcnow().isoformat(),
         },
     }
+    mark_json_field_modified(conversation, "extra")
 
 
 def build_node_states(workflow: dict[str, Any]) -> list[dict[str, Any]]:
@@ -83,19 +93,21 @@ def build_edge_states(workflow: dict[str, Any]) -> list[dict[str, Any]]:
 
 def append_run_event(run: WorkflowRun, event_type: str, payload: dict[str, Any] | None = None) -> None:
     run.events = [
-        *(run.events or []),
+        *deepcopy(run.events or []),
         {"type": event_type, "at": utcnow().isoformat(), **(payload or {})},
     ][-300:]
+    mark_json_field_modified(run, "events")
 
 
 def set_edge_state(run: WorkflowRun, source: str, target: str, status: str) -> None:
-    states = list(run.edge_states or [])
+    states = deepcopy(run.edge_states or [])
     for state in states:
         if str(state.get("from")) == source and str(state.get("to")) == target:
             state["status"] = status
             state["updated_at"] = utcnow().isoformat()
             break
     run.edge_states = states
+    mark_json_field_modified(run, "edge_states")
 
 
 def mark_workflow_completed(conversation: Conversation, run: WorkflowRun, status: str = "completed") -> None:
@@ -118,7 +130,7 @@ def _set_workflow_node_state(
     message: str | None = None,
     retry_count: int | None = None,
 ) -> None:
-    states = list(run.node_states or [])
+    states = deepcopy(run.node_states or [])
     now = utcnow().isoformat()
     for state in states:
         if state.get("id") != node_id:
@@ -139,12 +151,19 @@ def _set_workflow_node_state(
             state["message"] = message
         if status in {"running", "reviewing"} and not state.get("started_at"):
             state["started_at"] = now
-        if status in {"completed", "succeeded", "failed", "skipped"}:
+        if status in {"completed", "succeeded", "failed", "error", "skipped"}:
             state["completed_at"] = now
         break
     run.node_states = states
+    mark_json_field_modified(run, "node_states")
     total = max(1, len(states))
-    done = len([state for state in states if state.get("status") in {"completed", "succeeded", "skipped"}])
+    done = len(
+        [
+            state
+            for state in states
+            if state.get("status") in {"completed", "succeeded", "skipped", "failed", "error"}
+        ]
+    )
     if status == "failed":
         run.progress = max(run.progress or 0, int(done / total * 100))
     else:

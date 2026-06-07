@@ -22,17 +22,35 @@ export const WORKFLOW_NODE_TYPE_LABEL: Record<string, string> = {
   end: "End",
 };
 
+const WORKFLOW_NODE_TYPES = new Set(Object.keys(WORKFLOW_NODE_TYPE_LABEL));
+
+function normalizedNodeText(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 export function workflowNodeType(node: WorkflowNode) {
-  return (
-    node.type ||
-    (node.role === "reviewer"
-      ? "review"
-      : node.role === "artifact"
-        ? "artifact"
-        : node.role === "input"
-          ? "start"
-          : "agent")
-  );
+  const id = normalizedNodeText(node.id);
+  const role = normalizedNodeText(node.role);
+  const type = normalizedNodeText(node.type);
+  const title = normalizedNodeText(node.title);
+
+  if (id === "start" || role === "start" || role === "input" || title === "start") {
+    return "start";
+  }
+  if (id === "end" || role === "end" || title === "end") {
+    return "end";
+  }
+  if (WORKFLOW_NODE_TYPES.has(type)) return type;
+  if (role === "reviewer" || role === "review") return "review";
+  if (role === "artifact" || role === "deploy" || role === "delivery") {
+    return "artifact";
+  }
+  if (role === "tool") return "tool";
+  if (role === "skill") return "skill";
+  if (role === "mcp") return "mcp";
+  if (role === "condition") return "condition";
+  if (role === "loop") return "loop";
+  return "agent";
 }
 
 export function createWorkflowNode(type: string, agent?: Agent): WorkflowNode {

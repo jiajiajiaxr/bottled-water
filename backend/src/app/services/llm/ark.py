@@ -356,17 +356,17 @@ class ArkClient:
                                     if "arguments" in func:
                                         acc["function"].setdefault("arguments", "")
                                         acc["function"]["arguments"] += func["arguments"]
-                            finish_reason = choice.get("finish_reason")
-                            if finish_reason == "tool_calls":
-                                yield LLMStreamEvent(
-                                    type="tool_calls",
-                                    tool_calls=[
-                                        {"id": v.get("id", ""), "type": v.get("type", "function"), "function": v.get("function", {})}
-                                        for v in accumulated_tool_calls.values()
-                                        if v.get("function", {}).get("name")
-                                    ],
-                                    model=model,
-                                )
+                        if choice.get("finish_reason") == "tool_calls":
+                            yield LLMStreamEvent(
+                                type="tool_calls",
+                                tool_calls=[
+                                    {"id": v.get("id", ""), "type": v.get("type", "function"), "function": v.get("function", {})}
+                                    for v in accumulated_tool_calls.values()
+                                    if v.get("function", {}).get("name")
+                                ],
+                                model=model,
+                            )
+                            accumulated_tool_calls = {}
         yield LLMStreamEvent(type="done", usage=usage or {}, model=model)
 
     async def _mock_chat(self, messages: list[dict[str, str]], *, purpose: str) -> LLMResult:

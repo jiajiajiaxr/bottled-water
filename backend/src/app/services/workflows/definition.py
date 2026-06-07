@@ -59,6 +59,13 @@ WORKFLOW_REPLAN_PATTERN = re.compile(r"(workflow|canvas|流程|画布|编排|规
 
 
 def _workflow_node_type(node: dict[str, Any]) -> str:
+    node_id = str(node.get("id") or "").lower().strip()
+    title = str(node.get("title") or node.get("name") or "").lower().strip()
+    role = str(node.get("role") or "").lower().strip()
+    if node_id == "start" or title == "start" or role in {"input", "start"}:
+        return "start"
+    if node_id == "end" or title == "end" or role == "end":
+        return "end"
     raw = str(node.get("type") or node.get("role") or "agent").lower().strip()
     if raw in WORKFLOW_NODE_TYPES:
         return raw

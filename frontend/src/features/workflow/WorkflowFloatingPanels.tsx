@@ -150,6 +150,9 @@ export function WorkflowFloatingPanels({
             active={activePanel === item.key}
             disabled={item.disabled}
             loading={item.key === "ai" && generating}
+            testId={
+              item.key === "settings" ? "workflow-settings" : undefined
+            }
             badgeCount={
               item.key === "settings" && validationErrorCount
                 ? validationErrorCount

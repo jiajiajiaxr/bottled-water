@@ -7,11 +7,15 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Agent, Artifact, Conversation, FileAsset, McpServer, Skill, ToolDefinition, Workspace
+from app.services.agents.capability_permissions import (
+    agent_uses_default_full_permissions,
+    configured_tool_names,
+)
 from app.services.context.compression import trim_text
 from app.services.context.memory import workspace_memory_text
 from app.services.context.variables import artifact_reference_scope
 from app.services.tools.builtins.registry import BUILTIN_TOOLS
-from app.services.tools.permissions import normalize_tool_names
+from app.services.tools.catalog import sync_builtin_tool_definitions
 
 
 @dataclass
@@ -142,9 +146,13 @@ def _artifacts(db: Session, conversation: Conversation) -> list[dict[str, Any]]:
 
 
 def _authorized_tools(db: Session, agent: Agent | None) -> list[dict[str, Any]]:
-    allowed = normalize_tool_names((agent.config or {}).get("tools") or []) if agent else []
+    if not agent:
+        return []
+    default_all = agent_uses_default_full_permissions(agent)
+    allowed = list(BUILTIN_TOOLS) if default_all else configured_tool_names(agent)
     if not allowed:
         return []
+    sync_builtin_tool_definitions(db)
     rows = db.scalars(
         select(ToolDefinition)
         .where(
@@ -153,7 +161,7 @@ def _authorized_tools(db: Session, agent: Agent | None) -> list[dict[str, Any]]:
             (ToolDefinition.name.in_(allowed)) | (ToolDefinition.id.in_(allowed)),
         )
         .order_by(ToolDefinition.name.asc())
-        .limit(20)
+        .limit(40)
     ).all()
     items = [
         {
@@ -169,7 +177,7 @@ def _authorized_tools(db: Session, agent: Agent | None) -> list[dict[str, Any]]:
         builtin = BUILTIN_TOOLS.get(name)
         if builtin and name not in seen:
             items.append({"id": name, "name": name, "description": builtin.description, "type": "builtin"})
-    return items[:20]
+    return items[:40]
 
 
 def _authorized_skills(db: Session, agent: Agent | None) -> list[dict[str, Any]]:

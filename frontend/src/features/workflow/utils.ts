@@ -1,4 +1,5 @@
-import type { ConversationWorkflow } from "../../types";
+import { workflowNodeType } from "../../lib/workflow";
+import type { ConversationWorkflow, WorkflowNode } from "../../types";
 
 export type WorkflowEdge = ConversationWorkflow["edges"][number];
 
@@ -53,6 +54,36 @@ export function workflowSettings(workflow?: ConversationWorkflow): Record<string
   enabled: boolean;
 } {
   return { enabled: false, ...(workflow?.settings ?? {}) };
+}
+
+export function workflowNodeLabel(node: WorkflowNode) {
+  const title = typeof node.title === "string" ? node.title.trim() : "";
+  if (title && title.toLowerCase() !== "undefined") return title;
+  return node.id || workflowNodeType(node);
+}
+
+export function normalizeWorkflowForRun(
+  workflow: ConversationWorkflow,
+): ConversationWorkflow {
+  return {
+    ...workflow,
+    nodes: (workflow.nodes ?? []).map((node) => {
+      const type = workflowNodeType(node);
+      const config = node.config ?? {};
+      const agentId =
+        type === "agent" || type === "review"
+          ? String(node.agent_id || config.agent_id || "").trim()
+          : "";
+      return {
+        ...node,
+        title: workflowNodeLabel(node),
+        type,
+        role: type,
+        ...(agentId ? { agent_id: agentId } : {}),
+        config: agentId ? { ...config, agent_id: agentId } : config,
+      };
+    }),
+  };
 }
 
 export function statusTagColor(status?: string) {

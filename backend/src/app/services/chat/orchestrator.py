@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import json
 import logging
 
@@ -25,7 +26,13 @@ from app.services.workflows.definition import (
 )
 from app.services.workflows.engine import WorkflowEngine
 from app.services.workflows.planning import _maybe_replan_workflow
-from app.services.workflows.runtime import _sync_workflow_run, build_edge_states, build_node_states
+from app.services.workflows.runtime import (
+    _sync_workflow_run,
+    append_run_event,
+    build_edge_states,
+    build_node_states,
+    mark_json_field_modified,
+)
 from app.services.workflows.validator import (
     format_workflow_validation_message,
     validate_workflow_graph,
@@ -468,17 +475,19 @@ async def _complete_master_task(
 
 
 def _mark_workflow_completed(conversation: Conversation, workflow_run: WorkflowRun) -> None:
-    for state in workflow_run.node_states or []:
+    states = deepcopy(workflow_run.node_states or [])
+    for state in states:
         if state.get("type") == "end":
             state["status"] = "completed"
             state["progress"] = 100
             state["started_at"] = state.get("started_at") or utcnow().isoformat()
             state["completed_at"] = utcnow().isoformat()
-    workflow_run.node_states = list(workflow_run.node_states or [])
+    workflow_run.node_states = states
+    mark_json_field_modified(workflow_run, "node_states")
     workflow_run.status = "completed"
     workflow_run.progress = 100
     workflow_run.completed_at = utcnow()
-    workflow_run.events = [*(workflow_run.events or []), {"type": "run.completed", "at": utcnow().isoformat()}][-200:]
+    append_run_event(workflow_run, "run.completed")
     _sync_workflow_run(conversation, workflow_run)
 
 

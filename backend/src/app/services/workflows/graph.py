@@ -18,11 +18,15 @@ class Node:
     def from_dict(cls, value: dict[str, Any], index: int = 0) -> "Node":
         config = dict(value.get("config") if isinstance(value.get("config"), dict) else {})
         agent_id = value.get("agent_id") or config.get("agent_id")
+        node_id = str(value.get("id") or f"node-{index + 1}")
+        title = str(value.get("title") or value.get("name") or f"Node {index + 1}")
+        role = str(value.get("role") or value.get("type") or "agent")
+        node_type = _normalize_node_type(value, node_id=node_id, title=title, role=role)
         return cls(
-            id=str(value.get("id") or f"node-{index + 1}"),
-            type=str(value.get("type") or value.get("role") or "agent").lower(),
-            title=str(value.get("title") or value.get("name") or f"Node {index + 1}"),
-            role=str(value.get("role") or value.get("type") or "agent"),
+            id=node_id,
+            type=node_type,
+            title=title,
+            role=node_type if role == "agent" and node_type in {"start", "end"} else role,
             config=config,
             agent_id=str(agent_id) if agent_id else None,
             meta=str(value.get("meta") or value.get("description") or ""),
@@ -38,6 +42,28 @@ class Node:
             "meta": self.meta,
             **({"agent_id": self.agent_id} if self.agent_id else {}),
         }
+
+
+def _normalize_node_type(
+    value: dict[str, Any],
+    *,
+    node_id: str,
+    title: str,
+    role: str,
+) -> str:
+    normalized_id = node_id.strip().lower()
+    normalized_title = title.strip().lower()
+    normalized_role = role.strip().lower()
+    if normalized_id == "start" or normalized_title == "start" or normalized_role in {"input", "start"}:
+        return "start"
+    if normalized_id == "end" or normalized_title == "end" or normalized_role == "end":
+        return "end"
+    raw = str(value.get("type") or value.get("role") or "agent").lower().strip()
+    if raw in {"reviewer", "review"}:
+        return "review"
+    if raw in {"deploy", "delivery", "publish"}:
+        return "artifact"
+    return raw or "agent"
 
 
 @dataclass(frozen=True)

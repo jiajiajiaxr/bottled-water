@@ -106,6 +106,17 @@ export function useWorkflowStudio({
     })),
   );
 
+  const mergeWorkflowRuns = (incoming: WorkflowRun[]) => {
+    setWorkflowRuns((current) => {
+      const incomingIds = new Set(incoming.map((run) => run.id));
+      const pendingLocalRuns = current.filter(
+        (run) =>
+          ["running", "queued"].includes(run.status) && !incomingIds.has(run.id),
+      );
+      return [...pendingLocalRuns, ...incoming];
+    });
+  };
+
   const setWorkflowDraft = (next: ConversationWorkflow) => {
     const normalized = layoutWorkflowPositions(next);
     setWorkflow(normalized);
@@ -188,10 +199,21 @@ export function useWorkflowStudio({
 
   useEffect(() => {
     if (!latestRunStatus || !["running", "queued"].includes(latestRunStatus)) return;
-    const timer = window.setInterval(() => {
-      api.workflowRuns(conversationId).then(setWorkflowRuns).catch(() => undefined);
-    }, 2500);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    const refreshRuns = () => {
+      api
+        .workflowRuns(conversationId)
+        .then((runs) => {
+          if (!cancelled) mergeWorkflowRuns(runs);
+        })
+        .catch(() => undefined);
+    };
+    refreshRuns();
+    const timer = window.setInterval(refreshRuns, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [conversationId, latestRunId, latestRunStatus]);
 
   const openNodeEditor = (node: WorkflowNode) => {

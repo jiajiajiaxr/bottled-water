@@ -759,19 +759,19 @@ def mcp_invocation_to_dict(invocation: McpToolInvocation) -> dict[str, Any]:
 def workflow_run_to_dict(run: WorkflowRun) -> dict[str, Any]:
     return {
         "id": run.id,
-        "conversation_id": run.conversation_id,
-        "trigger_message_id": run.trigger_message_id,
-        "status": run.status,
-        "mode": run.mode,
-        "workflow_snapshot": run.workflow_snapshot or {},
-        "node_states": run.node_states or [],
-        "edge_states": run.edge_states or [],
-        "events": run.events or [],
-        "progress": run.progress,
-        "started_at": iso(run.started_at),
-        "completed_at": iso(run.completed_at),
-        "created_at": iso(run.created_at),
-        "updated_at": iso(run.updated_at),
+        "conversation_id": getattr(run, "conversation_id", None),
+        "trigger_message_id": getattr(run, "trigger_message_id", None),
+        "status": getattr(run, "status", ""),
+        "mode": getattr(run, "mode", ""),
+        "workflow_snapshot": getattr(run, "workflow_snapshot", {}) or {},
+        "node_states": getattr(run, "node_states", []) or [],
+        "edge_states": getattr(run, "edge_states", []) or [],
+        "events": getattr(run, "events", []) or [],
+        "progress": getattr(run, "progress", 0),
+        "started_at": iso(getattr(run, "started_at", None)),
+        "completed_at": iso(getattr(run, "completed_at", None)),
+        "created_at": iso(getattr(run, "created_at", None)),
+        "updated_at": iso(getattr(run, "updated_at", None)),
     }
 
 

@@ -4,6 +4,7 @@ from typing import Any
 
 from app.models import WorkflowRun
 from app.services.realtime.event_bus import event_bus
+from app.services.serialization import workflow_run_to_dict
 
 
 async def publish_workflow_event(channel: str, event_type: str, payload: dict[str, Any]) -> None:
@@ -11,7 +12,8 @@ async def publish_workflow_event(channel: str, event_type: str, payload: dict[st
 
 
 async def publish_run_updated(channel: str, run: WorkflowRun, node_id: str | None = None) -> None:
-    payload: dict[str, Any] = {"run_id": run.id, "status": run.status, "progress": run.progress}
+    payload: dict[str, Any] = workflow_run_to_dict(run)
+    payload["run_id"] = run.id
     if node_id:
         payload["node_id"] = node_id
     await publish_workflow_event(channel, "workflow:run_updated", payload)

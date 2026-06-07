@@ -219,6 +219,48 @@ def test_context_builder_orders_context_before_latest_input() -> None:
     assert latest_message == "使用资源"
 
 
+def test_default_capability_context_matches_full_tool_catalog() -> None:
+    db = _memory_session()
+    user, conversation = _user_conversation(db)
+    agent = _agent(db, user)
+    message = _message(conversation, user, "调用 Claude Code")
+    db.add(message)
+    db.commit()
+
+    bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=message,
+        agent=agent,
+        system_prompt="系统提示",
+        prompt="调用 Claude Code",
+        mode="direct",
+    )
+
+    names = {item["name"] for item in bundle.sections["workspace"]["authorized_tools"]}
+    assert "external_agent.run_claude_code" in names
+
+
+def test_explicit_empty_capability_context_stays_empty() -> None:
+    db = _memory_session()
+    user, conversation = _user_conversation(db)
+    agent = _agent(db, user)
+    agent.config = {"tools": [], "capability_permissions_initialized": True}
+    message = _message(conversation, user, "调用 Claude Code")
+    db.add(message)
+    db.commit()
+
+    bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=message,
+        agent=agent,
+        system_prompt="系统提示",
+        prompt="调用 Claude Code",
+        mode="direct",
+    )
+
+    assert bundle.sections["workspace"]["authorized_tools"] == []
+
+
 def test_group_history_preserves_agent_speaker_names() -> None:
     db = _memory_session()
     user = _user(db)

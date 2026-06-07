@@ -51,6 +51,7 @@ export function WorkflowSettingsCard({
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="停用"
+          data-testid="workflow-enabled-switch"
           onChange={(checked) => onPatchSettings({ enabled: checked })}
         />
       </div>

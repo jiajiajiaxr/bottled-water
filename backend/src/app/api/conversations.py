@@ -7,6 +7,7 @@ Conversations API
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import json
 import re
 from typing import Any
@@ -56,8 +57,16 @@ from app.services.tasks.service import create_task_for_prompt
 from app.services.model_config_resolver import create_provider_from_db
 from app.services.workflows.definition import _conversation_agents
 from app.services.workflows.engine import WorkflowEngine
-from app.services.workflows.runtime import _sync_workflow_run, build_edge_states, build_node_states
+from app.services.workflows.runtime import (
+    _set_workflow_node_state,
+    _sync_workflow_run,
+    append_run_event,
+    build_edge_states,
+    build_node_states,
+    mark_json_field_modified,
+)
 from app.services.workflows.validator import format_workflow_validation_message, validate_workflow_graph
+from model_provider.core.interfaces import ChatMessage
 
 router = APIRouter(tags=["conversations"])
 compat_router = APIRouter(tags=["conversations-compat"])
@@ -277,27 +286,182 @@ def _parse_json_object(text: str) -> dict | None:
         return None
 
 
+def _is_mock_model_provider(provider: Any) -> bool:
+    return (
+        provider is None
+        or provider.__class__.__name__.lower().startswith("_mock")
+        or str(getattr(provider, "model", "")).lower() == "mock"
+    )
+
+
+def _looks_like_workflow(value: Any) -> bool:
+    return isinstance(value, dict) and isinstance(value.get("nodes"), list)
+
+
+def _extract_workflow_object(value: Any) -> dict | None:
+    if _looks_like_workflow(value):
+        return value
+    if isinstance(value, dict) and _looks_like_workflow(value.get("workflow")):
+        return value["workflow"]
+    return None
+
+
+def _agent_text(agent: Agent) -> str:
+    values = [
+        agent.id,
+        agent.name,
+        agent.type,
+        agent.description,
+    ]
+    extra = agent.extra if isinstance(agent.extra, dict) else {}
+    values.extend(str(extra.get(key) or "") for key in ("display_name", "provider"))
+    for item in agent.capabilities or []:
+        if isinstance(item, dict):
+            values.extend(str(item.get(key) or "") for key in ("label", "name", "category"))
+        elif item:
+            values.append(str(item))
+    return " ".join(value for value in values if value).lower()
+
+
+def _node_text(node: dict, config: dict) -> str:
+    values = [
+        node.get("id"),
+        node.get("title"),
+        node.get("name"),
+        node.get("role"),
+        node.get("type"),
+        node.get("meta"),
+        node.get("description"),
+        config.get("agent_name"),
+        config.get("agent_type"),
+        config.get("role"),
+    ]
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    values.extend(data.get(key) for key in ("title", "label", "agent_name", "agent_type"))
+    return " ".join(str(value) for value in values if value).lower()
+
+
+def _agent_hint_values(node: dict, config: dict) -> list[str]:
+    values: list[Any] = [
+        node.get("agent_id"),
+        node.get("agentId"),
+        node.get("assigned_agent_id"),
+        node.get("agent"),
+        config.get("agent_id"),
+        config.get("agentId"),
+        config.get("assigned_agent_id"),
+    ]
+    for container in (node.get("data"), config.get("agent")):
+        if isinstance(container, dict):
+            values.extend(container.get(key) for key in ("id", "agent_id", "agentId", "name"))
+    return [str(value).strip() for value in values if str(value or "").strip()]
+
+
+def _resolve_workflow_agent_id(
+    node_type: str,
+    node: dict,
+    config: dict,
+    agents: list[Agent],
+    used_agent_ids: set[str],
+) -> str | None:
+    if node_type not in {"agent", "review"}:
+        return None
+    if not agents:
+        return None
+
+    by_id = {agent.id: agent for agent in agents}
+    hints = _agent_hint_values(node, config)
+    for hint in hints:
+        if hint in by_id:
+            return hint
+
+    lowered_hints = [hint.lower() for hint in hints]
+    for agent in agents:
+        agent_label = _agent_text(agent)
+        if any(hint and (hint in agent_label or agent.id.lower().startswith(hint)) for hint in lowered_hints):
+            return agent.id
+
+    text = _node_text(node, config)
+    scored: list[tuple[int, int, Agent]] = []
+    for index, agent in enumerate(agents):
+        score = 0
+        agent_label = _agent_text(agent)
+        if node_type == "review" and agent.type == "reviewer":
+            score += 8
+        if node_type == "agent" and agent.type != "reviewer":
+            score += 2
+        if agent.type and agent.type.lower() in text:
+            score += 6
+        if agent.name and agent.name.lower() in text:
+            score += 10
+        for token in text.split():
+            if len(token) >= 3 and token in agent_label:
+                score += 1
+        if agent.id in used_agent_ids:
+            score -= 3
+        scored.append((score, -index, agent))
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    if scored and scored[0][0] > 0:
+        return scored[0][2].id
+
+    preferred = [
+        agent
+        for agent in agents
+        if agent.id not in used_agent_ids
+        and ((node_type == "review" and agent.type == "reviewer") or node_type == "agent")
+    ]
+    if not preferred:
+        preferred = [agent for agent in agents if agent.id not in used_agent_ids]
+    return (preferred or agents)[0].id
+
+
+def _fallback_edges_for_nodes(nodes: list[dict[str, Any]]) -> list[list[str]]:
+    if len(nodes) < 2:
+        return []
+    start = next((node for node in nodes if node.get("type") == "start"), None)
+    end = next((node for node in reversed(nodes) if node.get("type") == "end"), None)
+    executable = [
+        node
+        for node in nodes
+        if node.get("type") not in {"start", "end"}
+    ]
+    if start and end and executable:
+        return [
+            *[[str(start["id"]), str(node["id"])] for node in executable],
+            *[[str(node["id"]), str(end["id"])] for node in executable],
+        ]
+    return [[str(nodes[index]["id"]), str(nodes[index + 1]["id"])] for index in range(len(nodes) - 1)]
+
+
 def _workflow_node_type(node: dict, role: str) -> str:
+    node_id = str(node.get("id") or "").lower().strip()
+    title = str(node.get("title") or node.get("name") or "").lower().strip()
+    normalized = role.lower().strip()
+    if node_id == "start" or title == "start" or normalized in {"input", "start"}:
+        return "start"
+    if node_id == "end" or title == "end" or normalized == "end":
+        return "end"
     raw_type = str(node.get("type") or "").lower().strip()
     if raw_type in WORKFLOW_NODE_TYPES:
         return raw_type
-    normalized = role.lower().strip()
     if normalized in {"review", "reviewer"}:
         return "review"
     if normalized in {"artifact", "deploy", "delivery", "publish"}:
         return "artifact"
-    if normalized in {"input", "start"}:
-        return "start"
-    if normalized == "end":
-        return "end"
     return "agent"
 
 
 def _node_config_defaults(node_type: str, node: dict) -> dict:
     raw_config = node.get("config") if isinstance(node.get("config"), dict) else {}
     config = dict(raw_config)
-    if node.get("agent_id"):
-        config.setdefault("agent_id", node.get("agent_id"))
+    for key in ("agent_id", "agentId", "assigned_agent_id"):
+        if node.get(key):
+            config.setdefault("agent_id", node.get(key))
+    if isinstance(node.get("agent"), dict):
+        agent = node["agent"]
+        config.setdefault("agent_id", agent.get("id") or agent.get("agent_id"))
+        config.setdefault("agent_name", agent.get("name"))
     if node_type == "tool":
         config.setdefault("tool_name", node.get("tool_name") or node.get("name") or "")
     elif node_type == "skill":
@@ -378,161 +542,23 @@ def _fallback_workflow(conversation: Conversation) -> dict:
     }
 
 
-def _workflow_from_instruction(conversation: Conversation, instruction: str) -> dict:
-    """Build a visible workflow draft when the model cannot return valid JSON."""
-    fallback = _fallback_workflow(conversation)
-    text = (instruction or "").lower()
-    agents = [it.agent for it in _active_participants(conversation) if it.agent]
-    selected_agents = []
-    for agent in agents:
-        haystack = " ".join(
-            [
-                str(agent.name or ""),
-                str(agent.type or ""),
-                str(agent.description or ""),
-                " ".join(str(item) for item in (agent.capabilities or [])[:6]),
-            ]
-        ).lower()
-        if (
-            ("前端" in instruction or "frontend" in text or "网页" in instruction or "html" in text)
-            and ("front" in haystack or "前端" in haystack or "html" in haystack)
-        ):
-            selected_agents.append(agent)
-        elif (
-            ("后端" in instruction or "backend" in text or "api" in text or "数据库" in instruction)
-            and ("back" in haystack or "后端" in haystack or "api" in haystack)
-        ):
-            selected_agents.append(agent)
-        elif (
-            ("部署" in instruction or "产物" in instruction or "导出" in instruction)
-            and ("deploy" in haystack or "部署" in haystack or "artifact" in haystack)
-        ):
-            selected_agents.append(agent)
-        elif (
-            ("审查" in instruction or "review" in text or "检查" in instruction)
-            and ("review" in haystack or "审查" in haystack or "reviewer" in haystack)
-        ):
-            selected_agents.append(agent)
-    if not selected_agents:
-        selected_agents = agents[:4]
-
-    nodes: list[dict[str, Any]] = [
-        {
-            "id": "start",
-            "title": "用户需求入口",
-            "type": "start",
-            "role": "start",
-            "status": "ready",
-            "meta": "接收用户输入、附件和上下文",
-            "config": {"input": "{{input}}"},
-            "position": {"x": 80, "y": 180},
-        }
-    ]
-    edges: list[dict[str, str]] = []
-    previous_ids = ["start"]
-    for index, agent in enumerate(selected_agents[:8]):
-        node_id = f"agent-{agent.id[:8]}"
-        nodes.append(
-            {
-                "id": node_id,
-                "title": agent.name,
-                "type": "review" if agent.type == "reviewer" else "agent",
-                "role": agent.type or "agent",
-                "status": "ready",
-                "meta": agent.description[:120] or "根据自身角色处理任务",
-                "agent_id": agent.id,
-                "config": {
-                    "agent_id": agent.id,
-                    "input": "{{upstream.text}}\n{{input}}",
-                    "output": {"text": "{{result.text}}"},
-                    "tools": (agent.config or {}).get("tools", []),
-                    "skill_ids": (agent.config or {}).get("skill_ids", []),
-                    "mcp_server_ids": (agent.config or {}).get("mcp_server_ids", []),
-                },
-                "position": {"x": 360, "y": 80 + index * 170},
-            }
-        )
-        for source_id in previous_ids:
-            edges.append({"id": f"edge-{source_id}-{node_id}", "source": source_id, "target": node_id})
-    executable_ids = [node["id"] for node in nodes if node["id"] != "start"]
-
-    if "条件" in instruction or "condition" in text:
-        condition_id = "condition-main"
-        nodes.append(
-            {
-                "id": condition_id,
-                "title": "条件判断",
-                "type": "condition",
-                "role": "condition",
-                "status": "ready",
-                "meta": "根据上游输出判断后续分支",
-                "config": {"expression": "{{upstream.text}} != ''", "branches": ["true", "false"]},
-                "position": {"x": 660, "y": 180},
-            }
-        )
-        for source_id in executable_ids or ["start"]:
-            edges.append({"id": f"edge-{source_id}-{condition_id}", "source": source_id, "target": condition_id})
-        previous_ids = [condition_id]
-    else:
-        previous_ids = executable_ids or ["start"]
-
-    if any(keyword in instruction for keyword in ["产物", "文档", "PDF", "Word", "PPT", "Excel", "HTML", "网页"]):
-        artifact_id = "artifact-output"
-        nodes.append(
-            {
-                "id": artifact_id,
-                "title": "产物生成",
-                "type": "artifact",
-                "role": "artifact",
-                "status": "ready",
-                "meta": "汇总上游结果并生成交付物",
-                "config": {"artifact_type": "html" if "html" in text or "网页" in instruction else "pdf"},
-                "position": {"x": 880, "y": 180},
-            }
-        )
-        for source_id in previous_ids:
-            edges.append({"id": f"edge-{source_id}-{artifact_id}", "source": source_id, "target": artifact_id})
-        previous_ids = [artifact_id]
-
-    nodes.append(
-        {
-            "id": "end",
-            "title": "最终回复",
-            "type": "end",
-            "role": "end",
-            "status": "ready",
-            "meta": "聚合节点输出，返回给用户",
-            "config": {"output": "{{upstream.text}}"},
-            "position": {"x": 1120, "y": 180},
-        }
-    )
-    for source_id in previous_ids:
-        edges.append({"id": f"edge-{source_id}-end", "source": source_id, "target": "end"})
-
-    return {
-        "conversation_id": conversation.id,
-        "mode": "ai_generated",
-        "nodes": nodes,
-        "edges": edges or fallback["edges"],
-        "settings": {
-            "default_policy": "generated from user instruction",
-            "generation_instruction": instruction,
-            "generated_by": "deterministic_fallback",
-        },
-    }
-
-
 def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
     fallback = _fallback_workflow(conversation)
-    active_agent_ids = {it.agent_id for it in _active_participants(conversation) if it.agent_id}
+    agents = [it.agent for it in _active_participants(conversation) if it.agent]
+    active_agent_ids = {agent.id for agent in agents}
     nodes = value.get("nodes") if isinstance(value.get("nodes"), list) else fallback["nodes"]
     edges = value.get("edges") if isinstance(value.get("edges"), list) else fallback["edges"]
     normalized_nodes = []
+    seen_node_ids: set[str] = set()
+    used_agent_ids: set[str] = set()
     for index, node in enumerate(nodes[:40]):
         if not isinstance(node, dict):
             continue
-        role = str(node.get("role") or node.get("type") or "agent")
+        raw_role = str(node.get("role") or node.get("type") or "agent")
+        role = raw_role
         node_type = _workflow_node_type(node, role)
+        if node_type in {"start", "end"} and raw_role == "agent":
+            role = node_type
         raw_meta = node.get("meta") or node.get("description") or ""
         if isinstance(raw_meta, dict):
             raw_meta = ", ".join(str(it) for it in raw_meta.get("capabilities", [])[:3]) or ""
@@ -540,12 +566,36 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
             raw_meta = ", ".join(str(it) for it in raw_meta[:4])
         config = _node_config_defaults(node_type, node)
         agent_id = node.get("agent_id") or config.get("agent_id")
-        if node_type in {"agent", "review"} and agent_id and str(agent_id) not in active_agent_ids:
-            continue
+        if node_type in {"agent", "review"}:
+            if not agent_id or str(agent_id) not in active_agent_ids:
+                agent_id = _resolve_workflow_agent_id(
+                    node_type,
+                    node,
+                    config,
+                    agents,
+                    used_agent_ids,
+                )
+            if not agent_id or str(agent_id) not in active_agent_ids:
+                continue
+            agent_id = str(agent_id)
+            config["agent_id"] = agent_id
+            used_agent_ids.add(agent_id)
+        node_id = str(node.get("id") or f"node-{index + 1}").strip() or f"node-{index + 1}"
+        if node_id in seen_node_ids:
+            node_id = f"{node_id}-{index + 1}"
+        seen_node_ids.add(node_id)
+        title = str(
+            node.get("title")
+            or node.get("name")
+            or config.get("agent_name")
+            or f"节点 {index + 1}"
+        )[:80]
+        if title.lower() == "undefined":
+            title = f"节点 {index + 1}"
         normalized_nodes.append(
             {
-                "id": str(node.get("id") or f"node-{index + 1}"),
-                "title": str(node.get("title") or node.get("name") or f"节点 {index + 1}")[:80],
+                "id": node_id,
+                "title": title,
                 "type": node_type,
                 "role": role,
                 "status": str(node.get("status") or "ready"),
@@ -585,7 +635,7 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
         **fallback,
         **{k: value[k] for k in ("mode", "settings") if k in value},
         "nodes": normalized_nodes or fallback["nodes"],
-        "edges": normalized_edges or fallback["edges"],
+        "edges": normalized_edges or _fallback_edges_for_nodes(normalized_nodes) or fallback["edges"],
     }
 
 
@@ -633,6 +683,75 @@ def _manual_workflow_prompt(workflow: dict[str, Any]) -> str:
 
 async def _publish_manual_task_started(task: Task, channel: str) -> None:
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+
+
+def _mark_manual_workflow_run_failed(workflow_run: WorkflowRun, error: str) -> None:
+    states = deepcopy(workflow_run.node_states or [])
+    running_index = next(
+        (
+            index
+            for index, state in enumerate(states)
+            if state.get("status") in {"running", "reviewing"}
+        ),
+        None,
+    )
+    if running_index is None:
+        running_index = next(
+            (
+                index
+                for index, state in enumerate(states)
+                if state.get("status") in {"queued", "ready", None}
+            ),
+            None,
+        )
+    failed_node_id = str(states[running_index]["id"]) if running_index is not None else None
+    if failed_node_id:
+        _set_workflow_node_state(
+            workflow_run,
+            failed_node_id,
+            status="failed",
+            progress=100,
+            output={"error": error, "source": "manual_workflow_run"},
+            error=error,
+            message="Workflow run failed before this node completed",
+        )
+        states = deepcopy(workflow_run.node_states or [])
+    for index, state in enumerate(states):
+        if index == running_index or state.get("status") not in {"queued", "ready"}:
+            continue
+        state["status"] = "skipped"
+        state["progress"] = 100
+        state["message"] = "Skipped because workflow run failed"
+        state["completed_at"] = utcnow().isoformat()
+        state["output"] = {
+            **(state.get("output") or {}),
+            "reason": "workflow_failed",
+            **({"failed_dependency": failed_node_id} if failed_node_id else {}),
+        }
+    workflow_run.node_states = states
+    mark_json_field_modified(workflow_run, "node_states")
+    workflow_run.status = "failed"
+    workflow_run.progress = max(
+        workflow_run.progress or 0,
+        int(
+            len(
+                [
+                    state
+                    for state in states
+                    if state.get("status")
+                    in {"completed", "succeeded", "skipped", "failed", "error"}
+                ]
+            )
+            / max(1, len(states))
+            * 100
+        ),
+    )
+    workflow_run.completed_at = utcnow()
+    append_run_event(
+        workflow_run,
+        "run.failed",
+        {"error": error, "source": "manual_workflow_run", "node_id": failed_node_id},
+    )
 
 
 async def _execute_manual_workflow_run(
@@ -707,17 +826,7 @@ async def _execute_manual_workflow_run(
         conversation = db.get(Conversation, conversation_id)
         workflow_run = db.get(WorkflowRun, run_id)
         if conversation and workflow_run:
-            workflow_run.status = "failed"
-            workflow_run.completed_at = utcnow()
-            workflow_run.events = [
-                *(workflow_run.events or []),
-                {
-                    "type": "run.failed",
-                    "at": utcnow().isoformat(),
-                    "error": str(exc),
-                    "source": "manual_workflow_run",
-                },
-            ][-300:]
+            _mark_manual_workflow_run_failed(workflow_run, str(exc))
             _sync_workflow_run(conversation, workflow_run)
             db.commit()
             await event_bus.publish(
@@ -888,47 +997,79 @@ async def generate_conversation_workflow(
         for it in _active_participants(conversation)
         if it.agent
     ]
-    generated = fallback
-    instruction = payload.instruction or payload.prompt or ""
+    instruction = (payload.instruction or payload.prompt or "").strip()
+    effective_instruction = instruction or "根据当前群聊成员和职责生成一个可直接运行的协作工作流。"
     provider = await _model_provider(db)
-    if provider:
-        try:
-            result = await provider.chat(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是 AgentHub 工作流编排器。只返回合法 JSON，不要 Markdown。"
-                            "字段必须包含 mode, nodes, edges, settings。"
-                            "nodes 含 id,title,type,role,status,meta,agent_id,config,position。"
-                            "edges 使用 {id,source,target}。"
-                            "Allowed types: start, agent, tool, skill, mcp, condition, loop, review, artifact, end。"
-                            "必须根据 instruction 改变节点、连线或配置，不能原样返回默认图。"
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {
-                                "conversation": conversation_to_dict(conversation),
-                                "agents": agents,
-                                "instruction": instruction,
+    if _is_mock_model_provider(provider):
+        raise ValidationAppError("AI 工作流生成需要先配置真实可用的模型，当前是 mock/未配置状态。")
+
+    try:
+        result = await provider.chat(
+            messages=[
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "你是 AgentHub 的工作流架构师。只返回一个 JSON 对象，不要 Markdown、不要解释。"
+                        "JSON 必须包含 mode、output_mode、nodes、edges、settings。"
+                        "nodes 是数组，每个节点必须包含 id、title、type、role、status、meta、config、position；"
+                        "agent/review 节点必须使用 available_agents 中真实存在的 agent_id。"
+                        "edges 是数组，使用 {id, source, target} 或 [source, target]。"
+                        "允许的 type: start, agent, tool, skill, mcp, condition, loop, review, artifact, end。"
+                        "必须至少包含一个 start、一个 end、一个 agent/review/tool/skill/mcp/artifact 可执行节点。"
+                        "根据 instruction 和 Agent 能力设计真实流程，不要照抄 current_workflow。"
+                    ),
+                ),
+                ChatMessage(
+                    role="user",
+                    content=json.dumps(
+                        {
+                            "instruction": effective_instruction,
+                            "conversation": conversation_to_dict(conversation),
+                            "available_agents": agents,
+                            "current_workflow": fallback,
+                            "response_schema": {
+                                "mode": "ai_generated",
+                                "output_mode": "independent_messages | aggregate",
+                                "nodes": [
+                                    {
+                                        "id": "string",
+                                        "title": "string",
+                                        "type": "start | agent | review | tool | skill | mcp | condition | loop | artifact | end",
+                                        "role": "string",
+                                        "status": "ready",
+                                        "meta": "string",
+                                        "agent_id": "agent/review only, from available_agents",
+                                        "config": {},
+                                        "position": {"x": 80, "y": 120},
+                                    }
+                                ],
+                                "edges": [{"id": "edge-id", "source": "node-id", "target": "node-id"}],
+                                "settings": {"generation_instruction": effective_instruction},
                             },
-                            ensure_ascii=False,
-                        ),
-                    },
-                ],
-                temperature=0.15,
-                max_tokens=1400,
-            )
-            generated = _parse_json_object(result.content) or _workflow_from_instruction(conversation, instruction)
-        except Exception:
-            generated = _workflow_from_instruction(conversation, instruction)
-    else:
-        generated = _workflow_from_instruction(conversation, instruction)
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            ],
+            temperature=0.25,
+            max_tokens=2400,
+        )
+    except Exception as exc:
+        raise ValidationAppError(f"AI 工作流生成失败：{exc}") from exc
+
+    raw = _parse_json_object(result.content)
+    generated = _extract_workflow_object(raw)
+    if not generated:
+        raise ValidationAppError("AI 没有返回可用的 workflow JSON，请调整需求后重试。")
 
     workflow = _normalize_workflow(generated, conversation)
-    workflow["settings"] = {**(workflow.get("settings") or {}), "generated_by_ai": True}
+    workflow["settings"] = {
+        **(workflow.get("settings") or {}),
+        "generation_instruction": instruction,
+        "generated_by_ai": True,
+        "generated_by": "model",
+        "model": getattr(provider, "model", None),
+    }
     conversation.extra = {**(conversation.extra or {}), "workflow": workflow}
     await db.commit()
     return ok(workflow, "工作流已生成")
@@ -1018,7 +1159,7 @@ async def update_workflow_node_state(
     if not run or run.conversation_id != conversation.id:
         raise NotFoundError("Workflow run not found")
 
-    states = list(run.node_states or [])
+    states = deepcopy(run.node_states or [])
     found = False
     now = utcnow().isoformat()
     for state in states:
@@ -1054,6 +1195,7 @@ async def update_workflow_node_state(
     failed = any(state.get("status") == "failed" for state in states)
     total = max(1, len(states))
     run.node_states = states
+    mark_json_field_modified(run, "node_states")
     run.progress = int((completed / total) * 100)
     if failed:
         run.status = "failed"
@@ -1064,16 +1206,15 @@ async def update_workflow_node_state(
         run.completed_at = utcnow()
     else:
         run.status = "running"
-    run.events = [
-        *(run.events or []),
+    append_run_event(
+        run,
+        "node.updated",
         {
-            "type": "node.updated",
             "node_id": node_id,
             "status": payload.get("status"),
-            "at": now,
             "actor_id": user.id,
         },
-    ][-200:]
+    )
     _sync_workflow_runtime(conversation, run)
     await db.commit()
     await db.refresh(run)
