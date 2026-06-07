@@ -1,11 +1,13 @@
 FROM python:3.11-slim
 
+# 从官方镜像复制 uv 二进制（不通过 pip 安装）
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
 WORKDIR /app
 
 # 安装依赖
 COPY pyproject.toml uv.lock* ./
-RUN pip install uv && \
-    uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev
 
 # 复制源码
 COPY . .
