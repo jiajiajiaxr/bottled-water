@@ -5,7 +5,8 @@
 .docs-workflow-nodes,
 .docs-asset-band,
 .docs-faq-band,
-.docs-updates {
+.docs-updates,
+.docs-reading-path {
   padding: 24px;
   border: 1px solid #e1e6ee;
   border-radius: 8px;
@@ -27,6 +28,7 @@
 }
 
 .docs-platform-card,
+.docs-path-card,
 .docs-lifecycle-grid article {
   border: 1px solid #e1e6ee;
   border-radius: 8px;
@@ -62,7 +64,7 @@
 }
 
 .docs-platform-card p {
-  min-height: 96px;
+  min-height: 132px;
 }
 
 .docs-platform-card ul {
@@ -94,6 +96,145 @@
 
 .docs-numbered-list li + li {
   margin-top: 6px;
+}
+
+.docs-explain-strip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: center;
+  margin-top: 22px;
+  padding: 14px 16px;
+  border-top: 1px solid #dfe7f2;
+  border-bottom: 1px solid #dfe7f2;
+  background: #fbfdff;
+}
+
+.docs-explain-strip span {
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: #e9f3ff;
+  color: #1668dc;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.docs-explain-strip strong {
+  color: #344054;
+  font-size: 14px;
+}
+
+.docs-checklist-band {
+  margin-top: 18px;
+  padding: 18px 0 0;
+  border-top: 1px solid #e5e9f0;
+}
+
+.docs-checklist-band h3 {
+  margin: 0 0 10px;
+  color: #252b36;
+  font-size: 18px;
+}
+
+.docs-checklist-band ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  margin: 0;
+  padding-left: 18px;
+  color: #3f4b5c;
+  line-height: 1.7;
+}
+
+.docs-runbook-note {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-left: 4px solid #2f8f72;
+  background: #f4fbf8;
+  color: #315f4d;
+}
+
+.docs-runbook-note strong {
+  color: #1f5f45;
+}
+
+.docs-map-notes,
+.docs-flow-guide,
+.docs-triage-lane {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.docs-map-notes {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.docs-map-notes article {
+  padding: 0 16px 0 14px;
+  border-left: 3px solid #b7c8dd;
+}
+
+.docs-map-notes strong,
+.docs-flow-guide strong {
+  display: block;
+  color: #202631;
+}
+
+.docs-map-notes p,
+.docs-flow-guide p {
+  margin-top: 5px;
+}
+
+.docs-flow-guide {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 16px;
+  border: 1px solid #dfe7f2;
+  background: #fbfdff;
+}
+
+.docs-flow-guide div {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: start;
+}
+
+.docs-flow-guide span {
+  grid-row: span 2;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #111827;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.docs-triage-lane {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding: 12px;
+  border: 1px solid #e1e6ee;
+  background: #fbfdff;
+}
+
+.docs-triage-lane span {
+  position: relative;
+  padding: 9px 10px;
+  background: #eef6ff;
+  color: #1f4e7a;
+  font-weight: 700;
+  text-align: center;
+}
+
+.docs-triage-lane span + span::before {
+  content: "→";
+  position: absolute;
+  left: -12px;
+  color: #8aa2c0;
 }
 
 .docs-table-wrap {
@@ -201,7 +342,7 @@
 
 .docs-wide-notes {
   grid-column: 1 / -1;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .docs-callout {

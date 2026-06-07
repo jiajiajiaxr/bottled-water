@@ -14,12 +14,19 @@ describe("DocsPage", () => {
 
     expect(
       screen.getByRole("heading", {
-        name: "AgentHub 多 Agent 协作平台说明文档",
+        name: "AgentHub 多 Agent 协作平台文档",
       }),
     ).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "打开控制台" })).toHaveLength(2);
+    expect(screen.queryByText("联系我们")).not.toBeInTheDocument();
+    expect(screen.queryByText("Demo Plan ↗")).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "演示链路" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "选择你的阅读路径" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("从会话到产物")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "产品平台总览" }),
     ).toBeInTheDocument();
@@ -51,11 +58,11 @@ describe("DocsPage", () => {
 
     const sidebar = screen.getByLabelText("文档目录");
     fireEvent.change(within(sidebar).getByLabelText("搜索文档"), {
-      target: { value: "部署" },
+      target: { value: "沙箱" },
     });
 
-    expect(within(sidebar).getByText("部署预览")).toBeInTheDocument();
-    expect(within(sidebar).queryByText("首次登录")).not.toBeInTheDocument();
+    expect(within(sidebar).getByText("沙箱执行")).toBeInTheDocument();
+    expect(within(sidebar).queryByText("首次会话")).not.toBeInTheDocument();
   });
 
   it("removes the announcement sticky offset after closing the banner", () => {

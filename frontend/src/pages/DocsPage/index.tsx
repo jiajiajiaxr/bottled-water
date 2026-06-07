@@ -1,9 +1,14 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  ApiOutlined,
+  BranchesOutlined,
+  BulbOutlined,
+  CodeOutlined,
+  HomeOutlined,
   MenuFoldOutlined,
+  RocketOutlined,
   SearchOutlined,
-  UsergroupAddOutlined,
 } from "@ant-design/icons";
 import {
   apiSections,
@@ -11,6 +16,7 @@ import {
   maintainCards,
   navGroups,
   quickEntries,
+  readingPaths,
   localBootCode,
 } from "./content";
 import type { NavGroup } from "./content";
@@ -36,9 +42,9 @@ function DocsAnnouncement({ onClose }: { onClose: () => void }) {
   return (
     <div className="docs-announcement">
       <span>
-        AgentHub 文档站已扩展为详细指南，覆盖快速开始、API、模型运行、工具接入和排查入口。
+        文档已按「快速开始、核心概念、API、扩展、排查」重组，优先服务真实使用和开发接入。
       </span>
-      <a href="#updates">查看详情 →</a>
+      <a href="#reading-path">选择阅读路径 →</a>
       <button
         type="button"
         aria-label="关闭公告"
@@ -57,23 +63,16 @@ function DocsTopbar() {
         <span className="docs-brand-mark">A</span>
         <span>AgentHub</span>
       </a>
-      <a className="docs-invite" href="#workspace">
-        <UsergroupAddOutlined />
-        <span>协作空间</span>
-      </a>
       <nav className="docs-nav" aria-label="文档导航">
-        <a href="#contact">联系我们</a>
-        <a href="#welcome">文档</a>
+        <a href="#start">快速开始</a>
+        <a href="#capability-map">核心概念</a>
+        <a href="#workflow-nodes">工作流</a>
         <a href="#api-overview">API</a>
-        <a className="docs-token" href="#first-run">
-          Demo Plan ↗
-        </a>
-        <Link to="/app">控制台</Link>
-        <a href="#updates">博客</a>
-        <span>中文 ▾</span>
-        <span className="docs-user-dot" aria-hidden="true">
-          <UsergroupAddOutlined />
-        </span>
+        <a href="#integration">扩展</a>
+        <a href="#faq">排查</a>
+        <Link className="docs-console-link" to="/app">
+          打开控制台
+        </Link>
       </nav>
     </header>
   );
@@ -116,11 +115,11 @@ function DocsSidebar({
         </section>
       ))}
       <div className="docs-sidebar-foot">
-        <a id="contact" href="#faq">
-          开发者交流群
+        <a href="#api-overview">
+          API 与 SDK
         </a>
-        <a href="#first-run">
-          免费体验 AgentHub <strong>HOT</strong>
+        <a href="#faq">
+          排查入口 <strong>NEW</strong>
         </a>
       </div>
     </aside>
@@ -130,27 +129,27 @@ function DocsSidebar({
 function DocsHero() {
   return (
     <section id="welcome" className="docs-hero-section">
-      <h1>AgentHub 多 Agent 协作平台说明文档</h1>
+      <div className="docs-hero-label">
+        <BulbOutlined aria-hidden="true" />
+        AgentHub Docs
+      </div>
+      <h1>AgentHub 多 Agent 协作平台文档</h1>
+      <p className="docs-hero-lead">
+        从第一次会话、模型配置、工作流编排到 API 接入和工具扩展，这里按真实任务路径组织说明，帮助团队更快把 AgentHub 用起来、接起来、维护好。
+      </p>
       <div className="docs-visual-hero">
         <div className="docs-line-field" />
         <div className="docs-pulse-grid" />
-        <div className="docs-hero-logo">AgentHub</div>
+        <div className="docs-hero-logo">Docs</div>
         <div className="docs-hero-copy">
-          <h2>AgentHub Docs 正式上线</h2>
+          <h2>从使用路径开始，而不是从概念堆栈开始</h2>
           <p>
-            从首次登录、模型运行、API 接入到工具/Skill/MCP 扩展，按真实使用链路组织说明，让开发和演示都能顺着文档走完闭环。
+            先跑通最小闭环，再理解工作区、Agent、工具、工作流和产物生命周期；需要集成时直接跳到 API、SDK 和扩展章节。
           </p>
         </div>
         <Link className="docs-hero-action" to="/app">
-          进入控制台 →
+          打开控制台
         </Link>
-        <div className="docs-hero-dots" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-          <span />
-          <span />
-        </div>
       </div>
     </section>
   );
@@ -162,12 +161,42 @@ function QuickStartSection() {
       <h2>快速开始</h2>
       <div className="docs-quick-grid">
         {quickEntries.map((entry) => (
-          <a className="docs-entry-card" href="#first-run" key={entry.title}>
+          <a className="docs-entry-card" href={entry.href} key={entry.title}>
             <span className="docs-entry-icon">{entry.icon}</span>
             <span>
               <strong>{entry.title}</strong>
               <small>{entry.description}</small>
             </span>
+          </a>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReadingPathSection() {
+  return (
+    <section id="reading-path" className="docs-section docs-reading-path">
+      <div className="docs-section-head">
+        <RocketOutlined />
+        <div>
+          <h2>选择你的阅读路径</h2>
+          <p>
+            好的文档会先帮用户判断该读什么。这里按常见角色给出最短路径，避免从长目录里猜入口。
+          </p>
+        </div>
+      </div>
+      <div className="docs-path-grid">
+        {readingPaths.map((path) => (
+          <a className="docs-path-card" href={path.href} key={path.title}>
+            <span>{path.audience}</span>
+            <strong>{path.title}</strong>
+            <p>{path.description}</p>
+            <ol>
+              {path.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
           </a>
         ))}
       </div>
@@ -181,8 +210,8 @@ function DemoFlowSection() {
       <div>
         <h2>演示链路</h2>
         <p>
-          推荐从演示用户进入系统，创建一个工作区，再发起单聊或多 Agent 群聊。单聊会使用当前
-          Agent 的工具权限执行，群聊会优先读取画布 workflow。
+          推荐先从演示用户进入控制台，创建或选择一个工作区，再发起单聊或多 Agent 群聊。单聊会使用当前
+          Agent 的工具权限执行，群聊会优先读取画布 workflow，让演示过程可复盘、可定位。
         </p>
         <div className="docs-steps">
           <span>登录</span>
@@ -201,14 +230,56 @@ function DemoFlowSection() {
 
 function CapabilitySection() {
   return (
-    <section id="workspace" className="docs-section">
-      <h2>核心能力</h2>
-      <div className="docs-capability-grid">
-        {capabilitySections.map((item) => (
-          <article className="docs-capability" id={item.id} key={item.id}>
-            <span>{item.icon}</span>
-            <h3>{item.title}</h3>
-            <p>{item.description}</p>
+    <section id="workspace" className="docs-section docs-capability-deep">
+      <div className="docs-capability-intro">
+        <span className="docs-capability-kicker">Core model</span>
+        <h2>核心能力不是功能清单，而是一条从输入到交付的链路</h2>
+        <p>
+          AgentHub 的核心能力可以按四层理解：会话负责承接任务，Agent 负责角色化执行，workflow 负责稳定编排，文件与产物负责把上下文和交付物沉淀下来。
+          这四层需要一起看，单独看某一个按钮或模块，很容易把平台误解成普通聊天界面。
+        </p>
+        <div className="docs-capability-tabs" aria-label="核心能力快捷入口">
+          {capabilitySections.map((item) => (
+            <a href={`#${item.id}`} key={item.id}>
+              {item.icon}
+              {item.title}
+            </a>
+          ))}
+        </div>
+      </div>
+      <div className="docs-capability-story">
+        {capabilitySections.map((item, index) => (
+          <article className="docs-capability-row" id={item.id} key={item.id}>
+            <div className="docs-capability-index">
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              {item.icon}
+            </div>
+            <div className="docs-capability-body">
+              <h3>{item.title}</h3>
+              <p>{item.description}</p>
+              {item.scenario ? (
+                <div className="docs-capability-scenario">
+                  <strong>适用场景</strong>
+                  <p>{item.scenario}</p>
+                </div>
+              ) : null}
+            </div>
+            <div className="docs-capability-operate">
+              <strong>操作路径</strong>
+              <ol>
+                {item.steps?.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+            </div>
+            <div className="docs-capability-signals">
+              <strong>观察点</strong>
+              <ul>
+                {item.signals?.map((signal) => (
+                  <li key={signal}>{signal}</li>
+                ))}
+              </ul>
+            </div>
           </article>
         ))}
       </div>
@@ -225,6 +296,16 @@ function ApiSection() {
           后端以 FastAPI 提供认证、会话、消息、Agent、工具、文件、产物、部署、审计等接口，前端通过统一
           API SDK 调用。
         </p>
+        <div className="docs-api-actions">
+          <a href="#api-overview">
+            <ApiOutlined />
+            查看接口总览
+          </a>
+          <a href="#frontend-sdk">
+            <CodeOutlined />
+            前端 SDK 示例
+          </a>
+        </div>
       </div>
       <div className="docs-api-list">
         {apiSections.map((item) => (
@@ -250,6 +331,29 @@ function MaintainSection() {
         </article>
       ))}
     </section>
+  );
+}
+
+function DocsUtilityRail() {
+  return (
+    <aside className="docs-utility-rail" aria-label="文档辅助入口">
+      <a href="#welcome">
+        <HomeOutlined />
+        顶部
+      </a>
+      <a href="#api-overview">
+        <ApiOutlined />
+        API
+      </a>
+      <a href="#workflow-nodes">
+        <BranchesOutlined />
+        工作流
+      </a>
+      <a href="#faq">
+        <SearchOutlined />
+        排查
+      </a>
+    </aside>
   );
 }
 
@@ -290,6 +394,7 @@ export function DocsPage() {
           <div className="docs-breadcrumb">文档 &gt; 欢迎使用</div>
           <DocsHero />
           <QuickStartSection />
+          <ReadingPathSection />
           <ProductPlatformSection />
           <DemoFlowSection />
           <FirstRunGuide />
@@ -306,9 +411,10 @@ export function DocsPage() {
           <UpdatesSection />
           <section className="docs-next">
             <span>下一篇</span>
-            <a href="#first-run">首次运行会话 ›</a>
+            <a href="#first-run">首次运行会话</a>
           </section>
         </section>
+        <DocsUtilityRail />
       </div>
     </main>
   );
