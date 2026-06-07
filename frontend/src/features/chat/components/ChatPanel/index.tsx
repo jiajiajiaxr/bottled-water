@@ -31,8 +31,6 @@ import { RuntimeDecisionStrip } from "@/features/chat/components/ChatPanel/Runti
 import {
   displayNodeName,
   displayNodePath,
-  formatSize,
-  sourceLabel,
   walk,
 } from "@/features/workspaceFiles/workspaceFileUtils";
 import { useMessageStore, useConversationStore } from "@/store";
@@ -106,8 +104,11 @@ export function ChatPanel({
     WorkspaceFileOption[]
   >([]);
   const [workspaceFilesLoading, setWorkspaceFilesLoading] = useState(false);
+  const [contextSelectOpen, setContextSelectOpen] = useState(false);
+  const [contextSearchValue, setContextSearchValue] = useState("");
   const [awaitingResponse, setAwaitingResponse] = useState(false);
   const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
+  const composerRef = useRef<HTMLDivElement>(null);
   const { message } = AntApp.useApp();
   const { send, cancel, streamingMessages, displayOrder } = useMessageOperations(
     userName,
@@ -141,22 +142,29 @@ export function ChatPanel({
     },
     [active],
   );
+  const activeConversationId = active?.id;
+  const activeGenerationStatus = active?.generation_status;
 
   useEffect(() => {
     if (!active?.id) return;
     const snippet = useConversationStore.getState().consumeDraftSnippet(active.id);
     if (!snippet) return;
     setText((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${snippet}`);
-  }, [active?.id]);
+  }, [activeConversationId]);
 
   useEffect(() => {
+    setQuoted(undefined);
     setContextReferences([]);
     setAgentMentions([]);
-  }, [active?.id]);
+    setContextSelectOpen(false);
+    setContextSearchValue("");
+  }, [activeConversationId]);
 
   useEffect(() => {
     if (!active?.workspace_id) {
       setWorkspaceFileOptions([]);
+      setContextSelectOpen(false);
+      setContextSearchValue("");
       return;
     }
     let alive = true;
@@ -183,9 +191,9 @@ export function ChatPanel({
   const historyConversationId = useMessageStore((s) => s.historyConversationId);
   const messageVersions = useMessageStore((s) => s.messageVersions);
   const activeHistoryMessages = useMemo(() => {
-    if (!active?.id || historyConversationId !== active.id) return [];
-    return historyMessages.filter((item) => item.conversationId === active.id);
-  }, [active?.id, historyConversationId, historyMessages]);
+    if (!activeConversationId || historyConversationId !== activeConversationId) return [];
+    return historyMessages.filter((item) => item.conversationId === activeConversationId);
+  }, [activeConversationId, historyConversationId, historyMessages]);
 
   // 合并所有消息用于 quoted 查找
   const allMessages = useMemo(
@@ -235,6 +243,8 @@ export function ChatPanel({
     setPendingFiles([]);
     setContextReferences([]);
     setAgentMentions([]);
+    setContextSelectOpen(false);
+    setContextSearchValue("");
     try {
       await send(
         value,
@@ -340,6 +350,8 @@ export function ChatPanel({
       const option = workspaceFileOptions.find((item) => item.value === value);
       if (!option) return;
       const reference = fileReferenceFromNode(option.node);
+      setContextSelectOpen(false);
+      setContextSearchValue("");
       setContextReferences((current) => {
         if (current.some((item) => fileReferenceKey(item) === fileReferenceKey(reference))) {
           message.info("该文件已在上下文引用中");
@@ -397,7 +409,7 @@ export function ChatPanel({
 
   useEffect(() => {
     setPendingFiles([]);
-  }, [active?.id]);
+  }, [activeConversationId]);
 
   useEffect(() => {
     const el = messageListRef.current;
@@ -454,10 +466,10 @@ export function ChatPanel({
   }, [streamingMessages.size, displayOrder.length, awaitingResponse]);
 
   useEffect(() => {
-    if (!active || active.generation_status === "idle") {
+    if (!activeConversationId || activeGenerationStatus === "idle") {
       setAwaitingResponse(false);
     }
-  }, [active?.id, active?.generation_status]);
+  }, [activeConversationId, activeGenerationStatus]);
 
   const renderMessageBubble = (item: ChatMessage) => {
     return (
@@ -508,7 +520,7 @@ export function ChatPanel({
           <Empty description="暂无消息" />
         )}
       </div>
-      <div className="composer">
+      <div ref={composerRef} className="composer">
         {quoted && (
           <div className="composer-quote">
             <div className="composer-quote-text">
@@ -609,23 +621,43 @@ export function ChatPanel({
               </Button>
             </Upload>
             <Select
+              key={`context-reference-${active?.id ?? "none"}`}
               className="composer-context-select"
               showSearch
               allowClear
               value={undefined}
-              placeholder="引用工作区文件"
+              open={contextSelectOpen && Boolean(active?.workspace_id)}
+              searchValue={contextSelectOpen ? contextSearchValue : ""}
+              placeholder="引用文档"
               loading={workspaceFilesLoading}
               disabled={!active?.workspace_id}
               options={workspaceFileOptions}
               optionFilterProp="searchText"
+              onOpenChange={(open) => {
+                const nextOpen = open && Boolean(active?.workspace_id);
+                setContextSelectOpen(nextOpen);
+                if (!nextOpen) setContextSearchValue("");
+              }}
+              onSearch={setContextSearchValue}
               onSelect={(value) => {
                 if (typeof value === "string") addContextReference(value);
               }}
+              onClear={() => {
+                setContextSelectOpen(false);
+                setContextSearchValue("");
+              }}
+              onBlur={() => {
+                setContextSelectOpen(false);
+                setContextSearchValue("");
+              }}
+              getPopupContainer={(triggerNode) =>
+                triggerNode.parentElement ?? composerRef.current ?? document.body
+              }
               popupMatchSelectWidth={420}
               data-testid="context-reference-select"
               suffixIcon={<FileSearchOutlined />}
               notFoundContent={
-                workspaceFilesLoading ? "加载中..." : "暂无可引用文件"
+                workspaceFilesLoading ? "加载中..." : "暂无可引用文档"
               }
             />
             <Select
@@ -688,7 +720,6 @@ function workspaceFileOptionsFromTree(root: WorkspaceFileNode): WorkspaceFileOpt
   });
   return nodes.map((node) => {
     const name = displayNodeName(node);
-    const path = displayNodePath(node);
     return {
       value: node.id || node.path,
       searchText: `${name} ${node.path} ${node.display_path ?? ""}`,
@@ -696,9 +727,6 @@ function workspaceFileOptionsFromTree(root: WorkspaceFileNode): WorkspaceFileOpt
       label: (
         <div className="composer-context-option">
           <span className="composer-context-option-name">{name}</span>
-          <span className="composer-context-option-meta">
-            {path} · {sourceLabel(node.source)} · {formatSize(node.size ?? 0)}
-          </span>
         </div>
       ),
     };
