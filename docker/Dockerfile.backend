@@ -19,13 +19,11 @@ COPY . .
 # 安装项目（包含所有依赖）
 RUN uv sync --frozen --no-dev
 
-# 虚拟环境 bin 加入 PATH，使 uvicorn / python 等可直接调用
-ENV PATH="/app/.venv/bin:${PATH}"
-
-# 健康检查
+# 健康检查（uv run 自动使用 .venv）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8888/health')" || exit 1
+    CMD uv run python -c "import httpx; httpx.get('http://localhost:8888/health')" || exit 1
 
 EXPOSE 8888
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8888"]
+# uv run 自动识别 .venv 并调用其中的 uvicorn
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8888"]
