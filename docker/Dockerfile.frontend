@@ -11,13 +11,10 @@ COPY frontend/pnpm-lock.yaml ./
 RUN npm install -g pnpm@9 && \
     pnpm install --frozen-lockfile
 
-# 复制源码（本地 frontend/node_modules 可能未被 .dockerignore 排除，会覆盖容器中的 node_modules）
+# 复制源码（.dockerignore 已排除 node_modules/dist，不会覆盖容器依赖）
 COPY frontend/ .
 
-# 重新安装依赖（pnpm store 已缓存，这一步很快）
-RUN pnpm install --frozen-lockfile
-
-# 构建
+# 构建（Docker 内跳过 TypeScript 类型检查，加速构建）
 RUN npx vite build
 
 # Nginx 运行 stage
