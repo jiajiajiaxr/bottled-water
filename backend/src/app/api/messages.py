@@ -16,13 +16,14 @@ from app.schemas.common import ApiResponse
 from app.schemas.requests import RunMessageCodeRequest, SendMessagePayload
 from app.events import SseSink
 from app.events import app_event_bus as event_bus
+from app.services.chat.mentions import normalize_agent_mentions, raw_agent_mentions
 from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
 from app.services.serialization import message_to_dict
 from app.services.files.attachments import (
     attachment_from_file_asset,
     refresh_attachment_text_if_needed,
 )
-from app.services.files.references import resolve_file_reference_attachments
+from app.services.files.references import file_reference_text, resolve_file_reference_attachments
 from app.services.chat.code_runner import run_message_code_block
 from app.services.chat.message_prompt import runtime_prompt_for_message
 
@@ -97,17 +98,28 @@ async def _send_async(
             refresh_attachment_text_if_needed(file_asset)
             normalized_attachments.append(attachment_from_file_asset(file_asset))
     existing_file_ids = {str(item.get("file_id") or "") for item in normalized_attachments}
-    if "@file(" in text:
+    reference_text = file_reference_text(
+        text,
+        raw_content.get("file_references") or payload.get("file_references"),
+    )
+    if reference_text:
         referenced = await db.run_sync(
             lambda session: resolve_file_reference_attachments(
                 session,
                 user=user,
                 conversation=conversation,
-                text=text,
+                text=reference_text,
                 existing_file_ids=existing_file_ids,
             )
         )
         normalized_attachments.extend(referenced)
+    normalized_agent_mentions = await db.run_sync(
+        lambda session: normalize_agent_mentions(
+            session,
+            conversation_id=conversation.id,
+            mentions=raw_agent_mentions(payload, raw_content),
+        )
+    )
     # 调度策略：消息级 > 会话级 > workflow 群聊默认 > tech_lead
     scheduling_strategy = resolve_scheduling_strategy(conversation, payload.get("scheduling_strategy"))
 
@@ -123,7 +135,11 @@ async def _send_async(
         sender_name=user.display_name,
         sender_avatar_url=user.avatar_url,
         content_type=payload.get("content_type") or "text",
-        content={"text": text, "attachments": normalized_attachments},
+        content={
+            "text": text,
+            "attachments": normalized_attachments,
+            "agent_mentions": normalized_agent_mentions,
+        },
         status="sent",
         reply_to_message_id=payload.get("reply_to_message_id") or payload.get("quotedMessageId"),
         extra={
@@ -203,16 +219,25 @@ def _send_sync(db, user: User, conversation_id: str, payload: dict, *, trigger_a
             refresh_attachment_text_if_needed(file_asset)
             normalized_attachments.append(attachment_from_file_asset(file_asset))
     existing_file_ids = {str(item.get("file_id") or "") for item in normalized_attachments}
-    if "@file(" in text:
+    reference_text = file_reference_text(
+        text,
+        raw_content.get("file_references") or payload.get("file_references"),
+    )
+    if reference_text:
         normalized_attachments.extend(
             resolve_file_reference_attachments(
                 db,
                 user=user,
                 conversation=conversation,
-                text=text,
+                text=reference_text,
                 existing_file_ids=existing_file_ids,
             )
         )
+    normalized_agent_mentions = normalize_agent_mentions(
+        db,
+        conversation_id=conversation.id,
+        mentions=raw_agent_mentions(payload, raw_content),
+    )
 
     scheduling_strategy = resolve_scheduling_strategy(conversation, payload.get("scheduling_strategy"))
     if payload.get("scheduling_strategy"):
@@ -225,7 +250,11 @@ def _send_sync(db, user: User, conversation_id: str, payload: dict, *, trigger_a
         sender_name=user.display_name,
         sender_avatar_url=user.avatar_url,
         content_type=payload.get("content_type") or "text",
-        content={"text": text, "attachments": normalized_attachments},
+        content={
+            "text": text,
+            "attachments": normalized_attachments,
+            "agent_mentions": normalized_agent_mentions,
+        },
         status="sent",
         reply_to_message_id=payload.get("reply_to_message_id") or payload.get("quotedMessageId"),
         extra={

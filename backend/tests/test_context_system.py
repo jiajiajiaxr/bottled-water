@@ -30,6 +30,7 @@ from app.services.context.memory import (
 )
 from app.services.context.state import conversation_state, update_conversation_state_after_turn
 from app.services.context.variables import artifact_reference_scope, resolve_value
+from app.services.chat.mentions import normalize_agent_mentions
 from app.services.chat.message_prompt import runtime_prompt_for_message
 
 
@@ -109,6 +110,54 @@ def test_runtime_prompt_includes_uploaded_file_context() -> None:
     assert "file_id=file-1" in prompt
     assert "核心结论：本季度交付稳定。" in prompt
     assert "不要说没有收到文件" in prompt
+
+
+def test_runtime_prompt_includes_agent_mentions_for_routing() -> None:
+    message = Message(
+        conversation_id="conv",
+        sender_type="user",
+        sender_name="User",
+        content={
+            "text": "请发表观点",
+            "agent_mentions": [
+                {"agent_id": "agent-ocean", "agent_name": "OCEAN"},
+            ],
+        },
+    )
+
+    prompt = runtime_prompt_for_message(message)
+
+    assert "@OCEAN" in prompt
+    assert "agent_id=agent-ocean" in prompt
+    assert "must be scheduled" in prompt
+    assert "请发表观点" in prompt
+
+
+def test_agent_mentions_are_limited_to_active_conversation_participants() -> None:
+    db = _memory_session()
+    user, conversation = _user_conversation(db)
+    target = _agent(db, user, name="OCEAN")
+    outsider = _agent(db, user, name="Outside Agent")
+    db.add(
+        ConversationParticipant(
+            conversation_id=conversation.id,
+            participant_type="agent",
+            agent_id=target.id,
+        )
+    )
+    db.commit()
+
+    mentions = normalize_agent_mentions(
+        db,
+        conversation_id=conversation.id,
+        mentions=[
+            {"agent_id": target.id},
+            {"agent_id": outsider.id},
+            {"agent_id": "missing-agent"},
+        ],
+    )
+
+    assert mentions == [{"agent_id": target.id, "agent_name": "OCEAN"}]
 
 
 def test_context_builder_orders_context_before_latest_input() -> None:

@@ -11,7 +11,12 @@ import {
   useStreamingMessages,
 } from "./useStreamingMessages";
 import type { ChatMessage, UploadedFile, MessageAttachment } from "@/types";
-import type { MessageBody, StreamAssistantHandlers } from "@/types/messages";
+import type {
+  MessageAgentMention,
+  MessageBody,
+  MessageFileReference,
+  StreamAssistantHandlers,
+} from "@/types/messages";
 
 function mergeThinkingFromLocal(
   fetchedMessages: ChatMessage[],
@@ -67,6 +72,8 @@ export function useMessageOperations(userName?: string, userAvatarUrl?: string) 
     attachments: UploadedFile[] = [],
     thinkingEnabled?: boolean,
     modelConfigId?: string,
+    fileReferences: MessageFileReference[] = [],
+    agentMentions: MessageAgentMention[] = [],
   ) => {
     if (!activeId) return;
 
@@ -81,7 +88,10 @@ export function useMessageOperations(userName?: string, userAvatarUrl?: string) 
         : workflowEnabled
           ? "workflow"
           : "tech_lead";
-    const localAttachments = normalizeAttachments(attachments);
+    const localAttachments = [
+      ...normalizeAttachments(attachments),
+      ...attachmentsFromFileReferences(fileReferences),
+    ];
     const clientMessageId = `client-${Date.now()}-${Math.random()
       .toString(16)
       .slice(2)}`;
@@ -97,6 +107,8 @@ export function useMessageOperations(userName?: string, userAvatarUrl?: string) 
         client_message_id: clientMessageId,
         clientMessageId,
         attachments: localAttachments,
+        file_references: fileReferences,
+        agent_mentions: agentMentions,
       },
       clientMessageId,
       client_message_id: clientMessageId,
@@ -117,6 +129,8 @@ export function useMessageOperations(userName?: string, userAvatarUrl?: string) 
           content_type: file.content_type,
           size: file.size,
         })),
+        file_references: fileReferences,
+        agent_mentions: agentMentions,
       },
       reply_to_message_id: quoted?.id,
       thinking_enabled: thinkingEnabled,
@@ -191,6 +205,30 @@ function normalizeAttachments(files: UploadedFile[]): MessageAttachment[] {
     download_url: file.download_url,
     metadata: file.metadata,
   }));
+}
+
+function attachmentsFromFileReferences(
+  references: MessageFileReference[],
+): MessageAttachment[] {
+  return references.map((reference) => {
+    const filename =
+      reference.filename ?? reference.path.split("/").pop() ?? reference.path;
+    return {
+      id: reference.node_id ?? reference.file_id ?? `workspace:${reference.path}`,
+      file_id: reference.file_id ?? `workspace:${reference.path}`,
+      filename,
+      original_filename: filename,
+      content_type: reference.content_type,
+      size: reference.size,
+      parse_status: "referenced",
+      metadata: {
+        reference_type: "workspace_file",
+        path: reference.path,
+        display_path: reference.display_path,
+        source: reference.source,
+      },
+    };
+  });
 }
 
 function createStreamHandlers(

@@ -661,6 +661,38 @@ def test_at_file_reference_is_resolved_into_message_attachment(db: Session) -> N
         _cleanup(workspace.id)
 
 
+def test_structured_file_reference_enters_attachment_context_without_polluting_text(
+    db: Session,
+) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+    path = scoped_dir(workspace.id, "sandbox", conversation_id=conversation.id) / "brief.txt"
+    path.write_text("Structured workspace reference context", encoding="utf-8")
+
+    try:
+        message = _send(
+            db,
+            user,
+            conversation.id,
+            {
+                "content": {
+                    "text": "请总结这个文件",
+                    "file_references": [
+                        {"path": f"sandbox/conversations/{conversation.id}/brief.txt"}
+                    ],
+                }
+            },
+            trigger_agent=False,
+        )
+        attachments = message.content["attachments"]
+
+        assert message.content["text"] == "请总结这个文件"
+        assert attachments[0]["filename"] == "brief.txt"
+        assert "Structured workspace reference context" in attachments[0]["extracted_text"]
+        assert attachments[0]["metadata"]["reference_type"] == "workspace_file"
+    finally:
+        _cleanup(workspace.id)
+
+
 def test_at_file_reference_missing_file_reports_clear_error(db: Session) -> None:
     user, workspace, conversation = _user_workspace_conversation(db)
 

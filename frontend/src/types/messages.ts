@@ -35,10 +35,29 @@ export type MessageBodyAttachment = {
   size?: number;
 };
 
+export type MessageFileReference = {
+  path: string;
+  file_id?: string;
+  node_id?: string;
+  filename?: string;
+  content_type?: string;
+  size?: number;
+  source?: string;
+  display_path?: string;
+};
+
+export type MessageAgentMention = {
+  agent_id: string;
+  agent_name?: string;
+  agent_avatar_url?: string;
+};
+
 /** 消息内容结构 */
 export type MessageBodyContent = {
   text?: string;
   attachments?: MessageBodyAttachment[];
+  file_references?: MessageFileReference[];
+  agent_mentions?: MessageAgentMention[];
 };
 
 /** 发送消息请求体（与后端 SendMessagePayload 对齐） */
@@ -49,6 +68,8 @@ export type MessageBody = {
   text?: string;
   prompt?: string;
   attachments?: MessageBodyAttachment[];
+  file_references?: MessageFileReference[];
+  agent_mentions?: MessageAgentMention[];
   reply_to_message_id?: string;
   quotedMessageId?: string;
   thinking_enabled?: boolean;

@@ -36,6 +36,31 @@ def parse_file_references(text: str) -> list[dict[str, str]]:
     return references
 
 
+def file_reference_text(text: str, file_references: Any) -> str:
+    parts: list[str] = []
+    if "@file(" in (text or ""):
+        parts.append(text)
+    if isinstance(file_references, list):
+        for item in file_references:
+            markup = _file_reference_markup(item)
+            if markup:
+                parts.append(markup)
+    return "\n".join(parts)
+
+
+def _file_reference_markup(item: Any) -> str:
+    if not isinstance(item, dict):
+        return ""
+    path = str(item.get("path") or "").strip()
+    file_id = str(item.get("file_id") or item.get("id") or "").strip()
+    if not path and not file_id:
+        return ""
+    body = path
+    if file_id:
+        body = f"{body} file_id={file_id}".strip()
+    return f"@file({body})"
+
+
 def resolve_file_reference_attachments(
     db: Session,
     *,

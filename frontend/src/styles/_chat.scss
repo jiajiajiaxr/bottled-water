@@ -519,12 +519,93 @@
   background: #f8fbff;
 }
 
+.composer-mentions {
+  width: 100%;
+  margin-bottom: $spacing-md;
+}
+
+.composer-contexts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: $spacing-sm 0 $spacing-md;
+}
+
+.composer-contexts-label {
+  font-size: 12px;
+}
+
+.composer-context-select {
+  width: min(260px, 32vw);
+}
+
+.composer-agent-mention-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.composer-agent-mention-avatar {
+  flex: 0 0 auto;
+}
+
+.composer-agent-mention-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.composer-agent-mention-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: $color-text-primary;
+  font-weight: 500;
+}
+
+.composer-agent-mention-meta {
+  color: $color-text-muted;
+  font-size: 12px;
+}
+
+.composer-context-option {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.composer-context-option-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: $color-text-primary;
+}
+
+.composer-context-option-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: $color-text-muted;
+  font-size: 12px;
+}
+
 .composer-model-select {
   min-width: 220px;
   max-width: 300px;
 }
 
 @media (max-width: 768px) {
+  .composer-context-select {
+    width: min(220px, 55vw);
+  }
+
   .composer-model-select {
     min-width: 160px;
     max-width: 45vw;

@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   CloudUploadOutlined,
   BulbOutlined,
+  FileSearchOutlined,
+  RobotOutlined,
   SendOutlined,
   StopOutlined,
 } from "@ant-design/icons";
 import {
   App as AntApp,
+  Avatar,
   Button,
   Empty,
   Flex,
-  Input,
   Layout,
+  Mentions,
   Select,
   Space,
   Spin,
@@ -24,12 +28,25 @@ import type { UploadProps } from "antd";
 import { api } from "@/api";
 import { MessageBubble } from "@/features/chat/components/MessageBubble";
 import { RuntimeDecisionStrip } from "@/features/chat/components/ChatPanel/RuntimeDecisionStrip";
+import {
+  displayNodeName,
+  displayNodePath,
+  formatSize,
+  sourceLabel,
+  walk,
+} from "@/features/workspaceFiles/workspaceFileUtils";
 import { useMessageStore, useConversationStore } from "@/store";
 import { useMessageOperations } from "@/hooks";
-import type { ChatMessage, Conversation, ModelConfig, UploadedFile } from "@/types";
+import type {
+  ChatMessage,
+  Conversation,
+  ModelConfig,
+  UploadedFile,
+  WorkspaceFileNode,
+} from "@/types";
+import type { MessageAgentMention, MessageFileReference } from "@/types/messages";
 
 const { Content } = Layout;
-const { TextArea } = Input;
 const { Text } = Typography;
 const AGENT_MODEL_SENTINEL = "__agent_model__";
 const UPLOAD_ACCEPT =
@@ -49,6 +66,20 @@ const BLOCKED_UPLOAD_EXTENSIONS = new Set([
   ".reg",
 ]);
 
+type WorkspaceFileOption = {
+  value: string;
+  label: ReactNode;
+  searchText: string;
+  node: WorkspaceFileNode;
+};
+
+type AgentMentionOption = {
+  value: string;
+  label: ReactNode;
+  searchText: string;
+  agent: MessageAgentMention;
+};
+
 export function ChatPanel({
   active,
   loading,
@@ -67,6 +98,14 @@ export function ChatPanel({
   const [text, setText] = useState("");
   const [quoted, setQuoted] = useState<ChatMessage>();
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
+  const [contextReferences, setContextReferences] = useState<
+    MessageFileReference[]
+  >([]);
+  const [agentMentions, setAgentMentions] = useState<MessageAgentMention[]>([]);
+  const [workspaceFileOptions, setWorkspaceFileOptions] = useState<
+    WorkspaceFileOption[]
+  >([]);
+  const [workspaceFilesLoading, setWorkspaceFilesLoading] = useState(false);
   const [awaitingResponse, setAwaitingResponse] = useState(false);
   const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
   const { message } = AntApp.useApp();
@@ -110,6 +149,35 @@ export function ChatPanel({
     setText((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${snippet}`);
   }, [active?.id]);
 
+  useEffect(() => {
+    setContextReferences([]);
+    setAgentMentions([]);
+  }, [active?.id]);
+
+  useEffect(() => {
+    if (!active?.workspace_id) {
+      setWorkspaceFileOptions([]);
+      return;
+    }
+    let alive = true;
+    setWorkspaceFilesLoading(true);
+    api
+      .workspaceFileTree(active.workspace_id)
+      .then((tree) => {
+        if (!alive) return;
+        setWorkspaceFileOptions(workspaceFileOptionsFromTree(tree.root));
+      })
+      .catch(() => {
+        if (alive) setWorkspaceFileOptions([]);
+      })
+      .finally(() => {
+        if (alive) setWorkspaceFilesLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [active?.workspace_id]);
+
   // 历史消息从 Store 读取
   const historyMessages = useMessageStore((s) => s.historyMessages);
   const historyConversationId = useMessageStore((s) => s.historyConversationId);
@@ -145,6 +213,10 @@ export function ChatPanel({
     ],
     [modelConfigs],
   );
+  const agentMentionOptions = useMemo(
+    () => agentMentionOptionsFromParticipants(active?.participants ?? []),
+    [active?.participants],
+  );
 
   const submit = async () => {
     let value =
@@ -154,17 +226,31 @@ export function ChatPanel({
     }
     if (!value || !active) return;
     const filesToSend = pendingFiles;
+    const refsToSend = contextReferences;
+    const mentionsToSend = agentMentions;
     const quotedMessage = quoted;
     setAwaitingResponse(true);
     setText("");
     setQuoted(undefined);
     setPendingFiles([]);
+    setContextReferences([]);
+    setAgentMentions([]);
     try {
-      await send(value, quotedMessage, filesToSend, thinkingEnabled, runtimeModelConfigId);
+      await send(
+        value,
+        quotedMessage,
+        filesToSend,
+        thinkingEnabled,
+        runtimeModelConfigId,
+        refsToSend,
+        mentionsToSend,
+      );
     } catch (error) {
       setText(value);
       setQuoted(quotedMessage);
       setPendingFiles(filesToSend);
+      setContextReferences(refsToSend);
+      setAgentMentions(mentionsToSend);
       throw error;
     }
   };
@@ -214,6 +300,62 @@ export function ChatPanel({
   const handleCopy = useCallback((value: string) => copy(value), [copy]);
   const messageListRef = useRef<HTMLDivElement>(null);
   const isAtBottom = useRef(true);
+
+  const handleComposerTextChange = useCallback((value: string) => {
+    setText(value);
+    setAgentMentions((current) =>
+      current.filter((mention) =>
+        mention.agent_name ? mentionTokenPresent(value, mention.agent_name) : true,
+      ),
+    );
+  }, []);
+
+  const addAgentMention = useCallback(
+    (mention: MessageAgentMention) => {
+      setAgentMentions((current) => {
+        if (current.some((item) => item.agent_id === mention.agent_id)) {
+          return current;
+        }
+        return [...current, mention];
+      });
+    },
+    [],
+  );
+
+  const removeAgentMention = useCallback(
+    (agentId: string) => {
+      const mention = agentMentions.find((item) => item.agent_id === agentId);
+      setAgentMentions((current) =>
+        current.filter((item) => item.agent_id !== agentId),
+      );
+      if (mention?.agent_name) {
+        setText((current) => removeMentionToken(current, mention.agent_name || ""));
+      }
+    },
+    [agentMentions],
+  );
+
+  const addContextReference = useCallback(
+    (value: string) => {
+      const option = workspaceFileOptions.find((item) => item.value === value);
+      if (!option) return;
+      const reference = fileReferenceFromNode(option.node);
+      setContextReferences((current) => {
+        if (current.some((item) => fileReferenceKey(item) === fileReferenceKey(reference))) {
+          message.info("该文件已在上下文引用中");
+          return current;
+        }
+        return [...current, reference];
+      });
+    },
+    [message, workspaceFileOptions],
+  );
+
+  const removeContextReference = useCallback((key: string) => {
+    setContextReferences((current) =>
+      current.filter((item) => fileReferenceKey(item) !== key),
+    );
+  }, []);
 
   const uploadProps: UploadProps = {
     multiple: true,
@@ -400,13 +542,31 @@ export function ChatPanel({
             ))}
           </div>
         )}
-        <TextArea
+        <Mentions
           data-testid="message-input"
           aria-label="message-input"
+          className="composer-mentions"
           autoSize={{ minRows: 2, maxRows: 6 }}
           value={text}
-          placeholder="输入消息，支持 @Agent 指定响应；Enter 发送，Shift+Enter 换行"
-          onChange={(event) => setText(event.target.value)}
+          prefix="@"
+          options={agentMentionOptions}
+          placeholder="输入消息，键入 @ 可选择群聊 Agent；Enter 发送，Shift+Enter 换行"
+          onChange={handleComposerTextChange}
+          onSelect={(option) => {
+            const selected = agentMentionOptions.find(
+              (item) => item.value === String(option.value || ""),
+            );
+            if (selected) addAgentMention(selected.agent);
+          }}
+          filterOption={(input, option) => {
+            const searchText = String(
+              (option as AgentMentionOption | undefined)?.searchText ||
+                option?.value ||
+                "",
+            ).toLowerCase();
+            return searchText.includes(input.toLowerCase());
+          }}
+          notFoundContent="暂无可 @ 的 Agent"
           onPressEnter={(event) => {
             if (!event.shiftKey) {
               event.preventDefault();
@@ -414,6 +574,33 @@ export function ChatPanel({
             }
           }}
         />
+        {(contextReferences.length > 0 || agentMentions.length > 0) && (
+          <div className="composer-contexts" data-testid="composer-contexts">
+            <Text type="secondary" className="composer-contexts-label">
+              引用/指定
+            </Text>
+            {agentMentions.map((mention) => (
+              <Tag
+                key={mention.agent_id}
+                closable
+                icon={<RobotOutlined />}
+                onClose={() => removeAgentMention(mention.agent_id)}
+              >
+                {mention.agent_name ?? mention.agent_id}
+              </Tag>
+            ))}
+            {contextReferences.map((reference) => (
+              <Tag
+                key={fileReferenceKey(reference)}
+                closable
+                icon={<FileSearchOutlined />}
+                onClose={() => removeContextReference(fileReferenceKey(reference))}
+              >
+                {reference.filename ?? reference.path}
+              </Tag>
+            ))}
+          </div>
+        )}
         <Flex justify="space-between" align="center">
           <Space>
             <Upload {...uploadProps}>
@@ -421,6 +608,26 @@ export function ChatPanel({
                 上传文件
               </Button>
             </Upload>
+            <Select
+              className="composer-context-select"
+              showSearch
+              allowClear
+              value={undefined}
+              placeholder="引用工作区文件"
+              loading={workspaceFilesLoading}
+              disabled={!active?.workspace_id}
+              options={workspaceFileOptions}
+              optionFilterProp="searchText"
+              onSelect={(value) => {
+                if (typeof value === "string") addContextReference(value);
+              }}
+              popupMatchSelectWidth={420}
+              data-testid="context-reference-select"
+              suffixIcon={<FileSearchOutlined />}
+              notFoundContent={
+                workspaceFilesLoading ? "加载中..." : "暂无可引用文件"
+              }
+            />
             <Select
               className="composer-model-select"
               size="middle"
@@ -472,4 +679,106 @@ export function ChatPanel({
       </div>
     </Content>
   );
+}
+
+function workspaceFileOptionsFromTree(root: WorkspaceFileNode): WorkspaceFileOption[] {
+  const nodes: WorkspaceFileNode[] = [];
+  walk([root], (node) => {
+    if (node.type === "file") nodes.push(node);
+  });
+  return nodes.map((node) => {
+    const name = displayNodeName(node);
+    const path = displayNodePath(node);
+    return {
+      value: node.id || node.path,
+      searchText: `${name} ${node.path} ${node.display_path ?? ""}`,
+      node,
+      label: (
+        <div className="composer-context-option">
+          <span className="composer-context-option-name">{name}</span>
+          <span className="composer-context-option-meta">
+            {path} · {sourceLabel(node.source)} · {formatSize(node.size ?? 0)}
+          </span>
+        </div>
+      ),
+    };
+  });
+}
+
+function fileReferenceFromNode(node: WorkspaceFileNode): MessageFileReference {
+  const fileId = node.id.startsWith("file:") ? node.id.slice(5) : undefined;
+  return {
+    path: node.path,
+    file_id: fileId,
+    node_id: node.id,
+    filename: displayNodeName(node),
+    content_type: node.mime_type,
+    size: node.size,
+    source: node.source,
+    display_path: node.display_path ?? displayNodePath(node),
+  };
+}
+
+function fileReferenceKey(reference: MessageFileReference) {
+  return reference.file_id
+    ? `file:${reference.file_id}`
+    : `path:${reference.path}`;
+}
+
+function agentMentionOptionsFromParticipants(
+  participants: Conversation["participants"],
+): AgentMentionOption[] {
+  return participants
+    .filter((participant) => (
+      participant.participant_type === "agent" &&
+      !participant.left_at &&
+      Boolean(participant.agent_id)
+    ))
+    .map((participant) => {
+      const agentId = String(participant.agent_id);
+      const name = participant.agent_name || participant.nickname || agentId;
+      const mention: MessageAgentMention = {
+        agent_id: agentId,
+        agent_name: name,
+        agent_avatar_url: participant.agent_avatar_url,
+      };
+      return {
+        value: name,
+        searchText: `${name} ${agentId} ${participant.agent_type ?? ""}`,
+        agent: mention,
+        label: (
+          <div className="composer-agent-mention-option">
+            <Avatar
+              size={28}
+              src={participant.agent_avatar_url}
+              className="composer-agent-mention-avatar"
+            >
+              {name.slice(0, 1).toUpperCase()}
+            </Avatar>
+            <div className="composer-agent-mention-text">
+              <span className="composer-agent-mention-name">{name}</span>
+              <span className="composer-agent-mention-meta">
+                {participant.agent_type || "Agent"}
+              </span>
+            </div>
+          </div>
+        ),
+      };
+    });
+}
+
+function mentionTokenPresent(text: string, name: string) {
+  return text.toLowerCase().includes(`@${name}`.toLowerCase());
+}
+
+function removeMentionToken(text: string, name: string) {
+  const escaped = escapeRegExp(name);
+  return text
+    .replace(new RegExp(`@${escaped}\\s*`, "gi"), "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trimStart();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

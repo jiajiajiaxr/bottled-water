@@ -28,12 +28,14 @@ from db.session import AsyncSessionLocal
 from app.services.conversation_session_manager import (
     ConversationSessionManager,
 )
+from app.services.chat.mentions import normalize_agent_mentions, raw_agent_mentions
 from app.services.chat.scheduling import persist_scheduling_strategy, resolve_scheduling_strategy
 from app.services.chat.message_prompt import runtime_prompt_for_message
 from app.services.files.attachments import (
     attachment_from_file_asset,
     refresh_attachment_text_if_needed,
 )
+from app.services.files.references import file_reference_text, resolve_file_reference_attachments
 from common.logger import get_logger
 
 logger = get_logger("app.api.websocket")
@@ -122,6 +124,30 @@ async def _save_user_message(
             refresh_attachment_text_if_needed(file_asset)
             normalized_attachments.append(attachment_from_file_asset(file_asset))
 
+    existing_file_ids = {str(item.get("file_id") or "") for item in normalized_attachments}
+    reference_text = file_reference_text(
+        text,
+        raw_content.get("file_references") or data.get("file_references"),
+    )
+    if reference_text:
+        referenced = await db.run_sync(
+            lambda session: resolve_file_reference_attachments(
+                session,
+                user=user,
+                conversation=conversation,
+                text=reference_text,
+                existing_file_ids=existing_file_ids,
+            )
+        )
+        normalized_attachments.extend(referenced)
+    normalized_agent_mentions = await db.run_sync(
+        lambda session: normalize_agent_mentions(
+            session,
+            conversation_id=conversation.id,
+            mentions=raw_agent_mentions(data, raw_content),
+        )
+    )
+
     # 调度策略
     scheduling_strategy = resolve_scheduling_strategy(conversation, data.get("scheduling_strategy"))
     if data.get("scheduling_strategy"):
@@ -135,7 +161,11 @@ async def _save_user_message(
         sender_name=user.display_name,
         sender_avatar_url=user.avatar_url,
         content_type=data.get("content_type") or "text",
-        content={"text": text, "attachments": normalized_attachments},
+        content={
+            "text": text,
+            "attachments": normalized_attachments,
+            "agent_mentions": normalized_agent_mentions,
+        },
         status="sent",
         reply_to_message_id=data.get("reply_to_message_id") or data.get("quotedMessageId"),
         extra={
