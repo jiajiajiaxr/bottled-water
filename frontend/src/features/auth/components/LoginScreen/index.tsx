@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   Button,
+  Checkbox,
   Form,
   Input,
   Segmented,
@@ -8,11 +9,18 @@ import {
   Typography,
   App as AntApp,
 } from "antd";
-import { LoginOutlined, ApiOutlined } from "@ant-design/icons";
+import {
+  ApiOutlined,
+  LockOutlined,
+  LoginOutlined,
+  SafetyCertificateOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
 import { api } from "@/api";
+import loginIllustration from "@/assets/login-illustration.svg";
 import type { User } from "@/types";
 
-const { Text, Title, Paragraph } = Typography;
+const { Text, Title } = Typography;
 
 export function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
   const [loading, setLoading] = useState(false);
@@ -64,93 +72,158 @@ export function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
 
   return (
     <main className="login-shell">
-      <section className="login-panel">
-        <div>
-          <Text type="secondary">AgentHub</Text>
-          <Title level={1}>IM 多 Agent 工作台</Title>
-          <Paragraph>
-            登录后进入会话、Agent、文件、知识库和部署一体化协作空间。
-          </Paragraph>
-        </div>
-        <Segmented
-          block
-          className="login-mode"
-          value={mode}
-          onChange={(value) => setMode(value as "login" | "register")}
-          options={[
-            { label: "登录", value: "login" },
-            { label: "注册", value: "register" },
-          ]}
-        />
-        <Form key={mode} layout="vertical" onFinish={submit}>
-          <Form.Item
-            label="Email"
-            name="email"
-            initialValue={mode === "login" ? "demo" : undefined}
-            rules={
-              mode === "register"
-                ? [{ required: true, type: "email", message: "请输入有效邮箱" }]
-                : undefined
-            }
+      <section className="login-card" aria-label="AgentHub 登录">
+        <div className="login-form-side">
+          <div className="login-brand">
+            <span className="login-brand-mark">
+              <SafetyCertificateOutlined />
+            </span>
+            <span>AgentHub</span>
+          </div>
+
+          <div className="login-heading">
+            <Text className="login-kicker">系统登录</Text>
+            <Title level={1}>欢迎回来</Title>
+            <Text type="secondary">
+              进入会话、Agent、工作流、文件和部署的一体化工作台。
+            </Text>
+          </div>
+
+          <Segmented
+            block
+            className="login-mode"
+            value={mode}
+            onChange={(value) => setMode(value as "login" | "register")}
+            options={[
+              { label: "账号登录", value: "login" },
+              { label: "新建账号", value: "register" },
+            ]}
+          />
+
+          <Form
+            key={mode}
+            layout="vertical"
+            onFinish={submit}
+            className="login-form"
           >
-            <Input
-              size="large"
-              prefix={<LoginOutlined />}
-              placeholder="demo 或邮箱"
-              aria-label="email"
-            />
-          </Form.Item>
-          {mode === "register" && (
-            <>
-              <Form.Item
-                label="用户名"
-                name="username"
-                rules={[{ required: true, message: "请输入用户名" }]}
-              >
-                <Input size="large" placeholder="agenthub-user" />
-              </Form.Item>
-              <Form.Item label="显示名称" name="display_name">
-                <Input size="large" placeholder="你的名字" />
-              </Form.Item>
-            </>
-          )}
-          <Form.Item
-            label="Password"
-            name="password"
-            initialValue={mode === "login" ? "agenthub" : undefined}
-            rules={
-              mode === "register"
-                ? [{ required: true, min: 6, message: "密码至少 6 位" }]
-                : undefined
-            }
-          >
-            <Input.Password
-              size="large"
-              placeholder="agenthub"
-              aria-label="password"
-            />
-          </Form.Item>
-          <Space className="login-actions">
+            <Form.Item
+              label={mode === "register" ? "邮箱" : "账号"}
+              name="email"
+              initialValue={mode === "login" ? "demo" : undefined}
+              rules={
+                mode === "register"
+                  ? [
+                      {
+                        required: true,
+                        type: "email",
+                        message: "请输入有效邮箱",
+                      },
+                    ]
+                  : undefined
+              }
+            >
+              <Input
+                size="large"
+                prefix={<UserOutlined />}
+                placeholder={
+                  mode === "register" ? "name@example.com" : "demo 或邮箱"
+                }
+                aria-label="email"
+              />
+            </Form.Item>
+
+            {mode === "register" && (
+              <div className="login-register-grid">
+                <Form.Item
+                  label="用户名"
+                  name="username"
+                  rules={[{ required: true, message: "请输入用户名" }]}
+                >
+                  <Input size="large" placeholder="agenthub-user" />
+                </Form.Item>
+                <Form.Item label="显示名称" name="display_name">
+                  <Input size="large" placeholder="你的名字" />
+                </Form.Item>
+              </div>
+            )}
+
+            <Form.Item
+              label="密码"
+              name="password"
+              initialValue={mode === "login" ? "agenthub" : undefined}
+              rules={
+                mode === "register"
+                  ? [{ required: true, min: 6, message: "密码至少 6 位" }]
+                  : undefined
+              }
+            >
+              <Input.Password
+                size="large"
+                prefix={<LockOutlined />}
+                placeholder={
+                  mode === "register" ? "至少 6 位密码" : "agenthub"
+                }
+                aria-label="password"
+              />
+            </Form.Item>
+
+            {mode === "login" && (
+              <div className="login-options">
+                <Checkbox defaultChecked>记住登录状态</Checkbox>
+                <Button type="link" size="small" disabled>
+                  忘记密码
+                </Button>
+              </div>
+            )}
+
             <Button
               type="primary"
               htmlType="submit"
               size="large"
               loading={loading}
+              block
+              className="login-submit"
+              icon={<LoginOutlined />}
             >
-              {mode === "register" ? "注册并登录" : "登录"}
+              {mode === "register" ? "注册并进入" : "点击登录"}
             </Button>
-            <Button
-              size="large"
-              icon={<ApiOutlined />}
-              onClick={demo}
-              loading={loading}
-              data-testid="demo-login"
-              disabled={mode === "register"}
-            >
-              演示用户
-            </Button>
+
+            {mode === "login" && (
+              <Button
+                size="large"
+                icon={<ApiOutlined />}
+                onClick={demo}
+                loading={loading}
+                data-testid="demo-login"
+                block
+                className="login-demo"
+              >
+                使用演示用户
+              </Button>
+            )}
+          </Form>
+
+          <Space className="login-footnote" split={<span />}>
+            <Text type="secondary">安全认证</Text>
+            <Text type="secondary">实时协作</Text>
+            <Text type="secondary">工具审计</Text>
           </Space>
-        </Form>
+        </div>
+
+        <aside className="login-visual-side" aria-label="AgentHub 工作台视觉">
+          <div className="login-visual-copy">
+            <Text>Multi-Agent Workspace</Text>
+            <Title level={2}>让每个 Agent 都在同一条工作流里协作</Title>
+          </div>
+          <img src={loginIllustration} alt="" className="login-illustration" />
+          <div className="login-status-panel">
+            <span className="login-status-dot" />
+            <div>
+              <Text strong>Runtime online</Text>
+              <Text type="secondary">Chat · Workflow · Deploy</Text>
+            </div>
+          </div>
+        </aside>
       </section>
     </main>
   );
