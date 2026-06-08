@@ -23,6 +23,8 @@ class DBSettings(BaseSettings):
 
     @property
     def resolved_database_url(self) -> str:
+        if self.database_url.startswith("postgresql://"):
+            return self.database_url.replace("postgresql://", "postgresql+psycopg://")
         if not self.database_url.startswith("sqlite:///"):
             return self.database_url
         raw_path = self.database_url.removeprefix("sqlite:///")

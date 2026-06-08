@@ -7,8 +7,10 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
+SRC_DIR = BACKEND_DIR / "src"
+for import_path in (SRC_DIR, BACKEND_DIR):
+    if str(import_path) not in sys.path:
+        sys.path.insert(0, str(import_path))
 
 from db.base import Base  # noqa: E402
 from db.config import get_db_settings  # noqa: E402

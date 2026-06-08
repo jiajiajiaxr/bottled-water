@@ -15,8 +15,10 @@ async_connect_args = {"check_same_thread": False, "timeout": 30} if is_sqlite el
 
 if database_url.startswith("sqlite"):
     async_database_url = database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
-elif database_url.startswith("postgresql"):
-    async_database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+elif database_url.startswith("postgresql+psycopg"):
+    async_database_url = database_url
+elif database_url.startswith("postgresql://"):
+    async_database_url = database_url.replace("postgresql://", "postgresql+psycopg://")
 else:
     async_database_url = database_url
 

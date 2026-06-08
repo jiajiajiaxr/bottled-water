@@ -1,7 +1,14 @@
+.git
+.env
+.env.*
+logs
+*.log
+
 frontend/node_modules
 frontend/dist
 frontend/logs
-frontend/.env*
+frontend/.env
+frontend/.env.*
 
 backend/.venv
 backend/.pytest_cache
@@ -11,9 +18,8 @@ backend/logs
 backend/*.db
 backend/*.db-shm
 backend/*.db-wal
-backend/.env*
+backend/.env
+backend/.env.*
 
-.git
-.env*
-logs
-*.log
+**/__pycache__
+**/*.pyc

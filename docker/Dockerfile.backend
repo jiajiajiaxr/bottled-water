@@ -1,22 +1,22 @@
 FROM python:3.11-slim
 
-WORKDIR /app
+WORKDIR /app/backend
 
-# 安装依赖
-COPY pyproject.toml uv.lock* ./
-RUN pip install uv && \
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/backend/src \
+    PATH="/app/backend/.venv/bin:${PATH}"
+
+COPY backend/pyproject.toml backend/uv.lock* ./
+RUN pip install --no-cache-dir uv && \
     uv sync --frozen --no-install-project --no-dev
 
-# 复制源码
-COPY . .
-
-# 安装项目（包含所有依赖）
+COPY backend/ .
 RUN uv sync --frozen --no-dev
 
-# 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8888/health')" || exit 1
 
 EXPOSE 8888
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8888"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT:-8888}"]

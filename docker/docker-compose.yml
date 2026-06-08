@@ -1,28 +1,33 @@
 version: "3.9"
 
 services:
-  # Nginx 反向代理 + 前端静态文件
   nginx:
     build:
-      context: .
-      dockerfile: Dockerfile.frontend
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
     ports:
-      - "80:80"
+      - "${WEB_PORT:-80}:80"
     depends_on:
       backend:
         condition: service_healthy
     networks:
       - agenthub
 
-  # 后端 API 服务
   backend:
     build:
-      context: ../backend
-      dockerfile: ../docker/Dockerfile.backend
+      context: ..
+      dockerfile: docker/Dockerfile.backend
     environment:
-      - DATABASE_URL=postgresql://agenthub:agenthub_secret@postgres:5432/agenthub
-      - REDIS_URL=redis://redis:6379/0
-      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-agenthub}:${POSTGRES_PASSWORD:-agenthub_secret}@postgres:5432/${POSTGRES_DB:-agenthub}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SECRET_KEY=${AGENTHUB_SECRET_KEY:-agenthub-dev-secret-change-me}
+      - API_PORT=8888
+      - FRONTEND_PORT=${WEB_PORT:-80}
+      - ARTIFACT_BASE_URL=${PUBLIC_BASE_URL:-http://localhost}
+      - STORAGE_DIR=/app/var/storage
+    volumes:
+      - backend_storage:/app/var/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,13 +41,12 @@ services:
       timeout: 5s
       retries: 5
 
-  # PostgreSQL 数据库
   postgres:
     image: postgres:15-alpine
     environment:
-      - POSTGRES_USER=agenthub
-      - POSTGRES_PASSWORD=agenthub_secret
-      - POSTGRES_DB=agenthub
+      - POSTGRES_USER=${POSTGRES_USER:-agenthub}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-agenthub_secret}
+      - POSTGRES_DB=${POSTGRES_DB:-agenthub}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -53,7 +57,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Redis 缓存
   redis:
     image: redis:7-alpine
     volumes:
@@ -68,3 +71,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  backend_storage:
