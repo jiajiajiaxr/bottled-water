@@ -32,6 +32,8 @@ __pycache__/
 # Frontend dependencies and build output
 frontend/node_modules/
 node_modules/
+frontend/.pnpm-store/
+.pnpm-store/
 frontend/pnpm-lock.yaml
 frontend/dist/
 dist/
