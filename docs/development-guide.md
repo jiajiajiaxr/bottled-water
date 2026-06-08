@@ -1,229 +1,135 @@
-# 开发维护手册
+# Development Guide
 
-本文说明如何在本地开发、验证和修改 AgentHub。
+This guide covers the current local development and deployment workflow.
 
-## 1. 环境变量
+## Prerequisites
 
-后端配置集中在 `backend/src/app/core/config.py`。当前只读取：
+- Python 3.11
+- `uv`
+- Node.js 20 or newer
+- `pnpm`
+- Docker Desktop or a compatible Docker engine for container deployment
 
-- 项目根目录 `.env`
-- `backend/.env`
+## Backend Setup
 
-推荐把主要配置放在项目根目录 `.env`。
+```powershell
+cd backend
+uv sync --extra dev
+uv run alembic upgrade head
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
 
-常用变量：
+The backend reads configuration from the repository `.env`, `backend/.env`, and process environment. Local development usually uses SQLite:
 
 ```env
 DATABASE_URL=sqlite:///./agenthub_dev.db
-LLM_PROVIDER=ark
-ARK_BASE_URL=...
-ARK_ENDPOINT_ID=...
-ARK_MODEL=...
+SECRET_KEY=dev-secret-change-me
+LLM_PROVIDER=auto
+ENABLE_FUNCTION_CALLING=true
+```
+
+For real model calls, configure the provider in the app UI or set the fallback Ark values:
+
+```env
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 ARK_API_KEY=...
+ARK_ENDPOINT_ID=...
+ARK_MODEL=doubao-seed-2-0-lite
 ```
 
-说明：
-
-- `LLM_PROVIDER=ark`：使用真实火山方舟适配器。
-- `LLM_PROVIDER=mock`：使用本地 mock。
-- `LLM_PROVIDER=auto`：有 key 时走真实模型，否则 mock。
-- API Key 不应该写入前端代码，也不应该通过浏览器传递。
-
-## 2. 安装依赖
-
-后端使用 `uv` 管理 Python 3.11 运行时、虚拟环境和依赖锁定：
-
-```powershell
-uv sync --project backend --extra dev
-```
-
-前端：
+## Frontend Setup
 
 ```powershell
 cd frontend
-corepack pnpm install
+pnpm install
+pnpm dev
 ```
 
-## 3. 数据库迁移
+The Vite dev server proxies API and WebSocket traffic to the backend. The app runs at `http://localhost:5173`.
+
+## Docker Stack
+
+Run the complete stack from the repository root:
 
 ```powershell
-uv run --project backend --directory backend alembic upgrade head
+docker compose -f docker/docker-compose.yml up --build
 ```
 
-迁移脚本位于：
+Open `http://localhost`.
 
-- `backend/alembic/versions`
-
-新增表或字段时：
-
-1. 修改 `backend/src/db/models/` 下对应领域模型文件。
-2. 新增 Alembic migration。
-3. 更新 `backend/src/app/services/serialization.py` 里的输出结构。
-4. 更新 `frontend/src/types/`。
-5. 补 API 和测试。
-
-## 4. 启动开发服务
-
-后端：
+To override secrets, host port, or public URL:
 
 ```powershell
-uv run --project backend --directory backend uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+Copy-Item docker/env.example docker/.env
+docker compose --env-file docker/.env -f docker/docker-compose.yml up --build
 ```
 
-前端：
+The stack starts nginx, backend, PostgreSQL, and Redis. The backend container runs `alembic upgrade head` before starting FastAPI.
+
+## Tests And Checks
+
+Backend:
 
 ```powershell
-cd frontend
-corepack pnpm dev
+cd backend
+uv run ruff check .
+uv run pytest -q
 ```
 
-开发时前端通过 Vite 代理访问后端 `/api/v1`。
-
-## 5. 测试命令
-
-后端：
+Targeted backend checks commonly used for recent workflow and external-agent changes:
 
 ```powershell
-uv run --project backend pytest -q
+cd backend
+uv run pytest tests/test_conversation.py tests/test_context_system.py tests/test_external_agents.py -q
 ```
 
-前端：
+Frontend:
 
 ```powershell
 cd frontend
-corepack pnpm vitest run
-corepack pnpm exec tsc --noEmit --pretty false
-corepack pnpm build
+pnpm build
+pnpm exec vitest run --config tests/vitest.config.ts
 ```
 
-E2E：
+Targeted frontend workflow checks:
 
 ```powershell
 cd frontend
-corepack pnpm exec playwright test -c ..\e2e\playwright.config.ts
+pnpm exec vitest run tests/workflow-board-panel.test.tsx tests/workflow-studio.test.tsx tests/workflow-utils.test.ts --config tests/vitest.config.ts
 ```
 
-## 6. 常见开发入口
+## Common Development Tasks
 
-### 新增一个 API
+Add or change an API:
 
-1. 在 `backend/src/app/api` 下选择已有领域文件或新建文件。
-2. 在 `backend/src/app/main.py` 注册 router。
-3. 如果涉及数据库，修改 `backend/src/db/models/` 下对应领域模型文件和迁移。
-4. 在 `backend/src/app/services/serialization.py` 增加输出转换。
-5. 在 `frontend/src/api/` 增加 SDK 方法。
-6. 在 `frontend/src/types/` 增加类型。
-7. 在对应测试文件里补测试。
+1. Update the relevant router in `backend/src/app/api`.
+2. Put business logic in `backend/src/app/services`.
+3. Update models in `backend/src/db/models` and add an Alembic migration when schema changes.
+4. Update serialization helpers if the frontend response shape changes.
+5. Update `frontend/src/api` and `frontend/src/types`.
+6. Add or update tests.
 
-### 新增一个 Agent 字段
+Add or change a tool:
 
-1. 修改 `backend/src/db/models/agents.py` 中 `Agent` 模型。
-2. 增加 migration。
-3. 修改 `agent_to_dict`。
-4. 修改 `frontend/src/types/` 的 `Agent` / `AgentConfig`。
-5. 修改 Agent 创建、编辑表单。
-6. 修改 `backend/src/app/api/agents.py` 的创建和更新逻辑。
-7. 如果影响执行，优先修改 `backend/src/app/services/agents/function_loop.py`、`agents/tool_loop.py` 或 `workflows/`；`agentic_runtime.py` 仅用于兼容。
+1. Define catalog metadata in `backend/src/app/services/tools/builtins/registry.py`.
+2. Implement execution under `backend/src/app/services/tools/builtins` or the matching service domain.
+3. Ensure permissions are exposed through agent/tool configuration.
+4. Persist execution facts through the tool invocation path.
+5. Add tests for success, permission failure, and input validation.
 
-### 新增一个工作流节点类型
+Add or change a workflow node:
 
-1. 修改 `frontend/src/types/` 的 `WorkflowNode` 约定。
-2. 修改 `frontend/src/features/workflow/` 的节点类型选项、创建默认配置、编辑表单。
-3. 修改 `backend/src/app/api/conversations.py` 的 normalize 逻辑，确保 `type/config` 不丢失。
-4. 修改 `backend/src/app/services/workflows/nodes/`、`engine.py`、`scheduler.py` 的执行逻辑。
-5. 修改 `conversation.extra.workflow_runtime` 输出。
-6. 增加 `tests/test_conversation.py` 和相关工作流测试。
+1. Update frontend workflow types and node editors in `frontend/src/features/workflow`.
+2. Update backend workflow normalization in `backend/src/app/api/conversations.py`.
+3. Update execution logic under `backend/src/app/services/workflows`.
+4. Persist node state in `WorkflowRun`.
+5. Add backend and frontend tests.
 
-### 新增一个内置工具
+## Troubleshooting
 
-1. 在 `backend/src/app/services/tools/builtins/registry.py` 增加工具定义。
-2. 在 `backend/src/app/services/tools/builtins/executor.py` 或对应领域目录中实现真实执行。
-3. 给 `backend/src/app/services/tools/toolboxes.py` 的官方 Agent 工具箱加权限。
-4. 如果需要文件能力，优先复用 `services/tools/builtins/file/` 和 `services/files/`。
-5. 前端工具目录会通过 `/tools` 自动展示。
-6. 补 `tests/test_tools_files.py`。
-
-### 新增一个文件格式
-
-1. 在 `backend/src/app/services/tools/builtins/file/` 或 `backend/src/app/services/files/` 增加提取、预览或生成逻辑。
-2. 在 `backend/src/app/api/files.py` 接入到对应接口。
-3. 如果需要作为产物导出，修改 `backend/src/app/services/tools/builtins/artifact/export.py`。
-4. 前端预览逻辑在 `PreviewPanel` 和附件预览处补展示。
-5. 补文件工具测试。
-
-### 调整模型供应商
-
-1. 修改 `backend/src/app/services/llm/ark.py` 或新增 provider service。
-2. 修改 `backend/src/app/services/llm/gateway.py`；旧 `ark.py` / `llm_gateway.py` 只做兼容导出，不承载新逻辑。
-3. 修改 `backend/src/app/api/models.py` 的配置和测试接口。
-4. 修改全局设置表单。
-5. 不要把 API Key 暴露到 `frontend/src`。
-
-### 调整输出显示
-
-内部规划、任务拆解、执行过程、审查草稿等内容不应该直接出现在最终聊天气泡里。
-
-相关入口：
-
-- 后端过滤：`backend/src/app/services/output_filter.py`
-- 前端过滤：`frontend/src/lib/message.ts`
-- 编排生成：`backend/src/app/services/agents/function_loop.py`、`backend/src/app/services/workflows/`
-
-## 7. 数据流速查
-
-发送消息：
-
-```text
-frontend Workbench.send
-  -> api.sendMessage
-  -> backend/src/app/api/messages.py
-  -> Message 入库
-  -> runtime_service.run / conversation_session_manager
-  -> events 发布流式事件
-  -> frontend api.streamConversation
-  -> 聊天气泡增量更新
-```
-
-上传附件：
-
-```text
-frontend uploadFile
-  -> /files/upload
-  -> save_upload
-  -> services/tools/builtins/file/extractors
-  -> FileAsset 入库
-  -> 发送消息时 attachments 进入消息上下文
-```
-
-产物生成：
-
-```text
-Agent / tool
-  -> services.tools.executor.invoke_tool
-  -> artifacts.create_artifact
-  -> Message preview_card
-  -> 用户点击卡片
-  -> PreviewPanel 加载 artifact
-```
-
-群聊工作流：
-
-```text
-send message
-  -> load conversation.extra.workflow
-  -> optional replan
-  -> workflow_execution_order
-  -> node type dispatch
-  -> WorkflowRun.node_states
-  -> final assistant message
-```
-
-## 8. 排障建议
-
-- 页面空白：先跑 `corepack pnpm exec tsc --noEmit --pretty false`。
-- 登录失败：查 `backend/src/app/api/auth.py` 和 `.env` 的 `SECRET_KEY`。
-- 模型无响应：查 `LLM_PROVIDER`、`ARK_API_KEY`、`ARK_ENDPOINT_ID`，再看 `backend/src/app/services/llm/ark.py`。
-- 消息一直显示正在回答：查 `localRunningConversationIds` 清理逻辑和 `runtime_service.run` / `conversation_session_manager` 是否抛错。
-- 工作流节点配置丢失：查 `conversations.py` normalize 是否保留 `type/config`。
-- 产物打不开：查 `Artifact.content`、`services/tools/builtins/artifact/export.py` 和 `PreviewPanel`。
-- MCP 调用失败：先 probe，再看 `McpToolInvocation` 记录。
+- Backend cannot import `app` or `db`: run commands from `backend` through `uv run`, or set `PYTHONPATH=src`.
+- Alembic cannot connect to Postgres: use `postgresql+psycopg://...`; plain `postgresql://...` is normalized to psycopg by current config.
+- Frontend blank page: run `pnpm build` and check TypeScript errors first.
+- Streaming does not finish: inspect `backend/src/app/api/messages.py`, chat finalizer/cancellation services, and frontend running-conversation state.
+- Workflow run looks stuck: check `backend/src/app/services/workflows`, `WorkflowRun.node_states`, and browser network polling responses.
+- Docker stack uses the wrong database: use `docker/.env` variables from `docker/env.example`; compose builds its own Postgres URL from `POSTGRES_*`.
