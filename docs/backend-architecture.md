@@ -59,6 +59,8 @@ Message send paths enter through `messages.py` or `websocket.py`, then move thro
 
 Streaming events are consumed by frontend merge logic and should always finish with a terminal success, failure, or cancellation event.
 
+Actor-runtime group chat is coordinated by `backend/src/agent_runtime/strategies/scheduler_agent.py`. The scheduler builds a short task plan, dispatches suitable agents, records agent reports, and emits `scheduler.summary`. Visible Team Leader final messages are persisted only when the summary payload requests publication. The legacy path that synthesized a Team Leader summary after arbitrary multi-agent completion is no longer part of the runtime.
+
 ## Agent Tool Loop
 
 Agent tool execution has three important layers:
@@ -93,7 +95,7 @@ Skills live under `services/skills` and MCP under `services/mcp`.
 
 External coding agent adapters live under `services/external_agents`.
 
-They expose probe, run, status, and cancel operations for Codex and Claude Code. Runs persist stdout, stderr, exit code, changed files, cwd, duration, and status. CWD validation protects workspace boundaries.
+They expose probe, run, status, and cancel operations for Codex, Claude Code, and compatible adapters through the unified `external_agent.invoke` tool. Legacy provider-specific tool names are mapped to the unified tool internally for compatibility, while the public catalog exposes the unified tool. Runs persist stdout, stderr, exit code, changed files, cwd, duration, and status. CWD validation protects workspace boundaries.
 
 ## Files, Artifacts, And Deployment Preview
 

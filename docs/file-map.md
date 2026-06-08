@@ -65,7 +65,7 @@ Routers:
 - `files.py` and `workspace_files.py`: upload, workspace tree, preview, download, file operations.
 - `artifacts.py`: artifact create, preview, version, diff, export.
 - `deployments.py`: preview deployment, records, rollback, health checks.
-- `external_agents.py`: Codex/Claude Code probe and run records.
+- `external_agents.py`: external coding agent providers, probe, invoke, status, cancel, and run records.
 - `sandbox.py`: sandbox sessions and command execution entry points.
 - `security_ops.py`: audit logs, roles, permissions, user role updates.
 - `knowledge.py`, `tasks.py`, `context.py`, `logs.py`, `orchestrator.py`: supporting platform APIs.
@@ -76,7 +76,7 @@ Service domains:
 - `services/chat`: send pipeline, prompts, finalization, cancellation, artifacts, scheduling.
 - `services/context`: context builder, workspace/conversation context, authorized tool summaries.
 - `services/tools`: tool catalog, permissions, execution, built-in tools.
-- `services/external_agents`: Codex and Claude Code provider adapters.
+- `services/external_agents`: Codex, Claude Code, OpenCode-compatible provider adapters and run persistence.
 - `services/workflows`: workflow normalization, runtime persistence, engine, node execution.
 - `services/skills`: skill runtime, dependencies, versions, testing.
 - `services/mcp`: MCP discovery, transports, invocation, records.
@@ -122,12 +122,21 @@ Core frontend files:
 - `frontend/src/api/message.ts`: message send, stream parsing, event dispatch.
 - `frontend/src/api/websocket.ts`: conversation WebSocket client.
 - `frontend/src/pages/WorkbenchPage`: main IM workbench.
-- `frontend/src/features/chat`: chat panel, sidebar, message bubbles, drawers.
+- `frontend/src/features/chat`: chat panel, sidebar, message bubbles, runtime decision/progress strip, drawers.
 - `frontend/src/features/agents`: agent directory and configuration UI.
 - `frontend/src/features/workflow`: workflow studio and canvas components.
 - `frontend/src/features/platform`: platform drawer tabs for tools, skills, MCP, security, workflows, etc.
 - `frontend/src/features/preview`: artifact preview/edit/diff/deployment panel.
 - `frontend/src/features/workspaceFiles`: workspace file tree and preview flows.
+
+Runtime coordination files:
+
+- `backend/src/agent_runtime/strategies/scheduler_agent.py`: actor-runtime Team Leader plan/decision/summary behavior.
+- `backend/src/app/services/conversation_session_manager.py`: runtime event persistence, generation lifecycle, optional Team Leader summary message persistence.
+- `backend/src/app/services/runtime/generation_records.py`: generation event and runtime summary records.
+- `frontend/src/lib/runtimeEvents.ts`: frontend runtime event normalization.
+- `frontend/src/features/chat/components/ChatPanel/RuntimeDecisionStrip.tsx`: multi-agent plan/progress/summary display.
+- `frontend/src/features/chat/components/CreateConversationModal.tsx`: default Daily Agent selection and manual multi-agent selection.
 
 Tests:
 

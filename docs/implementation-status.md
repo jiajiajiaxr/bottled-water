@@ -6,9 +6,11 @@ This file is the compact status reference for current docs. It avoids historical
 
 - Authentication, demo login, users, workspaces, projects, and conversation management.
 - Single-agent and group conversations with persisted messages and streaming responses.
+- New conversation defaults that select one Daily Chat Agent instead of preselecting every specialist agent.
+- Actor-runtime multi-agent coordination with Team Leader planning, suitable-agent selection, visible progress, agent reports, and optional aggregated final deliverables.
 - Agent directory and configurable model/tool/skill/MCP permissions.
 - Tool catalog, built-in tools, invocation records, and permission checks.
-- External coding agent tools for Codex and Claude Code, including persisted runs and status/cancel paths.
+- Unified external coding agent tool invocation for Codex, Claude Code, and compatible adapters, including persisted runs and status/cancel paths.
 - Model provider management and Ark/OpenAI-compatible fallback configuration.
 - File upload, workspace file tree, preview/download operations, and attachment context.
 - Artifact generation, preview, versioning, diff, export, and deployment preview records, including local/Docker-stack container mode.
@@ -27,6 +29,13 @@ This file is the compact status reference for current docs. It avoids historical
 
 ## Recently Hardened
 
+- Team Leader final messages are now emitted only from `scheduler.summary` when publication is appropriate; the old fallback that synthesized a Team Leader message after any multi-agent completion has been removed.
+- Multi-agent progress uses short planned task labels and does not repeat the whole user prompt for every agent.
+- Complex collaborative final answers aggregate source outputs, dependency chain, compliance checks, final products, and risks while preserving real artifact references.
+- Group scheduling can select a suitable subset of agents instead of always using every participant.
+- New chat creation defaults to Daily Chat Agent for both single and group-capable dialogs, leaving multi-agent selection explicit.
+- External coding agent tools are unified under `external_agent.invoke`; legacy aliases are compatibility shims.
+- User profile signatures are supported in the profile/settings flow.
 - Workflow run state no longer relies on static 5% progress and merges persisted node/run state during polling.
 - Workflow save accepts canvas object edges and updates conversation runtime mode when enabled.
 - AI workflow generation uses backend generation logic instead of static examples.

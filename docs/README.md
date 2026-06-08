@@ -33,7 +33,14 @@ React Workbench
   -> model providers, sandbox, external coding agents, deployment preview
 ```
 
-Single-agent chats run the selected agent's loop. Group chats use the conversation scheduling settings. When `workflow_enabled=true`, the saved workflow canvas is the execution plan; otherwise the runtime can use the tech-lead/actor orchestration path.
+Single-agent chats run the selected agent's loop. New conversations default to one Daily Chat Agent so ordinary chat starts simply. Group chats use conversation scheduling settings: when `workflow_enabled=true`, the saved workflow canvas is the execution plan; otherwise the actor runtime uses a Team Leader scheduler to choose suitable agents, stream progress, collect agent reports, and publish an aggregated final answer only for collaborative tasks that need one.
+
+Current multi-agent delivery behavior:
+
+- Simple chat should stay single-agent and stream normally.
+- Complex group tasks can be planned into short task steps and assigned to a suitable subset of agents.
+- The Team Leader summary is produced by the scheduler summary event, not by a legacy fallback that concatenates every agent message.
+- Final collaborative answers should aggregate sources, chain, checks, products, and risks, and include real artifact or deployment links when generated.
 
 ## Documentation Rules
 

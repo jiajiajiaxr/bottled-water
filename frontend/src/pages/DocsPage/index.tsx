@@ -192,8 +192,8 @@ function DemoFlowSection() {
       <div>
         <h2>演示链路</h2>
         <p>
-          推荐先从演示用户进入控制台，创建或选择一个工作区，再发起单聊或多 Agent 群聊。单聊会使用当前
-          Agent 的工具权限执行，群聊会优先读取画布 workflow，让演示过程可复盘、可定位。
+          推荐先从演示用户进入控制台，创建或选择一个工作区，再发起默认 Daily 单聊或手动选择多 Agent 群聊。单聊会使用当前
+          Agent 的工具权限执行，复杂群聊会显示 Team Leader 计划、Agent 报告和按需最终交付；启用 workflow 后则按画布运行，让演示过程可复盘、可定位。
         </p>
         <div className="docs-steps">
           <span>登录</span>

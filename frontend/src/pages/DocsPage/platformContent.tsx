@@ -44,7 +44,7 @@ export const productModules: ProductModule[] = [
     title: "IM 工作台",
     description:
       "以会话为主入口，把需求、附件、Agent 回复、工具摘要和产物卡片放在同一条协作时间线中。",
-    points: ["单聊直连 Agent", "群聊绑定工作流", "消息流式回填", "右侧产物预览"],
+    points: ["默认 Daily 单聊", "群聊自动组织", "消息流式回填", "右侧产物预览"],
     icon: <MessageOutlined />,
   },
   {
@@ -57,8 +57,8 @@ export const productModules: ProductModule[] = [
   {
     title: "工作流运行时",
     description:
-      "群聊以 workflow 为事实来源，运行态写入 WorkflowRun，前端可以展示节点状态、输出和错误。",
-    points: ["节点编排", "条件分支", "循环执行", "运行历史"],
+      "复杂群聊可由 Team Leader 动态调度；启用 workflow 后以画布为事实来源，运行态写入 WorkflowRun。",
+    points: ["Team Leader 计划", "节点编排", "条件分支", "运行历史"],
     icon: <BranchesOutlined />,
   },
   {
@@ -114,7 +114,7 @@ export const capabilityRows: CapabilityRow[] = [
     domain: "会话与消息",
     console: "会话列表、聊天区、成员管理、后台任务按钮",
     backend: "conversations.py / messages.py / realtime/",
-    outcome: "支持单聊、群聊、流式回复、停止生成、重试和运行态展示。",
+    outcome: "支持默认 Daily 单聊、手动多 Agent 群聊、流式回复、协作进度、停止生成和重试。",
   },
   {
     domain: "Agent 与能力授权",
@@ -126,7 +126,7 @@ export const capabilityRows: CapabilityRow[] = [
     domain: "工作流画布",
     console: "会话设置里的画布、独立 Workflow Studio",
     backend: "workflows/engine.py / workflows/nodes/",
-    outcome: "群聊按节点和边执行，并记录 WorkflowRun、节点输出和失败状态。",
+    outcome: "启用 workflow 后群聊按节点和边执行，并记录 WorkflowRun、节点输出和失败状态。",
   },
   {
     domain: "文件、知识库与上下文",

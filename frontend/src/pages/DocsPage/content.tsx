@@ -135,7 +135,7 @@ export const quickEntries: IconCard[] = [
   {
     href: "#workflow-nodes",
     title: "工作流编排",
-    description: "理解群聊为什么以 workflow 为事实来源，以及节点输入、输出、失败状态如何形成可观察的运行链路。",
+    description: "理解复杂群聊如何在 Team Leader 自动调度和 workflow 固定编排之间切换，以及节点输入、输出、失败状态如何形成可观察链路。",
     icon: <BranchesOutlined />,
   },
   {
@@ -163,7 +163,7 @@ export const readingPaths: ReadingPath[] = [
     audience: "第一次体验",
     title: "从会话到产物",
     description: "适合演示人员和产品同学。目标不是读完整个系统，而是快速证明 AgentHub 能把输入、推理、工具调用和交付结果串成一条可展示的链路。",
-    steps: ["打开控制台并确认登录态", "选择或创建一个独立工作区", "新建单聊或绑定 workflow 的群聊", "上传材料并发送明确任务", "查看流式回复、工具摘要和产物预览"],
+    steps: ["打开控制台并确认登录态", "选择或创建一个独立工作区", "新建默认 Daily 单聊或手动选择群聊成员", "上传材料并发送明确任务", "查看流式回复、工具摘要、协作进度和产物预览"],
     href: "#first-run",
   },
   {
@@ -187,11 +187,11 @@ export const capabilitySections: IconCard[] = [
     id: "chat",
     title: "会话工作台",
     description:
-      "会话是 AgentHub 的主入口，也是用户最先理解平台能力的地方。左侧负责会话、分类、归档和工作区上下文，中间承载用户输入、Agent 流式回复、工具摘要和运行提示，右侧在需要时打开文件或产物预览。单聊适合验证一个 Agent 的能力边界，群聊适合把多角色协作和 workflow 运行放在同一条时间线里。",
+      "会话是 AgentHub 的主入口，也是用户最先理解平台能力的地方。左侧负责会话、分类、归档和工作区上下文，中间承载用户输入、Agent 流式回复、工具摘要和运行提示，右侧在需要时打开文件或产物预览。新建会话默认选择一个 Daily Chat Agent，适合日常问答；群聊适合把多角色协作、Team Leader 自动组织和 workflow 运行放在同一条时间线里。",
     scenario:
       "当用户拿到一份需求、报告、代码片段或业务材料时，不需要先理解后端工具目录，只要创建会话、选择 Agent、上传材料并提出任务，就能看到系统如何组织上下文、调用能力和输出结果。",
-    steps: ["选择工作区并新建会话", "选择单聊 Agent 或群聊成员", "上传附件或粘贴需求", "观察流式消息、工具摘要和后台任务", "点击产物卡片进入右侧预览"],
-    signals: ["消息是否持续流式回填", "工具摘要是否说明调用目的和结果", "产物卡片是否只在需要交付时出现", "停止生成、重试、后台任务状态是否一致"],
+    steps: ["选择工作区并新建会话", "默认使用 Daily 或手动增加协作 Agent", "上传附件或粘贴需求", "观察流式消息、工具摘要、协作计划和后台任务", "点击产物卡片进入右侧预览"],
+    signals: ["消息是否持续流式回填", "复杂任务是否出现短任务进度", "Team Leader 是否只在需要总结时发最终交付", "产物卡片是否只在需要交付时出现", "停止生成、重试、后台任务状态是否一致"],
     icon: <MessageOutlined />,
   },
   {
@@ -209,7 +209,7 @@ export const capabilitySections: IconCard[] = [
     id: "workflow",
     title: "工作流画布",
     description:
-      "工作流画布用于把多 Agent 协作从临场聊天变成可复盘的执行图。群聊运行时优先读取当前会话保存的 workflow，节点负责明确输入、配置、输出和失败状态。画布不是为了把所有事情都做成流程，而是把需要稳定复用、需要审计、需要定位失败原因的协作链路显式化。",
+      "工作流画布用于把多 Agent 协作从临场聊天变成可复盘的执行图。未启用 workflow 的群聊会由 Team Leader 根据任务选择合适 Agent 并生成进度；启用 workflow 后，保存的画布成为执行计划，节点负责明确输入、配置、输出和失败状态。画布不是为了把所有事情都做成流程，而是把需要稳定复用、需要审计、需要定位失败原因的协作链路显式化。",
     scenario:
       "当一个任务需要先分析、再生成、再审查、最后产出文档或页面时，使用 workflow 能让每个阶段的责任、输出和异常都可见。",
     steps: ["从 start 节点接收任务", "用 agent/tool/skill/mcp 节点处理关键步骤", "用 condition/loop 控制分支与迭代", "用 review 节点做质量把关", "用 artifact/end 节点交付结果并汇总"],
@@ -304,8 +304,8 @@ export const endpointEntries: EndpointEntry[] = [
   { module: "认证", endpoint: "/api/v1/auth/login", purpose: "登录、演示登录、会话恢复" },
   { module: "工作区", endpoint: "/api/v1/workspaces", purpose: "工作区隔离、成员、项目文件入口" },
   { module: "工作区文件", endpoint: "/api/v1/workspace-files", purpose: "文件树、预览、下载、重命名、收藏、移动" },
-  { module: "会话", endpoint: "/api/v1/conversations", purpose: "单聊、群聊、分类、归档、工作流保存" },
-  { module: "消息", endpoint: "/api/v1/messages", purpose: "消息发送、流式事件、停止生成、重试" },
+  { module: "会话", endpoint: "/api/v1/conversations", purpose: "单聊、群聊、成员、分类、归档、工作流保存" },
+  { module: "消息", endpoint: "/api/v1/messages", purpose: "消息发送、流式事件、运行事件、停止生成、重试" },
   { module: "Agent", endpoint: "/api/v1/agents", purpose: "官方 Agent、自定义 Agent、权限绑定" },
   { module: "工具", endpoint: "/api/v1/tools", purpose: "内置工具、自定义工具、AI 生成工具、调用测试" },
   { module: "MCP", endpoint: "/api/v1/mcp", purpose: "服务注册、探测、工具调用、调用记录" },
@@ -320,7 +320,8 @@ export const endpointEntries: EndpointEntry[] = [
 export const integrationSteps = [
   "在全局设置里确认模型供应商、工具目录、Skill 和 MCP 服务状态。",
   "进入 Agent 广场，为目标 Agent 绑定允许调用的工具、Skill 或 MCP。",
-  "在单聊中直接验证 Agent 小循环，或在群聊画布中把能力节点接入 workflow。",
+  "在单聊中直接验证 Agent 小循环，或在群聊中观察 Team Leader 调度与进度。",
+  "需要稳定复用时，再把能力节点接入 workflow 并保存启用。",
   "运行后查看消息、工具摘要、后台任务、审计日志和产物预览。",
 ];
 
@@ -328,6 +329,8 @@ export const troubleshootingRows = [
   ["登录失败", "检查 auth API、token、本地存储和后端环境变量。"],
   ["模型无响应", "检查 LLM_PROVIDER、ARK_API_KEY、模型配置和后端日志。"],
   ["消息不流式", "检查 SSE/WebSocket、event_bus、messages API 和前端消息 Store。"],
+  ["群聊没有进度", "检查 scheduler.plan、scheduler.decision、agent.report、scheduler.summary 和 RuntimeDecisionStrip。"],
+  ["Team Leader 多余复述", "检查 scheduler.summary.publish_message 和 conversation_session_manager 的 summary 持久化条件。"],
   ["Agent 不调用工具", "检查 Agent 权限、tool_loop、工具 schema 和调用参数。"],
   ["工作流不运行", "检查 conversation.extra.workflow、节点类型、边和 workflow run 状态。"],
   ["产物打不开", "检查 artifact 文件路径、预览 URL、导出格式和浏览器控制台错误。"],
@@ -339,7 +342,7 @@ export const troubleshootingRows = [
 export const localBootCode = `cd backend
 uv sync --extra dev
 uv run alembic upgrade head
-uv run uvicorn app:app --reload --reload-dir ./app
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 cd ../frontend
 pnpm install
@@ -372,8 +375,9 @@ export const workflowExampleCode = `{
 }`;
 
 export const updateItems = [
-  "补充产品平台级说明，覆盖角色路径、能力地图、工作流节点和文件产物生命周期。",
-  "新增公开 /docs 文档站，控制台顶部可一键进入。",
-  "补充工作流画布独立页面与嵌入式运行视图。",
-  "工具、Skill、MCP 模块完成目录边界拆分，旧入口保留兼容 shim。",
+  "新建会话默认只选择 Daily Chat Agent，复杂协作由用户显式添加合适 Agent。",
+  "多 Agent 群聊支持 Team Leader 自动规划、短任务进度、合适 Agent 选择和按需最终总结。",
+  "Team Leader 最终交付改为聚合来源、链路、校验、产物和风险，不再使用旧兜底转述。",
+  "外部 Coding Agent 统一通过 external_agent.invoke 调用，Codex、Claude Code 和兼容适配器共用运行记录。",
+  "Docker/PWA、个人签名、工作流运行态和文档页面说明已按当前版本更新。",
 ];

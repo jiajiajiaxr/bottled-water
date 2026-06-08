@@ -6,8 +6,8 @@ This document describes the current chat and workflow runtime behavior.
 
 Each conversation has a chat type and scheduling settings.
 
-- Single chat: run the selected agent.
-- Group chat without workflow enabled: run the configured group orchestration strategy.
+- Single chat: run the selected agent. New conversation defaults prefer the Daily Chat Agent so ordinary chat remains simple.
+- Group chat without workflow enabled: run the configured group orchestration strategy, usually the actor runtime with a Team Leader scheduler.
 - Group chat with `workflow_enabled=true`: run the saved workflow canvas.
 
 The workflow flag and runtime mode are synchronized when a workflow is saved and enabled from the UI.
@@ -29,6 +29,25 @@ The context builder includes relevant conversation history, attachments, persist
 ## Group Chat
 
 Group chat can use a planning/orchestration path or a workflow path. The runtime must not let one agent impersonate another agent. Group context lists members and current-agent constraints.
+
+In the actor runtime, the Team Leader scheduler is an event-driven runtime actor, not a hidden final answer generator. It consumes user input and agent reports, then emits scheduling events:
+
+- `scheduler.plan`: short user-visible task plan and target agent IDs.
+- `scheduler.decision`: assign/parallel/wait/complete decision and repaired targets.
+- `control.assign`: concrete task input for one or more agents.
+- `agent.report`: persisted agent work result and tool-event summary.
+- `scheduler.summary`: final runtime summary and optional Team Leader deliverable.
+
+Important behavior:
+
+- Simple greetings and single-agent turns should complete without a Team Leader restatement.
+- Mentioned agents restrict the turn to the mentioned scope unless the prompt is explicitly collaborative.
+- Complex group turns can select a suitable subset of available agents; the runtime does not have to use every participant.
+- Reviewer and deploy-style agents should normally depend on upstream implementation/content outputs.
+- The final Team Leader message is only persisted when `scheduler.summary.publish_message` is true.
+- The final answer should aggregate source outputs, logic chain, compliance checks, final products, and risks instead of concatenating raw agent transcripts.
+
+The old fallback that synthesized a Team Leader summary after any multi-agent completion has been removed. Persisted Team Leader messages now come from the scheduler summary event only.
 
 ## Workflow Canvas
 
@@ -79,7 +98,7 @@ Run polling merges persisted run and node state so the UI reflects real progress
 
 Agent nodes call the same agent loop used by chat. Tool nodes call the same tool executor used by function calling. This keeps permission checks, invocation records, and result shapes consistent.
 
-External coding agent workflow nodes can call external agent tools when the agent has permission.
+External coding agent workflow nodes can call `external_agent.invoke` when the agent has permission. Legacy external-agent tool aliases are mapped internally to the unified invocation path.
 
 ## Runtime State
 
@@ -111,5 +130,7 @@ Retry/skip/stop policy support is service-level behavior, not a frontend illusio
 - Workflow board/settings panel: `frontend/src/features/platform/tabs/WorkflowBoardPanel`
 - Workflow API client: `frontend/src/api/workflow.ts`
 - Workflow types: `frontend/src/types/workflow.ts`
+- Runtime decision/progress strip: `frontend/src/features/chat/components/ChatPanel/RuntimeDecisionStrip.tsx`
+- Runtime event normalization: `frontend/src/lib/runtimeEvents.ts`
 
 The frontend should prefer backend run state over local timers for real workflow execution status.

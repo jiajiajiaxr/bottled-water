@@ -48,7 +48,7 @@ export function ProductPlatformSection() {
             AgentHub 是围绕 IM 协作组织的多 Agent 工作台。它不是把多个聊天机器人简单放在同一个页面里，而是把会话、工作区、Agent 能力、工作流、文件产物和安全治理放在同一套产品链路里。用户从输入需求开始，平台会逐步组织上下文、选择角色、调用工具、记录运行态，并把结果沉淀为可预览、可导出、可审计的产物。
           </p>
           <p>
-            这套结构适合两类场景：一类是演示和轻量协作，需要快速证明“输入材料到交付结果”的闭环；另一类是团队内部平台化，需要把模型、工具、Skill、MCP、文件和审计都纳入统一边界。阅读文档时建议先理解这些模块之间的关系，再进入具体 API 或源码位置。
+            当前版本把简单聊天和复杂协作拆开处理：新建会话默认只选择 Daily Chat Agent；当用户手动加入多个 Agent 并提出复杂任务时，Team Leader 会生成短任务计划、选择合适角色、汇总真实产物；需要稳定复用的流程则保存为 workflow。阅读文档时建议先理解这些模块之间的关系，再进入具体 API 或源码位置。
           </p>
         </div>
       </div>
@@ -115,21 +115,21 @@ export function FirstRunGuide() {
       <div>
         <h2>首次运行会话</h2>
         <p>
-          AgentHub 的最小闭环是：登录、选择工作区、创建会话、选择 Agent、发送消息、查看流式回复和可选产物。单聊直接运行当前 Agent 的小循环；群聊会优先读取会话内保存的 workflow。
+          AgentHub 的最小闭环是：登录、选择工作区、创建会话、选择 Agent、发送消息、查看流式回复和可选产物。单聊直接运行当前 Agent 的小循环；群聊默认由 Team Leader 组织协作，启用 workflow 后才按会话内保存的画布执行。
         </p>
         <p>
-          首次体验时不要急着配置所有模块。建议先用官方 Agent 跑一个可观察的小任务，例如“审查一份需求并生成任务清单”。这个任务足够小，可以快速暴露登录、工作区、文件上传、消息流、工具调用和产物预览是否贯通；同时又足够完整，能展示 AgentHub 相比普通聊天界面的差异。
+          首次体验时不要急着配置所有模块。建议先用默认 Daily Chat Agent 跑一句普通对话，确认流式消息稳定；再手动选择多个官方 Agent 跑一个可观察的小任务，例如“生成一份发布材料、复核并给出预览产物”。这个任务足够小，可以快速暴露登录、工作区、文件上传、消息流、工具调用、协作进度和产物预览是否贯通；同时又足够完整，能展示 AgentHub 相比普通聊天界面的差异。
         </p>
         <ol className="docs-numbered-list">
           <li>使用演示用户进入控制台，确认左上角已经选择目标工作区。工作区决定文件、会话、产物和运行记录的归属。</li>
-          <li>新建单聊时选择一个官方 Agent，例如 Reviewer、Writing Agent 或 Frontend Worker。单聊更适合验证一个 Agent 是否能稳定完成职责。</li>
+          <li>新建会话默认会选择 Daily Chat Agent。普通聊天保持单 Agent；复杂任务再手动增加 Frontend、Writing、Reviewer、Deploy 等合适角色。</li>
           <li>上传文件或输入需求，发送后观察消息是否持续流式回填。若任务较长，顶部后台任务入口应该能看到运行状态。</li>
-          <li>展开工具摘要，确认工具调用目的、参数和结果是否清楚。如果 Agent 没有调用工具，要回到 Agent 权限和工具 schema 检查。</li>
+          <li>复杂群聊应看到短任务进度和 Agent 报告；展开工具摘要，确认工具调用目的、参数和结果是否清楚。如果 Agent 没有调用工具，要回到 Agent 权限和工具 schema 检查。</li>
           <li>如果出现产物卡片，点击后在右侧预览、编辑、Diff 或导出。产物链路是判断“交付是否真实落地”的关键。</li>
         </ol>
         <div className="docs-runbook-note">
           <strong>验收标准</strong>
-          <span>一次成功的首跑应同时看到：用户消息、Agent 流式回复、必要的工具摘要、稳定的任务状态，以及可打开的产物或明确的非产物结论。</span>
+          <span>一次成功的首跑应同时看到：用户消息、Agent 流式回复、必要的工具摘要、稳定的任务状态；复杂群聊还应看到协作进度、按需 Team Leader 聚合交付，以及可打开的产物或明确的非产物结论。</span>
         </div>
       </div>
       <div id="frontend-sdk">
@@ -249,7 +249,7 @@ export function WorkflowNodeSection() {
         <div>
           <h2>工作流节点说明</h2>
           <p>
-            群聊运行时不会把任务交给隐藏的总控 Agent，而是优先读取当前会话保存的 workflow。每个节点都有明确输入、配置和运行态，方便复盘失败节点。设计 workflow 时，重点不是把所有人工判断都流程化，而是把那些需要稳定复用、需要多人协作、需要生成产物或需要审计的步骤显式写出来。
+            群聊运行时有两条路径：未启用 workflow 时，Team Leader 作为普通调度 Agent 规划任务、选择合适成员并汇总真实结果；启用 workflow 后，当前会话保存的画布成为执行计划。每个节点都有明确输入、配置和运行态，方便复盘失败节点。设计 workflow 时，重点不是把所有人工判断都流程化，而是把那些需要稳定复用、需要多人协作、需要生成产物或需要审计的步骤显式写出来。
           </p>
         </div>
       </div>
@@ -295,7 +295,7 @@ export function WorkflowNodeSection() {
         </table>
       </div>
       <div className="docs-callout">
-        画布保存后写入 conversation.extra.workflow；运行后产生 WorkflowRun，节点状态会记录 status、progress、message、output、started_at 和 completed_at。
+        画布保存后写入 conversation.extra.workflow；启用后会更新会话运行模式。运行后产生 WorkflowRun，节点状态会记录 status、progress、message、output、started_at 和 completed_at。未启用 workflow 的复杂群聊则看 scheduler.plan、agent.report 和 scheduler.summary。
       </div>
     </section>
   );
@@ -411,7 +411,7 @@ export function IntegrationSection() {
       <div>
         <h2>AI Coding 与能力接入</h2>
         <p>
-          AgentHub 的扩展方式接近主流 API 文档站的接入指南：先确认兼容协议或能力来源，再绑定凭证和权限，最后在会话或 workflow 中验证。接入新能力时不要只追求“能调通”，还要确认结果是否能进入消息、产物、任务或审计记录，否则用户很难理解这个能力是否真的执行成功。
+          AgentHub 的扩展方式接近主流 API 文档站的接入指南：先确认兼容协议或能力来源，再绑定凭证和权限，最后在会话、Team Leader 调度或 workflow 中验证。接入新能力时不要只追求“能调通”，还要确认结果是否能进入消息、产物、任务或审计记录，否则用户很难理解这个能力是否真的执行成功。
         </p>
         <ol className="docs-numbered-list">
           {integrationSteps.map((step) => (
@@ -428,6 +428,11 @@ export function IntegrationSection() {
           <ToolOutlined />
           <h3>自定义工具</h3>
           <p>工具定义保存到数据库，受限 Python 片段落在工作区目录内，调用前经过参数校验和权限检查。适合封装明确输入输出的小能力，例如读取项目文件、转换数据、调用内部 HTTP API 或生成结构化片段。</p>
+        </article>
+        <article id="external-agents">
+          <CodeOutlined />
+          <h3>外部 Coding Agent</h3>
+          <p>Codex、Claude Code 和兼容适配器通过 external_agent.invoke 统一调用，支持 run、probe、status、cancel，运行事实写入外部 Agent 记录。用户可见结论必须以记录状态、stdout/stderr、变更文件和退出码为准。</p>
         </article>
         <article id="skills">
           <CodeOutlined />
@@ -497,7 +502,7 @@ export function UpdatesSection() {
           <li key={item}>{item}</li>
         ))}
       </ul>
-      <p>更新时间：2026 年 06 月 07 日</p>
+      <p>更新时间：2026 年 06 月 08 日</p>
     </section>
   );
 }

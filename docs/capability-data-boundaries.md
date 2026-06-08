@@ -25,6 +25,8 @@ Tool calls must pass:
 
 Successful and failed tool calls should be recorded through invocation records. User-facing claims about files, artifacts, deployment, external agents, or tests should be grounded in those records.
 
+Team Leader final deliverables are subject to the same rule. A collaborative summary can aggregate and explain agent outputs, but artifact IDs, preview URLs, export URLs, deployment links, test results, and external-agent run status must come from persisted tool/runtime records, not from free-form text claims.
+
 ## Files And Workspaces
 
 Workspace file operations must remain inside workspace-safe paths. File upload, read, write, preview, move, rename, and delete operations belong to backend file services. Frontend paths are display values, not authority.
@@ -43,7 +45,9 @@ Codex and Claude Code adapters must:
 - Support cancel/status checks.
 - Redact resolved command paths in user-facing probe payloads where appropriate.
 
-They should never be treated as successful unless the run record says so.
+The public tool catalog exposes `external_agent.invoke` as the unified entry point for run/probe/status/cancel actions. Legacy provider-specific names are compatibility aliases only. External agents should never be treated as successful unless the run record says so.
+
+Compatible adapters such as OpenCode follow the same boundary: declared provider, safe cwd, persisted run facts, and explicit degraded status when the runtime is unavailable.
 
 ## MCP
 
@@ -73,6 +77,8 @@ Context builders can include:
 - Current agent private context
 
 Context must not include unrelated conversation history unless explicitly intended through workspace memory or user-selected context.
+
+Multi-agent group context must also preserve speaker boundaries. One agent should not impersonate another, and the Team Leader should not copy every raw agent message as a final answer. For simple or single-agent turns, `scheduler.summary.publish_message=false` is the expected way to avoid an unnecessary Team Leader restatement.
 
 ## Deployment Preview
 

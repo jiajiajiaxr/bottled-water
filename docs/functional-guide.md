@@ -4,7 +4,7 @@ AgentHub is organized around conversations. A user starts from an IM-style workb
 
 ## Authentication And Workspaces
 
-- Users can register, log in, use demo login, update profile, and change password.
+- Users can register, log in, use demo login, update profile, update profile signature, and change password.
 - Workspaces isolate conversations, files, projects, knowledge entries, and audit context.
 - The workbench keeps workspace and conversation route state synchronized so direct links can reopen the same context.
 
@@ -23,7 +23,16 @@ AgentHub supports:
 - Streaming responses over SSE and WebSocket-compatible paths.
 - Stop/cancel generation, retry, and persisted message history.
 
-Single chat runs the selected agent loop. Group chat chooses scheduling from conversation settings. When workflow mode is enabled, the workflow canvas drives execution.
+New conversations default to one Daily Chat Agent, including group-capable creation dialogs. Users can add more agents manually when they want collaboration.
+
+Single chat runs the selected agent loop. Group chat chooses scheduling from conversation settings:
+
+- Workflow-enabled group chat runs the saved workflow canvas and persists `WorkflowRun` node state.
+- Non-workflow group chat uses the actor runtime and Team Leader scheduler.
+- Simple turns should not receive a trailing Team Leader restatement.
+- Complex collaborative turns can show a short plan/progress strip, dispatch a suitable subset of agents, and publish a Team Leader final answer only when a real multi-agent summary is useful.
+
+The current Team Leader final answer is an aggregated deliverable. It should summarize source outputs, dependency chain, checks, final products, and risks without dumping every agent's raw transcript. Artifact and deployment links must come from persisted tool results.
 
 Key code:
 
@@ -81,15 +90,13 @@ Key code:
 
 ## External Coding Agents
 
-External agent support exposes Codex and Claude Code as real tool-call targets:
+External agent support exposes Codex, Claude Code, and compatible adapters through one unified tool-call target:
 
-- `external_agent.probe`
-- `external_agent.run_codex`
-- `external_agent.run_claude_code`
-- `external_agent.status`
-- `external_agent.cancel`
+- `external_agent.invoke`
 
-Runs persist provider, command, cwd, stdout, stderr, changed files, status, exit code, duration, and error message. CWD is constrained to workspace-safe paths.
+The unified tool accepts action-style calls for run/probe/status/cancel while preserving legacy aliases internally for compatibility. The public tool catalog exposes the unified tool so agents do not need to choose provider-specific tool names.
+
+Runs persist provider, command, cwd, stdout, stderr, changed files, status, exit code, duration, and error message. CWD is constrained to workspace-safe paths, and unavailable runtimes degrade explicitly instead of pretending success.
 
 Key code:
 
@@ -136,6 +143,7 @@ Recent behavior:
 - Workflow saves normalize canvas-style edges and preserve runtime settings.
 - Enabling a saved workflow updates the conversation scheduling mode.
 - Run state is persisted and merged during polling so runs no longer appear stuck at an artificial 5%.
+- Agent/tool workflow nodes share the same permission, invocation, and result persistence path as chat.
 
 Key code:
 
@@ -148,6 +156,8 @@ Key code:
 Deployment preview creates records, health-checks accessible artifacts, supports rollback records, and supports `preview_link`, `static_site`, `source_download`, and `container` modes. In the current runtime, `container` means the artifact is exposed through the running AgentHub app or Docker Compose stack and receives the same health-checked preview URL; it is not a separate production orchestrator.
 
 The Docker stack is for running the AgentHub app itself. Full production cloud deployment automation remains a separate roadmap item.
+
+The Docker stack currently uses the `docker/` build context, backend `PYTHONPATH`, startup migrations, psycopg PostgreSQL URLs, and nginx proxy rules for `/api/`, `/ws`, and streaming traffic. See `docker/README.md` for operational details.
 
 Key code:
 

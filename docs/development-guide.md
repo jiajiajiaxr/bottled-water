@@ -83,6 +83,13 @@ cd backend
 uv run pytest tests/test_conversation.py tests/test_context_system.py tests/test_external_agents.py -q
 ```
 
+Targeted backend checks commonly used for actor runtime and Team Leader scheduling changes:
+
+```powershell
+cd backend
+uv run pytest tests/test_agent_runtime/test_scheduler_agent.py tests/test_agent_runtime/test_tech_lead_scheduler.py tests/test_agent_runtime/test_orchestrator.py::TestOrchestratorRun tests/test_conversation_session_manager.py -q
+```
+
 Frontend:
 
 ```powershell
@@ -96,6 +103,14 @@ Targeted frontend workflow checks:
 ```powershell
 cd frontend
 pnpm exec vitest run tests/workflow-board-panel.test.tsx tests/workflow-studio.test.tsx tests/workflow-utils.test.ts --config tests/vitest.config.ts
+```
+
+Targeted frontend chat/runtime checks:
+
+```powershell
+cd frontend
+pnpm exec vitest run tests/runtime-decision-strip.test.tsx tests/create-conversation-modal.test.tsx --config vitest.config.ts
+pnpm exec tsc --noEmit -p tsconfig.json
 ```
 
 ## Common Development Tasks
@@ -117,6 +132,15 @@ Add or change a tool:
 4. Persist execution facts through the tool invocation path.
 5. Add tests for success, permission failure, and input validation.
 
+Add or change multi-agent runtime behavior:
+
+1. Keep single-chat behavior isolated from group orchestration changes.
+2. Update `backend/src/agent_runtime/strategies/scheduler_agent.py` and related runtime types/events.
+3. Ensure simple turns do not publish a visible Team Leader final message.
+4. Ensure complex collaborative turns preserve real artifact/tool references in `scheduler.summary`.
+5. Update `frontend/src/lib/runtimeEvents.ts`, `RuntimeDecisionStrip.tsx`, and chat tests when event shape changes.
+6. Run the targeted actor-runtime and frontend chat/runtime checks above.
+
 Add or change a workflow node:
 
 1. Update frontend workflow types and node editors in `frontend/src/features/workflow`.
@@ -131,5 +155,7 @@ Add or change a workflow node:
 - Alembic cannot connect to Postgres: use `postgresql+psycopg://...`; plain `postgresql://...` is normalized to psycopg by current config.
 - Frontend blank page: run `pnpm build` and check TypeScript errors first.
 - Streaming does not finish: inspect `backend/src/app/api/messages.py`, chat finalizer/cancellation services, and frontend running-conversation state.
+- Group chat has no visible progress: inspect `scheduler.plan`, `scheduler.decision`, `agent.report`, `scheduler.summary`, `frontend/src/lib/runtimeEvents.ts`, and `RuntimeDecisionStrip.tsx`.
+- Team Leader speaks on a simple turn: check `scheduler.summary.publish_message`, `conversation_session_manager._persist_scheduler_summary_message`, and the scheduler final-deliverable rules.
 - Workflow run looks stuck: check `backend/src/app/services/workflows`, `WorkflowRun.node_states`, and browser network polling responses.
 - Docker stack uses the wrong database: use `docker/.env` variables from `docker/env.example`; compose builds its own Postgres URL from `POSTGRES_*`.
