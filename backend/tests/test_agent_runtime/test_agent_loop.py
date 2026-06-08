@@ -226,6 +226,92 @@ class TestAgentLoopBasic:
         assert result["status_report"].state == AgentState.COMPLETED
 
     @pytest.mark.asyncio
+    async def test_run_recovers_bad_html_tool_arguments(
+        self,
+        agent_config,
+        mock_provider,
+        mock_tool_executor,
+    ):
+        mock_provider.responses = [
+            ChatResponse(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_bad_html",
+                        "type": "function",
+                        "function": {
+                            "name": "artifact.create_html",
+                            "arguments": '{"title": "broken", "html": "<html>',
+                        },
+                    }
+                ],
+            ),
+            ChatResponse(content=""),
+        ]
+        mock_tool_executor._tools = [
+            {
+                "type": "function",
+                "function": {"name": "artifact.create_html", "description": "create html"},
+            }
+        ]
+
+        loop = AgentLoop(agent_config, mock_provider)
+        result = await loop.run("生成一个企业知识库问答 HTML 页面", {}, mock_tool_executor)
+
+        assert mock_tool_executor.calls
+        assert mock_tool_executor.calls[0]["tool_name"] == "artifact.create_html"
+        assert "<!doctype html>" in mock_tool_executor.calls[0]["parameters"]["html"].lower()
+        assert result["tool_events"][0]["results"][0]["success"] is True
+        assert result["status_report"].state == AgentState.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_run_marks_empty_output_failed_when_tools_fail(
+        self,
+        agent_config,
+        mock_provider,
+        mock_tool_executor,
+    ):
+        mock_provider.responses = [
+            ChatResponse(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_file",
+                        "type": "function",
+                        "function": {"name": "file_read", "arguments": '{"path": "/missing"}'},
+                    }
+                ],
+            ),
+            ChatResponse(
+                content='```status_report\n{"state":"completed","will":"complete"}\n```'
+            ),
+        ]
+        mock_tool_executor._tools = [
+            {
+                "type": "function",
+                "function": {"name": "file_read", "description": "read file"},
+            }
+        ]
+
+        async def fail_execute(_tool_call):
+            from agent_runtime import ToolResult
+
+            return ToolResult(
+                call_id="call_file",
+                success=False,
+                result=None,
+                error="file not found",
+            )
+
+        mock_tool_executor.execute = fail_execute
+
+        loop = AgentLoop(agent_config, mock_provider)
+        result = await loop.run("读取缺失文件", {}, mock_tool_executor)
+
+        assert result["status_report"].state == AgentState.FAILED
+        assert "file_read 执行失败" in result["work_product"]
+
+    @pytest.mark.asyncio
     async def test_run_max_tool_rounds(self, agent_config, mock_provider):
         """测试工具调用轮数上限"""
         # 模拟 LLM 总是返回 tool_calls

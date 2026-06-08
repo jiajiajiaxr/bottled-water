@@ -129,6 +129,11 @@ class AgentActor:
                 event.correlation_id = event.correlation_id or source_event.correlation_id
                 await self.event_bus.publish(event)
 
+            context_metadata = _dict_payload(source_event.payload.get("context_metadata"))
+            task_input = _dict_payload(source_event.payload.get("task_input"))
+            if task_input:
+                context_metadata = {**context_metadata, "task_input": task_input}
+
             result = await self.stepper.run_assignment(
                 task,
                 blackboard,
@@ -136,12 +141,13 @@ class AgentActor:
                 agent_ctx=agent_ctx,
                 emit_event=emit_event,
                 context_provider=self.context_provider,
-                context_metadata=_dict_payload(source_event.payload.get("context_metadata")),
+                context_metadata=context_metadata,
             )
             output = result.output
             report = result.report
             work_product = str(output.get("work_product") or "")
             stream_message_id = str(output.get("stream_message_id") or "")
+            tool_events = output.get("tool_events") if isinstance(output.get("tool_events"), list) else []
             history_type = "agent_control" if result.interrupted else "agent_work"
             await self.blackboard_mgr.append_history(
                 self.session_id,
@@ -149,10 +155,20 @@ class AgentActor:
                     "type": history_type,
                     "agent_id": self.config.id,
                     "task": task,
+                    "input": task_input
+                    or {
+                        "assigned_task": task,
+                        "rationale": source_event.payload.get("rationale"),
+                    },
                     "content": work_product,
+                    "output": {
+                        "work_product": work_product,
+                        "tool_events": tool_events,
+                    },
                     "interrupted": result.interrupted,
                     "report": _report_payload(report),
                     "stream_message_id": stream_message_id or None,
+                    "tool_events": tool_events,
                 },
             )
             await self._publish_report(
@@ -160,6 +176,8 @@ class AgentActor:
                 work_product=work_product,
                 task=task,
                 stream_message_id=stream_message_id or None,
+                task_input=task_input,
+                tool_events=tool_events,
             )
             await self._set_state(report.state, reason="assignment_completed", task=task)
         except Exception as exc:
@@ -200,11 +218,20 @@ class AgentActor:
         work_product: str,
         task: str | None = None,
         stream_message_id: str | None = None,
+        task_input: dict[str, Any] | None = None,
+        tool_events: list[dict[str, Any]] | None = None,
     ) -> None:
         payload = {
             "agent_id": self.config.id,
+            "agent_name": self.config.name,
             "task": task,
+            "input": task_input or {},
             "work_product": work_product,
+            "output": {
+                "work_product": work_product,
+                "tool_events": tool_events or [],
+            },
+            "tool_events": tool_events or [],
             "report": _report_payload(report),
         }
         if stream_message_id:

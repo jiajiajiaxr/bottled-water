@@ -41,6 +41,44 @@ describe("applyRuntimeEvent", () => {
     });
   });
 
+  it("records scheduler plan and summary events", () => {
+    const plan = [
+      {
+        id: "auto-1",
+        agent_id: "agent-frontend",
+        agent_name: "Frontend Worker",
+        status: "queued",
+        task: "build ui",
+      },
+    ];
+    const planned = applyRuntimeEvent(conversation(), "scheduler.plan", {
+      generation_id: "gen-1",
+      plan,
+    });
+    const summarized = applyRuntimeEvent(
+      conversation({ runtime: planned.runtime }),
+      "scheduler.summary",
+      {
+        status: "completed",
+        task: "build ui",
+        plan: [{ ...plan[0], status: "completed", output_preview: "ui done" }],
+        completed_agent_ids: ["agent-frontend"],
+        final_answer: "Frontend Worker: ui done",
+      },
+    );
+
+    const generation = summarized.runtime?.generations?.[0];
+    expect(generation?.task_plan?.[0]).toMatchObject({
+      agent_id: "agent-frontend",
+      status: "completed",
+    });
+    expect(generation?.summary).toMatchObject({
+      status: "completed",
+      final_answer: "Frontend Worker: ui done",
+    });
+    expect(generation?.summaries).toHaveLength(1);
+  });
+
   it("records legacy control scheduling decisions in the active generation", () => {
     const patch = applyRuntimeEvent(conversation(), "control.scheduling_decision", {
       generation_id: "gen-1",
@@ -75,7 +113,16 @@ describe("applyRuntimeEvent", () => {
         state: "completed",
         rationale: "接口已完成",
       },
+      input: {
+        user_request: "build api",
+        assigned_task: "implement endpoint",
+      },
       work_product: "生成了 API 方案",
+      output: {
+        work_product: "生成了 API 方案",
+        tool_events: [{ round: 1, results: [{ tool: "api.probe" }] }],
+      },
+      tool_events: [{ round: 1, results: [{ tool: "api.probe" }] }],
     });
 
     const run = patch.runtime?.generations?.[0].agent_runs?.[0];
@@ -84,7 +131,38 @@ describe("applyRuntimeEvent", () => {
       status: "completed",
       output_preview: "生成了 API 方案",
       rationale: "接口已完成",
+      input: {
+        user_request: "build api",
+      },
+      output: {
+        work_product: "生成了 API 方案",
+      },
+      tool_count: 1,
     });
+  });
+
+  it("copies scheduler decision summaries", () => {
+    const patch = applyRuntimeEvent(conversation(), "scheduler.decision", {
+      generation_id: "gen-1",
+      round: 1,
+      plan: [{ agent_id: "agent-frontend", status: "running" }],
+      summary: {
+        status: "partial",
+        task: "build ui",
+        pending_agent_ids: ["agent-frontend"],
+      },
+      decision: {
+        decision_type: "wait",
+        target_agent_ids: ["agent-frontend"],
+      },
+    });
+
+    const generation = patch.runtime?.generations?.[0];
+    expect(generation?.task_plan?.[0]).toMatchObject({
+      agent_id: "agent-frontend",
+    });
+    expect(generation?.summary?.status).toBe("partial");
+    expect(generation?.decisions?.[0].summary?.pending_agent_ids).toEqual(["agent-frontend"]);
   });
 
   it("clears the active generation on cancellation", () => {

@@ -69,6 +69,49 @@ export interface ConversationRuntimeAgentRun {
   output_preview?: string;
   rationale?: string;
   current_task?: string;
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  tool_events?: unknown[];
+  tool_count?: number;
+}
+
+export interface ConversationRuntimeTaskPlanItem {
+  id?: string;
+  agent_id?: string;
+  agent_name?: string;
+  role?: string;
+  priority?: number;
+  stage?: number;
+  depends_on?: string[];
+  status?: string;
+  task?: string;
+  assigned_task?: string;
+  expected_outputs?: string[];
+  rationale?: string;
+  output_preview?: string;
+  confidence?: number;
+  blockers?: string[];
+  tool_events?: unknown[];
+}
+
+export interface ConversationRuntimeSummary {
+  status?: string;
+  task?: string;
+  plan?: ConversationRuntimeTaskPlanItem[];
+  agent_outputs?: Record<string, unknown>[];
+  completed_agent_ids?: string[];
+  failed_agent_ids?: string[];
+  waiting_agent_ids?: string[];
+  pending_agent_ids?: string[];
+  inflight_agent_ids?: string[];
+  coordination_gaps?: string[];
+  source_reviews?: Record<string, unknown>[];
+  logic_chain?: Record<string, unknown>[];
+  compliance_checks?: Record<string, unknown>[];
+  final_product?: Record<string, unknown>;
+  final_deliverable?: Record<string, unknown>;
+  final_answer?: string;
+  created_at?: string;
 }
 
 export interface ConversationRuntimeDecision {
@@ -81,6 +124,7 @@ export interface ConversationRuntimeDecision {
   expected_outputs?: string[];
   requires_review?: boolean;
   fallback_reason?: string;
+  summary?: ConversationRuntimeSummary;
   created_at?: string;
 }
 
@@ -93,6 +137,9 @@ export interface ConversationRuntimeGeneration {
   cancelled_at?: string | null;
   error?: string | null;
   event_counts?: Record<string, number>;
+  task_plan?: ConversationRuntimeTaskPlanItem[];
+  summary?: ConversationRuntimeSummary;
+  summaries?: ConversationRuntimeSummary[];
   decisions?: ConversationRuntimeDecision[];
   agent_runs?: ConversationRuntimeAgentRun[];
 }

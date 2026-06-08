@@ -205,5 +205,5 @@ class _NullToolExecutor(ToolExecutor):
             error="No tool executor configured",
         )
 
-    def list_tools(self) -> List[Dict]:
+    async def list_tools(self) -> List[Dict]:
         return []

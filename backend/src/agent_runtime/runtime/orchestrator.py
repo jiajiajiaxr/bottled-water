@@ -216,12 +216,6 @@ class Orchestrator:
 
             # --- 2. 收集 Agent 报告 ---
             reports = self._collect_reports()
-            # 只清空已完成/失败的报告，保留未完成状态的报告
-            self._pending_agent_reports = {
-                aid: r
-                for aid, r in self._pending_agent_reports.items()
-                if r.state not in ("completed", "failed")
-            }
 
             yield Event(
                 type="system.round_started",
@@ -258,6 +252,7 @@ class Orchestrator:
                     },
                 )
             decision = self._scope_decision_to_mentions(decision, reports, current_task)
+            decision = self._ensure_group_collaboration_decision(decision, reports, current_task)
             logger.info(
                 "调度决策",
                 session_id=self.session_id,
@@ -309,8 +304,14 @@ class Orchestrator:
                 break
 
             # --- 7. 判断循环是否继续 ---
-            all_completed = all(r.will.value == "complete" for r in reports)
-            if all_completed and len(reports) == len(self._active_agent_ids()):
+            latest_reports = self._collect_reports()
+            all_completed = all(
+                r.state in {AgentState.COMPLETED, AgentState.FAILED}
+                or r.will == AgentWill.COMPLETE
+                or r.will.value == "complete"
+                for r in latest_reports
+            )
+            if all_completed and len(latest_reports) == len(self._active_agent_ids()):
                 logger.info("所有 Agent 已完成，结束调度循环", session_id=self.session_id)
                 break
 
@@ -1020,6 +1021,63 @@ class Orchestrator:
 
         return self._mention_decision(reports, current_task) or decision
 
+    def _ensure_group_collaboration_decision(
+        self,
+        decision: SchedulingDecision,
+        reports: list[AgentReport],
+        current_task: str,
+    ) -> SchedulingDecision:
+        if self._mention_target_ids or self._is_simple_greeting(current_task):
+            return decision
+        active_ids = self._active_agent_ids()
+        if len(active_ids) <= 2:
+            return decision
+        report_by_agent = {report.agent_id: report for report in reports}
+        pending_ids = [
+            agent_id
+            for agent_id in active_ids
+            if not (
+                report_by_agent.get(agent_id)
+                and report_by_agent[agent_id].state in {AgentState.COMPLETED, AgentState.FAILED}
+            )
+        ]
+        if not pending_ids:
+            decision.decision_type = "complete"
+            decision.action = "complete"
+            decision.target_agent_ids = active_ids
+            decision.rationale = _append_reason(
+                decision.rationale,
+                "All Agents in the group collaboration have terminal reports.",
+            )
+            return decision
+        if decision.decision_type in {"assign", "parallel"}:
+            target_ids = self._decision_target_ids(
+                decision.target_agent_ids,
+                decision.verification_agents,
+                decision.target_agent_id,
+            )
+            if len(target_ids) <= 1:
+                decision.decision_type = "parallel" if len(pending_ids) > 1 else "assign"
+                decision.action = "assign"
+                decision.target_agent_id = pending_ids[0]
+                decision.target_agent_ids = pending_ids
+                decision.task_description = decision.task_description or current_task
+                decision.rationale = _append_reason(
+                    decision.rationale,
+                    "Group conversation has more than two Agents; defaulting to automatic collaboration.",
+                )
+        if decision.decision_type == "complete" and pending_ids:
+            decision.decision_type = "parallel" if len(pending_ids) > 1 else "assign"
+            decision.action = "assign"
+            decision.target_agent_id = pending_ids[0]
+            decision.target_agent_ids = pending_ids
+            decision.task_description = decision.task_description or current_task
+            decision.rationale = _append_reason(
+                decision.rationale,
+                "Completion deferred until all Agents in the group collaboration report.",
+            )
+        return decision
+
     def _build_blackboard_view(self, blackboard: dict) -> dict:
         """构建给 Agent 看的 Blackboard 分层视图。
 
@@ -1048,6 +1106,27 @@ class Orchestrator:
             "kv_state": blackboard.get("kv_state", {}),
             "version": blackboard.get("version", 0),
         }
+
+    @staticmethod
+    def _is_simple_greeting(text: str) -> bool:
+        normalized = (text or "").strip().lower()
+        if not normalized:
+            return False
+        compact = "".join(
+            char for char in normalized if char.isalnum() or "\u4e00" <= char <= "\u9fff"
+        )
+        greetings = {
+            "hi",
+            "hello",
+            "hey",
+            "你好",
+            "你们好",
+            "大家好",
+            "早上好",
+            "下午好",
+            "晚上好",
+        }
+        return compact in greetings or compact.rstrip("呀啊哈呢哦") in greetings
 
     async def _handle_user_input_to_blackboard(self, content: str):
         """将用户输入记录到 Blackboard"""
@@ -1126,3 +1205,13 @@ class Orchestrator:
             "watchdog": self.watchdog.get_status(),
             "user_input_queue": self._user_input_queue.qsize(),
         }
+
+
+def _append_reason(existing: str, addition: str) -> str:
+    existing_text = str(existing or "").strip()
+    addition_text = str(addition or "").strip()
+    if not existing_text:
+        return addition_text
+    if not addition_text or addition_text in existing_text:
+        return existing_text
+    return f"{existing_text} {addition_text}"

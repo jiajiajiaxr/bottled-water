@@ -17,6 +17,8 @@ AGENT_FAILED = "agent.failed"
 BLACKBOARD_UPDATED = "blackboard.updated"
 USER_INPUT = "user.input"
 SCHEDULER_DECISION = "scheduler.decision"
+SCHEDULER_PLAN = "scheduler.plan"
+SCHEDULER_SUMMARY = "scheduler.summary"
 
 SYSTEM_SESSION_STARTED = "system.session_started"
 SYSTEM_SESSION_COMPLETED = "system.session_completed"

@@ -32,6 +32,19 @@ class TestTechLeadSchedulerFallback:
         assert "回退策略" in decision.rationale
 
     @pytest.mark.asyncio
+    async def test_fallback_parallel_for_more_than_two_ready_agents(self, scheduler):
+        reports = [
+            AgentReport(agent_id="planner", state=AgentState.READY, will=AgentWill.EXECUTE),
+            AgentReport(agent_id="writer", state=AgentState.READY, will=AgentWill.EXECUTE),
+            AgentReport(agent_id="analyst", state=AgentState.READY, will=AgentWill.EXECUTE),
+        ]
+
+        decision = await scheduler.make_decision({}, reports, {})
+
+        assert decision.decision_type == "parallel"
+        assert decision.target_agent_ids == ["planner", "writer", "analyst"]
+
+    @pytest.mark.asyncio
     async def test_fallback_all_completed(self, scheduler):
         reports = [
             AgentReport(agent_id="coder", state=AgentState.COMPLETED, will=AgentWill.COMPLETE),

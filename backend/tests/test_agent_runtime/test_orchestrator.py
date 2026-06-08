@@ -135,6 +135,48 @@ class TestOrchestratorRun:
         assert orch.status == "completed"
 
     @pytest.mark.asyncio
+    async def test_group_with_more_than_two_agents_expands_single_assign_to_parallel(self, mock_provider):
+        agents = {
+            "planner": AgentConfig(id="planner", name="Planner", system_prompt="plan"),
+            "writer": AgentConfig(id="writer", name="Writer", system_prompt="write"),
+            "analyst": AgentConfig(id="analyst", name="Analyst", system_prompt="analyze"),
+        }
+        scheduler = SimpleScheduler(
+            [
+                SchedulingDecision(
+                    decision_type="assign",
+                    target_agent_id="planner",
+                    task_description="整理产品发布方案",
+                ),
+                SchedulingDecision(decision_type="complete"),
+            ]
+        )
+        orch = Orchestrator(
+            session_id="sess_three_agent_parallel",
+            agents=agents,
+            scheduler=scheduler,
+            model_provider=mock_provider,
+        )
+        mock_provider.responses = [
+            ChatResponse(content='planner done\n```status_report\n{"state": "completed", "will": "complete"}\n```'),
+            ChatResponse(content='writer done\n```status_report\n{"state": "completed", "will": "complete"}\n```'),
+            ChatResponse(content='analyst done\n```status_report\n{"state": "completed", "will": "complete"}\n```'),
+        ]
+
+        events = []
+        async for event in orch.run("整理一份产品发布方案"):
+            events.append(event)
+
+        completed_ids = [
+            event.payload["agent_id"]
+            for event in events
+            if event.type == "system.agent_completed"
+        ]
+        assert set(completed_ids) == {"planner", "writer", "analyst"}
+        assert completed_ids.count("planner") == 1
+        assert "system.session_completed" in [event.type for event in events]
+
+    @pytest.mark.asyncio
     async def test_assign_yields_agent_tokens_before_agent_finishes(self, sample_agents):
         provider = PausableStreamingProvider()
         scheduler = SimpleScheduler(
@@ -323,8 +365,8 @@ class TestOrchestratorRun:
         assert scheduler.call_count == 0
         assert started == ["deploy"]
         assert completed == ["deploy"]
-        assert [event.payload["decision"] for event in decisions] == ["assign", "complete"]
-        assert [event.payload["target"] for event in decisions] == ["deploy", "deploy"]
+        assert [event.payload["decision"] for event in decisions] == ["assign"]
+        assert [event.payload["target"] for event in decisions] == ["deploy"]
         assert not [event for event in events if event.type == "control.watchdog_triggered"]
 
     @pytest.mark.asyncio

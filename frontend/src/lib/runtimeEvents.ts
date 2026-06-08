@@ -3,6 +3,8 @@ import type {
   ConversationRuntime,
   ConversationRuntimeAgentRun,
   ConversationRuntimeGeneration,
+  ConversationRuntimeSummary,
+  ConversationRuntimeTaskPlanItem,
 } from "../types";
 
 export function applyRuntimeEvent(
@@ -19,11 +21,20 @@ export function applyRuntimeEvent(
     [event]: (generation.event_counts?.[event] || 0) + 1,
   };
 
+  if (event === "scheduler.plan") {
+    const plan = planFromPayload(payload);
+    if (plan) generation.task_plan = plan;
+  }
+
   if (event === "scheduler.decision" || event === "control.scheduling_decision") {
     const decision =
       payload.decision && typeof payload.decision === "object"
         ? (payload.decision as Record<string, unknown>)
         : undefined;
+    const plan = planFromPayload(payload);
+    if (plan) generation.task_plan = plan;
+    const summary = summaryFromPayload(payload);
+    if (summary) applySummary(generation, summary);
     generation.decisions = [
       ...(generation.decisions || []),
       {
@@ -41,6 +52,7 @@ export function applyRuntimeEvent(
         expected_outputs: arrayOfStrings(decision?.expected_outputs),
         requires_review: Boolean(decision?.requires_review ?? decision?.requires_verification),
         fallback_reason: stringOrUndefined(decision?.fallback_reason),
+        summary,
         created_at: new Date().toISOString(),
       },
     ].slice(-20);
@@ -69,10 +81,23 @@ export function applyRuntimeEvent(
       run.agent_name =
         stringOrUndefined(payload.agent_name ?? report?.agent_name) || run.agent_name;
       run.status = stringOrUndefined(report?.state) || "completed";
+      run.input = objectOrUndefined(payload.input) || run.input;
+      run.output = objectOrUndefined(payload.output) || run.output;
+      if (Array.isArray(payload.tool_events)) {
+        run.tool_events = [...payload.tool_events].slice(-20);
+        run.tool_count = toolCount(payload.tool_events);
+      } else if (typeof payload.tool_count === "number") {
+        run.tool_count = payload.tool_count;
+      }
       run.output_preview = stringOrUndefined(payload.work_product) || run.output_preview;
       run.rationale = stringOrUndefined(report?.rationale) || run.rationale;
       run.completed_at ||= new Date().toISOString();
     }
+  }
+
+  if (event === "scheduler.summary") {
+    const summary = summaryFromPayload({ summary: payload }) || summaryFromPayload(payload);
+    if (summary) applySummary(generation, summary);
   }
 
   if (event === "agent.failed") {
@@ -93,6 +118,10 @@ export function applyRuntimeEvent(
   }
 
   const terminalStatus = terminalStatusForEvent(event);
+  if (event === "control.complete") {
+    const summary = summaryFromPayload(payload);
+    if (summary) applySummary(generation, summary);
+  }
   if (terminalStatus) {
     generation.status = terminalStatus;
     generation.completed_at ||= new Date().toISOString();
@@ -158,7 +187,17 @@ function ensureRuntime(
   const generations: ConversationRuntimeGeneration[] = (runtime?.generations || []).map((item) => ({
     ...item,
     decisions: item.decisions ? [...item.decisions] : undefined,
-    agent_runs: item.agent_runs ? item.agent_runs.map((run) => ({ ...run })) : undefined,
+    task_plan: item.task_plan ? item.task_plan.map((plan) => ({ ...plan })) : undefined,
+    summary: item.summary ? { ...item.summary } : undefined,
+    summaries: item.summaries ? item.summaries.map((summary) => ({ ...summary })) : undefined,
+    agent_runs: item.agent_runs
+      ? item.agent_runs.map((run) => ({
+          ...run,
+          input: run.input ? { ...run.input } : undefined,
+          output: run.output ? { ...run.output } : undefined,
+          tool_events: run.tool_events ? [...run.tool_events] : undefined,
+        }))
+      : undefined,
     event_counts: item.event_counts ? { ...item.event_counts } : undefined,
   }));
   const next: ConversationRuntime = {
@@ -177,6 +216,47 @@ function ensureRuntime(
     generations.push({ id, status: "running", started_at: new Date().toISOString() });
   }
   return next;
+}
+
+function applySummary(
+  generation: ConversationRuntimeGeneration,
+  summary: ConversationRuntimeSummary,
+) {
+  generation.summary = summary;
+  const summaries = [...(generation.summaries || []), summary];
+  generation.summaries = summaries.slice(-20);
+  if (summary.plan) generation.task_plan = summary.plan;
+}
+
+function planFromPayload(payload: Record<string, unknown>): ConversationRuntimeTaskPlanItem[] | undefined {
+  return Array.isArray(payload.plan)
+    ? payload.plan.map((item) => ({ ...(item as ConversationRuntimeTaskPlanItem) }))
+    : undefined;
+}
+
+function summaryFromPayload(payload: Record<string, unknown>): ConversationRuntimeSummary | undefined {
+  const raw = objectOrUndefined(payload.summary);
+  if (!raw) return undefined;
+  const summary = { ...raw } as ConversationRuntimeSummary;
+  if (Array.isArray(raw.plan)) {
+    summary.plan = raw.plan.map((item) => ({ ...(item as ConversationRuntimeTaskPlanItem) }));
+  }
+  if (!summary.created_at) summary.created_at = new Date().toISOString();
+  return summary;
+}
+
+function objectOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : undefined;
+}
+
+function toolCount(value: unknown[]): number {
+  return value.reduce<number>((total, item) => {
+    if (!item || typeof item !== "object") return total;
+    const results = (item as Record<string, unknown>).results;
+    return total + (Array.isArray(results) ? results.length : 0);
+  }, 0);
 }
 
 function latestOrActiveGeneration(runtime: ConversationRuntime): ConversationRuntimeGeneration | undefined {

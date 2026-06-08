@@ -13,11 +13,14 @@ from app.core.errors import AppError
 from db.session import AsyncSessionLocal
 from app.core.logging_config import configure_logging
 from app.core.response import fail, ok
+from app.services.runtime.generation_records import cancel_abandoned_generation_records
 from app.services.seed import ensure_seed_data
+from common.logger import get_logger
 
 
 configure_logging()
 settings = get_settings()
+logger = get_logger("app.main")
 
 
 @asynccontextmanager
@@ -27,6 +30,13 @@ async def lifespan(_app: FastAPI):
             await ensure_seed_data(db)
         except Exception:
             await db.rollback()
+        try:
+            recovered = await cancel_abandoned_generation_records(db, reason="server_restarted")
+            if recovered:
+                logger.info("Recovered abandoned generations", count=len(recovered))
+        except Exception as exc:
+            await db.rollback()
+            logger.warning("Abandoned generation recovery skipped", error=str(exc))
         yield
 
 

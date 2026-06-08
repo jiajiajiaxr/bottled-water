@@ -469,15 +469,24 @@ class AgentLoop:
 
                 if err:
                     logger.error("工具参数解析失败", tool=tool_call.tool_name, error=str(err))
+                    recovered = self._recover_tool_call_arguments(tool_call.tool_name, task)
+                    if recovered is not None:
+                        logger.info(
+                            "Recovered tool arguments with deterministic fallback",
+                            agent_id=self.agent.id,
+                            tool=tool_call.tool_name,
+                        )
+                        tool_call.parameters = recovered
+                        err = None
+                    else:
+                        result = ToolResult(
+                            call_id=tool_call.call_id,
+                            success=False,
+                            result=None,
+                            error=f"参数解析失败: {err}",
+                        )
 
-                    result = ToolResult(
-                        call_id=tool_call.call_id,
-                        success=False,
-                        result=None,
-                        error=f"参数解析失败: {err}",
-                    )
-
-                else:
+                if not err:
                     try:
                         logger.info(
                             "执行工具",
@@ -645,6 +654,44 @@ class AgentLoop:
                     work_product,
                     stream_context=self._stream_context_payload(context_metadata),
                 )
+        elif not work_product.strip() and self._has_failed_tool_results(tool_results):
+            work_product = self._tool_failure_message(tool_results)
+            if status_report.state != AgentState.FAILED:
+                status_report = AgentReport(
+                    agent_id=status_report.agent_id,
+                    state=AgentState.FAILED,
+                    will=AgentWill.BLOCKED,
+                    target_task=status_report.target_task,
+                    blockers=[work_product],
+                    priority=status_report.priority,
+                    confidence=0.0,
+                    rationale=status_report.rationale
+                    or "Tool execution failed and no user-visible work product was produced.",
+                    expected_duration=status_report.expected_duration,
+                )
+            if self.use_streaming:
+                await self._emit_text_response(
+                    _emit,
+                    stream_message_id,
+                    work_product,
+                    stream_context=self._stream_context_payload(context_metadata),
+                )
+        if (
+            self._artifact_tool_succeeded(tool_results)
+            and status_report.state == AgentState.UNKNOWN
+            and work_product.strip()
+        ):
+            status_report = AgentReport(
+                agent_id=status_report.agent_id,
+                state=AgentState.COMPLETED,
+                will=AgentWill.COMPLETE,
+                target_task=status_report.target_task,
+                blockers=status_report.blockers,
+                priority=status_report.priority,
+                confidence=max(status_report.confidence, 0.9),
+                rationale=status_report.rationale or "Artifact tool succeeded.",
+                expected_duration=status_report.expected_duration,
+            )
 
         # 将本轮对话归档回 AgentContext
         if agent_ctx:
@@ -705,6 +752,26 @@ class AgentLoop:
             if tool_name.startswith("artifact.create_") and result.get("success") is True:
                 return tool_name
         return None
+
+    @staticmethod
+    def _has_failed_tool_results(tool_results: List[Dict[str, Any]]) -> bool:
+        return any(result.get("success") is False for result in tool_results)
+
+    @staticmethod
+    def _tool_failure_message(tool_results: List[Dict[str, Any]]) -> str:
+        failures = [
+            result
+            for result in tool_results
+            if result.get("success") is False
+        ]
+        if not failures:
+            return "工具执行没有产出可见结果，需要重新执行或人工复核。"
+        first = failures[0]
+        tool = str(first.get("tool") or first.get("tool_name") or "工具")
+        error = str(first.get("error") or "执行失败").strip()
+        total = len(failures)
+        suffix = f"；本轮共有 {total} 个工具调用失败。" if total > 1 else ""
+        return f"{tool} 执行失败，未生成可交付产物：{error}{suffix}"
 
     @staticmethod
     def _only_artifact_create_calls(tool_calls: List[Dict[str, Any]]) -> bool:
@@ -916,6 +983,17 @@ class AgentLoop:
                 "arguments": json.dumps(artifact_arguments(requested, task), ensure_ascii=False),
             },
         }
+
+    @staticmethod
+    def _recover_tool_call_arguments(tool_name: str, task: str) -> dict[str, Any] | None:
+        try:
+            from app.services.llm.html_artifacts import HTML_ARTIFACT_TOOLS
+            from app.services.llm.tool_calls import artifact_arguments
+        except Exception:
+            return None
+        if tool_name not in HTML_ARTIFACT_TOOLS:
+            return None
+        return artifact_arguments(tool_name, task)
 
     async def _execute_virtual_agent(
         self,
@@ -1170,7 +1248,7 @@ class AgentLoop:
         system_prompt = self.agent.system_prompt
         metadata = dict(context_metadata or {})
         prompt_task = str(metadata.get("visible_content") or task)
-        user_prompt = self._build_prompt(prompt_task, blackboard_view)
+        user_prompt = self._build_prompt(prompt_task, blackboard_view, metadata.get("task_input"))
 
         if context_provider:
             request = AgentContextBuildRequest(
@@ -1199,7 +1277,12 @@ class AgentLoop:
                 )
 
         messages = self._agent_context_messages(agent_ctx)
-        messages.append(ChatMessage(role="user", content=self._build_prompt(task, blackboard_view)))
+        messages.append(
+            ChatMessage(
+                role="user",
+                content=self._build_prompt(task, blackboard_view, metadata.get("task_input")),
+            )
+        )
         return system_prompt, messages
 
     def _agent_context_messages(self, agent_ctx: Optional[AgentContext]) -> List[ChatMessage]:
@@ -1262,10 +1345,16 @@ class AgentLoop:
         system_prompt = "\n\n".join(part for part in system_parts if part) or fallback_system_prompt
         return system_prompt, messages
 
-    def _build_prompt(self, task: str, blackboard_view: dict) -> str:
+    def _build_prompt(
+        self,
+        task: str,
+        blackboard_view: dict,
+        task_input: Any | None = None,
+    ) -> str:
         """构建用户提示词"""
         # 构建 Blackboard 视图文本
         bb_text = self._format_blackboard(blackboard_view)
+        assignment_context = self._format_assignment_context(task_input)
 
         return f"""你是当前 Agent：{self.agent.name}
 角色：{self.agent.role}
@@ -1278,6 +1367,9 @@ class AgentLoop:
 
 你的当前任务：
 {task}
+
+Assignment context (read-only; use upstream_outputs when coordinating with other Agents):
+{assignment_context}
 
 全局上下文（只读）：
 {bb_text}
@@ -1297,6 +1389,47 @@ class AgentLoop:
 }}
 ```
 """
+
+    def _format_assignment_context(self, task_input: Any | None) -> str:
+        if not isinstance(task_input, dict) or not task_input:
+            return "(none)"
+        safe: dict[str, Any] = {}
+        for key in ("user_request", "assigned_task", "rationale"):
+            if task_input.get(key):
+                safe[key] = task_input.get(key)
+        plan = task_input.get("plan")
+        if isinstance(plan, list):
+            safe["plan"] = [
+                {
+                    "agent_id": item.get("agent_id"),
+                    "agent_name": item.get("agent_name"),
+                    "role": item.get("role"),
+                    "stage": item.get("stage"),
+                    "depends_on": item.get("depends_on"),
+                    "status": item.get("status"),
+                    "task": item.get("task"),
+                    "output_preview": item.get("output_preview"),
+                }
+                for item in plan
+                if isinstance(item, dict)
+            ]
+        upstream = task_input.get("upstream_outputs")
+        if isinstance(upstream, dict):
+            safe["upstream_outputs"] = {
+                agent_id: {
+                    "task": value.get("task"),
+                    "status": value.get("status"),
+                    "output": value.get("output_preview") or value.get("output"),
+                    "rationale": value.get("rationale"),
+                    "confidence": value.get("confidence"),
+                    "blockers": value.get("blockers"),
+                }
+                for agent_id, value in upstream.items()
+                if isinstance(value, dict)
+            }
+        if not safe:
+            return "(none)"
+        return json.dumps(safe, ensure_ascii=False, indent=2, default=str)[:12000]
 
     def _format_blackboard(self, blackboard_view: dict) -> str:
         """格式化 Blackboard 分层视图为文本"""

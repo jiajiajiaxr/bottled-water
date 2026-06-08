@@ -15,14 +15,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from agent_runtime import Session as AgentSession
+from agent_runtime.core.protocol import SCHEDULER_SUMMARY
 from agent_runtime.core.types import Event as RuntimeEvent
 from app.events import WebSocketSink
 from db.models import Conversation, ConversationParticipant, Message, utcnow
 from db.session import AsyncSessionLocal
 from app.services.runtime.generation_records import (
+    cancel_abandoned_generation_record,
     create_generation_record,
     finish_generation_record,
     record_generation_event,
+    recover_abandoned_generation_record,
 )
 from app.services.serialization import conversation_to_dict, message_to_dict
 from app.services.chat.scheduling import resolve_scheduling_strategy, runtime_mode, workflow_enabled
@@ -96,6 +99,12 @@ class ConversationSessionManager:
         requested_workflow_enabled = workflow_enabled(conversation)
 
         async with self._get_lock(conversation_id):
+            await self._recover_abandoned_generation_if_needed(
+                db,
+                conversation,
+                reason="server_restarted",
+            )
+
             if conversation_id in self._sessions:
                 task = self._running_tasks.get(conversation_id)
                 if task and not task.done():
@@ -145,6 +154,43 @@ class ConversationSessionManager:
                 agent_count=len(agents),
             )
             return session
+
+    async def recover_conversation(self, conversation_id: str, *, reason: str = "server_restarted") -> bool:
+        """Recover a conversation whose running generation belongs to a dead process."""
+        if self.is_generation_running(conversation_id):
+            return False
+        async with self._get_lock(conversation_id):
+            if self.is_generation_running(conversation_id):
+                return False
+            async with self._session_factory() as db:
+                recovered = await recover_abandoned_generation_record(
+                    db,
+                    conversation_id,
+                    reason=reason,
+                )
+            if not recovered:
+                return False
+            generation_id = recovered.generation_id
+            self._generation_ids.pop(conversation_id, None)
+            self._pending_preview_message_ids.pop(generation_id, None)
+            self._clear_generation_thinking(generation_id)
+            self._generation_thinking_enabled.pop(generation_id, None)
+            self._active_user_message_ids.pop(conversation_id, None)
+            self._queued_inputs.pop(conversation_id, None)
+        await self._publish_conversation_snapshot(conversation_id)
+        event_type = "generation_finished" if recovered.status == "completed" else f"generation:{recovered.status}"
+        await WebSocketSink(conversation_id).emit(
+            RuntimeEvent(
+                type=event_type,
+                payload={
+                    "conversation_id": conversation_id,
+                    "generation_id": generation_id,
+                    "status": recovered.status,
+                    "error": recovered.error,
+                },
+            )
+        )
+        return True
 
     async def start_generation(
         self,
@@ -333,7 +379,39 @@ class ConversationSessionManager:
             self._active_user_message_ids.pop(conversation_id, None)
 
             return True
-        return False
+        return await self.recover_conversation(conversation_id, reason="user_cancelled")
+
+    async def _recover_abandoned_generation_if_needed(
+        self,
+        db: AsyncSession,
+        conversation: Conversation,
+        *,
+        reason: str,
+    ) -> bool:
+        conversation_id = str(conversation.id)
+        if self.is_generation_running(conversation_id):
+            return False
+        generation_id = await cancel_abandoned_generation_record(
+            db,
+            conversation_id,
+            reason=reason,
+        )
+        if not generation_id:
+            return False
+        await db.refresh(conversation)
+        self._generation_ids.pop(conversation_id, None)
+        self._pending_preview_message_ids.pop(generation_id, None)
+        self._clear_generation_thinking(generation_id)
+        self._generation_thinking_enabled.pop(generation_id, None)
+        self._active_user_message_ids.pop(conversation_id, None)
+        self._queued_inputs.pop(conversation_id, None)
+        logger.info(
+            "Recovered abandoned generation",
+            conversation_id=conversation_id,
+            generation_id=generation_id,
+            reason=reason,
+        )
+        return True
 
     def _on_generation_done(self, conversation_id: str, generation_id: str, task: asyncio.Task) -> None:
         """Handle generation task completion."""
@@ -506,9 +584,20 @@ class ConversationSessionManager:
                 generation_id,
                 event,
             )
+            if message is None:
+                message = await self._persist_scheduler_summary_message(
+                    db,
+                    conversation_id,
+                    generation_id,
+                    event,
+                )
         if message:
             sink = WebSocketSink(conversation_id)
-            event_type = "message:updated" if event.type == "system.agent_completed" else "message:new"
+            event_type = (
+                "message:updated"
+                if event.type == "system.agent_completed" or bool(getattr(message, "_runtime_emit_updated", False))
+                else "message:new"
+            )
             await sink.emit(RuntimeEvent(type=event_type, payload=message_to_dict(message)))
             await self._publish_pending_preview_messages(sink, conversation_id, generation_id)
         if _should_publish_conversation_snapshot(event.type):
@@ -830,6 +919,92 @@ class ConversationSessionManager:
         await db.refresh(message)
         return message
 
+    async def _persist_scheduler_summary_message(
+        self,
+        db: AsyncSession,
+        conversation_id: str,
+        generation_id: str,
+        event: RuntimeEvent,
+    ) -> Message | None:
+        if event.type != SCHEDULER_SUMMARY:
+            return None
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if payload.get("publish_message") is False:
+            return None
+        final_answer = str(payload.get("final_answer") or "").strip()
+        if not final_answer:
+            return None
+
+        existing = await db.scalar(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.sender_type == "agent",
+                Message.sender_id == "team_leader",
+                Message.extra["runtime_generation_id"].as_string() == generation_id,
+                Message.extra["runtime_scheduler_summary"].as_boolean().is_(True),
+                Message.deleted_at.is_(None),
+            )
+            .order_by(Message.created_at.desc())
+        )
+        content = {
+            "text": final_answer,
+            "agent_id": "team_leader",
+            "runtime_report": payload,
+            "runtime_summary": payload,
+            "final_product": payload.get("final_product"),
+            "final_deliverable": payload.get("final_deliverable"),
+            "compliance_checks": payload.get("compliance_checks") or [],
+            "logic_chain": payload.get("logic_chain") or [],
+            "thinking_enabled": False,
+        }
+        conversation = await db.get(Conversation, conversation_id)
+        if existing:
+            existing.content = {
+                **(existing.content if isinstance(existing.content, dict) else {}),
+                **content,
+            }
+            existing.sender_name = existing.sender_name or "Team Leader"
+            existing.status = "completed"
+            existing.updated_at = utcnow()
+            existing.extra = {
+                **(existing.extra or {}),
+                "runtime_generation_id": generation_id,
+                "runtime_scheduler_summary": True,
+            }
+            if conversation:
+                conversation.last_message_preview = final_answer[:300]
+                conversation.last_message_sender = existing.sender_name or "Team Leader"
+                conversation.last_message_at = utcnow()
+            await db.commit()
+            await db.refresh(existing)
+            setattr(existing, "_runtime_emit_updated", True)
+            return existing
+
+        message = Message(
+            conversation_id=conversation_id,
+            sender_type="agent",
+            sender_id="team_leader",
+            sender_name="Team Leader",
+            sender_avatar_url=None,
+            content_type="text",
+            content=content,
+            status="completed",
+            extra={
+                "runtime_generation_id": generation_id,
+                "runtime_scheduler_summary": True,
+            },
+        )
+        if conversation:
+            conversation.last_message_preview = final_answer[:300]
+            conversation.last_message_sender = "Team Leader"
+            conversation.last_message_at = utcnow()
+            conversation.message_count += 1
+        db.add(message)
+        await db.commit()
+        await db.refresh(message)
+        return message
+
     async def _finish_generation(
         self,
         conversation_id: str,
@@ -887,3 +1062,11 @@ def _mention_target_agent_ids(agent_mentions: list[dict[str, Any]] | None) -> li
         if agent_id and agent_id not in ids:
             ids.append(agent_id)
     return ids
+
+
+def _runtime_generation(conversation: Conversation, generation_id: str) -> dict[str, Any] | None:
+    runtime = (conversation.extra or {}).get("runtime") if isinstance(conversation.extra, dict) else {}
+    for item in (runtime or {}).get("generations") or []:
+        if isinstance(item, dict) and str(item.get("id") or "") == generation_id:
+            return item
+    return None

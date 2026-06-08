@@ -1,4 +1,5 @@
 import { api } from "@/api";
+import { useCallback, useEffect, useRef } from "react";
 import {
   useConversationStore,
   useMessageStore,
@@ -82,122 +83,138 @@ export function useMessageOperations(userName?: string, userAvatarUrl?: string) 
   const { activeId } = useConversationStore();
   const { updateMessagesForConversation } = useMessageStore();
   const streaming = useStreamingMessages(activeId);
+  const streamingRef = useRef(streaming);
 
-  const send = async (
-    content: string,
-    quoted?: ChatMessage,
-    attachments: UploadedFile[] = [],
-    thinkingEnabled?: boolean,
-    modelConfigId?: string,
-    fileReferences: MessageFileReference[] = [],
-    agentMentions: MessageAgentMention[] = [],
-  ) => {
-    if (!activeId) return;
+  useEffect(() => {
+    streamingRef.current = streaming;
+  }, [streaming]);
 
-    const conversationId = activeId;
-    const activeConversation = useConversationStore
-      .getState()
-      .conversations.find((item) => item.id === conversationId);
-    const workflowEnabled = Boolean(activeConversation?.workflow_enabled);
-    const schedulingStrategy =
-      activeConversation?.chat_type === "single"
-        ? "single_agent"
-        : workflowEnabled
-          ? "workflow"
-          : "tech_lead";
-    const localAttachments = [
-      ...normalizeAttachments(attachments),
-      ...attachmentsFromFileReferences(fileReferences),
-    ];
-    const clientMessageId = `client-${Date.now()}-${Math.random()
-      .toString(16)
-      .slice(2)}`;
+  const send = useCallback(
+    async (
+      content: string,
+      quoted?: ChatMessage,
+      attachments: UploadedFile[] = [],
+      thinkingEnabled?: boolean,
+      modelConfigId?: string,
+      fileReferences: MessageFileReference[] = [],
+      agentMentions: MessageAgentMention[] = [],
+    ) => {
+      if (!activeId) return;
 
-    const userMessage = makeMessage({
-      conversationId,
-      role: "user",
-      kind: "text",
-      author: userName || "我",
-      content,
-      sender_avatar_url: userAvatarUrl,
-      rawContent: {
-        client_message_id: clientMessageId,
-        clientMessageId,
-        attachments: localAttachments,
-        file_references: fileReferences,
-        agent_mentions: agentMentions,
-      },
-      clientMessageId,
-      client_message_id: clientMessageId,
-      streamState: "done",
-      state: "active",
-      attachments: localAttachments,
-      quotedMessageId: quoted?.id,
-    });
-    updateMessagesForConversation(conversationId, (prev) => [...prev, userMessage]);
+      const conversationId = activeId;
+      const activeConversation = useConversationStore
+        .getState()
+        .conversations.find((item) => item.id === conversationId);
+      const workflowEnabled = Boolean(activeConversation?.workflow_enabled);
+      const schedulingStrategy =
+        activeConversation?.chat_type === "single"
+          ? "single_agent"
+          : workflowEnabled
+            ? "workflow"
+            : "tech_lead";
+      const localAttachments = [
+        ...normalizeAttachments(attachments),
+        ...attachmentsFromFileReferences(fileReferences),
+      ];
+      const clientMessageId = `client-${Date.now()}-${Math.random()
+        .toString(16)
+        .slice(2)}`;
 
-    const body: MessageBody = {
-      content_type: "text",
-      content: {
-        text: content,
-        attachments: localAttachments.map((file) => ({
-          file_id: file.file_id ?? file.id,
-          filename: file.filename,
-          content_type: file.content_type,
-          size: file.size,
-        })),
-        file_references: fileReferences,
-        agent_mentions: agentMentions,
-      },
-      reply_to_message_id: quoted?.id,
-      thinking_enabled: thinkingEnabled,
-      model_config_id: modelConfigId,
-      client_message_id: clientMessageId,
-      scheduling_strategy: schedulingStrategy,
-    };
-
-    markConversationRunning(conversationId);
-    setConversationThinkingMode(conversationId, Boolean(thinkingEnabled));
-
-    try {
-      await api.sendMessageWs(
+      const userMessage = makeMessage({
         conversationId,
-        body,
-        createStreamHandlers(
-          conversationId,
-          streaming.streamHandlers,
-          streaming.waitForConversationStreams,
-        ),
-      );
-    } catch {
-      clearConversationThinkingMode(conversationId);
-      clearConversationRunning(conversationId);
-    }
-  };
+        role: "user",
+        kind: "text",
+        author: userName || "我",
+        content,
+        sender_avatar_url: userAvatarUrl,
+        rawContent: {
+          client_message_id: clientMessageId,
+          clientMessageId,
+          attachments: localAttachments,
+          file_references: fileReferences,
+          agent_mentions: agentMentions,
+        },
+        clientMessageId,
+        client_message_id: clientMessageId,
+        streamState: "done",
+        state: "active",
+        attachments: localAttachments,
+        quotedMessageId: quoted?.id,
+      });
+      updateMessagesForConversation(conversationId, (prev) => [...prev, userMessage]);
 
-  const cancel = async (conversationId = activeId) => {
-    if (!conversationId) return;
-    try {
-      api.cancelAssistantReplyWs(conversationId);
-      await api.cancelAssistantReply(conversationId);
-    } finally {
-      clearConversationThinkingMode(conversationId);
-      streaming.clearPendingStreams(conversationId);
-      clearConversationRunning(conversationId);
-      updateMessagesForConversation(conversationId, (prev) =>
-        prev.map((item) =>
-          item.conversationId === conversationId &&
-          (item.status === "streaming" || item.streamState === "streaming")
-            ? {
-                ...item,
-                status: "cancelled",
-                streamState: "done",
-              }
-            : item,
-        ),
-      );
-    }
-  };
+      const body: MessageBody = {
+        content_type: "text",
+        content: {
+          text: content,
+          attachments: localAttachments.map((file) => ({
+            file_id: file.file_id ?? file.id,
+            filename: file.filename,
+            content_type: file.content_type,
+            size: file.size,
+          })),
+          file_references: fileReferences,
+          agent_mentions: agentMentions,
+        },
+        reply_to_message_id: quoted?.id,
+        thinking_enabled: thinkingEnabled,
+        model_config_id: modelConfigId,
+        client_message_id: clientMessageId,
+        scheduling_strategy: schedulingStrategy,
+      };
+
+      markConversationRunning(conversationId);
+      setConversationThinkingMode(conversationId, Boolean(thinkingEnabled));
+
+      try {
+        await api.sendMessageWs(
+          conversationId,
+          body,
+          createStreamHandlers(
+            conversationId,
+            streamingRef.current.streamHandlers,
+            streamingRef.current.waitForConversationStreams,
+          ),
+        );
+      } catch {
+        clearConversationThinkingMode(conversationId);
+        clearConversationRunning(conversationId);
+      }
+    },
+    [
+      activeId,
+      updateMessagesForConversation,
+      userAvatarUrl,
+      userName,
+    ],
+  );
+
+  const cancel = useCallback(
+    async (conversationId = activeId) => {
+      if (!conversationId) return;
+      try {
+        api.cancelAssistantReplyWs(conversationId);
+        await api.cancelAssistantReply(conversationId);
+      } finally {
+        clearConversationThinkingMode(conversationId);
+        streamingRef.current.clearPendingStreams(conversationId);
+        clearConversationRunning(conversationId);
+        updateMessagesForConversation(conversationId, (prev) =>
+          prev.map((item) =>
+            item.conversationId === conversationId &&
+            (item.status === "streaming" || item.streamState === "streaming")
+              ? {
+                  ...item,
+                  status: "cancelled",
+                  streamState: "done",
+                }
+              : item,
+          ),
+        );
+      }
+    },
+    [activeId, updateMessagesForConversation],
+  );
 
   return {
     send,

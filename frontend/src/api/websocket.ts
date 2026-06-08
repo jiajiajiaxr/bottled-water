@@ -6,6 +6,8 @@ export type MessageListener = (
   requestId?: string,
 ) => void;
 
+export type CloseListener = (event: CloseEvent) => void;
+
 /**
  * 管理单个会话的 WebSocket 连接。
  *
@@ -19,6 +21,8 @@ class ConversationWS {
   private ws: WebSocket | null = null;
 
   private listeners = new Set<MessageListener>();
+
+  private closeListeners = new Set<CloseListener>();
 
   private pingTimer: number | null = null;
 
@@ -74,8 +78,9 @@ class ConversationWS {
         }
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (event) => {
         this.stopPing();
+        this.closeListeners.forEach((fn) => fn(event));
         if (!this.closed) {
           this.scheduleReconnect();
         }
@@ -108,6 +113,13 @@ class ConversationWS {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+    };
+  }
+
+  onClose(listener: CloseListener): () => void {
+    this.closeListeners.add(listener);
+    return () => {
+      this.closeListeners.delete(listener);
     };
   }
 

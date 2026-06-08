@@ -13,6 +13,8 @@ from agent_runtime.core.protocol import (
     AGENT_REPORT,
     AGENT_STATE_CHANGED,
     SCHEDULER_DECISION,
+    SCHEDULER_PLAN,
+    SCHEDULER_SUMMARY,
     SYSTEM_SESSION_COMPLETED,
     SYSTEM_SESSION_STARTED,
 )
@@ -21,6 +23,7 @@ from app.services.conversation_session_manager import (
     ConversationSessionManager,
 )
 from app.services.chat.user_messages import save_user_message
+from app.services.runtime.generation_records import create_generation_record
 from db.base import Base
 from db.models import Conversation, Message, User
 
@@ -66,6 +69,50 @@ class _FakeAgentSession:
         return {"status": "completed"}
 
 
+class _FakeLegacyMultiAgentSession:
+    def __init__(self, conversation_id: str):
+        self.session_id = conversation_id
+        self.last_context_metadata = None
+        self.agents = {
+            "planner": SimpleNamespace(id="planner", name="Planner Agent", role="planner"),
+            "writer": SimpleNamespace(id="writer", name="Writer Agent", role="writer"),
+            "analyst": SimpleNamespace(id="analyst", name="Analyst Agent", role="analyst"),
+        }
+
+    async def run(self, content: str, context_metadata: dict | None = None):
+        self.last_context_metadata = context_metadata
+        yield RuntimeEvent(
+            type="system.session_started",
+            payload={"session_id": self.session_id},
+        )
+        for agent_id, name, work_product in [
+            ("planner", "Planner Agent", "已完成发布方案结构、里程碑和负责人拆分。"),
+            ("writer", "Writer Agent", "已完成发布公告正文、FAQ 和用户沟通话术。"),
+            ("analyst", "Analyst Agent", "已完成上线风险、指标口径和复盘检查表。"),
+        ]:
+            yield RuntimeEvent(
+                type="system.agent_completed",
+                payload={
+                    "round": 1,
+                    "agent_id": agent_id,
+                    "agent_name": name,
+                    "work_product": work_product,
+                    "status_report": {
+                        "agent_id": agent_id,
+                        "state": "completed",
+                        "will": "complete",
+                    },
+                },
+            )
+        yield RuntimeEvent(
+            type="system.session_completed",
+            payload={"session_id": self.session_id},
+        )
+
+    def get_status(self):
+        return {"status": "completed"}
+
+
 class _FakeActorSession:
     def __init__(self, conversation_id: str):
         self.session_id = conversation_id
@@ -80,10 +127,32 @@ class _FakeActorSession:
             type=SYSTEM_SESSION_STARTED,
             payload={"session_id": self.session_id, "runtime": "actor"},
         )
+        plan = [
+            {
+                "id": "auto-1",
+                "agent_id": "frontend",
+                "agent_name": "Frontend Worker",
+                "role": "frontend",
+                "status": "queued",
+                "task": content,
+                "expected_outputs": ["HTML page"],
+            }
+        ]
+        yield RuntimeEvent(
+            type=SCHEDULER_PLAN,
+            payload={"round": 0, "task": content, "plan": plan, "target_agent_ids": ["frontend"]},
+        )
         yield RuntimeEvent(
             type=SCHEDULER_DECISION,
             payload={
                 "round": 1,
+                "plan": plan,
+                "summary": {
+                    "status": "partial",
+                    "task": content,
+                    "plan": plan,
+                    "pending_agent_ids": ["frontend"],
+                },
                 "decision": {
                     "decision_type": "assign",
                     "target_agent_id": "frontend",
@@ -100,7 +169,19 @@ class _FakeActorSession:
             type=AGENT_REPORT,
             payload={
                 "agent_id": "frontend",
+                "agent_name": "Frontend Worker",
+                "input": {
+                    "user_request": content,
+                    "assigned_task": content,
+                    "plan": plan,
+                    "upstream_outputs": {},
+                },
                 "work_product": "HTML page completed",
+                "output": {
+                    "work_product": "HTML page completed",
+                    "tool_events": [{"round": 1, "results": [{"tool": "artifact.create_html"}]}],
+                },
+                "tool_events": [{"round": 1, "results": [{"tool": "artifact.create_html"}]}],
                 "report": {
                     "agent_id": "frontend",
                     "state": "completed",
@@ -108,6 +189,24 @@ class _FakeActorSession:
                     "confidence": 0.95,
                     "rationale": "Done",
                 },
+            },
+        )
+        yield RuntimeEvent(
+            type=SCHEDULER_SUMMARY,
+            payload={
+                "round": 2,
+                "status": "completed",
+                "task": content,
+                "plan": [{**plan[0], "status": "completed", "output_preview": "HTML page completed"}],
+                "agent_outputs": [
+                    {
+                        "agent_id": "frontend",
+                        "status": "completed",
+                        "output_preview": "HTML page completed",
+                    }
+                ],
+                "completed_agent_ids": ["frontend"],
+                "final_answer": "Frontend Worker: HTML page completed",
             },
         )
         yield RuntimeEvent(
@@ -271,6 +370,121 @@ class TestConversationSessionManagerStatus:
             await engine.dispose()
 
     @pytest.mark.asyncio
+    async def test_cancel_generation_recovers_abandoned_persisted_run(self, tmp_path):
+        conversation_id = "conv-generation-abandoned"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            async with factory() as session:
+                generation_id = await create_generation_record(
+                    session,
+                    conversation_id,
+                    session_id="old-process-session",
+                    agents=[
+                        SimpleNamespace(
+                            id="agent-a",
+                            name="Frontend Worker",
+                            role="frontend",
+                        )
+                    ],
+                    prompt="long task",
+                    user_message_id="msg-abandoned",
+                )
+
+            mgr = ConversationSessionManager(session_factory=factory)
+            assert await mgr.cancel_generation(conversation_id) is True
+
+            async with factory() as session:
+                conversation = await session.get(Conversation, conversation_id)
+
+            runtime = (conversation.extra or {}).get("runtime") or {}
+            record = runtime["generations"][-1]
+            assert runtime["active_generation_id"] is None
+            assert conversation.generation_status == "cancelled"
+            assert conversation.active_session_id is None
+            assert record["id"] == generation_id
+            assert record["status"] == "cancelled"
+            assert record["error"] == "user_cancelled"
+            assert record["agent_runs"][0]["status"] == "cancelled"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_get_or_create_session_ignores_missing_abandoned_generation(self, tmp_path):
+        conversation_id = "conv-generation-no-abandoned"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            runtime_session = _FakeActorSession(conversation_id)
+
+            async with factory() as session:
+                conversation = await session.get(Conversation, conversation_id)
+                with patch(
+                    "app.services.conversation_session_manager.OrchestratorService._get_conversation_agents",
+                    return_value=[
+                        SimpleNamespace(
+                            id="frontend",
+                            name="Frontend Worker",
+                            role="frontend",
+                            type="worker",
+                        )
+                    ],
+                ):
+                    with patch(
+                        "app.services.conversation_session_manager.OrchestratorService.create_session",
+                        return_value=runtime_session,
+                    ) as create_session:
+                        session_obj = await mgr.get_or_create_session(session, conversation)
+
+            assert session_obj is runtime_session
+            assert create_session.await_count == 1
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_recover_conversation_clears_stale_completed_active_generation(self, tmp_path):
+        conversation_id = "conv-generation-stale-completed"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            async with factory() as session:
+                generation_id = await create_generation_record(
+                    session,
+                    conversation_id,
+                    session_id="old-process-session",
+                    agents=[
+                        SimpleNamespace(
+                            id="agent-a",
+                            name="Frontend Worker",
+                            role="frontend",
+                        )
+                    ],
+                    prompt="quick task",
+                )
+                conversation = await session.get(Conversation, conversation_id)
+                runtime = dict((conversation.extra or {}).get("runtime") or {})
+                generations = list(runtime.get("generations") or [])
+                generations[-1] = {**generations[-1], "status": "completed"}
+                runtime["generations"] = generations
+                runtime["active_generation_id"] = generation_id
+                conversation.extra = {**(conversation.extra or {}), "runtime": runtime}
+                conversation.generation_status = "running"
+                await session.commit()
+
+            mgr = ConversationSessionManager(session_factory=factory)
+            assert await mgr.recover_conversation(conversation_id) is True
+
+            async with factory() as session:
+                conversation = await session.get(Conversation, conversation_id)
+
+            runtime = (conversation.extra or {}).get("runtime") or {}
+            record = runtime["generations"][-1]
+            assert runtime["active_generation_id"] is None
+            assert conversation.generation_status == "idle"
+            assert conversation.active_session_id is None
+            assert record["status"] == "completed"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
     async def test_actor_runtime_events_are_persisted_for_recovery(self, tmp_path):
         conversation_id = "conv-generation-actor"
         engine, factory = await _create_runtime_db(tmp_path, conversation_id)
@@ -289,12 +503,151 @@ class TestConversationSessionManagerStatus:
             runtime = (conversation.extra or {}).get("runtime") or {}
             record = runtime["generations"][-1]
             assert record["status"] == "completed"
+            assert record["event_counts"][SCHEDULER_PLAN] == 1
             assert record["event_counts"][SCHEDULER_DECISION] == 1
+            assert record["event_counts"][SCHEDULER_SUMMARY] == 1
             assert record["event_counts"][AGENT_REPORT] == 1
+            assert record["task_plan"][0]["agent_id"] == "frontend"
+            assert record["summary"]["status"] == "completed"
+            assert record["summary"]["final_answer"] == "Frontend Worker: HTML page completed"
             assert record["decisions"][0]["decision"] == "assign"
             assert record["decisions"][0]["target"] == "frontend"
+            assert record["decisions"][0]["summary"]["status"] == "partial"
             assert record["agent_runs"][0]["status"] == "completed"
+            assert record["agent_runs"][0]["input"]["user_request"] == "build a small html page"
+            assert record["agent_runs"][0]["output"]["work_product"] == "HTML page completed"
+            assert record["agent_runs"][0]["tool_count"] == 1
             assert record["agent_runs"][0]["output_preview"] == "HTML page completed"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_scheduler_summary_is_persisted_as_team_leader_message(self, tmp_path):
+        conversation_id = "conv-generation-team-leader-summary"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            event = RuntimeEvent(
+                type=SCHEDULER_SUMMARY,
+                payload={
+                    "round": 2,
+                    "status": "completed",
+                    "task": "build a page",
+                    "completed_agent_ids": ["frontend"],
+                    "final_answer": "HTML page completed.",
+                    "final_product": {
+                        "type": "single",
+                        "content": "HTML page completed.",
+                        "artifacts": [{"artifact_id": "artifact-1"}],
+                    },
+                    "compliance_checks": [{"name": "输出格式标准化", "status": "passed"}],
+                    "logic_chain": [{"agent_id": "frontend", "status": "closed"}],
+                },
+            )
+
+            async with factory() as session:
+                first = await mgr._persist_scheduler_summary_message(
+                    session,
+                    conversation_id,
+                    "generation-1",
+                    event,
+                )
+            event.payload["final_answer"] = "HTML page completed. Updated."
+            async with factory() as session:
+                second = await mgr._persist_scheduler_summary_message(
+                    session,
+                    conversation_id,
+                    "generation-1",
+                    event,
+                )
+            async with factory() as session:
+                messages = (
+                    await session.execute(
+                        select(Message).where(Message.conversation_id == conversation_id)
+                    )
+                ).scalars().all()
+                conversation = await session.get(Conversation, conversation_id)
+
+            assert first is not None
+            assert second is not None
+            assert first.id == second.id
+            assert len(messages) == 1
+            assert messages[0].sender_id == "team_leader"
+            assert messages[0].sender_name == "Team Leader"
+            assert messages[0].content["text"] == "HTML page completed. Updated."
+            assert messages[0].content["final_product"]["artifacts"][0]["artifact_id"] == "artifact-1"
+            assert messages[0].extra["runtime_scheduler_summary"] is True
+            assert conversation.message_count == 1
+            assert conversation.last_message_sender == "Team Leader"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_scheduler_summary_can_skip_team_leader_message_for_simple_turn(self, tmp_path):
+        conversation_id = "conv-generation-team-leader-summary-skipped"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            event = RuntimeEvent(
+                type=SCHEDULER_SUMMARY,
+                payload={
+                    "round": 1,
+                    "status": "completed",
+                    "task": "hello",
+                    "completed_agent_ids": ["daily"],
+                    "publish_message": False,
+                    "final_answer": "你好，我在。",
+                },
+            )
+
+            async with factory() as session:
+                message = await mgr._persist_scheduler_summary_message(
+                    session,
+                    conversation_id,
+                    "generation-1",
+                    event,
+                )
+            async with factory() as session:
+                messages = (
+                    await session.execute(
+                        select(Message).where(Message.conversation_id == conversation_id)
+                    )
+                ).scalars().all()
+                conversation = await session.get(Conversation, conversation_id)
+
+            assert message is None
+            assert messages == []
+            assert conversation.message_count == 0
+            assert not conversation.last_message_sender
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_legacy_multi_agent_generation_does_not_synthesize_team_leader_summary(self, tmp_path):
+        conversation_id = "conv-generation-legacy-team-leader-summary"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            mgr._sessions[conversation_id] = _FakeLegacyMultiAgentSession(conversation_id)
+
+            await mgr.start_generation(conversation_id, "整理一份产品发布方案")
+            await mgr._running_tasks[conversation_id]
+            await asyncio.sleep(0.05)
+
+            async with factory() as session:
+                messages = (
+                    await session.execute(
+                        select(Message).where(Message.conversation_id == conversation_id)
+                    )
+                ).scalars().all()
+                conversation = await session.get(Conversation, conversation_id)
+
+            team = [message for message in messages if message.sender_id == "team_leader"]
+            assert team == []
+            runtime = (conversation.extra or {}).get("runtime") or {}
+            record = runtime["generations"][-1]
+            assert not record.get("summary")
+            assert record["event_counts"].get(SCHEDULER_SUMMARY, 0) == 0
         finally:
             await engine.dispose()
 

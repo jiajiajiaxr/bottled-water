@@ -83,9 +83,24 @@ async def conversation_websocket(
     await websocket.accept()
     logger.info("WebSocket connected", conversation_id=conversation_id, user_id=user.id)
 
+    async with AsyncSessionLocal() as db:
+        try:
+            await _get_conversation_ws(db, user, conversation_id)
+        except Exception as exc:
+            await websocket.close(code=4004, reason=str(exc))
+            return
+
     sink = WebSocketSink(conversation_id)
     sink.register(websocket)
     session_manager = ConversationSessionManager.get_instance()
+    try:
+        await session_manager.recover_conversation(conversation_id, reason="server_restarted")
+    except Exception as exc:
+        logger.warning(
+            "WebSocket recovery check failed",
+            conversation_id=conversation_id,
+            error=str(exc),
+        )
 
     try:
         while True:
@@ -126,7 +141,11 @@ async def conversation_websocket(
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected", conversation_id=conversation_id, user_id=user.id)
     except Exception as exc:
-        logger.error("WebSocket failed", conversation_id=conversation_id, error=str(exc))
+        logger.error(
+            f"WebSocket failed: {type(exc).__name__}: {exc}",
+            conversation_id=conversation_id,
+            exc_info=True,
+        )
     finally:
         sink.unregister(websocket)
 
@@ -183,11 +202,29 @@ async def _handle_chat_send(
             )
 
         except Exception as exc:
-            logger.error("chat.send failed", conversation_id=conversation_id, error=str(exc))
+            logger.error(
+                f"chat.send failed: {type(exc).__name__}: {exc}",
+                conversation_id=conversation_id,
+                request_id=request_id or "",
+                exc_info=True,
+            )
+            failure_payload = {
+                "conversation_id": conversation_id,
+                "status": "failed",
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            }
+            await websocket.send_json(
+                {
+                    "event": "generation:failed",
+                    "data": failure_payload,
+                    "request_id": request_id,
+                }
+            )
             await websocket.send_json(
                 {
                     "event": "error",
-                    "data": {"message": str(exc)},
+                    "data": {"message": str(exc), **failure_payload},
                     "request_id": request_id,
                 }
             )

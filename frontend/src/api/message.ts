@@ -8,9 +8,10 @@ type PendingAck = {
   timeout: number;
 };
 
-const wsStreamSubscriptions = new Map<string, () => void>();
+const wsStreamSubscriptions = new Map<string, { message: () => void; close: () => void }>();
 const wsStreamHandlers = new Map<string, StreamAssistantHandlers>();
 const wsPendingAcks = new Map<string, Map<string, PendingAck>>();
+const wsActiveStreams = new Set<string>();
 
 export async function messages(conversationId: string): Promise<ChatMessage[]> {
   const result = await get<{ items: ChatMessage[] } | ChatMessage[]>(
@@ -149,6 +150,19 @@ function dispatchStreamEvent(
     case "conversation:updated":
       handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
+    case "error": {
+      const payload =
+        data && typeof data === "object"
+          ? (data as Record<string, unknown>)
+          : { message: String(data || "WebSocket request failed") };
+      handlers.onRuntimeEvent?.("generation:failed", {
+        status: "failed",
+        error: payload.error ?? payload.message ?? "websocket_error",
+        ...payload,
+      });
+      handlers.onDone?.(payload);
+      break;
+    }
     case "generation_finished":
     case "generation:finished":
     case "generation:cancelled":
@@ -193,12 +207,15 @@ function dispatchStreamEvent(
       handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
 
+    case "scheduler.plan":
     case "scheduler.decision":
+    case "scheduler.summary":
     case "agent.state_changed":
       handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
     case "agent.report":
     case "agent.failed":
+    case "control.complete":
     case "control.cancel":
       handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
@@ -393,9 +410,18 @@ export function streamAssistantReply(
       "workflow:completed",
       "workflow:run_completed",
       "message:updated",
+      "scheduler.plan",
+      "scheduler.decision",
+      "scheduler.summary",
+      "agent.state_changed",
+      "agent.report",
+      "agent.failed",
       "agent.tool_call",
       "agent.tool_result",
       "agent.tool_calls_executed",
+      "control.complete",
+      "control.cancel",
+      "control.watchdog_triggered",
       "generation_finished",
       "generation:finished",
       "generation:cancelled",
@@ -445,6 +471,7 @@ export async function sendMessageWs(
   return new Promise((resolve) => {
     const stop = () => {
       ws.send("chat.cancel", {}, requestId);
+      wsActiveStreams.delete(conversationId);
       handlers.onDone?.();
     };
     handlers.onControl?.(stop);
@@ -549,9 +576,10 @@ function ensureConversationStreamSubscription(
   if (wsStreamSubscriptions.has(conversationId)) return;
 
   const ws = getConversationWS(conversationId);
-  const unsubscribe = ws.onMessage((event, data, requestId) => {
+  const unsubscribeMessage = ws.onMessage((event, data, requestId) => {
     const activeHandlers = wsStreamHandlers.get(conversationId) ?? handlers;
     if (event === "chat.ack") {
+      wsActiveStreams.add(conversationId);
       resolvePendingAck(conversationId, requestId, "ok");
       return;
     }
@@ -559,10 +587,29 @@ function ensureConversationStreamSubscription(
     dispatchStreamEvent(event, data, activeHandlers);
 
     if (isTerminalWsEvent(event)) {
+      wsActiveStreams.delete(conversationId);
       resolveConversationPendingAcks(conversationId, "completed");
     }
   });
-  wsStreamSubscriptions.set(conversationId, unsubscribe);
+  const unsubscribeClose = ws.onClose(() => {
+    if (!wsActiveStreams.has(conversationId)) {
+      return;
+    }
+    const activeHandlers = wsStreamHandlers.get(conversationId) ?? handlers;
+    wsActiveStreams.delete(conversationId);
+    const payload = {
+      conversation_id: conversationId,
+      status: "failed",
+      error: "websocket_disconnected",
+    };
+    activeHandlers.onRuntimeEvent?.("generation:failed", payload);
+    activeHandlers.onDone?.(payload);
+    resolveConversationPendingAcks(conversationId, "disconnected");
+  });
+  wsStreamSubscriptions.set(conversationId, {
+    message: unsubscribeMessage,
+    close: unsubscribeClose,
+  });
 }
 
 function pendingAcksFor(conversationId: string): Map<string, PendingAck> {
@@ -608,9 +655,12 @@ function resolveConversationPendingAcks(
 }
 
 function clearConversationWsSubscription(conversationId: string): void {
-  wsStreamSubscriptions.get(conversationId)?.();
+  const subscription = wsStreamSubscriptions.get(conversationId);
+  subscription?.message();
+  subscription?.close();
   wsStreamSubscriptions.delete(conversationId);
   wsStreamHandlers.delete(conversationId);
+  wsActiveStreams.delete(conversationId);
   resolveConversationPendingAcks(conversationId, "completed");
 }
 

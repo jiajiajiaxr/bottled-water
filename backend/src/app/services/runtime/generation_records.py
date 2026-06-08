@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import uuid
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Iterable
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_runtime.core.protocol import (
@@ -12,12 +14,24 @@ from agent_runtime.core.protocol import (
     AGENT_STATE_CHANGED,
     BLACKBOARD_UPDATED,
     SCHEDULER_DECISION,
+    SCHEDULER_PLAN,
+    SCHEDULER_SUMMARY,
 )
 from agent_runtime.core.types import Event
 from db.models import Conversation, utcnow
 
 MAX_GENERATION_HISTORY = 20
 MAX_DECISION_HISTORY = 20
+MAX_RUNTIME_SUMMARIES = 20
+TERMINAL_GENERATION_STATUSES = {"completed", "failed", "cancelled", "canceled"}
+
+
+@dataclass(frozen=True)
+class RecoveredGeneration:
+    conversation_id: str
+    generation_id: str
+    status: str
+    error: str | None = None
 
 
 def _now_iso() -> str:
@@ -103,6 +117,9 @@ async def create_generation_record(
         "cancelled_at": None,
         "error": None,
         "event_counts": {},
+        "task_plan": [],
+        "summary": {},
+        "summaries": [],
         "decisions": [],
         "watchdog_events": [],
         "agent_runs": [_agent_snapshot(agent) for agent in agents],
@@ -139,8 +156,10 @@ async def record_generation_event(
     event_counts = dict(record.get("event_counts") or {})
     event_counts[event.type] = int(event_counts.get(event.type) or 0) + 1
     record["event_counts"] = event_counts
+    _record_plan_event(record, event)
     _record_agent_event(record, event)
     _record_decision_event(record, event)
+    _record_summary_event(record, event)
     _record_watchdog_event(record, event)
     generations[index] = record
     runtime["generations"] = generations
@@ -184,6 +203,127 @@ async def finish_generation_record(
     await db.commit()
 
 
+async def cancel_abandoned_generation_record(
+    db: AsyncSession,
+    conversation_id: str,
+    *,
+    reason: str = "server_restarted",
+) -> str | None:
+    """Cancel a persisted running generation that no in-process task owns."""
+    conversation = await db.get(Conversation, conversation_id)
+    if not conversation:
+        return None
+    recovered = _cancel_abandoned_generation(conversation, reason=reason)
+    if recovered:
+        await db.commit()
+        return recovered.generation_id
+    return None
+
+
+async def recover_abandoned_generation_record(
+    db: AsyncSession,
+    conversation_id: str,
+    *,
+    reason: str = "server_restarted",
+) -> RecoveredGeneration | None:
+    """Recover a persisted active generation that no in-process task owns."""
+    conversation = await db.get(Conversation, conversation_id)
+    if not conversation:
+        return None
+    recovered = _cancel_abandoned_generation(conversation, reason=reason)
+    if recovered:
+        await db.commit()
+    return recovered
+
+
+async def cancel_abandoned_generation_records(
+    db: AsyncSession,
+    *,
+    reason: str = "server_restarted",
+) -> list[RecoveredGeneration]:
+    """Cancel persisted running generations left behind by a process restart."""
+    result = await db.scalars(
+        select(Conversation).where(Conversation.deleted_at.is_(None))
+    )
+    recovered: list[RecoveredGeneration] = []
+    for conversation in result.all():
+        recovered_generation = _cancel_abandoned_generation(conversation, reason=reason)
+        if recovered_generation:
+            recovered.append(recovered_generation)
+    if recovered:
+        await db.commit()
+    return recovered
+
+
+def _cancel_abandoned_generation(
+    conversation: Conversation,
+    *,
+    reason: str,
+) -> RecoveredGeneration | None:
+    _extra, runtime = _runtime_payload(conversation)
+    generations = list(runtime.get("generations") or [])
+    active_generation_id = str(runtime.get("active_generation_id") or "")
+    candidate_ids: list[str] = []
+    if active_generation_id:
+        candidate_ids.append(active_generation_id)
+
+    conversation_status = str(conversation.generation_status or "").lower()
+    if conversation_status in {"running", "executing"} and generations:
+        latest_id = str(generations[-1].get("id") or "")
+        if latest_id and latest_id not in candidate_ids:
+            candidate_ids.append(latest_id)
+
+    if not candidate_ids and conversation_status not in {"running", "executing"}:
+        return None
+
+    completed_at = _now_iso()
+    recovered_generation_id: str | None = None
+    terminal_candidate_status: str | None = None
+    updated_generations: list[dict[str, Any]] = []
+    for item in generations:
+        record = dict(item)
+        record_id = str(record.get("id") or "")
+        status = str(record.get("status") or "").lower()
+        if record_id in candidate_ids and status not in TERMINAL_GENERATION_STATUSES:
+            record["status"] = "cancelled"
+            record["completed_at"] = record.get("completed_at") or completed_at
+            record["cancelled_at"] = record.get("cancelled_at") or record["completed_at"]
+            record["error"] = str(reason or "server_restarted")[:1000]
+            _mark_open_agents_for_terminal_status(record, "cancelled", record["error"])
+            recovered_generation_id = record_id
+        elif record_id in candidate_ids and status in TERMINAL_GENERATION_STATUSES:
+            terminal_candidate_status = "cancelled" if status == "canceled" else status
+        updated_generations.append(record)
+
+    changed = recovered_generation_id is not None
+    if active_generation_id in candidate_ids:
+        runtime["active_generation_id"] = None
+        changed = True
+
+    if not changed and conversation_status not in {"running", "executing"}:
+        return None
+
+    runtime["generations"] = updated_generations
+    _set_runtime(conversation, runtime)
+    if recovered_generation_id or not terminal_candidate_status:
+        recovered_status = "cancelled"
+        conversation_status = "cancelled"
+        error = str(reason or "server_restarted")[:1000]
+    else:
+        recovered_status = terminal_candidate_status
+        conversation_status = "idle" if terminal_candidate_status == "completed" else terminal_candidate_status
+        error = None
+    conversation.generation_status = conversation_status
+    conversation.active_session_id = None
+    generation_id = recovered_generation_id or (candidate_ids[0] if candidate_ids else "status-only")
+    return RecoveredGeneration(
+        conversation_id=str(conversation.id),
+        generation_id=generation_id,
+        status=recovered_status,
+        error=error,
+    )
+
+
 def _should_record_event(event: Event) -> bool:
     if event.type.startswith("agent.token"):
         return False
@@ -214,6 +354,15 @@ def _record_agent_event(record: dict[str, Any], event: Event) -> None:
     record["agent_runs"] = agent_runs
 
 
+def _record_plan_event(record: dict[str, Any], event: Event) -> None:
+    if event.type not in {SCHEDULER_PLAN, SCHEDULER_DECISION}:
+        return
+    payload = event.payload or {}
+    plan = payload.get("plan")
+    if isinstance(plan, list):
+        record["task_plan"] = deepcopy(plan)
+
+
 def _apply_agent_status(item: dict[str, Any], event: Event) -> None:
     payload = event.payload or {}
     if event.type == AGENT_STATE_CHANGED:
@@ -234,6 +383,18 @@ def _apply_agent_status(item: dict[str, Any], event: Event) -> None:
         state = _normalize_agent_run_status(report.get("state"))
         item["status"] = state
         item["completed_at"] = item.get("completed_at") or _now_iso()
+        if payload.get("input") is not None:
+            item["input"] = deepcopy(payload.get("input"))
+        if payload.get("output") is not None:
+            item["output"] = deepcopy(payload.get("output"))
+        tool_events = payload.get("tool_events")
+        if isinstance(tool_events, list):
+            item["tool_events"] = deepcopy(tool_events[-20:])
+            item["tool_count"] = sum(
+                len(event.get("results") or [])
+                for event in tool_events
+                if isinstance(event, dict)
+            )
         item["output_preview"] = str(payload.get("work_product") or "")[:300]
         item["rationale"] = str(report.get("rationale") or "")[:500]
         item["will"] = str(report.get("will") or "")[:50]
@@ -297,11 +458,30 @@ def _record_decision_event(record: dict[str, Any], event: Event) -> None:
                 or decision_payload.get("requires_verification")
             ),
             "fallback_reason": decision_payload.get("fallback_reason"),
+            "summary": deepcopy(payload.get("summary")) if isinstance(payload.get("summary"), dict) else {},
             "raw": deepcopy(payload),
             "created_at": _now_iso(),
         }
     )
     record["decisions"] = decisions[-MAX_DECISION_HISTORY:]
+
+
+def _record_summary_event(record: dict[str, Any], event: Event) -> None:
+    if event.type not in {SCHEDULER_SUMMARY, SCHEDULER_DECISION} and event.type != "control.complete":
+        return
+    payload = event.payload or {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else None
+    if summary is None and event.type == SCHEDULER_SUMMARY:
+        summary = payload
+    if not isinstance(summary, dict):
+        return
+    record["summary"] = deepcopy(summary)
+    summaries = list(record.get("summaries") or [])
+    summaries.append({"created_at": _now_iso(), **deepcopy(summary)})
+    record["summaries"] = summaries[-MAX_RUNTIME_SUMMARIES:]
+    plan = summary.get("plan")
+    if isinstance(plan, list):
+        record["task_plan"] = deepcopy(plan)
 
 
 def _record_watchdog_event(record: dict[str, Any], event: Event) -> None:

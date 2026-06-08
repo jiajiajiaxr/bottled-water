@@ -138,6 +138,16 @@ Agent reports:
         return {"decision_type": "wait", "rationale": "无法解析: could not parse model response"}
 
     def _fallback_decision(self, agent_reports: List[AgentReport]) -> SchedulingDecision:
+        ready_reports = [report for report in agent_reports if report.state == AgentState.READY]
+        if len(ready_reports) > 2:
+            targets = [report.agent_id for report in ready_reports]
+            return SchedulingDecision(
+                decision_type="parallel",
+                target_agent_id=targets[0],
+                target_agent_ids=targets,
+                task_description="Execute the current task with each Agent contributing its relevant specialty.",
+                rationale="回退策略: group chat has more than two ready agents, organize them in parallel.",
+            )
         for report in agent_reports:
             if report.state == AgentState.READY:
                 return SchedulingDecision(

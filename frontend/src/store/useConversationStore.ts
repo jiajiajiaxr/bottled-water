@@ -1,6 +1,31 @@
 import { create } from "zustand";
 import type { Conversation } from "@/types";
 
+function sameStringArray(left: string[], right: string[]) {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+function sameStringSet(left: Set<string>, right: Set<string>) {
+  if (left.size !== right.size) return false;
+  for (const item of left) {
+    if (!right.has(item)) return false;
+  }
+  return true;
+}
+
+function sameConversationPatch(
+  conversation: Conversation | undefined,
+  patch: Partial<Conversation>,
+) {
+  if (!conversation) return false;
+  const keys = Object.keys(patch) as (keyof Conversation)[];
+  return keys.length > 0 && keys.every((key) => Object.is(conversation[key], patch[key]));
+}
+
+function sameConversationArray(left: Conversation[], right: Conversation[]) {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
 function loadThinkingEnabled(): Map<string, boolean> {
   if (typeof window === "undefined") {
     return new Map();
@@ -123,18 +148,32 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   draftSnippets: new Map(),
   localRunningConversationIds: new Set(),
 
-  setConversations: (conversations) => set({ conversations }),
+  setConversations: (conversations) =>
+    set((state) =>
+      sameConversationArray(state.conversations, conversations)
+        ? state
+        : { conversations },
+    ),
   setActiveId: (id) => {
-    const conversation = id ? get().conversations.find((item) => item.id === id) : undefined;
-    set({ activeId: id, activeConversation: conversation });
+    set((state) => {
+      const conversation = id ? state.conversations.find((item) => item.id === id) : undefined;
+      return state.activeId === id && state.activeConversation === conversation
+        ? state
+        : { activeId: id, activeConversation: conversation };
+    });
   },
   setActiveConversation: (id) => {
-    const conversation = get().conversations.find((item) => item.id === id);
-    set({ activeId: id, activeConversation: conversation });
+    set((state) => {
+      const conversation = state.conversations.find((item) => item.id === id);
+      return state.activeId === id && state.activeConversation === conversation
+        ? state
+        : { activeId: id, activeConversation: conversation };
+    });
   },
   updateActiveConversation: (patch) => {
     const conversation = get().activeConversation;
     if (conversation) {
+      if (sameConversationPatch(conversation, patch)) return;
       const updated = { ...conversation, ...patch };
       set({
         activeConversation: updated,
@@ -145,16 +184,30 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     }
   },
   setConversationCategories: (conversationCategories) =>
-    set({ conversationCategories }),
+    set((state) =>
+      sameStringArray(state.conversationCategories, conversationCategories)
+        ? state
+        : { conversationCategories },
+    ),
   updateConversation: (id, patch) =>
     set((state) => {
-      const conversations = state.conversations.map((c) =>
-        c.id === id ? { ...c, ...patch } : c,
-      );
+      const current = state.conversations.find((item) => item.id === id);
+      const activeCurrent =
+        state.activeConversation?.id === id ? state.activeConversation : undefined;
+      if (!current && !activeCurrent) return state;
+      if (
+        sameConversationPatch(current, patch) &&
+        (!activeCurrent || sameConversationPatch(activeCurrent, patch))
+      ) {
+        return state;
+      }
+      const updated = current ? { ...current, ...patch } : undefined;
+      const activeUpdated = activeCurrent ? { ...activeCurrent, ...patch } : state.activeConversation;
+      const conversations = updated
+        ? state.conversations.map((c) => (c.id === id ? updated : c))
+        : state.conversations;
       const activeConversation =
-        state.activeConversation?.id === id
-          ? { ...state.activeConversation, ...patch }
-          : state.activeConversation;
+        state.activeConversation?.id === id ? activeUpdated : state.activeConversation;
       return { conversations, activeConversation };
     }),
   addConversation: (conversation) =>
@@ -168,17 +221,29 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   setLoading: (isLoading) => set({ isLoading }),
   setLoadingMessages: (loadingMessages) => set({ loadingMessages }),
   updateConversations: (updater) =>
-    set((state) => ({ conversations: updater(state.conversations) })),
+    set((state) => {
+      const conversations = updater(state.conversations);
+      return sameConversationArray(state.conversations, conversations)
+        ? state
+        : { conversations };
+    }),
 
   // --- 运行中对话标记 ---
 
   setLocalRunningConversationIds: (ids) =>
-    set({ localRunningConversationIds: ids }),
+    set((state) =>
+      sameStringSet(state.localRunningConversationIds, ids)
+        ? state
+        : { localRunningConversationIds: ids },
+    ),
 
   updateLocalRunningConversationIds: (updater) =>
-    set((state) => ({
-      localRunningConversationIds: updater(state.localRunningConversationIds),
-    })),
+    set((state) => {
+      const next = updater(state.localRunningConversationIds);
+      return sameStringSet(state.localRunningConversationIds, next)
+        ? state
+        : { localRunningConversationIds: next };
+    }),
 
   // --- 思考模式（按会话持久化） ---
 

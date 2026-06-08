@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Checkbox, Form, Input, Modal, Select } from "antd";
 import { normalizeConversationCategory } from "@/lib/conversation";
 import type { Agent } from "@/types";
@@ -18,6 +18,8 @@ const COPY = {
   autoOrganize: "\u81ea\u52a8\u7ec4\u7ec7\u591a Agent \u534f\u4f5c",
   dailyChat: "\u65e5\u5e38\u804a\u5929",
 };
+
+const AUTO_ORGANIZE_AGENT_TYPES = ["master", "frontend", "backend", "reviewer", "deploy", "writing"];
 
 export function CreateConversationModal({
   open,
@@ -41,7 +43,10 @@ export function CreateConversationModal({
   }) => void;
 }) {
   const [form] = Form.useForm();
-  const onlineAgents = agents.filter((agent) => agent.status === "online");
+  const onlineAgents = useMemo(
+    () => agents.filter((agent) => agent.status === "online"),
+    [agents],
+  );
   const maxAgentCount = group ? 8 : 1;
   const initializedRef = useRef(false);
   const selectedAgentIdsRef = useRef<string[]>([]);
@@ -160,6 +165,22 @@ export function CreateConversationModal({
 }
 
 function pickDefaultAgentIds(agents: Agent[], maxAgentCount: number): string[] {
+  if (maxAgentCount > 1) {
+    const priority = new Map(
+      AUTO_ORGANIZE_AGENT_TYPES.map((type, index) => [type, index]),
+    );
+    const collaborativeAgents = agents
+      .filter((agent) => priority.has(agent.type))
+      .sort(
+        (left, right) =>
+          (priority.get(left.type) ?? 99) - (priority.get(right.type) ?? 99) ||
+          left.name.localeCompare(right.name),
+      );
+    if (collaborativeAgents.length > 0) {
+      return collaborativeAgents.slice(0, maxAgentCount).map((agent) => agent.id);
+    }
+  }
+
   const dailyAgent = agents.find((agent) => {
     const lowerName = agent.name.toLowerCase();
     return lowerName.includes("daily chat") || agent.name.includes(COPY.dailyChat);

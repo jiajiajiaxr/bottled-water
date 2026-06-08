@@ -49,6 +49,104 @@ function conversation(): Conversation {
   };
 }
 
+function progressConversation(): Conversation {
+  return {
+    ...conversation(),
+    participants: [
+      {
+        participant_type: "agent",
+        agent_id: "frontend",
+        agent_name: "Frontend Worker",
+      },
+      {
+        participant_type: "agent",
+        agent_id: "backend",
+        agent_name: "Backend Worker",
+      },
+    ],
+    runtime: {
+      active_generation_id: "gen-1",
+      generations: [
+        {
+          id: "gen-1",
+          status: "running",
+          task_plan: [
+            {
+              id: "step-1",
+              agent_id: "frontend",
+              agent_name: "Frontend Worker",
+              status: "completed",
+              stage: 1,
+              task: "Inspect dirty diff and build Web prototype",
+            },
+            {
+              id: "step-2",
+              agent_id: "backend",
+              agent_name: "Backend Worker",
+              status: "queued",
+              stage: 1,
+              task: "Run API checks with small tool loops",
+            },
+          ],
+          agent_runs: [
+            {
+              agent_id: "frontend",
+              agent_name: "Frontend Worker",
+              status: "completed",
+            },
+            {
+              agent_id: "backend",
+              agent_name: "Backend Worker",
+              status: "running",
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function legacyRuntimeConversation(): Conversation {
+  return {
+    ...conversation(),
+    participants: [
+      {
+        participant_type: "agent",
+        agent_id: "frontend",
+        agent_name: "Frontend Worker",
+      },
+      {
+        participant_type: "agent",
+        agent_id: "backend",
+        agent_name: "Backend Worker",
+      },
+    ],
+    runtime: {
+      active_generation_id: "gen-legacy",
+      generations: [
+        {
+          id: "gen-legacy",
+          status: "running",
+          agent_runs: [
+            {
+              agent_id: "frontend",
+              agent_name: "Frontend Worker",
+              status: "running",
+              current_task: "请组织多智能体完成企业知识库问答 MVP，并在每个 Agent 下重复这条完整用户提示。",
+            },
+            {
+              agent_id: "backend",
+              agent_name: "Backend Worker",
+              status: "queued",
+              current_task: "请组织多智能体完成企业知识库问答 MVP，并在每个 Agent 下重复这条完整用户提示。",
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 describe("RuntimeDecisionStrip", () => {
   it("expands from the floating robot card and uses participant names", () => {
     render(<RuntimeDecisionStrip conversation={conversation()} />);
@@ -61,5 +159,28 @@ describe("RuntimeDecisionStrip", () => {
 
     expect(screen.getAllByText(/Daily Chat Agent/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/72fbea2b · running/)).toBeNull();
+  });
+
+  it("shows a task progress list for multi-agent organization", () => {
+    render(<RuntimeDecisionStrip conversation={progressConversation()} />);
+
+    fireEvent.click(screen.getByLabelText("展开组织状态"));
+
+    expect(screen.getByText("进度")).toBeInTheDocument();
+    expect(screen.getByText("Inspect dirty diff and build Web prototype")).toBeInTheDocument();
+    expect(screen.getByText("Run API checks with small tool loops")).toBeInTheDocument();
+    expect(screen.getByText("Frontend Worker · 已完成")).toBeInTheDocument();
+    expect(screen.getByText("Backend Worker · 进行中")).toBeInTheDocument();
+  });
+
+  it("falls back to agent run progress when scheduler plan is absent", () => {
+    render(<RuntimeDecisionStrip conversation={legacyRuntimeConversation()} />);
+
+    fireEvent.click(screen.getByLabelText("展开组织状态"));
+
+    expect(screen.getByText("进度")).toBeInTheDocument();
+    expect(screen.queryByText(/企业知识库问答 MVP/)).toBeNull();
+    expect(screen.getByText("Frontend Worker · 进行中")).toBeInTheDocument();
+    expect(screen.getByText("Backend Worker · 待执行")).toBeInTheDocument();
   });
 });

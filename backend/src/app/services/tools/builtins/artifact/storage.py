@@ -76,7 +76,7 @@ def build_artifact_file(
 
 
 def html_artifact_file(*, title: str, html_content: str) -> GeneratedFile:
-    safe = _safe_filename(title)[:70] or "agenthub-artifact"
+    safe = _safe_filename(title, max_length=48) or "agenthub-artifact"
     return GeneratedFile(
         content=html_content.encode("utf-8"),
         media_type=ARTIFACT_MEDIA_TYPES["html"],
@@ -96,7 +96,7 @@ def persist_artifact_file(
 ) -> dict[str, Any]:
     raw = generated.content
     checksum = hashlib.sha256(raw).hexdigest()
-    safe_name = _safe_filename(generated.filename)
+    safe_name = _safe_filename(generated.filename, max_length=48)
     workspace_id = workspace_id_from_conversation(db, artifact.conversation_id)
     folder = scoped_dir(
         workspace_id,
@@ -187,6 +187,14 @@ def regenerate_binary_from_preview(
     }
 
 
-def _safe_filename(name: str) -> str:
+def _safe_filename(name: str, *, max_length: int = 80) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._\-\u4e00-\u9fff]+", "_", name).strip("._")
-    return cleaned or "artifact.bin"
+    cleaned = cleaned or "artifact.bin"
+    if len(cleaned) <= max_length:
+        return cleaned
+    stem, dot, suffix = cleaned.rpartition(".")
+    if dot and 0 < len(suffix) <= 12:
+        stem_limit = max(8, max_length - len(suffix) - 1)
+        stem = stem[:stem_limit].rstrip("._-") or "artifact"
+        return f"{stem}.{suffix}"
+    return cleaned[:max_length].rstrip("._-") or "artifact.bin"

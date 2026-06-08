@@ -8,6 +8,7 @@ from agent_runtime.core.interfaces import AgentContextBuildResult
 from agent_runtime.core.protocol import AGENT_REPORT, CONTROL_ASSIGN, CONTROL_COMPLETE
 from agent_runtime.core.types import AgentConfig, AgentState, Event
 from agent_runtime.runtime.agent_actor import AgentActor
+from agent_runtime.runtime.session import Session
 from agent_runtime.runtime.event_dispatcher import EventDispatcher
 
 
@@ -36,7 +37,14 @@ async def test_agent_actor_runs_assignment_and_publishes_report(mock_provider, m
     await bus.publish(
         Event(
             type=CONTROL_ASSIGN,
-            payload={"task": "write a helper"},
+            payload={
+                "task": "write a helper",
+                "task_input": {
+                    "user_request": "build feature",
+                    "assigned_task": "write a helper",
+                    "upstream_outputs": {"planner": {"output": "plan done"}},
+                },
+            },
             source="scheduler",
             target="coder",
         )
@@ -46,9 +54,15 @@ async def test_agent_actor_runs_assignment_and_publishes_report(mock_provider, m
 
     assert report_event.payload["agent_id"] == "coder"
     assert report_event.payload["report"]["state"] == AgentState.COMPLETED.value
+    assert report_event.payload["input"]["user_request"] == "build feature"
+    assert report_event.payload["output"]["work_product"]
+    assert report_event.payload["tool_events"] == []
     stored = await blackboard.get("sess_actor")
     assert stored is not None
     assert any(item.get("type") == "agent_work" for item in stored["raw_history"])
+    history = next(item for item in stored["raw_history"] if item.get("type") == "agent_work")
+    assert history["input"]["assigned_task"] == "write a helper"
+    assert history["output"]["work_product"]
 
 
 @pytest.mark.asyncio
@@ -127,6 +141,11 @@ async def test_agent_actor_passes_assignment_context_metadata(mock_provider, moc
             type=CONTROL_ASSIGN,
             payload={
                 "task": "write a helper",
+                "task_input": {
+                    "user_request": "build feature",
+                    "assigned_task": "write a helper",
+                    "upstream_outputs": {"planner": {"output": "plan done"}},
+                },
                 "context_metadata": {
                     "conversation_id": "conv-1",
                     "user_message_id": "msg-1",
@@ -144,6 +163,7 @@ async def test_agent_actor_passes_assignment_context_metadata(mock_provider, moc
     assert captured["request"].metadata["user_message_id"] == "msg-1"
     assert captured["request"].metadata["client_message_id"] == "client-1"
     assert captured["request"].metadata["visible_content"] == "visible text"
+    assert captured["request"].metadata["task_input"]["upstream_outputs"]["planner"]["output"] == "plan done"
     thinking_event = next(event for event in events if event.type == "agent.thinking")
     assert thinking_event.payload["user_message_id"] == "msg-1"
     assert thinking_event.payload["client_message_id"] == "client-1"
@@ -178,6 +198,32 @@ async def test_agent_actor_exits_on_control_complete(mock_provider, mock_tool_ex
 
     assert report_event.payload["agent_id"] == "reviewer"
     assert report_event.payload["report"]["state"] == AgentState.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_actor_runtime_without_tool_executor_can_complete(mock_provider):
+    mock_provider.responses = [
+        ChatResponse(
+            content='{"decision_type":"assign","target_agent_id":"coder","target_agent_ids":["coder"],"task_description":"write a helper","rationale":"Coder should do it"}'
+        ),
+        ChatResponse(
+            content='done\n```status_report\n{"state":"completed","will":"complete","confidence":0.9}\n```'
+        ),
+    ]
+    session = Session.create(
+        agents=[AgentConfig(id="coder", name="Coder", system_prompt="You code.")],
+        model_provider=mock_provider,
+        scheduler_config={"strategy": "tech_lead", "runtime": "actor", "max_runtime_seconds": 2},
+        session_id="sess_actor_no_tools",
+    )
+
+    events = []
+    async for event in session.run("write a helper"):
+        events.append(event)
+
+    reports = [event for event in events if event.type == AGENT_REPORT]
+    assert reports
+    assert reports[-1].payload["report"]["state"] == AgentState.COMPLETED.value
 
 
 async def _append(target: list[Event], event: Event) -> None:
