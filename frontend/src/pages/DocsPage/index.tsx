@@ -38,24 +38,6 @@ import "./docs-detail.css";
 import "./docs-hero.css";
 import "./docs-responsive.css";
 
-function DocsAnnouncement({ onClose }: { onClose: () => void }) {
-  return (
-    <div className="docs-announcement">
-      <span>
-        文档已按「快速开始、核心概念、API、扩展、排查」重组，优先服务真实使用和开发接入。
-      </span>
-      <a href="#reading-path">选择阅读路径 →</a>
-      <button
-        type="button"
-        aria-label="关闭公告"
-        onClick={onClose}
-      >
-        ×
-      </button>
-    </div>
-  );
-}
-
 function DocsTopbar() {
   return (
     <header className="docs-topbar">
@@ -359,7 +341,6 @@ function DocsUtilityRail() {
 
 export function DocsPage() {
   const [query, setQuery] = useState("");
-  const [announcementVisible, setAnnouncementVisible] = useState(true);
   const filteredGroups = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return navGroups;
@@ -375,14 +356,7 @@ export function DocsPage() {
   }, [query]);
 
   return (
-    <main
-      className={`docs-shell ${
-        announcementVisible ? "docs-shell-announced" : "docs-shell-plain"
-      }`}
-    >
-      {announcementVisible ? (
-        <DocsAnnouncement onClose={() => setAnnouncementVisible(false)} />
-      ) : null}
+    <main className="docs-shell">
       <DocsTopbar />
       <div className="docs-layout">
         <DocsSidebar
