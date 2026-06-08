@@ -6,6 +6,7 @@ import type { User } from "@/types";
 import { LoginRoute } from "./LoginRoute";
 import { WorkbenchRoute } from "./WorkbenchRoute";
 import { DocsPage } from "@/pages/DocsPage";
+import { ProductReleasePage } from "@/pages/ProductReleasePage";
 
 export function AppRouter() {
   const [user, setUser] = useState<User>();
@@ -37,6 +38,8 @@ export function AppRouter() {
   return (
     <AntApp>
       <Routes>
+        <Route path="/" element={<ProductReleasePage />} />
+        <Route path="/release" element={<ProductReleasePage />} />
         <Route
           path="/login"
           element={<LoginRoute user={user} onLogin={setUser} />}
