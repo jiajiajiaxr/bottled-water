@@ -439,6 +439,7 @@ class WorkflowUpdatePayload(BaseModel):
     """更新会话工作流请求体。"""
 
     mode: str | None = None
+    output_mode: str | None = None
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[list[str] | dict[str, Any]] = Field(default_factory=list)
     settings: dict[str, Any] = Field(default_factory=dict)

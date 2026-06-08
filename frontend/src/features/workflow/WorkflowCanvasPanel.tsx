@@ -15,6 +15,8 @@ export function WorkflowCanvasPanel({
   selectedNodeIds,
   selectedEdgeIds,
   editingNodeState,
+  editingNodeLastState,
+  editingNodeLastRun,
   workflowRuns,
   validationIssues,
   fitViewSignal,
@@ -33,6 +35,8 @@ export function WorkflowCanvasPanel({
   selectedNodeIds: string[];
   selectedEdgeIds: string[];
   editingNodeState?: WorkflowRun["node_states"][number];
+  editingNodeLastState?: WorkflowRun["node_states"][number];
+  editingNodeLastRun?: WorkflowRun;
   workflowRuns: WorkflowRun[];
   validationIssues?: WorkflowValidationIssue[];
   fitViewSignal: number;
@@ -81,6 +85,8 @@ export function WorkflowCanvasPanel({
                   size="small"
                   items={WorkflowRunPanels({
                     editingNodeState,
+                    editingNodeLastState,
+                    editingNodeLastRun,
                     latestRun,
                     workflowRuns,
                   })}

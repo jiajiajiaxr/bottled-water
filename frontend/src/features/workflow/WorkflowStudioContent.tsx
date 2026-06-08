@@ -6,7 +6,11 @@ import { layoutWorkflowPositions } from "../../lib/workflowLayout";
 import { conversationRoutePath } from "../../lib/workflowRoutes";
 import { useConversationStore } from "../../store";
 import type { ConversationWorkflow } from "../../types";
-import { normalizeWorkflowForRun, workflowSettings } from "./utils";
+import {
+  normalizeWorkflowAgentBindings,
+  normalizeWorkflowForRun,
+  workflowSettings,
+} from "./utils";
 import { validateWorkflowDefinition } from "./validation";
 import { WorkflowCanvasPanel } from "./WorkflowCanvasPanel";
 import {
@@ -59,8 +63,20 @@ export function WorkflowStudioContent({
       .map((issue) => issue.message)
       .join("；")}`;
 
+  const normalizeWorkflowDraft = (workflow: ConversationWorkflow) =>
+    layoutWorkflowPositions(
+      normalizeWorkflowAgentBindings(
+        workflow,
+        studio.conversation?.participants,
+        studio.agents,
+      ),
+    );
+
   const persistWorkflow = async (workflow: ConversationWorkflow) => {
-    const saved = await api.saveConversationWorkflow(conversationId, workflow);
+    const saved = await api.saveConversationWorkflow(
+      conversationId,
+      normalizeWorkflowDraft(workflow),
+    );
     const enabled = Boolean(workflowSettings(saved).enabled);
     const patch = {
       scheduling_strategy: enabled ? "workflow" : "tech_lead",
@@ -93,9 +109,9 @@ export function WorkflowStudioContent({
     studio.setWorkflowDraft(nextWorkflow);
     if ("enabled" in settingsPatch) {
       try {
-        await persistWorkflow(layoutWorkflowPositions(nextWorkflow));
+        await persistWorkflow(normalizeWorkflowDraft(nextWorkflow));
         onSuccess(
-          Boolean(settingsPatch.enabled)
+          settingsPatch.enabled
             ? "Workflow chat enabled"
             : "Workflow chat disabled",
         );
@@ -110,12 +126,12 @@ export function WorkflowStudioContent({
 
     let parsed: ConversationWorkflow;
     if (studio.editingNode) {
-      parsed = layoutWorkflowPositions(
+      parsed = normalizeWorkflowDraft(
         (await studio.saveWorkflowNode()) ?? studio.workflow,
       );
     } else {
       try {
-        parsed = layoutWorkflowPositions(
+        parsed = normalizeWorkflowDraft(
           JSON.parse(studio.workflowJson) as ConversationWorkflow,
         );
       } catch {
@@ -136,7 +152,7 @@ export function WorkflowStudioContent({
         conversationId,
         studio.workflowInstruction,
       );
-      const nextWorkflow = layoutWorkflowPositions(generated);
+      const nextWorkflow = normalizeWorkflowDraft(generated);
       studio.setWorkflowDraft({
         ...nextWorkflow,
         settings: {
@@ -156,11 +172,11 @@ export function WorkflowStudioContent({
     if (!studio.workflow) return;
 
     const workflowToRun = normalizeWorkflowForRun(
-      studio.editingNode
-        ? layoutWorkflowPositions(
-            (await studio.saveWorkflowNode()) ?? studio.workflow,
-          )
-        : studio.workflow,
+      normalizeWorkflowDraft(
+        studio.editingNode
+          ? (await studio.saveWorkflowNode()) ?? studio.workflow
+          : studio.workflow,
+      ),
     );
 
     const nextValidationErrors = validateWorkflowDefinition(workflowToRun).filter(
@@ -174,6 +190,7 @@ export function WorkflowStudioContent({
 
     const run = await api.startWorkflowRun(conversationId, workflowToRun);
     studio.setWorkflowRuns((current) => [run, ...current]);
+    studio.setWorkflowDraft(run.workflow_snapshot);
     onSuccess("工作流运行已创建");
   };
 
@@ -244,6 +261,8 @@ export function WorkflowStudioContent({
       selectedNodeIds={studio.selectedNodeIds}
       selectedEdgeIds={studio.selectedEdgeIds}
       editingNodeState={studio.editingNodeState}
+      editingNodeLastState={studio.editingNodeLastState}
+      editingNodeLastRun={studio.editingNodeLastRun}
       workflowRuns={studio.workflowRuns}
       validationIssues={validationIssues}
       fitViewSignal={fitViewSignal}
@@ -276,6 +295,8 @@ export function WorkflowStudioContent({
       nodeForm={nodeForm}
       editingNode={studio.editingNode}
       editingNodeState={studio.editingNodeState}
+      editingNodeLastState={studio.editingNodeLastState}
+      editingNodeLastRun={studio.editingNodeLastRun}
       latestRun={studio.latestRun}
       workflowEdges={studio.workflowEdges}
       workflowJson={studio.workflowJson}
@@ -302,6 +323,8 @@ export function WorkflowStudioContent({
           selectedEdgeIds={studio.selectedEdgeIds}
           editingNode={studio.editingNode}
           editingNodeState={studio.editingNodeState}
+          editingNodeLastState={studio.editingNodeLastState}
+          editingNodeLastRun={studio.editingNodeLastRun}
           latestRun={studio.latestRun}
           workflowRuns={studio.workflowRuns}
           workflowEdges={studio.workflowEdges}

@@ -1,5 +1,6 @@
 import { Empty, Progress, Space, Tag, Typography } from "antd";
 import type { WorkflowRun } from "../../types";
+import { WorkflowNodeRunIO } from "./WorkflowNodeRunIO";
 import { statusTagColor } from "./utils";
 
 const { Text } = Typography;
@@ -7,15 +8,21 @@ const { Text } = Typography;
 export function WorkflowRunLogCard({
   latestRun,
   editingNodeState,
+  editingNodeLastState,
+  editingNodeLastRun,
 }: {
   latestRun?: WorkflowRun;
   editingNodeState?: WorkflowRun["node_states"][number];
+  editingNodeLastState?: WorkflowRun["node_states"][number];
+  editingNodeLastRun?: WorkflowRun;
 }) {
   if (!latestRun) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无运行记录" />;
   }
+
   const nodeStates = latestRun.node_states ?? [];
   const events = latestRun.events ?? [];
+
   return (
     <Space direction="vertical" size={12} className="full-width">
       <div className="workflow-floating-run-summary">
@@ -25,6 +32,15 @@ export function WorkflowRunLogCard({
         </Space>
         <Progress percent={latestRun.progress} size="small" />
       </div>
+
+      <div className="workflow-runtime-section">
+        <Text strong>节点输入输出</Text>
+        <WorkflowNodeRunIO
+          nodeState={editingNodeLastState ?? editingNodeState}
+          run={editingNodeLastRun ?? latestRun}
+        />
+      </div>
+
       <div className="workflow-runtime-section">
         <Text strong>节点状态</Text>
         <Space direction="vertical" size={8} className="full-width">
@@ -34,9 +50,7 @@ export function WorkflowRunLogCard({
                 <Space wrap>
                   <Text strong>{state.title ?? state.id}</Text>
                   <Tag color={statusTagColor(state.status)}>{state.status}</Tag>
-                  {typeof state.progress === "number" && (
-                    <Tag>{state.progress}%</Tag>
-                  )}
+                  {typeof state.progress === "number" && <Tag>{state.progress}%</Tag>}
                 </Space>
                 {state.error && <Text type="danger">{state.error}</Text>}
               </div>
@@ -46,16 +60,7 @@ export function WorkflowRunLogCard({
           )}
         </Space>
       </div>
-      <div className="workflow-runtime-section">
-        <Text strong>当前节点输出</Text>
-        <pre className="workflow-node-output">
-          {JSON.stringify(
-            editingNodeState?.output ?? editingNodeState ?? {},
-            null,
-            2,
-          )}
-        </pre>
-      </div>
+
       <div className="workflow-runtime-section">
         <Text strong>事件流</Text>
         <div className="workflow-run-log">

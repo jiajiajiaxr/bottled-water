@@ -21,8 +21,30 @@ import {
   edgeId,
   edgeSource,
   edgeTarget,
+  normalizeWorkflowAgentBindings,
   textFromConfigValue,
 } from "./utils";
+
+type WorkflowNodeState = WorkflowRun["node_states"][number];
+
+function hasRuntimeValue(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
+function hasNodeRunDetails(state?: WorkflowNodeState): boolean {
+  if (!state) return false;
+  const status = String(state.status || "");
+  return Boolean(
+    hasRuntimeValue(state.input) ||
+      hasRuntimeValue(state.output) ||
+      state.error ||
+      (status && !["queued", "ready"].includes(status)),
+  );
+}
 
 export function useWorkflowStudio({
   workspaceId,
@@ -59,6 +81,24 @@ export function useWorkflowStudio({
   const editingNodeState = latestRun?.node_states?.find(
     (state) => state.id === editingNodeId,
   );
+  let editingNodeLastRun: WorkflowRun | undefined;
+  let editingNodeLastState: WorkflowNodeState | undefined;
+  if (editingNodeId) {
+    for (const run of workflowRuns) {
+      const state = (run.node_states ?? []).find(
+        (item) => item.id === editingNodeId,
+      );
+      if (hasNodeRunDetails(state)) {
+        editingNodeLastRun = run;
+        editingNodeLastState = state;
+        break;
+      }
+    }
+    if (!editingNodeLastState && editingNodeState) {
+      editingNodeLastRun = latestRun;
+      editingNodeLastState = editingNodeState;
+    }
+  }
   const activeAgentIds = new Set(
     conversation?.participants
       .map((item) => item.agent_id)
@@ -118,7 +158,13 @@ export function useWorkflowStudio({
   };
 
   const setWorkflowDraft = (next: ConversationWorkflow) => {
-    const normalized = layoutWorkflowPositions(next);
+    const normalized = layoutWorkflowPositions(
+      normalizeWorkflowAgentBindings(
+        next,
+        conversation?.participants,
+        agents,
+      ),
+    );
     setWorkflow(normalized);
     setWorkflowJson(JSON.stringify(normalized, null, 2));
   };
@@ -427,6 +473,7 @@ export function useWorkflowStudio({
   return {
     loading,
     conversation,
+    agents,
     workflow,
     setWorkflowDraft,
     workflowJson,
@@ -448,6 +495,8 @@ export function useWorkflowStudio({
     setSelectedEdgeIds,
     editingNode,
     editingNodeState,
+    editingNodeLastRun,
+    editingNodeLastState,
     setEditingNodeId,
     agentOptions,
     toolOptions,

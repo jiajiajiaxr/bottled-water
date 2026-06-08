@@ -1,16 +1,21 @@
 import { Empty, Space, Tag, Typography } from "antd";
 import type { TabsProps } from "antd";
 import type { WorkflowRun } from "../../types";
+import { WorkflowNodeRunIO } from "./WorkflowNodeRunIO";
 import { statusTagColor } from "./utils";
 
 const { Text } = Typography;
 
 export function WorkflowRunPanels({
   editingNodeState,
+  editingNodeLastState,
+  editingNodeLastRun,
   latestRun,
   workflowRuns,
 }: {
   editingNodeState?: WorkflowRun["node_states"][number];
+  editingNodeLastState?: WorkflowRun["node_states"][number];
+  editingNodeLastRun?: WorkflowRun;
   latestRun?: WorkflowRun;
   workflowRuns: WorkflowRun[];
 }): TabsProps["items"] {
@@ -36,12 +41,13 @@ export function WorkflowRunPanels({
       ),
     },
     {
-      key: "output",
-      label: "节点输出",
+      key: "io",
+      label: "节点输入输出",
       children: (
-        <pre className="workflow-node-output">
-          {JSON.stringify(editingNodeState?.output ?? editingNodeState ?? {}, null, 2)}
-        </pre>
+        <WorkflowNodeRunIO
+          nodeState={editingNodeLastState ?? editingNodeState}
+          run={editingNodeLastRun ?? latestRun}
+        />
       ),
     },
     {

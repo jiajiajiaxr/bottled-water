@@ -633,7 +633,7 @@ def _normalize_workflow(value: dict, conversation: Conversation) -> dict:
             normalized_edges.append([str(source), str(target)])
     return {
         **fallback,
-        **{k: value[k] for k in ("mode", "settings") if k in value},
+        **{k: value[k] for k in ("mode", "output_mode", "settings") if k in value},
         "nodes": normalized_nodes or fallback["nodes"],
         "edges": normalized_edges or _fallback_edges_for_nodes(normalized_nodes) or fallback["edges"],
     }

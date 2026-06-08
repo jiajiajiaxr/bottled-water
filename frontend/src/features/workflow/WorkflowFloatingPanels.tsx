@@ -50,6 +50,8 @@ export function WorkflowFloatingPanels({
   selectedEdgeIds,
   editingNode,
   editingNodeState,
+  editingNodeLastState,
+  editingNodeLastRun,
   latestRun,
   workflowRuns,
   workflowEdges,
@@ -84,6 +86,8 @@ export function WorkflowFloatingPanels({
   selectedEdgeIds: string[];
   editingNode?: WorkflowNode;
   editingNodeState?: WorkflowRun["node_states"][number];
+  editingNodeLastState?: WorkflowRun["node_states"][number];
+  editingNodeLastRun?: WorkflowRun;
   latestRun?: WorkflowRun;
   workflowRuns: WorkflowRun[];
   workflowEdges: string[][];
@@ -241,6 +245,8 @@ export function WorkflowFloatingPanels({
               nodeForm={nodeForm}
               editingNode={editingNode}
               editingNodeState={editingNodeState}
+              editingNodeLastState={editingNodeLastState}
+              editingNodeLastRun={editingNodeLastRun}
               latestRun={latestRun}
               workflowEdges={workflowEdges}
               workflowJson={workflowJson}
@@ -317,6 +323,8 @@ export function WorkflowFloatingPanels({
           <WorkflowRunLogCard
             latestRun={latestRun}
             editingNodeState={editingNodeState}
+            editingNodeLastState={editingNodeLastState}
+            editingNodeLastRun={editingNodeLastRun}
           />
         </div>
       </section>

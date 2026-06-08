@@ -100,6 +100,42 @@ def test_normalize_workflow_fills_missing_agent_id_from_node_intent() -> None:
     assert by_id["review-step"]["config"]["agent_id"] == "agent-reviewer"
 
 
+def test_normalize_workflow_binds_ai_agent_node_without_agent_id() -> None:
+    conversation = _conversation()
+    raw = {
+        "mode": "ai_generated",
+        "output_mode": "independent_messages",
+        "nodes": [
+            {"id": "start", "title": "任务启动", "type": "start", "role": "start"},
+            {
+                "id": "agent-15198f4c",
+                "title": "Daily Chat Agent",
+                "type": "agent",
+                "role": "agent",
+                "status": "ready",
+                "meta": "Daily Chat Agent completed",
+                "config": {},
+            },
+            {"id": "end", "title": "任务结束", "type": "end", "role": "end"},
+        ],
+        "edges": [
+            {"source": "start", "target": "agent-15198f4c"},
+            {"source": "agent-15198f4c", "target": "end"},
+        ],
+        "settings": {"enabled": True},
+    }
+
+    workflow = conversations_api._normalize_workflow(raw, conversation)
+    by_id = {node["id"]: node for node in workflow["nodes"]}
+    state_by_id = {state["id"]: state for state in build_node_states(workflow)}
+
+    assert workflow["output_mode"] == "independent_messages"
+    assert by_id["agent-15198f4c"]["type"] == "agent"
+    assert by_id["agent-15198f4c"]["agent_id"] == "agent-frontend"
+    assert by_id["agent-15198f4c"]["config"]["agent_id"] == "agent-frontend"
+    assert state_by_id["agent-15198f4c"]["agent_id"] == "agent-frontend"
+
+
 def test_normalize_workflow_treats_id_only_start_and_end_as_control_nodes() -> None:
     conversation = _conversation()
     raw = {

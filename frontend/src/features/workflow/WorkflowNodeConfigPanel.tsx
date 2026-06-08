@@ -14,6 +14,7 @@ import {
 import type { FormInstance } from "antd";
 import { WORKFLOW_NODE_TYPE_OPTIONS } from "../../lib/workflow";
 import type { WorkflowNode, WorkflowRun } from "../../types";
+import { WorkflowNodeRunIO } from "./WorkflowNodeRunIO";
 import { statusTagColor } from "./utils";
 
 const { Text } = Typography;
@@ -23,6 +24,8 @@ export function WorkflowNodeConfigPanel({
   nodeForm,
   editingNode,
   editingNodeState,
+  editingNodeLastState,
+  editingNodeLastRun,
   latestRun,
   workflowEdges,
   workflowJson,
@@ -41,6 +44,8 @@ export function WorkflowNodeConfigPanel({
   nodeForm: FormInstance;
   editingNode?: WorkflowNode;
   editingNodeState?: WorkflowRun["node_states"][number];
+  editingNodeLastState?: WorkflowRun["node_states"][number];
+  editingNodeLastRun?: WorkflowRun;
   latestRun?: WorkflowRun;
   workflowEdges: string[][];
   workflowJson: string;
@@ -162,6 +167,13 @@ export function WorkflowNodeConfigPanel({
             应用配置
           </Button>
           {extraActions}
+          <div className="workflow-node-config-io">
+            <Text strong>上次运行输入输出</Text>
+            <WorkflowNodeRunIO
+              nodeState={editingNodeLastState ?? editingNodeState}
+              run={editingNodeLastRun ?? latestRun}
+            />
+          </div>
         </Form>
       ) : (
         <Empty
