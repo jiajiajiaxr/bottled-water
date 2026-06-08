@@ -14,7 +14,7 @@ from app.services.agents.capability_permissions import (
 from app.services.context.compression import trim_text
 from app.services.context.memory import workspace_memory_text
 from app.services.context.variables import artifact_reference_scope
-from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.builtins.registry import BUILTIN_TOOLS, active_builtin_tool_names
 from app.services.tools.catalog import sync_builtin_tool_definitions
 
 
@@ -149,7 +149,7 @@ def _authorized_tools(db: Session, agent: Agent | None) -> list[dict[str, Any]]:
     if not agent:
         return []
     default_all = agent_uses_default_full_permissions(agent)
-    allowed = list(BUILTIN_TOOLS) if default_all else configured_tool_names(agent)
+    allowed = active_builtin_tool_names() if default_all else configured_tool_names(agent)
     if not allowed:
         return []
     sync_builtin_tool_definitions(db)

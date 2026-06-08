@@ -74,6 +74,7 @@ def user_to_dict(user: User) -> dict[str, Any]:
         "display_name": user.display_name,
         "avatar": user.avatar_url,
         "avatar_url": user.avatar_url,
+        "signature": str(extra.get("signature") or ""),
         "role": "demo" if user.username == "demo" else user.role,
         "default_model_config_id": extra.get("default_model_config_id"),
     }

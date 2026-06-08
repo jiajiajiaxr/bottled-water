@@ -36,9 +36,10 @@ from app.services.mcp import invoke_mcp_tool_recorded, tool_name
 from app.services.model_config_resolver import create_provider_from_db
 from model_provider.core.interfaces import ChatMessage
 from model_provider.core.streaming import collect_chat_stream
-from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.builtins.registry import BUILTIN_TOOLS, active_builtin_tool_names
 from app.services.tools.catalog import sync_builtin_tool_definitions
 from app.services.tools.executor import invoke_tool as invoke_tool_sync
+from app.services.tools.permissions import canonical_tool_name
 
 
 def _is_async_session(db: Any) -> bool:
@@ -396,6 +397,11 @@ async def execute_tool_by_name(
 ) -> dict[str, Any]:
     """根据 tool_name 路由到内置工具/Skill/MCP 执行器。"""
 
+    original_tool_name = tool_name
+    tool_name = canonical_tool_name(tool_name)
+    if original_tool_name != tool_name:
+        arguments = {**arguments, "_legacy_tool_name": original_tool_name}
+
     # 内置工具
     if tool_name in BUILTIN_TOOLS:
         if tool_name not in _allowed_tool_names(agent) and not agent_uses_default_full_permissions(agent):
@@ -524,6 +530,6 @@ async def _db_tool_exists(db: AsyncSession, tool_name: str) -> bool:
 
 def _allowed_tool_names(agent: Agent) -> list[str]:
     if agent_uses_default_full_permissions(agent):
-        return list(BUILTIN_TOOLS.keys())
+        return active_builtin_tool_names()
     configured = configured_tool_names(agent)
     return list(dict.fromkeys(configured))

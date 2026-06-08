@@ -14,7 +14,7 @@ from app.core.errors import ValidationAppError
 from app.services.agents.tool_loop import build_tools_for_agent, execute_tool_by_name
 from app.services.external_agents.registry import get_external_agent_adapter
 from app.services.external_agents.workspace import external_agent_cwd
-from app.services.tools.catalog import sync_builtin_tool_definitions
+from app.services.tools.catalog import list_tools, sync_builtin_tool_definitions
 from app.services.tools.executor import invoke_tool
 from db.base import Base
 from app.services.workflows.graph import Node
@@ -71,8 +71,10 @@ def test_fake_codex_run_persists_events_and_changed_files(
     payload = invoke_tool(
         db,
         user,
-        "external_agent.run_codex",
+        "external_agent.invoke",
         {
+            "action": "run",
+            "provider": "codex",
             "workspace_id": workspace.id,
             "conversation_id": conversation.id,
             "prompt": "实现一个排序函数",
@@ -93,8 +95,37 @@ def test_fake_codex_run_persists_events_and_changed_files(
     assert run.status == "completed"
     assert run.workspace_id == workspace.id
     assert invocation is not None
-    assert invocation.tool_name == "external_agent.run_codex"
+    assert invocation.tool_name == "external_agent.invoke"
     assert invocation.status == "completed"
+
+
+def test_legacy_external_agent_run_aliases_to_invoke(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _redirect_workspace_var(tmp_path, monkeypatch)
+    fake_cli = _fake_cli(tmp_path, exit_code=0)
+    monkeypatch.setenv("CODEX_CLI_PATH", sys.executable)
+    monkeypatch.setenv("CODEX_CLI_TEMPLATE", json.dumps(["{command}", str(fake_cli), "{prompt}"]))
+    db = _memory_session()
+    user, workspace, _conversation = _seed_workspace(db)
+
+    payload = invoke_tool(
+        db,
+        user,
+        "external_agent.run_codex",
+        {
+            "workspace_id": workspace.id,
+            "prompt": "legacy run",
+            "timeout_ms": 10_000,
+        },
+    )
+
+    assert payload["tool"]["name"] == "external_agent.invoke"
+    assert payload["result"]["provider"] == "codex"
+    invocation = db.get(ToolInvocation, payload["invocation_id"])
+    assert invocation is not None
+    assert invocation.tool_name == "external_agent.invoke"
 
 
 def test_fake_claude_code_failure_is_recorded(
@@ -111,8 +142,10 @@ def test_fake_claude_code_failure_is_recorded(
     payload = invoke_tool(
         db,
         user,
-        "external_agent.run_claude_code",
+        "external_agent.invoke",
         {
+            "action": "run",
+            "provider": "claude_code",
             "workspace_id": workspace.id,
             "conversation_id": conversation.id,
             "prompt": "修复测试",
@@ -142,8 +175,10 @@ def test_external_agent_cancel_converges_to_cancelled(
     started = invoke_tool(
         db,
         user,
-        "external_agent.run_codex",
+        "external_agent.invoke",
         {
+            "action": "run",
+            "provider": "codex",
             "workspace_id": workspace.id,
             "conversation_id": conversation.id,
             "prompt": "长任务",
@@ -151,7 +186,12 @@ def test_external_agent_cancel_converges_to_cancelled(
         },
     )["result"]
 
-    cancelled = invoke_tool(db, user, "external_agent.cancel", {"run_id": started["run_id"]})["result"]
+    cancelled = invoke_tool(
+        db,
+        user,
+        "external_agent.invoke",
+        {"action": "cancel", "run_id": started["run_id"]},
+    )["result"]
 
     assert cancelled["status"] == "cancelled"
     assert db.get(ExternalAgentRun, started["run_id"]).status == "cancelled"
@@ -189,7 +229,7 @@ def test_external_tools_sync_and_agent_authorization(
         owner_id=user.id,
         name="Authorized Agent",
         type="custom",
-        config={"tools": ["external_agent.run_codex"]},
+        config={"tools": ["external_agent.invoke"]},
     )
     unauthorized_agent = Agent(
         id="agent-denied",
@@ -224,12 +264,31 @@ def test_external_tools_sync_and_agent_authorization(
         )
     )
 
-    assert "external_agent.run_codex" in tool_names
-    assert db.scalar(select(ToolDefinition).where(ToolDefinition.name == "external_agent.run_codex")) is not None
+    assert "external_agent.invoke" in tool_names
+    assert "external_agent.run_codex" not in tool_names
+    assert db.scalar(select(ToolDefinition).where(ToolDefinition.name == "external_agent.invoke")) is not None
+    assert db.scalar(select(ToolDefinition).where(ToolDefinition.name == "external_agent.run_codex")) is None
     assert denied["status"] == "failed"
     assert "未授权" in denied["output"] or "Agent" in denied["output"]
     assert allowed["status"] == "completed"
     assert allowed["output"]["run_id"]
+
+
+def test_tool_catalog_exposes_unified_external_agent_only() -> None:
+    db = _memory_session()
+    user, _workspace, _conversation = _seed_workspace(db)
+
+    items = list_tools(db, user)
+    names = {item["name"] for item in items}
+    unified = next(item for item in items if item["name"] == "external_agent.invoke")
+
+    assert "external_agent.invoke" in names
+    assert unified["display_name"] == "调用外部智能体"
+    assert "opencode" in json.dumps(unified["input_schema"], ensure_ascii=False)
+    assert "external_agent.probe" not in names
+    assert "external_agent.run_codex" not in names
+    assert "external_agent.run_claude_code" not in names
+    assert "external_agent.cancel" not in names
 
 
 def test_workflow_tool_node_can_run_external_agent(
@@ -247,7 +306,7 @@ def test_workflow_tool_node_can_run_external_agent(
         owner_id=user.id,
         name="Workflow Agent",
         type="custom",
-        config={"tools": ["external_agent.run_codex"]},
+        config={"tools": ["external_agent.invoke"]},
     )
     message = Message(
         id="message-workflow",
@@ -273,8 +332,13 @@ def test_workflow_tool_node_can_run_external_agent(
         type="tool",
         title="Run Codex",
         config={
-            "tool_name": "external_agent.run_codex",
-            "arguments": {"workspace_id": workspace.id, "prompt": "{{input}}"},
+            "tool_name": "external_agent.invoke",
+            "arguments": {
+                "action": "run",
+                "provider": "codex",
+                "workspace_id": workspace.id,
+                "prompt": "{{input}}",
+            },
         },
         agent_id=agent.id,
     )

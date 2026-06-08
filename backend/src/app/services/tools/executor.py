@@ -9,7 +9,7 @@ from app.models import Conversation, McpServer, Skill, ToolDefinition, User
 from app.services.tools.builtins.executor import invoke_builtin_tool
 from app.services.tools.catalog import ensure_tool_tables, get_tool_definition
 from app.services.tools.custom import invoke_custom_tool
-from app.services.tools.permissions import check_user_tool_permissions
+from app.services.tools.permissions import canonical_tool_name, check_user_tool_permissions
 from app.services.tools.runs import finish_tool_invocation, start_tool_invocation
 from app.services.tools.schema import validate_tool_arguments
 
@@ -23,6 +23,9 @@ def invoke_tool(
     """统一执行内置工具和自定义工具。"""
 
     ensure_tool_tables(db)
+    original_tool_name = str(tool_id_or_name)
+    tool_id_or_name = canonical_tool_name(tool_id_or_name)
+    arguments = _legacy_alias_arguments(original_tool_name, tool_id_or_name, arguments)
     conversation_id = str(arguments.get("conversation_id") or "") or None
     tool = get_tool_definition(db, user, tool_id_or_name)
     validate_tool_arguments(tool.input_schema, arguments, tool_name=tool.name)
@@ -56,6 +59,9 @@ async def invoke_tool_async(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     ensure_tool_tables(db)
+    original_tool_name = str(tool_id_or_name)
+    tool_id_or_name = canonical_tool_name(tool_id_or_name)
+    arguments = _legacy_alias_arguments(original_tool_name, tool_id_or_name, arguments)
     conversation_id = str(arguments.get("conversation_id") or "") or None
     tool = get_tool_definition(db, user, tool_id_or_name)
     validate_tool_arguments(tool.input_schema, arguments, tool_name=tool.name)
@@ -192,6 +198,16 @@ def _executor_payload(tool: ToolDefinition, result: dict[str, Any], invocation_i
     if tool.type == "custom_python" and "tool" in result and "result" in result:
         return {**result, "invocation_id": invocation_id}
     return {"tool": _tool_catalog_payload(tool), "result": result, "invocation_id": invocation_id}
+
+
+def _legacy_alias_arguments(
+    original_tool_name: str,
+    canonical_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if original_tool_name == canonical_name:
+        return arguments
+    return {**arguments, "_legacy_tool_name": original_tool_name}
 
 
 __all__ = ["get_tool_definition", "invoke_builtin_tool", "invoke_tool", "invoke_tool_async"]

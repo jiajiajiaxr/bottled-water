@@ -4,7 +4,7 @@ from typing import Any
 
 from app.models import User
 from app.services.audit import has_permission
-from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.builtins.registry import BUILTIN_TOOLS, LEGACY_BUILTIN_TOOL_ALIASES
 
 
 def normalize_tool_names(values: list[Any]) -> list[str]:
@@ -20,6 +20,7 @@ def normalize_tool_names(values: list[Any]) -> list[str]:
         "deploy": "deploy.preview",
         "mcp": "mcp.invoke",
         "skills": "skill.run",
+        **LEGACY_BUILTIN_TOOL_ALIASES,
     }
     for item in values:
         name = str(item.get("name") if isinstance(item, dict) else item).strip()
@@ -27,6 +28,11 @@ def normalize_tool_names(values: list[Any]) -> list[str]:
             continue
         names.append(aliases.get(name, name))
     return list(dict.fromkeys(names))
+
+
+def canonical_tool_name(value: Any) -> str:
+    name = str(value.get("name") if isinstance(value, dict) else value).strip()
+    return LEGACY_BUILTIN_TOOL_ALIASES.get(name, name)
 
 
 def allowed_builtin_tools(values: list[Any]) -> list[str]:

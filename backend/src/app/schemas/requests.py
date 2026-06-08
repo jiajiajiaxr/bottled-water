@@ -425,6 +425,7 @@ class UpdateProfileRequest(BaseModel):
     display_name: str | None = None
     name: str | None = None
     avatar_url: str | None = None
+    signature: str | None = None
     settings: dict[str, Any] | None = None
 
 

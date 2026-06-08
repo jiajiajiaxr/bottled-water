@@ -237,7 +237,8 @@ def test_default_capability_context_matches_full_tool_catalog() -> None:
     )
 
     names = {item["name"] for item in bundle.sections["workspace"]["authorized_tools"]}
-    assert "external_agent.run_claude_code" in names
+    assert "external_agent.invoke" in names
+    assert "external_agent.run_claude_code" not in names
 
 
 def test_explicit_empty_capability_context_stays_empty() -> None:

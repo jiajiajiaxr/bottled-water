@@ -28,6 +28,7 @@ class UserOut(ORMModel):
     name: str
     display_name: str
     avatar_url: str | None = None
+    signature: str = ""
     role: str
     default_model_config_id: str | None = None
 

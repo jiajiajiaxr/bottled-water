@@ -40,8 +40,9 @@ describe("ExternalAgentsPanel", () => {
 
     expect(await screen.findByText("Codex CLI")).toBeInTheDocument();
     expect(screen.getByText("Claude Code CLI")).toBeInTheDocument();
+    expect(screen.getByText("OpenCode CLI")).toBeInTheDocument();
     expect(screen.getByText("可用")).toBeInTheDocument();
-    expect(screen.getByText("降级")).toBeInTheDocument();
+    expect(screen.getAllByText("降级").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/Install Claude Code CLI/)).toBeInTheDocument();
   });
 

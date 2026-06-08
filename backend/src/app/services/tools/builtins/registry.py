@@ -313,6 +313,57 @@ BUILTIN_TOOLS: dict[str, BuiltinTool] = {
             }
         ),
     ),
+    "external_agent.invoke": BuiltinTool(
+        "external_agent.invoke",
+        "调用外部智能体",
+        "external_agent",
+        (
+            "统一调用 Codex、Claude Code、OpenCode 等外部合规 AI Agent。"
+            "通过 action=run/probe/cancel/status 与 provider=codex/claude_code/opencode 区分底层算力端口，"
+            "后续新增 provider 只需注册适配器，无需新增工具。"
+        ),
+        ("external_agent:run", "external_agent:read", "file:write"),
+        _schema(
+            {
+                "action": {
+                    "type": "string",
+                    "enum": ["run", "probe", "cancel", "status"],
+                    "description": "动作：run 启动任务，probe 探测端口，cancel 取消任务，status 查询任务。",
+                },
+                "provider": {
+                    "type": "string",
+                    "description": "外部智能体端口，如 codex、claude_code、opencode；可扩展为其他注册 provider。",
+                },
+                "prompt": {"type": "string"},
+                "task": {"type": "string"},
+                "run_id": {"type": "string"},
+                "conversation_id": {"type": "string"},
+                "agent_id": {"type": "string"},
+                "workspace_id": {"type": "string"},
+                "cwd": {"type": "string"},
+                "timeout_ms": {"type": "integer"},
+                "timeout": {"type": "integer"},
+                "wait": {"type": "boolean"},
+            },
+        ),
+        _schema(
+            {
+                "status": {"type": "string"},
+                "provider": {"type": "string"},
+                "run_id": {"type": "string"},
+                "providers": {"type": "array"},
+                "degraded": {"type": "array"},
+                "events": {"type": "array"},
+                "changed_files": {"type": "array"},
+                "stdout_tail": {"type": "string"},
+                "stderr_tail": {"type": "string"},
+                "exit_code": {"type": "integer"},
+                "duration_ms": {"type": "integer"},
+                "error": {"type": "string"},
+            }
+        ),
+        ("codex", "claude-code", "opencode", "coding-agent", "external-agent", "probe", "cancel"),
+    ),
     "external_agent.probe": BuiltinTool(
         "external_agent.probe",
         "探测外部 Coding Agent",
@@ -423,6 +474,22 @@ BUILTIN_TOOLS: dict[str, BuiltinTool] = {
     ),
 }
 
+LEGACY_BUILTIN_TOOL_ALIASES: dict[str, str] = {
+    "external_agent.probe": "external_agent.invoke",
+    "external_agent.run_codex": "external_agent.invoke",
+    "external_agent.run_claude_code": "external_agent.invoke",
+    "external_agent.cancel": "external_agent.invoke",
+    "external_agent.status": "external_agent.invoke",
+}
+
+
+def active_builtin_tool_names() -> list[str]:
+    return [name for name in BUILTIN_TOOLS if name not in LEGACY_BUILTIN_TOOL_ALIASES]
+
 
 def builtin_tool_dicts() -> list[dict[str, Any]]:
-    return [tool.to_dict() for tool in BUILTIN_TOOLS.values()]
+    return [
+        tool.to_dict()
+        for name, tool in BUILTIN_TOOLS.items()
+        if name in active_builtin_tool_names()
+    ]

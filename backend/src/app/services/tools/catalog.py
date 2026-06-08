@@ -4,9 +4,14 @@ from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.core.errors import NotFoundError
-from app.models import ToolDefinition, ToolInvocation, User
+from app.models import ToolDefinition, ToolInvocation, User, utcnow
 from app.services.serialization import tool_definition_to_dict
-from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.builtins.registry import (
+    BUILTIN_TOOLS,
+    LEGACY_BUILTIN_TOOL_ALIASES,
+    active_builtin_tool_names,
+)
+from app.services.tools.permissions import canonical_tool_name
 
 
 def ensure_tool_tables(db: Session) -> None:
@@ -33,11 +38,14 @@ def sync_builtin_tool_definitions(db: Session) -> None:
             select(ToolDefinition).where(
                 ToolDefinition.owner_id.is_(None),
                 ToolDefinition.workspace_id.is_(None),
-                ToolDefinition.name.in_(list(BUILTIN_TOOLS)),
+                ToolDefinition.name.in_(active_builtin_tool_names()),
             )
         ).all()
     }
+    _retire_legacy_builtin_tool_definitions(db)
     for name, builtin in BUILTIN_TOOLS.items():
+        if name in LEGACY_BUILTIN_TOOL_ALIASES:
+            continue
         tool = existing.get(name)
         if not tool:
             tool = ToolDefinition(owner_id=None, workspace_id=None, name=name)
@@ -105,6 +113,7 @@ def get_custom_tool(db: Session, user: User, tool_id_or_name: str) -> ToolDefini
 def get_tool_definition(db: Session, user: User, tool_id_or_name: str) -> ToolDefinition:
     ensure_tool_tables(db)
     sync_builtin_tool_definitions(db)
+    tool_id_or_name = canonical_tool_name(tool_id_or_name)
     tool = db.scalar(
         visible_tool_query(user).where(
             (ToolDefinition.id == tool_id_or_name) | (ToolDefinition.name == tool_id_or_name)
@@ -123,6 +132,23 @@ def _dedupe_tool_items(items: list[dict]) -> list[dict]:
             continue
         by_key[key] = _prefer_tool_item(by_key.get(key), item, key=key)
     return list(by_key.values())
+
+
+def _retire_legacy_builtin_tool_definitions(db: Session) -> None:
+    rows = db.scalars(
+        select(ToolDefinition).where(
+            ToolDefinition.owner_id.is_(None),
+            ToolDefinition.workspace_id.is_(None),
+            ToolDefinition.name.in_(list(LEGACY_BUILTIN_TOOL_ALIASES)),
+            ToolDefinition.deleted_at.is_(None),
+        )
+    ).all()
+    if not rows:
+        return
+    now = utcnow()
+    for tool in rows:
+        tool.status = "deleted"
+        tool.deleted_at = now
 
 
 def _dedupe_key(item: dict) -> str:
