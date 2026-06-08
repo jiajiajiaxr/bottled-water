@@ -111,7 +111,6 @@ async def _run_direct_agent(
             runtime_model_config_id=str(selected_model_config_id) if selected_model_config_id else None,
             max_tool_rounds=3,
         )
-        await _publish_tool_artifacts(db, channel, result.tool_context)
     except Exception as exc:
         logger.exception("direct agent failed: agent=%s", agent.id)
         subtask.status = "FAILED"
@@ -168,6 +167,7 @@ async def _run_direct_agent(
     db.commit()
     await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
+    await _publish_tool_artifacts(db, channel, result.tool_context)
     await event_bus.publish(channel, "generation_finished", {"conversation_id": conversation.id, "reason": "direct_agent_completed"})
 
 
@@ -225,7 +225,6 @@ async def _run_direct_agent_without_function_calling(
     await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
 
     tool_context = await run_agentic_tool_loop(db, conversation, prompt, max_steps=2, agent=agent)
-    await _publish_tool_artifacts(db, channel, tool_context)
     task.output = {**(task.output or {}), "agentic_tools": tool_context}
     task.progress = 70
     db.commit()
@@ -358,6 +357,7 @@ async def _run_direct_agent_without_function_calling(
     db.commit()
     await event_bus.publish(channel, "message:updated", message_to_dict(assistant))
     await event_bus.publish(channel, "message_stop", {"agent_message_id": assistant.id, "stop_reason": "end_turn"})
+    await _publish_tool_artifacts(db, channel, tool_context)
     await event_bus.publish(channel, "task:subtask_updated", subtask_to_dict(subtask))
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
     await event_bus.publish(channel, "generation_finished", {"conversation_id": conversation.id, "reason": "direct_agent_completed"})

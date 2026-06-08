@@ -146,6 +146,9 @@ function dispatchStreamEvent(
     case "message:updated":
       handlers.onMessageUpdated?.(normalizeChatMessage(data as ChatMessage));
       break;
+    case "conversation:updated":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
+      break;
     case "generation_finished":
     case "generation:finished":
     case "generation:cancelled":
@@ -277,53 +280,9 @@ function dispatchStreamEvent(
     case "user.waiting_for_input":
     case "user.input_received":
     case "user.input_queued":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
   }
-}
-
-/** 标准 SSE fetch 客户端（POST + ReadableStream）。 */
-function previewCardFromToolResult(
-  payload: Record<string, unknown>,
-): ChatMessage | undefined {
-  const result = asRecord(payload.result) || {};
-  const output = asRecord(result.output) || asRecord(result.result) || result;
-  const artifact = asRecord(output.artifact) || {};
-  const artifactId = stringValue(output.artifact_id ?? artifact.id);
-  if (!artifactId) return undefined;
-  const conversationId = stringValue(
-    artifact.conversationId ?? artifact.conversation_id ?? output.conversation_id,
-  );
-  if (!conversationId) return undefined;
-  const title =
-    stringValue(artifact.title ?? artifact.name ?? output.title ?? output.filename) ||
-    "AgentHub 产物";
-  const messageId = stringValue(output.preview_message_id) || `preview-${artifactId}`;
-  return {
-    id: messageId,
-    conversationId,
-    role: "assistant",
-    kind: "preview_card",
-    author: "Master Agent",
-    content: `预览产物：${title}`,
-    rawContent: {
-      artifact_id: artifactId,
-      title,
-      artifact_type: output.artifact_type ?? artifact.type,
-      preview_url: output.preview_url ?? artifact.previewUrl,
-      export_url: output.export_url ?? artifact.exportUrl,
-      format: output.format ?? artifact.format,
-      media_type: output.media_type ?? artifact.media_type,
-      filename: output.filename ?? artifact.filename,
-    },
-    createdAt: new Date().toISOString(),
-    streamState: "done",
-    state: "active",
-    status: "completed",
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
 }
 
 function stringValue(value: unknown): string {

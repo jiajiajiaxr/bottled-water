@@ -97,7 +97,10 @@ class ActorOrchestrator:
                 payload={
                     "session_id": self.session_id,
                     "content": user_message,
-                    "mention_target_agent_ids": self._mention_targets(user_message),
+                    "mention_target_agent_ids": self._mention_targets(
+                        user_message,
+                        current_context_metadata,
+                    ),
                     "context_metadata": current_context_metadata,
                 },
                 source="user",
@@ -165,11 +168,12 @@ class ActorOrchestrator:
             self.session_id,
             {"type": "user_input", "content": content, "interrupt": True},
         )
+        normalized_metadata = self._normalize_context_metadata(content, context_metadata)
         await self._pending_user_inputs.put(
             {
                 "content": content,
-                "mention_target_agent_ids": self._mention_targets(content),
-                "context_metadata": self._normalize_context_metadata(content, context_metadata),
+                "mention_target_agent_ids": self._mention_targets(content, normalized_metadata),
+                "context_metadata": normalized_metadata,
             }
         )
         yield Event(
@@ -251,10 +255,20 @@ class ActorOrchestrator:
             self.actors[agent_id] = actor
             actor.start()
 
-    def _mention_targets(self, user_message: str) -> list[str]:
+    def _mention_targets(
+        self,
+        user_message: str,
+        context_metadata: dict[str, Any] | None = None,
+    ) -> list[str]:
+        metadata_targets = self._metadata_mention_targets(context_metadata)
+        if metadata_targets:
+            return metadata_targets
         if not user_message or re.search(r"@(全员|所有人|大家)|全员|所有\s*Agent|协作", user_message, re.I):
             return []
         targets: list[str] = []
+        for agent_id in re.findall(r"agent_id=([A-Za-z0-9_.:-]+)", user_message):
+            if agent_id in self.agents and agent_id not in targets:
+                targets.append(agent_id)
         lowered = user_message.lower()
         for agent_id, config in self.agents.items():
             name = (config.name or "").strip()
@@ -268,6 +282,26 @@ class ActorOrchestrator:
             if any(pattern.lower() in lowered for pattern in patterns):
                 targets.append(agent_id)
         return list(dict.fromkeys(targets))
+
+    def _metadata_mention_targets(self, metadata: dict[str, Any] | None) -> list[str]:
+        if not isinstance(metadata, dict):
+            return []
+        targets: list[str] = []
+        raw_targets = metadata.get("mention_target_agent_ids")
+        if isinstance(raw_targets, list):
+            for item in raw_targets:
+                agent_id = str(item or "").strip()
+                if agent_id in self.agents and agent_id not in targets:
+                    targets.append(agent_id)
+        raw_mentions = metadata.get("agent_mentions")
+        if isinstance(raw_mentions, list):
+            for item in raw_mentions:
+                if not isinstance(item, dict):
+                    continue
+                agent_id = str(item.get("agent_id") or item.get("id") or "").strip()
+                if agent_id in self.agents and agent_id not in targets:
+                    targets.append(agent_id)
+        return targets
 
     async def _dispatch_pending_user_inputs(self) -> None:
         while not self._pending_user_inputs.empty():

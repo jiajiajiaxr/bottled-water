@@ -69,6 +69,7 @@ class SchedulerAgent(AgentActor):
         self._scheduler = TechLeadScheduler(agents=agents, model_provider=model_provider)
         self._mention_target_ids: list[str] = []
         self._mention_dispatched_ids: set[str] = set()
+        self._assigned_agent_ids: set[str] = set()
         self._context_metadata: dict[str, Any] = {}
         self._bind()
 
@@ -108,12 +109,16 @@ class SchedulerAgent(AgentActor):
         if event.type == USER_INPUT:
             self.current_task = str(event.payload.get("content") or event.payload.get("task") or "")
             self.reports = self._initial_reports()
+            mention_targets = list(event.payload.get("mention_target_agent_ids") or [])
+            mention_targets.extend(_mention_target_ids_from_metadata(event.payload.get("context_metadata")))
             self._mention_target_ids = [
                 str(item)
-                for item in (event.payload.get("mention_target_agent_ids") or [])
+                for item in mention_targets
                 if str(item) in self.agents
             ]
+            self._mention_target_ids = list(dict.fromkeys(self._mention_target_ids))
             self._mention_dispatched_ids = set()
+            self._assigned_agent_ids = set()
             self._context_metadata = _dict_payload(event.payload.get("context_metadata"))
             return bool(self.current_task)
         if event.type == AGENT_REPORT:
@@ -152,6 +157,8 @@ class SchedulerAgent(AgentActor):
         reports = list(self.reports.values()) or list(self._initial_reports().values())
         try:
             decision = self._mention_decision()
+            if decision is None:
+                decision = self._completion_decision_for_terminal_reports(reports)
             if decision is None:
                 decision = self._greeting_decision(reports)
             if decision is None:
@@ -245,6 +252,7 @@ class SchedulerAgent(AgentActor):
                 await self._assign(decision.target_agent_id, decision)
 
     async def _assign(self, target: str, decision: SchedulingDecision) -> None:
+        self._assigned_agent_ids.add(target)
         if target in self._mention_target_ids:
             self._mention_dispatched_ids.add(target)
         await self.event_bus.publish(
@@ -329,6 +337,61 @@ class SchedulerAgent(AgentActor):
             return False
         return report.state in {AgentState.COMPLETED, AgentState.FAILED}
 
+    def _completion_decision_for_terminal_reports(
+        self,
+        reports: list[AgentReport],
+    ) -> SchedulingDecision | None:
+        terminal_states = {AgentState.COMPLETED, AgentState.FAILED}
+        terminal_ids = {
+            report.agent_id
+            for report in reports
+            if report.state in terminal_states
+        }
+        if not terminal_ids:
+            return None
+
+        schedulable_ids = self._schedulable_agent_ids()
+        if schedulable_ids and all(
+            self.reports.get(agent_id) and self.reports[agent_id].state in terminal_states
+            for agent_id in schedulable_ids
+        ):
+            return SchedulingDecision(
+                decision_type="complete",
+                action="complete",
+                task=self.current_task,
+                task_description=self.current_task,
+                rationale="All schedulable Agents reached terminal reports.",
+            )
+
+        named_targets = self._agent_ids_mentioned_in(self.current_task)
+        if len(named_targets) == 1 and named_targets[0] in terminal_ids:
+            return SchedulingDecision(
+                decision_type="complete",
+                action="complete",
+                target_agent_id=named_targets[0],
+                target_agent_ids=named_targets,
+                task=self.current_task,
+                task_description=self.current_task,
+                rationale="Single addressed Agent reached a terminal report; ending this turn.",
+            )
+
+        if len(self._assigned_agent_ids) != 1:
+            return None
+        assigned = next(iter(self._assigned_agent_ids))
+        if assigned not in terminal_ids:
+            return None
+        if self._requires_multi_agent_turn(named_targets):
+            return None
+        return SchedulingDecision(
+            decision_type="complete",
+            action="complete",
+            target_agent_id=assigned,
+            target_agent_ids=[assigned],
+            task=self.current_task,
+            task_description=self.current_task,
+            rationale="The single assigned Agent completed the turn.",
+        )
+
     def _greeting_decision(self, reports: list[AgentReport]) -> SchedulingDecision | None:
         if not _is_simple_greeting_utf8(self.current_task):
             return None
@@ -411,7 +474,7 @@ class SchedulerAgent(AgentActor):
             if item
         )
         named_targets = self._agent_ids_mentioned_in(decision_text)
-        is_multi_agent_task = self._looks_like_multi_agent_task(decision_text)
+        is_multi_agent_task = self._requires_multi_agent_turn(named_targets, decision_text)
 
         if decision.decision_type in {"assign", "parallel"}:
             targets = self._valid_target_ids(decision.target_agent_ids)
@@ -496,21 +559,73 @@ class SchedulerAgent(AgentActor):
     def _agent_ids_mentioned_in(self, text: str) -> list[str]:
         lowered = (text or "").lower()
         matched: list[str] = []
+        generic_tokens = {
+            "agent",
+            "assistant",
+            "worker",
+            "scheduler",
+            "master",
+            "leader",
+            "team",
+            "daily",
+            "chat",
+        }
         for agent_id, config in self.agents.items():
             if agent_id == self.scheduler_id or config.role == "leader":
                 continue
             name = (config.name or "").lower()
             role = (config.role or "").lower()
-            tokens = {name, role, agent_id.lower()}
-            tokens.update(part.strip().lower() for part in name.replace("-", " ").split())
+            tokens = {name, agent_id.lower()}
+            if role and role not in generic_tokens:
+                tokens.add(role)
+            tokens.update(
+                part
+                for part in (part.strip().lower() for part in name.replace("-", " ").split())
+                if len(part) >= 3 and part not in generic_tokens
+            )
             if any(token and token in lowered for token in tokens):
                 matched.append(agent_id)
         return self._valid_target_ids(matched)
+
+    def _requires_multi_agent_turn(
+        self,
+        named_targets: list[str],
+        text: str | None = None,
+    ) -> bool:
+        return len(named_targets) > 1 or self._looks_like_multi_agent_task(
+            self.current_task if text is None else text
+        )
 
     def _looks_like_multi_agent_task(self, text: str) -> bool:
         normalized = (text or "").lower()
         if _is_simple_greeting_utf8(normalized):
             return False
+        explicit_keywords = (
+            "multi-agent",
+            "multi agent",
+            "multiple agents",
+            "collaborate",
+            "collaboration",
+            "parallel",
+            "split the work",
+            "divide the work",
+            "frontend and backend",
+            "backend and frontend",
+            "full-stack",
+            "end-to-end",
+            "全栈",
+            "前后端",
+            "多智能体",
+            "多个 agent",
+            "多个agent",
+            "协作",
+            "协同",
+            "分工",
+            "各自",
+            "分别",
+            "并行",
+        )
+        return any(keyword in normalized for keyword in explicit_keywords)
         keywords = (
             "多智能体",
             "多agent",
@@ -620,6 +735,26 @@ def _report_from_payload(payload: dict[str, Any], fallback_agent_id: str | None)
 
 def _dict_payload(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _mention_target_ids_from_metadata(value: Any) -> list[str]:
+    metadata = _dict_payload(value)
+    targets: list[str] = []
+    raw_targets = metadata.get("mention_target_agent_ids")
+    if isinstance(raw_targets, list):
+        for item in raw_targets:
+            agent_id = str(item or "").strip()
+            if agent_id and agent_id not in targets:
+                targets.append(agent_id)
+    raw_mentions = metadata.get("agent_mentions")
+    if isinstance(raw_mentions, list):
+        for item in raw_mentions:
+            if not isinstance(item, dict):
+                continue
+            agent_id = str(item.get("agent_id") or item.get("id") or "").strip()
+            if agent_id and agent_id not in targets:
+                targets.append(agent_id)
+    return targets
 
 
 def _state(value: Any) -> AgentState:

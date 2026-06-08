@@ -4,6 +4,8 @@
 覆盖调度循环的核心逻辑。
 """
 
+import asyncio
+
 import pytest
 
 from agent_runtime.runtime.orchestrator import Orchestrator
@@ -16,7 +18,8 @@ from agent_runtime.core.types import (
 )
 from agent_runtime.strategies.base import Scheduler
 
-from model_provider import ChatResponse
+from model_provider import ChatResponse, StreamChunk
+from model_provider.core.interfaces import BaseModelProvider
 
 
 class SimpleScheduler(Scheduler):
@@ -47,6 +50,20 @@ class SimpleScheduler(Scheduler):
             decision_type="assign",
             target_agent_id=conflicting_reports[0].agent_id,
         )
+
+
+class PausableStreamingProvider(BaseModelProvider):
+    def __init__(self):
+        super().__init__({"model": "pausable"})
+        self.release_second = asyncio.Event()
+
+    async def chat(self, *args, **kwargs):
+        return ChatResponse(content="firstsecond")
+
+    async def chat_stream(self, *args, **kwargs):
+        yield StreamChunk(content="first")
+        await self.release_second.wait()
+        yield StreamChunk(content="second", finish_reason="stop")
 
 
 @pytest.fixture
@@ -116,6 +133,44 @@ class TestOrchestratorRun:
         assert "system.session_completed" in event_types
         assert "control.scheduling_decision" in event_types
         assert orch.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_assign_yields_agent_tokens_before_agent_finishes(self, sample_agents):
+        provider = PausableStreamingProvider()
+        scheduler = SimpleScheduler(
+            [
+                SchedulingDecision(
+                    decision_type="assign",
+                    target_agent_id="coder",
+                    task_description="stream slowly",
+                ),
+                SchedulingDecision(decision_type="complete"),
+            ]
+        )
+        orch = Orchestrator(
+            session_id="sess_stream",
+            agents=sample_agents,
+            scheduler=scheduler,
+            model_provider=provider,
+        )
+
+        stream = orch.run("stream slowly")
+        events = []
+        while True:
+            event = await asyncio.wait_for(stream.__anext__(), timeout=1)
+            events.append(event)
+            if event.type == "agent.token":
+                break
+
+        assert events[-1].payload["token"] == "first"
+
+        provider.release_second.set()
+        async for event in stream:
+            events.append(event)
+
+        event_types = [event.type for event in events]
+        assert event_types.index("agent.token") < event_types.index("system.agent_completed")
+        assert "system.session_completed" in event_types
 
     @pytest.mark.asyncio
     async def test_run_with_persistence(self, orch, mock_provider, mock_persistence):

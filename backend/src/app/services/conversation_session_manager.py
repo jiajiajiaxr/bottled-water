@@ -10,20 +10,21 @@ from __future__ import annotations
 import asyncio
 from typing import Any, ClassVar, Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from agent_runtime import Session as AgentSession
 from agent_runtime.core.types import Event as RuntimeEvent
 from app.events import WebSocketSink
-from db.models import Conversation, Message, utcnow
+from db.models import Conversation, ConversationParticipant, Message, utcnow
 from db.session import AsyncSessionLocal
 from app.services.runtime.generation_records import (
     create_generation_record,
     finish_generation_record,
     record_generation_event,
 )
-from app.services.serialization import message_to_dict
+from app.services.serialization import conversation_to_dict, message_to_dict
 from app.services.chat.scheduling import resolve_scheduling_strategy, runtime_mode, workflow_enabled
 from app.services.runtime_service import OrchestratorService
 from common.logger import get_logger
@@ -58,7 +59,7 @@ class ConversationSessionManager:
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._generation_ids: dict[str, str] = {}
         self._active_user_message_ids: dict[str, str] = {}
-        self._queued_inputs: dict[str, list[dict[str, str | bool | None]]] = {}
+        self._queued_inputs: dict[str, list[dict[str, Any]]] = {}
         self._pending_preview_message_ids: dict[str, list[str]] = {}
         self._latest_thinking: dict[tuple[str, str, str], str] = {}
         self._generation_thinking_enabled: dict[str, bool] = {}
@@ -154,6 +155,7 @@ class ConversationSessionManager:
         thinking_enabled: bool = False,
         user_message_id: str | None = None,
         client_message_id: str | None = None,
+        agent_mentions: list[dict[str, Any]] | None = None,
     ) -> None:
         """Start a generation if this user message has not already been handled."""
         user_message_key = str(user_message_id or "").strip()
@@ -183,6 +185,7 @@ class ConversationSessionManager:
                 content,
                 user_message_id=user_message_key or None,
             )
+            await self._publish_conversation_snapshot(conversation_id)
             self._generation_thinking_enabled[generation_id] = bool(thinking_enabled)
             if user_message_key:
                 self._active_user_message_ids[conversation_id] = user_message_key
@@ -191,6 +194,7 @@ class ConversationSessionManager:
                 content,
                 user_message_id=user_message_id,
                 client_message_id=client_message_id,
+                agent_mentions=agent_mentions,
             )
             task = asyncio.create_task(
                 self._run_generation(
@@ -217,7 +221,7 @@ class ConversationSessionManager:
         generation_id: str,
         content: str,
         *,
-        context_metadata: dict[str, str] | None = None,
+        context_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Run a session generation in the background."""
 
@@ -235,6 +239,7 @@ class ConversationSessionManager:
         thinking_enabled: bool = False,
         user_message_id: str | None = None,
         client_message_id: str | None = None,
+        agent_mentions: list[dict[str, Any]] | None = None,
     ) -> None:
         """Send user input to the active session with message-level idempotency."""
         user_message_key = str(user_message_id or "").strip()
@@ -265,6 +270,7 @@ class ConversationSessionManager:
                         "thinking_enabled": bool(thinking_enabled),
                         "user_message_id": user_message_key or None,
                         "client_message_id": str(client_message_id or "") or None,
+                        "agent_mentions": agent_mentions or [],
                     }
                 )
                 queued_payload = {
@@ -286,6 +292,7 @@ class ConversationSessionManager:
             thinking_enabled=thinking_enabled,
             user_message_id=user_message_id,
             client_message_id=client_message_id,
+            agent_mentions=agent_mentions,
         )
 
 
@@ -406,7 +413,8 @@ class ConversationSessionManager:
         *,
         user_message_id: str | None,
         client_message_id: str | None = None,
-    ) -> dict[str, str]:
+        agent_mentions: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         metadata = {
             "conversation_id": str(conversation_id),
             "session_id": str(conversation_id),
@@ -416,6 +424,10 @@ class ConversationSessionManager:
             metadata["user_message_id"] = str(user_message_id)
         if client_message_id:
             metadata["client_message_id"] = str(client_message_id)
+        mention_ids = _mention_target_agent_ids(agent_mentions)
+        if mention_ids:
+            metadata["mention_target_agent_ids"] = mention_ids
+            metadata["agent_mentions"] = agent_mentions or []
         return metadata
 
     async def _generation_exists_for_user_message(
@@ -469,7 +481,7 @@ class ConversationSessionManager:
         self._generation_ids[conversation_id] = generation_id
         return generation_id
 
-    def _dequeue_next_input(self, conversation_id: str) -> dict[str, str | bool | None] | None:
+    def _dequeue_next_input(self, conversation_id: str) -> dict[str, Any] | None:
         queue = self._queued_inputs.get(conversation_id)
         if not queue:
             return None
@@ -499,6 +511,8 @@ class ConversationSessionManager:
             event_type = "message:updated" if event.type == "system.agent_completed" else "message:new"
             await sink.emit(RuntimeEvent(type=event_type, payload=message_to_dict(message)))
             await self._publish_pending_preview_messages(sink, conversation_id, generation_id)
+        if _should_publish_conversation_snapshot(event.type):
+            await self._publish_conversation_snapshot(conversation_id)
         if event.type == "control.watchdog_triggered":
             reason = str((event.payload or {}).get("reason") or "watchdog_triggered")
             if self._generation_ids.get(conversation_id) == generation_id:
@@ -585,6 +599,24 @@ class ConversationSessionManager:
                 await db.refresh(preview)
                 await sink.emit(RuntimeEvent(type="message:new", payload=message_to_dict(preview)))
 
+    async def _publish_conversation_snapshot(self, conversation_id: str) -> None:
+        async with self._session_factory() as db:
+            conversation = await db.scalar(
+                select(Conversation)
+                .where(Conversation.id == conversation_id)
+                .options(
+                    selectinload(Conversation.participants).selectinload(
+                        ConversationParticipant.agent
+                    )
+                )
+            )
+            if not conversation:
+                return
+            payload = conversation_to_dict(conversation)
+        await WebSocketSink(conversation_id).emit(
+            RuntimeEvent(type="conversation:updated", payload=payload)
+        )
+
     async def _finish_generation_and_continue(
         self,
         conversation_id: str,
@@ -592,7 +624,7 @@ class ConversationSessionManager:
         *,
         status: str,
         error: str | None,
-        next_input: dict[str, str | None] | None,
+        next_input: dict[str, Any] | None,
     ) -> None:
         await self._finish_generation(
             conversation_id,
@@ -609,6 +641,7 @@ class ConversationSessionManager:
         next_thinking_enabled = bool(next_input.get("thinking_enabled"))
         next_user_message_id = next_input.get("user_message_id")
         next_client_message_id = next_input.get("client_message_id")
+        next_agent_mentions = next_input.get("agent_mentions")
         if not next_content:
             return
 
@@ -620,6 +653,7 @@ class ConversationSessionManager:
                 thinking_enabled=next_thinking_enabled,
                 user_message_id=str(next_user_message_id) if next_user_message_id else None,
                 client_message_id=str(next_client_message_id) if next_client_message_id else None,
+                agent_mentions=next_agent_mentions if isinstance(next_agent_mentions, list) else None,
             )
         except Exception as exc:
             logger.error("Queued input failed to start", conversation_id=conversation_id, error=str(exc))
@@ -632,6 +666,59 @@ class ConversationSessionManager:
                     },
                 )
             )
+
+    async def _find_runtime_agent_message(
+        self,
+        db: AsyncSession,
+        conversation_id: str,
+        generation_id: str,
+        agent_id: str,
+        *,
+        stream_message_id: str,
+        task: str,
+        work_product: str,
+    ) -> Message | None:
+        base_conditions = (
+            Message.conversation_id == conversation_id,
+            Message.sender_type == "agent",
+            Message.sender_id == (agent_id or None),
+            Message.extra["runtime_generation_id"].as_string() == generation_id,
+            Message.deleted_at.is_(None),
+        )
+        if stream_message_id:
+            return await db.scalar(
+                select(Message)
+                .where(
+                    *base_conditions,
+                    or_(
+                        Message.content["agent_message_id"].as_string() == stream_message_id,
+                        Message.content["message_id"].as_string() == stream_message_id,
+                        Message.content["stream_message_id"].as_string() == stream_message_id,
+                    ),
+                )
+                .order_by(Message.created_at.desc())
+            )
+        if task:
+            existing = await db.scalar(
+                select(Message)
+                .where(
+                    *base_conditions,
+                    Message.extra["runtime_report_task"].as_string() == task,
+                )
+                .order_by(Message.created_at.desc())
+            )
+            if existing:
+                return existing
+        if work_product:
+            return await db.scalar(
+                select(Message)
+                .where(
+                    *base_conditions,
+                    Message.content["text"].as_string() == work_product,
+                )
+                .order_by(Message.created_at.desc())
+            )
+        return None
 
     async def _persist_agent_report_message(
         self,
@@ -663,75 +750,30 @@ class ConversationSessionManager:
             or str(payload.get("agent_avatar_url") or payload.get("sender_avatar_url") or "")
             or None
         )
-        if event.type == "system.agent_completed":
-            persisted = await db.scalar(
-                select(Message)
-                .where(
-                    Message.conversation_id == conversation_id,
-                    Message.sender_type == "agent",
-                    Message.sender_id == agent_id,
-                    Message.extra["runtime_generation_id"].as_string() == generation_id,
-                    Message.content["text"].as_string() == work_product,
-                    Message.deleted_at.is_(None),
-                )
-                .order_by(Message.created_at.desc())
-            )
-            if persisted:
-                thinking = self._latest_thinking.get((conversation_id, generation_id, agent_id), "").strip()
-                if thinking and isinstance(persisted.content, dict) and not str(persisted.content.get("thinking") or "").strip():
-                    persisted.content = {
-                        **persisted.content,
-                        "thinking": thinking,
-                        "thinking_enabled": thinking_enabled,
-                    }
-                elif isinstance(persisted.content, dict) and persisted.content.get("thinking_enabled") is None:
-                    persisted.content = {
-                        **persisted.content,
-                        "thinking_enabled": thinking_enabled,
-                    }
-                if agent_avatar_url and not persisted.sender_avatar_url:
-                    persisted.sender_avatar_url = agent_avatar_url
-                if isinstance(persisted.content, dict):
-                    content_patch = {}
-                    if agent_id and not persisted.content.get("agent_id"):
-                        content_patch["agent_id"] = agent_id
-                    if stream_message_id and not persisted.content.get("agent_message_id"):
-                        content_patch["agent_message_id"] = stream_message_id
-                        content_patch["message_id"] = stream_message_id
-                        content_patch["stream_message_id"] = stream_message_id
-                    if content_patch:
-                        persisted.content = {
-                            **persisted.content,
-                            **content_patch,
-                        }
-                conversation = await db.get(Conversation, conversation_id)
-                if conversation:
-                    conversation.last_message_preview = work_product[:300]
-                    conversation.last_message_sender = persisted.sender_name or agent_name
-                    conversation.last_message_at = utcnow()
-                await db.commit()
-                await db.refresh(persisted)
-                return persisted
-        existing = await db.scalar(
-            select(Message).where(
-                Message.conversation_id == conversation_id,
-                Message.sender_type == "agent",
-                Message.sender_id == agent_id,
-                Message.extra["runtime_generation_id"].as_string() == generation_id,
-                Message.extra["runtime_report_task"].as_string() == str(payload.get("task") or ""),
-                Message.deleted_at.is_(None),
-            )
+        task = str(payload.get("task") or "")
+        existing = await self._find_runtime_agent_message(
+            db,
+            conversation_id,
+            generation_id,
+            agent_id,
+            stream_message_id=stream_message_id,
+            task=task,
+            work_product=work_product,
         )
-        if existing:
-            return None
-
         report = payload.get("report") if isinstance(payload.get("report"), dict) else {}
+        status_report = (
+            payload.get("status_report")
+            if isinstance(payload.get("status_report"), dict)
+            else {}
+        )
+        runtime_report = report or status_report
         thinking = self._latest_thinking.get((conversation_id, generation_id, agent_id), "").strip()
+        existing_content = existing.content if existing and isinstance(existing.content, dict) else {}
         content = {
             "text": work_product,
-            "thinking": thinking,
+            "thinking": thinking or str(existing_content.get("thinking") or ""),
             "thinking_enabled": thinking_enabled,
-            "runtime_report": report,
+            "runtime_report": runtime_report or existing_content.get("runtime_report") or {},
         }
         if agent_id:
             content["agent_id"] = agent_id
@@ -739,6 +781,29 @@ class ConversationSessionManager:
             content["agent_message_id"] = stream_message_id
             content["message_id"] = stream_message_id
             content["stream_message_id"] = stream_message_id
+
+        if existing:
+            existing.content = {**existing_content, **content}
+            existing.sender_name = existing.sender_name or agent_name
+            if agent_avatar_url and not existing.sender_avatar_url:
+                existing.sender_avatar_url = agent_avatar_url
+            existing.status = "completed"
+            existing.updated_at = utcnow()
+            existing.extra = {
+                **(existing.extra or {}),
+                "runtime_generation_id": generation_id,
+                "runtime_agent_report": True,
+                "runtime_report_task": task,
+            }
+            conversation = await db.get(Conversation, conversation_id)
+            if conversation:
+                conversation.last_message_preview = work_product[:300]
+                conversation.last_message_sender = existing.sender_name or agent_name
+                conversation.last_message_at = utcnow()
+            await db.commit()
+            await db.refresh(existing)
+            return existing if event.type == "system.agent_completed" else None
+
         message = Message(
             conversation_id=conversation_id,
             sender_type="agent",
@@ -751,7 +816,7 @@ class ConversationSessionManager:
             extra={
                 "runtime_generation_id": generation_id,
                 "runtime_agent_report": True,
-                "runtime_report_task": str(payload.get("task") or ""),
+                "runtime_report_task": task,
             },
         )
         conversation = await db.get(Conversation, conversation_id)
@@ -781,6 +846,7 @@ class ConversationSessionManager:
                 status=status,
                 error=error,
             )
+        await self._publish_conversation_snapshot(conversation_id)
         event_type = {
             "cancelled": "generation:cancelled",
             "failed": "generation:failed",
@@ -797,3 +863,27 @@ class ConversationSessionManager:
             )
         )
         self._generation_thinking_enabled.pop(generation_id, None)
+
+
+def _should_publish_conversation_snapshot(event_type: str) -> bool:
+    if event_type in {"agent.token", "agent.thinking", "content_block_delta"}:
+        return False
+    return event_type.startswith(("system.", "scheduler.", "control.", "user.")) or event_type in {
+        "agent.state_changed",
+        "agent.report",
+        "agent.failed",
+        "agent.tool_call",
+        "agent.tool_result",
+        "blackboard.updated",
+    }
+
+
+def _mention_target_agent_ids(agent_mentions: list[dict[str, Any]] | None) -> list[str]:
+    ids: list[str] = []
+    for item in agent_mentions or []:
+        if not isinstance(item, dict):
+            continue
+        agent_id = str(item.get("agent_id") or item.get("id") or "").strip()
+        if agent_id and agent_id not in ids:
+            ids.append(agent_id)
+    return ids

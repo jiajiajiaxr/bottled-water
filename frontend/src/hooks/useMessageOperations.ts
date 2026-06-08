@@ -10,7 +10,7 @@ import {
   setConversationThinkingMode,
   useStreamingMessages,
 } from "./useStreamingMessages";
-import type { ChatMessage, UploadedFile, MessageAttachment } from "@/types";
+import type { ChatMessage, Conversation, UploadedFile, MessageAttachment } from "@/types";
 import type {
   MessageAgentMention,
   MessageBody,
@@ -61,6 +61,23 @@ function mergeThinkingFromLocal(
 /**
  * 封装聊天消息发送与流式响应状态同步。
  */
+function conversationSnapshotFromPayload(
+  payload: Record<string, unknown>,
+): (Partial<Conversation> & { id: string }) | undefined {
+  const nested = payload.conversation;
+  const record =
+    nested && typeof nested === "object"
+      ? (nested as Record<string, unknown>)
+      : payload;
+  const id =
+    typeof record.id === "string"
+      ? record.id
+      : typeof record.conversation_id === "string"
+        ? record.conversation_id
+        : "";
+  return id ? ({ ...record, id } as Partial<Conversation> & { id: string }) : undefined;
+}
+
 export function useMessageOperations(userName?: string, userAvatarUrl?: string) {
   const { activeId } = useConversationStore();
   const { updateMessagesForConversation } = useMessageStore();
@@ -150,7 +167,6 @@ export function useMessageOperations(userName?: string, userAvatarUrl?: string) 
           conversationId,
           streaming.streamHandlers,
           streaming.waitForConversationStreams,
-          streaming.ingestPersistedMessages,
         ),
       );
     } catch {
@@ -238,13 +254,19 @@ function createStreamHandlers(
     conversationId?: string,
     timeoutMs?: number,
   ) => Promise<void>,
-  ingestPersistedMessages: (messages: ChatMessage[]) => void,
 ): StreamAssistantHandlers {
   return {
     ...baseHandlers,
     onRuntimeEvent: (event, payload) => {
       baseHandlers.onRuntimeEvent?.(event, payload);
       const store = useConversationStore.getState();
+      if (event === "conversation:updated") {
+        const snapshot = conversationSnapshotFromPayload(payload);
+        if (snapshot) {
+          store.updateConversation(snapshot.id, snapshot);
+        }
+        return;
+      }
       const current = store.conversations.find((item) => item.id === conversationId);
       if (current) {
         store.updateConversation(
@@ -275,7 +297,10 @@ function createStreamHandlers(
             (messageStore.historyConversationId === conversationId
               ? messageStore.historyMessages
               : []);
-          ingestPersistedMessages(mergeThinkingFromLocal(nextMessages, localMessages));
+          messageStore.setMessagesForConversation(
+            conversationId,
+            mergeThinkingFromLocal(nextMessages, localMessages),
+          );
         })
         .catch(() => {
           // keep current optimistic / streaming state if refresh fails

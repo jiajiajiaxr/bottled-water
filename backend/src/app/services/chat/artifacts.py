@@ -17,13 +17,14 @@ async def _publish_tool_artifacts(db: Session, channel: str, tool_context: dict[
     fallback_conversation_id = _conversation_id_from_channel(channel)
     tool_results = _collect_tool_results(tool_context)
     final_failed_tools = _final_failed_tool_names(tool_results)
+    boundary_ids = _timeline_boundary_ids(tool_context)
     failed_tool_message_created = False
     for item in tool_results:
         output = item.get("output") if isinstance(item.get("output"), dict) else {}
         tool_name = str(item.get("tool_name") or output.get("tool") or "")
         if not output:
             continue
-        await _publish_artifact_outputs(db, channel, output, tool_name=tool_name)
+        await _publish_artifact_outputs(db, channel, output, tool_name=tool_name, boundary_ids=boundary_ids)
         if _should_show_tool_message(tool_name, output):
             if tool_name not in final_failed_tools:
                 continue
@@ -46,6 +47,7 @@ async def _publish_artifact_outputs(
     output: dict[str, Any],
     *,
     tool_name: str = "",
+    boundary_ids: list[str] | None = None,
 ) -> None:
     artifact_id = _artifact_id(output)
     artifact: Artifact | None = None
@@ -56,6 +58,11 @@ async def _publish_artifact_outputs(
     if artifact:
         preview = _preview_message_for_artifact_output(db, output, artifact, tool_name)
         if preview:
+            _attach_timeline_boundary(preview, boundary_ids)
+            preview.created_at = utcnow()
+            preview.updated_at = utcnow()
+            db.commit()
+            db.refresh(preview)
             await event_bus.publish(channel, "message:new", message_to_dict(preview))
 
 
@@ -178,6 +185,37 @@ def _touch_conversation(db: Session, conversation_id: str, preview: str, sender:
     conversation.last_message_sender = sender
     conversation.last_message_at = utcnow()
     conversation.message_count += 1
+
+
+def _timeline_boundary_ids(tool_context: dict[str, Any]) -> list[str]:
+    candidates = [
+        tool_context.get("assistant_message_id"),
+        tool_context.get("agent_message_id"),
+        tool_context.get("user_message_id"),
+        tool_context.get("trigger_message_id"),
+        tool_context.get("client_message_id"),
+    ]
+    ids: list[str] = []
+    for value in candidates:
+        if isinstance(value, str) and value.strip() and value not in ids:
+            ids.append(value)
+    return ids
+
+
+def _attach_timeline_boundary(preview: Message, boundary_ids: list[str] | None) -> None:
+    if not boundary_ids:
+        return
+    content = dict(preview.content or {})
+    existing = content.get("_streamHistoryBoundaryIds")
+    merged: list[str] = []
+    if isinstance(existing, list):
+        merged.extend(str(value) for value in existing if isinstance(value, str) and value.strip())
+    for value in boundary_ids:
+        if value and value not in merged:
+            merged.append(value)
+    if merged:
+        content["_streamHistoryBoundaryIds"] = merged
+        preview.content = content
 
 
 def _collect_tool_results(value: Any) -> list[dict[str, Any]]:

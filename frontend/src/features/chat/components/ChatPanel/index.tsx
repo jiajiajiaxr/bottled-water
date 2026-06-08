@@ -390,11 +390,6 @@ export function ChatPanel({
         active.generation_status === "running" ||
         active.generation_status === "executing"),
   );
-  const hasVisibleStreamingMessage = streamingMessages.size > 0 || displayOrder.length > 0;
-  const showThinkingIndicator = Boolean(
-    active && isWorking && !hasVisibleStreamingMessage,
-  );
-
   useEffect(() => {
     if (
       !activeConversationId ||
@@ -631,7 +626,7 @@ export function ChatPanel({
     };
   }, []);
 
-  // 智能体开始回复后，隐藏思考中指示器
+  // 智能体开始回复后，结束等待首个流式事件的状态
   useEffect(() => {
     if (awaitingResponse && (streamingMessages.size > 0 || displayOrder.length > 0)) {
       setAwaitingResponse(false);
@@ -673,16 +668,6 @@ export function ChatPanel({
         ) : visibleMessages.length ? (
           <>
             {visibleMessages.map(renderMessageBubble)}
-            {showThinkingIndicator && (
-              <div className="thinking-indicator">
-                <div className="thinking-indicator-dots">
-                  <span className="dot" />
-                  <span className="dot" />
-                  <span className="dot" />
-                </div>
-                <span className="thinking-indicator-text">思考中</span>
-              </div>
-            )}
           </>
         ) : (
           <Empty description="暂无消息" />

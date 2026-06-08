@@ -88,9 +88,6 @@ describe("useStreamingMessages internal block filtering", () => {
       });
     });
 
-    expect(currentStream(result)?.content).toBe("可");
-    flushTypewriter();
-
     expect(currentStream(result)?.content).toBe(
       "可见回答",
     );
@@ -127,9 +124,6 @@ describe("useStreamingMessages internal block filtering", () => {
         agent_message_id: "message-1",
       });
     });
-
-    expect(currentStream(result)?.content).toBe("v");
-    flushTypewriter();
 
     expect(currentStream(result)?.content).toBe(
       "visible answer",
@@ -173,8 +167,6 @@ describe("useStreamingMessages internal block filtering", () => {
     expect(result.current.displayOrder).toHaveLength(1);
     const visibleKey = result.current.displayOrder[0];
     expect(result.current.streamingMessages.get(visibleKey)?.id).toBe("message-1");
-    expect(result.current.streamingMessages.get(visibleKey)?.content).toBe("你");
-    flushTypewriter();
     expect(result.current.streamingMessages.get(visibleKey)?.content).toBe("你好呀");
   });
 
@@ -211,9 +203,6 @@ describe("useStreamingMessages internal block filtering", () => {
     expect(result.current.streamingMessages.size).toBe(1);
     expect(result.current.streamingMessages.get("message-1")?.id).toBe("message-1");
     expect(result.current.streamingMessages.get("message-1")?.thinking).toBe("thinking...");
-    expect(result.current.streamingMessages.get("message-1")?.content).toBe("a");
-
-    flushTypewriter();
     expect(result.current.streamingMessages.get("message-1")?.content).toBe("answer");
   });
 
@@ -286,6 +275,129 @@ describe("useStreamingMessages internal block filtering", () => {
       ?.rawContent?._streamHistoryBoundaryIds as string[];
     expect(boundaryIds).toContain("local-user-1");
     expect(boundaryIds).toContain("client-1");
+  });
+
+  it("carries stream anchor ids into the persisted final assistant message", () => {
+    useConversationStore.getState().setActiveId("conversation-1");
+    useMessageStore.getState().setMessagesForConversation("conversation-1", [
+      {
+        id: "local-user-1",
+        conversationId: "conversation-1",
+        role: "user",
+        kind: "text",
+        author: "User",
+        content: "hello",
+        rawContent: {
+          client_message_id: "client-1",
+          clientMessageId: "client-1",
+        },
+        client_message_id: "client-1",
+        clientMessageId: "client-1",
+        createdAt: "2026-06-07T10:00:00.000Z",
+        streamState: "done",
+        state: "active",
+      },
+    ]);
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+    const payload = {
+      conversation_id: "conversation-1",
+      agent_id: "agent-1",
+      agent_message_id: "message-1",
+      agent_name: "Daily Chat Agent",
+    };
+
+    act(() => {
+      result.current.streamHandlers.onMessageStart(payload);
+      result.current.streamHandlers.onToken?.("agent-1", "answer", payload);
+    });
+
+    const persisted = makeMessage({
+      conversationId: "conversation-1",
+      sender_id: "agent-1",
+      sender_type: "agent",
+      role: "assistant",
+      kind: "text",
+      author: "Daily Chat Agent",
+      content: "answer",
+      rawContent: {
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+      },
+      streamState: "done",
+      status: "completed",
+      state: "active",
+    });
+    persisted.id = "persisted-message-1";
+    persisted.createdAt = "2026-06-07T09:59:00.000Z";
+
+    act(() => {
+      result.current.streamHandlers.onMessageNew?.(persisted);
+    });
+
+    const messages = useMessageStore.getState().historyMessages;
+    const boundaryIds = messages[1]?.rawContent?._streamHistoryBoundaryIds as string[];
+    expect(messages.map((item) => item.id)).toEqual([
+      "local-user-1",
+      "persisted-message-1",
+    ]);
+    expect(boundaryIds).toContain("local-user-1");
+    expect(boundaryIds).toContain("client-1");
+  });
+
+  it("does not resurrect a terminal stream from late tokens after server persistence", () => {
+    useConversationStore.getState().setActiveId("conversation-1");
+    const { result } = renderHook(() => useStreamingMessages("conversation-1"));
+    const payload = {
+      conversation_id: "conversation-1",
+      agent_id: "agent-1",
+      agent_message_id: "message-1",
+      agent_name: "Daily Chat Agent",
+    };
+
+    act(() => {
+      result.current.streamHandlers.onMessageStart(payload);
+      result.current.streamHandlers.onToken?.("agent-1", "answer", payload);
+    });
+
+    expect(result.current.displayOrder).toEqual(["message-1"]);
+    expect(result.current.streamingMessages.get("message-1")?.content).toBe("answer");
+
+    const persisted = makeMessage({
+      conversationId: "conversation-1",
+      sender_id: "agent-1",
+      sender_type: "agent",
+      role: "assistant",
+      kind: "text",
+      author: "Daily Chat Agent",
+      content: "answer",
+      rawContent: {
+        agent_id: "agent-1",
+        agent_message_id: "message-1",
+        stream_message_id: "message-1",
+      },
+      streamState: "done",
+      status: "completed",
+      state: "active",
+    });
+    persisted.id = "persisted-message-1";
+
+    act(() => {
+      result.current.streamHandlers.onMessageNew?.(persisted);
+    });
+
+    expect(result.current.displayOrder).toEqual([]);
+    expect(result.current.streamingMessages.size).toBe(0);
+
+    act(() => {
+      result.current.streamHandlers.onToken?.("agent-1", " late", payload);
+      result.current.streamHandlers.onThinking?.("agent-1", " late thinking", payload);
+    });
+    flushTypewriter();
+
+    expect(result.current.displayOrder).toEqual([]);
+    expect(result.current.streamingMessages.size).toBe(0);
+    expect(useMessageStore.getState().historyMessages).toHaveLength(1);
+    expect(useMessageStore.getState().historyMessages[0].content).toBe("answer");
   });
 
   it("anchors the first thinking frame with payload client message ids", () => {
@@ -364,7 +476,7 @@ describe("useStreamingMessages internal block filtering", () => {
     expect(result.current.streamingMessages.get("message-2")?.content).toBe("second");
   });
 
-  it("drains thinking before showing answer content", () => {
+  it("shows thinking and answer chunks as backend sends them", () => {
     const { result } = renderHook(() => useStreamingMessages("conversation-1"));
 
     const payload = {
@@ -381,16 +493,11 @@ describe("useStreamingMessages internal block filtering", () => {
       result.current.streamHandlers.onToken?.("agent-1", "再输出正文", payload);
     });
 
-    expect(currentStream(result)?.thinking).toBe("先");
-    expect(currentStream(result)?.content).toBe("");
-
-    flushTypewriter();
-
     expect(currentStream(result)?.thinking).toBe("先完成思考");
     expect(currentStream(result)?.content).toBe("再输出正文");
   });
 
-  it("streams the persisted final suffix before committing history", () => {
+  it("commits the persisted final message without replaying a suffix", () => {
     useConversationStore.getState().setActiveId("conversation-1");
     const { result } = renderHook(() => useStreamingMessages("conversation-1"));
 
@@ -422,12 +529,6 @@ describe("useStreamingMessages internal block filtering", () => {
     act(() => {
       result.current.streamHandlers.onMessageNew?.(persisted);
     });
-
-    expect(result.current.streamingMessages.size).toBe(1);
-    expect(useMessageStore.getState().historyMessages).toEqual([]);
-    expect(currentStream(result)?.content).toBe("第一句。第");
-
-    flushTypewriter();
 
     expect(result.current.streamingMessages.size).toBe(0);
     expect(useMessageStore.getState().historyMessages).toEqual([persisted]);
@@ -507,8 +608,6 @@ describe("useStreamingMessages internal block filtering", () => {
       });
     });
 
-    expect(currentStream(result)?.content).toBe("你");
-    flushTypewriter();
     expect(currentStream(result)?.content).toBe("你好呀，这是新回复。");
   });
 
@@ -587,7 +686,7 @@ describe("useStreamingMessages internal block filtering", () => {
     });
 
     expect(currentStream(result)?.content).toBe(
-      "我",
+      "我可以帮你",
     );
 
     const persisted = makeMessage({
@@ -666,7 +765,7 @@ describe("useStreamingMessages internal block filtering", () => {
       result.current.streamHandlers.onMessageNew?.(placeholder);
     });
 
-    expect(currentStream(result)?.content).toBe("你");
+    expect(currentStream(result)?.content).toBe("你好呀");
 
     const completed = {
       ...placeholder,
@@ -741,14 +840,12 @@ describe("useStreamingMessages internal block filtering", () => {
     });
 
     expect(useMessageStore.getState().historyMessages).toEqual([preview]);
-    expect(currentStream(result)?.content).toBe("已");
-    flushTypewriter();
     expect(currentStream(result)?.content).toBe(
       "已为你生成 PDF",
     );
   });
 
-  it("shows artifact tool progress until the final agent reply arrives", () => {
+  it("commits preview cards according to backend event order", () => {
     useConversationStore.getState().setConversations([
       {
         id: "conversation-1",
@@ -833,14 +930,10 @@ describe("useStreamingMessages internal block filtering", () => {
       result.current.streamHandlers.onMessageNew?.(finalReply);
     });
 
-    expect(result.current.streamingMessages.size).toBe(1);
-    expect(currentStream(result)?.content).toBe("已");
-    flushTypewriter();
-
     expect(result.current.streamingMessages.size).toBe(0);
-    expect(useMessageStore.getState().historyMessages).toEqual([
-      preview,
-      finalReply,
+    expect(useMessageStore.getState().historyMessages.map((item) => item.id)).toEqual([
+      "preview-message-1",
+      "agent-final-message-1",
     ]);
   });
 
@@ -913,7 +1006,7 @@ describe("useStreamingMessages internal block filtering", () => {
     expect(useMessageStore.getState().historyMessages).toEqual([persisted]);
   });
 
-  it("drains queued characters before committing a stopped stream", () => {
+  it("commits a stopped stream after the backend chunk has been applied", () => {
     useConversationStore.getState().setConversations([
       {
         id: "conversation-1",
@@ -949,22 +1042,11 @@ describe("useStreamingMessages internal block filtering", () => {
       result.current.streamHandlers.onDelta?.("hello", payload);
     });
 
-    expect(currentStream(result)?.content).toBe("h");
+    expect(currentStream(result)?.content).toBe("hello");
 
     act(() => {
       result.current.streamHandlers.onMessageEnd(payload);
     });
-
-    expect(currentStream(result)?.content).toBe("h");
-    expect(useMessageStore.getState().historyMessages).toEqual([]);
-
-    act(() => {
-      vi.advanceTimersByTime(28);
-    });
-
-    expect(currentStream(result)?.content).toBe("he");
-
-    flushTypewriter();
 
     expect(result.current.streamingMessages.size).toBe(0);
     expect(useMessageStore.getState().historyMessages).toHaveLength(1);

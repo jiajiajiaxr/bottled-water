@@ -121,7 +121,6 @@ async def run_orchestration(message_id: str) -> None:
         await _sync_subtasks_from_engine(db, subtasks, engine_result.outputs, channel)
         if engine_result.worker_contexts:
             task.output = {**(task.output or {}), "worker_contexts": engine_result.worker_contexts}
-        await _publish_tool_artifacts(db, channel, engine_result.tool_context)
         task.output = {**(task.output or {}), "agentic_tools": engine_result.tool_context}
         task.progress = max(task.progress or 0, 58)
         db.commit()
@@ -135,6 +134,7 @@ async def run_orchestration(message_id: str) -> None:
                 workflow_run,
                 subtasks,
                 engine_result.agent_replies,
+                engine_result.tool_context,
                 channel,
             )
             return
@@ -148,6 +148,7 @@ async def run_orchestration(message_id: str) -> None:
             engine_result.tool_context,
             channel,
         )
+        await _publish_tool_artifacts(db, channel, engine_result.tool_context)
         review_text = await _review(prompt)
         await _complete_master_task(
             db,
@@ -332,6 +333,7 @@ async def _complete_independent_group(
     workflow_run: WorkflowRun,
     subtasks: list[Subtask],
     agent_replies: list[dict[str, str]],
+    tool_context: dict,
     channel: str,
 ) -> None:
     summary = "\n\n".join(f"{item['agent_name']}: {item['text']}" for item in agent_replies)
@@ -360,6 +362,7 @@ async def _complete_independent_group(
         stop_reason="workflow_completed",
         fallback_text="This turn has completed.",
     )
+    await _publish_tool_artifacts(db, channel, tool_context)
     await event_bus.publish(channel, "task:status_changed", task_to_dict(task))
     await event_bus.publish(
         channel,

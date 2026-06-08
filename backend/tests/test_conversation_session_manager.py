@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import suppress
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
@@ -294,6 +295,105 @@ class TestConversationSessionManagerStatus:
             assert record["decisions"][0]["target"] == "frontend"
             assert record["agent_runs"][0]["status"] == "completed"
             assert record["agent_runs"][0]["output_preview"] == "HTML page completed"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_generation_pushes_authoritative_conversation_snapshots(self, tmp_path):
+        conversation_id = "conv-generation-snapshots"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        emitted = []
+
+        async def fake_emit(_sink, event):
+            emitted.append(event)
+
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            mgr._sessions[conversation_id] = _FakeActorSession(conversation_id)
+
+            with patch("app.services.conversation_session_manager.WebSocketSink.emit", new=fake_emit):
+                await mgr.start_generation(conversation_id, "build a small html page")
+                task = mgr._running_tasks[conversation_id]
+                await task
+                await asyncio.sleep(0.05)
+
+            snapshots = [event for event in emitted if event.type == "conversation:updated"]
+            assert snapshots
+            assert snapshots[0].payload["generation_status"] == "running"
+            assert snapshots[0].payload["runtime"]["active_generation_id"]
+            assert snapshots[-1].payload["generation_status"] == "idle"
+            assert snapshots[-1].payload["runtime"]["active_generation_id"] is None
+            assert snapshots[-1].payload["runtime"]["generations"][-1]["status"] == "completed"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_report_and_completed_share_stream_message(self, tmp_path):
+        conversation_id = "conv-generation-stream-identity"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            mgr = ConversationSessionManager(session_factory=factory)
+            mgr._sessions[conversation_id] = _FakeAgentSession(conversation_id)
+
+            report_event = RuntimeEvent(
+                type=AGENT_REPORT,
+                payload={
+                    "agent_id": "agent-a",
+                    "agent_name": "Frontend Worker",
+                    "task": "reply to mention",
+                    "work_product": "draft answer",
+                    "stream_message_id": "stream-agent-a-1",
+                    "agent_message_id": "stream-agent-a-1",
+                    "report": {
+                        "agent_id": "agent-a",
+                        "state": "completed",
+                        "will": "complete",
+                    },
+                },
+            )
+            completed_event = RuntimeEvent(
+                type="system.agent_completed",
+                payload={
+                    "agent_id": "agent-a",
+                    "agent_name": "Frontend Worker",
+                    "work_product": "final answer",
+                    "stream_message_id": "stream-agent-a-1",
+                    "agent_message_id": "stream-agent-a-1",
+                    "status_report": {
+                        "agent_id": "agent-a",
+                        "state": "completed",
+                    },
+                },
+            )
+
+            async with factory() as session:
+                first = await mgr._persist_agent_report_message(
+                    session,
+                    conversation_id,
+                    "generation-1",
+                    report_event,
+                )
+            async with factory() as session:
+                second = await mgr._persist_agent_report_message(
+                    session,
+                    conversation_id,
+                    "generation-1",
+                    completed_event,
+                )
+            async with factory() as session:
+                messages = (
+                    await session.execute(
+                        select(Message).where(Message.conversation_id == conversation_id)
+                    )
+                ).scalars().all()
+
+            assert first is not None
+            assert second is not None
+            assert first.id == second.id
+            assert len(messages) == 1
+            assert messages[0].content["text"] == "final answer"
+            assert messages[0].content["agent_message_id"] == "stream-agent-a-1"
+            assert messages[0].content["stream_message_id"] == "stream-agent-a-1"
         finally:
             await engine.dispose()
 

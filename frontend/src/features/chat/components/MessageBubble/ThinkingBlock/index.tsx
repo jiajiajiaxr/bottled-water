@@ -1,8 +1,5 @@
 import { MarkdownContent } from "@/lib";
 import { BulbOutlined } from "@ant-design/icons";
-import { Typography } from "antd";
-
-const { Text } = Typography;
 
 interface ThinkingBlockProps {
   thinking: string;
@@ -28,11 +25,7 @@ export default function ThinkingBlock({
       </button>
       {expanded && (
         <div className="thinking-content">
-          {thinking.trim().length > 0 ? (
-            <MarkdownContent text={thinking} />
-          ) : (
-            <Text type="secondary">思考中...</Text>
-          )}
+          <MarkdownContent text={thinking} />
         </div>
       )}
     </div>
