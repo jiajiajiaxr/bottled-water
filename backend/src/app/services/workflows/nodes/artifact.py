@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.models import Agent, Artifact, Message, User
+from app.models import Agent, Artifact, Message, User, utcnow
 from app.services.agents.tool_loop import execute_tool_by_name
 from app.services.serialization import artifact_to_dict, message_to_dict
 from app.services.realtime.event_bus import event_bus
@@ -178,4 +178,22 @@ async def _publish_artifact_messages(context: WorkflowExecutionContext, output: 
     preview_id = output.get("preview_message_id")
     preview = context.db.get(Message, str(preview_id)) if preview_id else None
     if preview:
+        boundary_ids = _timeline_boundary_ids(context)
+        if boundary_ids:
+            content = dict(preview.content or {})
+            content["_streamHistoryBoundaryIds"] = boundary_ids
+            preview.content = content
+        preview.created_at = utcnow()
+        preview.updated_at = utcnow()
+        context.db.commit()
+        context.db.refresh(preview)
         await event_bus.publish(context.channel, "message:new", message_to_dict(preview))
+
+
+def _timeline_boundary_ids(context: WorkflowExecutionContext) -> list[str]:
+    ids: list[str] = []
+    run = getattr(context, "workflow_run", None)
+    trigger_message_id = getattr(run, "trigger_message_id", None)
+    if isinstance(trigger_message_id, str) and trigger_message_id.strip():
+        ids.append(trigger_message_id)
+    return ids

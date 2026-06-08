@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +39,11 @@ from app.services.conversation_identity import conversation_group_number, conver
 
 
 def iso(value: datetime | None) -> str | None:
-    return value.isoformat().replace("+00:00", "Z") if value else None
+    if not value:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 SENSITIVE_KEY_PARTS = ("api_key", "apikey", "secret", "token", "password", "authorization")
