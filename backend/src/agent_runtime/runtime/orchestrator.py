@@ -68,6 +68,8 @@ class Orchestrator:
         self._pending_agent_reports: Dict[str, AgentReport] = {}
         self._persistence_lock = asyncio.Lock()
         self._current_context_metadata: dict[str, Any] = {}
+        self._mention_target_ids: list[str] = []
+        self._mention_dispatched_ids: set[str] = set()
 
     async def run(
         self,
@@ -139,6 +141,7 @@ class Orchestrator:
             user_message,
             context_metadata,
         )
+        self._reset_mention_scope(user_message, self._current_context_metadata)
 
         # 加载已有 Blackboard，不存在则创建
         blackboard = await self.blackboard_mgr.get(self.session_id)
@@ -200,6 +203,7 @@ class Orchestrator:
                     content,
                     user_input.get("context_metadata"),
                 )
+                self._reset_mention_scope(content, self._current_context_metadata)
                 await self._handle_user_input_to_blackboard(content)
                 current_task = content  # 用户输入成为新任务
                 yield Event(type="user.input_received", payload={"content": content})
@@ -241,16 +245,19 @@ class Orchestrator:
                 return
 
             # --- 4. 调度器决策 ---
-            decision = await self.scheduler.make_decision(
-                blackboard=blackboard_view,
-                agent_reports=reports,
-                conversation_context={
-                    "session_id": self.session_id,
-                    "round": self.round_num,
-                    "current_task": current_task,
-                    "agent_count": len(self.agents),
-                },
-            )
+            decision = self._mention_decision(reports, current_task)
+            if decision is None:
+                decision = await self.scheduler.make_decision(
+                    blackboard=blackboard_view,
+                    agent_reports=reports,
+                    conversation_context={
+                        "session_id": self.session_id,
+                        "round": self.round_num,
+                        "current_task": current_task,
+                        "agent_count": len(reports),
+                    },
+                )
+            decision = self._scope_decision_to_mentions(decision, reports, current_task)
             logger.info(
                 "调度决策",
                 session_id=self.session_id,
@@ -303,7 +310,7 @@ class Orchestrator:
 
             # --- 7. 判断循环是否继续 ---
             all_completed = all(r.will.value == "complete" for r in reports)
-            if all_completed and len(reports) == len(self.agents):
+            if all_completed and len(reports) == len(self._active_agent_ids()):
                 logger.info("所有 Agent 已完成，结束调度循环", session_id=self.session_id)
                 break
 
@@ -418,6 +425,9 @@ class Orchestrator:
             logger.error("指派目标无效", session_id=self.session_id, target=agent_id)
             execution_state["should_continue"] = True
             return
+
+        if agent_id in self._mention_target_ids:
+            self._mention_dispatched_ids.add(agent_id)
 
         agent = self.agents[agent_id]
         agent_loop = self._agent_loops[agent_id]
@@ -577,6 +587,9 @@ class Orchestrator:
         if not agent_id or agent_id not in self.agents:
             logger.error("指派目标无效", session_id=self.session_id, target=agent_id)
             return True, events
+
+        if agent_id in self._mention_target_ids:
+            self._mention_dispatched_ids.add(agent_id)
 
         agent = self.agents[agent_id]
         agent_loop = self._agent_loops[agent_id]
@@ -818,7 +831,11 @@ class Orchestrator:
 
         for value in values:
             collect(value)
-        return list(dict.fromkeys(flattened))
+        targets = list(dict.fromkeys(flattened))
+        if self._mention_target_ids:
+            allowed = set(self._mention_target_ids)
+            targets = [agent_id for agent_id in targets if agent_id in allowed]
+        return targets
 
     def _compact_parallel_events(self, events: list[Event]) -> list[Event]:
         """Keep structural events when replaying finished parallel branches.
@@ -833,7 +850,7 @@ class Orchestrator:
     def _collect_reports(self) -> List[AgentReport]:
         """收集各 Agent 的状态报告"""
         reports = []
-        for agent_id in self.agents:
+        for agent_id in self._active_agent_ids():
             if agent_id in self._pending_agent_reports:
                 reports.append(self._pending_agent_reports[agent_id])
             else:
@@ -847,6 +864,161 @@ class Orchestrator:
                     )
                 )
         return reports
+
+    def _reset_mention_scope(self, content: str, context_metadata: dict[str, Any]) -> None:
+        self._mention_target_ids = self._resolve_mention_target_ids(content, context_metadata)
+        self._mention_dispatched_ids.clear()
+
+    def _resolve_mention_target_ids(
+        self,
+        content: str,
+        context_metadata: dict[str, Any] | None,
+    ) -> list[str]:
+        metadata = context_metadata or {}
+        targets: list[str] = []
+
+        def add(agent_id: Any) -> None:
+            normalized = str(agent_id or "").strip()
+            if normalized in self.agents and normalized not in targets:
+                targets.append(normalized)
+
+        raw_targets = metadata.get("mention_target_agent_ids")
+        if isinstance(raw_targets, (list, tuple, set)):
+            for item in raw_targets:
+                add(item)
+
+        raw_mentions = metadata.get("agent_mentions")
+        if isinstance(raw_mentions, list):
+            for item in raw_mentions:
+                if isinstance(item, dict):
+                    add(item.get("agent_id") or item.get("id"))
+
+        if targets:
+            return targets
+
+        lowered = (content or "").lower()
+        if not lowered:
+            return []
+        for agent_id, config in self.agents.items():
+            candidates = {
+                f"agent_id={agent_id.lower()}",
+                f"@{agent_id.lower()}",
+            }
+            name = (config.name or "").strip().lower()
+            if name:
+                candidates.add(f"@{name}")
+            if any(candidate in lowered for candidate in candidates):
+                add(agent_id)
+        return targets
+
+    def _active_agent_ids(self) -> list[str]:
+        if self._mention_target_ids:
+            return [agent_id for agent_id in self._mention_target_ids if agent_id in self.agents]
+        return list(self.agents)
+
+    def _mention_decision(
+        self,
+        reports: list[AgentReport],
+        current_task: str,
+    ) -> SchedulingDecision | None:
+        targets = self._active_agent_ids() if self._mention_target_ids else []
+        if not targets:
+            return None
+        report_by_agent = {report.agent_id: report for report in reports}
+
+        def is_terminal(agent_id: str) -> bool:
+            report = report_by_agent.get(agent_id)
+            return bool(report and report.state in {AgentState.COMPLETED, AgentState.FAILED})
+
+        pending = [
+            agent_id
+            for agent_id in targets
+            if agent_id not in self._mention_dispatched_ids and not is_terminal(agent_id)
+        ]
+        if pending:
+            return SchedulingDecision(
+                decision_type="parallel" if len(pending) > 1 else "assign",
+                action="assign",
+                target_agent_id=pending[0],
+                target_agent_ids=pending,
+                task=current_task,
+                task_description=current_task,
+                rationale="Explicit user mention restricts this turn to the mentioned Agent(s).",
+                expected_outputs=["Direct response from the mentioned Agent(s)."],
+            )
+
+        unfinished = [agent_id for agent_id in targets if not is_terminal(agent_id)]
+        if unfinished:
+            return SchedulingDecision(
+                decision_type="wait",
+                action="wait",
+                target_agent_id=unfinished[0],
+                target_agent_ids=unfinished,
+                task=current_task,
+                task_description=current_task,
+                rationale="Mentioned Agent has already been assigned; waiting for its terminal report.",
+            )
+
+        return SchedulingDecision(
+            decision_type="complete",
+            action="complete",
+            target_agent_id=targets[0],
+            target_agent_ids=targets,
+            task=current_task,
+            task_description=current_task,
+            rationale="Mentioned Agent reached a terminal report; ending this turn.",
+        )
+
+    def _scope_decision_to_mentions(
+        self,
+        decision: SchedulingDecision,
+        reports: list[AgentReport],
+        current_task: str,
+    ) -> SchedulingDecision:
+        targets = self._active_agent_ids() if self._mention_target_ids else []
+        if not targets:
+            return decision
+
+        if decision.decision_type in {"assign", "parallel"}:
+            scoped_targets = self._decision_target_ids(
+                decision.target_agent_ids,
+                decision.verification_agents,
+                decision.target_agent_id,
+            )
+            if not scoped_targets:
+                scoped_targets = [
+                    agent_id
+                    for agent_id in targets
+                    if agent_id not in self._mention_dispatched_ids
+                ] or targets
+            decision.decision_type = "parallel" if len(scoped_targets) > 1 else "assign"
+            decision.action = "assign"
+            decision.target_agent_id = scoped_targets[0]
+            decision.target_agent_ids = scoped_targets
+            return decision
+
+        if decision.decision_type == "complete":
+            report_by_agent = {report.agent_id: report for report in reports}
+            unfinished = [
+                agent_id
+                for agent_id in targets
+                if not (
+                    report_by_agent.get(agent_id)
+                    and report_by_agent[agent_id].state in {AgentState.COMPLETED, AgentState.FAILED}
+                )
+            ]
+            if unfinished:
+                return self._mention_decision(reports, current_task) or decision
+            decision.target_agent_id = decision.target_agent_id or targets[0]
+            decision.target_agent_ids = targets
+            return decision
+
+        if decision.decision_type == "wait":
+            decision.target_agent_id = decision.target_agent_id or targets[0]
+            decision.target_agent_ids = targets
+            return decision
+
+        return self._mention_decision(reports, current_task) or decision
 
     def _build_blackboard_view(self, blackboard: dict) -> dict:
         """构建给 Agent 看的 Blackboard 分层视图。

@@ -276,6 +276,58 @@ class TestOrchestratorRun:
         assert "reviewer:sess_parallel" in mock_persistence.agent_contexts
 
     @pytest.mark.asyncio
+    async def test_raw_mention_limits_legacy_scheduler_to_target(self, mock_provider):
+        scheduler = SimpleScheduler(
+            [
+                SchedulingDecision(
+                    decision_type="parallel",
+                    target_agent_id="daily",
+                    target_agent_ids=["daily", "deploy", "frontend"],
+                    task_description="incorrect broad dispatch",
+                ),
+                SchedulingDecision(decision_type="complete"),
+            ]
+        )
+        agents = {
+            "daily": AgentConfig(id="daily", name="Daily Chat Agent", system_prompt="chat"),
+            "deploy": AgentConfig(id="deploy", name="Deploy Agent", system_prompt="deploy"),
+            "frontend": AgentConfig(
+                id="frontend",
+                name="Frontend Worker",
+                system_prompt="frontend",
+            ),
+        }
+        orch = Orchestrator(
+            session_id="sess_mention_scope",
+            agents=agents,
+            scheduler=scheduler,
+            model_provider=mock_provider,
+            watchdog_config=WatchdogConfig(max_rounds=5),
+        )
+        mock_provider.responses = [
+            ChatResponse(
+                content='deploy done\n```status_report\n{"state": "completed", "will": "complete"}\n```'
+            ),
+        ]
+
+        events = []
+        async for event in orch.run("@Deploy Agent hello"):
+            events.append(event)
+
+        started = [event.payload["agent_id"] for event in events if event.type == "system.agent_started"]
+        completed = [
+            event.payload["agent_id"] for event in events if event.type == "system.agent_completed"
+        ]
+        decisions = [event for event in events if event.type == "control.scheduling_decision"]
+
+        assert scheduler.call_count == 0
+        assert started == ["deploy"]
+        assert completed == ["deploy"]
+        assert [event.payload["decision"] for event in decisions] == ["assign", "complete"]
+        assert [event.payload["target"] for event in decisions] == ["deploy", "deploy"]
+        assert not [event for event in events if event.type == "control.watchdog_triggered"]
+
+    @pytest.mark.asyncio
     async def test_agent_failure_is_reported_and_archived_to_blackboard(
         self, sample_agents, mock_provider, mock_persistence, monkeypatch
     ):

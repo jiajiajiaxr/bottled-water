@@ -4,7 +4,7 @@ import pytest
 
 from agent_runtime.context.blackboard import BlackboardManager
 from agent_runtime.core.protocol import AGENT_REPORT, CONTROL_ASSIGN, CONTROL_COMPLETE, SCHEDULER_DECISION, USER_INPUT
-from agent_runtime.core.types import AgentConfig, Event
+from agent_runtime.core.types import AgentConfig, Event, SchedulingDecision
 from agent_runtime.runtime.agent_loop import AgentLoop
 from agent_runtime.runtime.agent_actor import AgentActor
 from agent_runtime.runtime.event_dispatcher import EventDispatcher
@@ -180,6 +180,38 @@ def test_scheduler_agent_name_matching_ignores_generic_agent_token():
     )
 
     assert scheduler._agent_ids_mentioned_in("@Deploy Agent 你会干嘛") == ["deploy"]
+
+
+def test_scheduler_agent_repair_keeps_decision_inside_mention_scope():
+    bus = EventDispatcher()
+    scheduler = SchedulerAgent(
+        session_id="sess_scheduler_mention_repair",
+        agents={
+            "daily": AgentConfig(id="daily", name="Daily Chat Agent", system_prompt="chat"),
+            "deploy": AgentConfig(id="deploy", name="Deploy Agent", system_prompt="deploy"),
+            "frontend": AgentConfig(id="frontend", name="Frontend Worker", system_prompt="frontend"),
+        },
+        event_bus=bus,
+        blackboard_mgr=BlackboardManager(event_bus=bus),
+        model_provider=None,
+    )
+    scheduler.current_task = "@Deploy Agent hello"
+    scheduler._mention_target_ids = ["deploy"]
+
+    repaired = scheduler._repair_decision(
+        SchedulingDecision(
+            decision_type="parallel",
+            target_agent_id="daily",
+            target_agent_ids=["daily", "frontend"],
+            verification_agents=["deploy"],
+            task_description="hello",
+        ),
+        reports=[],
+    )
+
+    assert repaired.decision_type == "assign"
+    assert repaired.target_agent_id == "deploy"
+    assert repaired.target_agent_ids == ["deploy"]
 
 
 @pytest.mark.asyncio

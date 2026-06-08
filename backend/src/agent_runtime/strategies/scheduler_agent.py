@@ -197,6 +197,8 @@ class SchedulerAgent(AgentActor):
             await self._set_state(AgentState.WAITING, reason="scheduler_waiting_for_reports")
 
     async def _publish_control(self, decision: SchedulingDecision) -> None:
+        mention_targets = set(self._valid_target_ids(self._mention_target_ids))
+
         if decision.decision_type == "complete":
             await self.event_bus.publish(
                 Event(
@@ -230,6 +232,8 @@ class SchedulerAgent(AgentActor):
             ]
             if decision.target_agent_id:
                 targets.insert(0, decision.target_agent_id)
+            if mention_targets:
+                targets = [target for target in targets if target in mention_targets]
             for target in dict.fromkeys(targets):
                 if target in self.agents and target != self.scheduler_id:
                     await self._assign(target, decision)
@@ -248,6 +252,8 @@ class SchedulerAgent(AgentActor):
             return
 
         if decision.target_agent_id:
+            if mention_targets and decision.target_agent_id not in mention_targets:
+                return
             if decision.target_agent_id in self.agents and decision.target_agent_id != self.scheduler_id:
                 await self._assign(decision.target_agent_id, decision)
 
@@ -459,7 +465,64 @@ class SchedulerAgent(AgentActor):
         reports: list[AgentReport],
     ) -> SchedulingDecision:
         """Repair unsafe scheduler output with deterministic runtime guardrails."""
-        if self._mention_target_ids:
+        mention_targets = self._valid_target_ids(self._mention_target_ids)
+        if mention_targets:
+            if decision.decision_type in {"assign", "parallel"}:
+                targets = self._valid_target_ids(
+                    [decision.target_agent_id]
+                    + list(decision.target_agent_ids or [])
+                    + list(decision.verification_agents or [])
+                )
+                targets = [target for target in targets if target in mention_targets]
+                if not targets:
+                    targets = [
+                        agent_id
+                        for agent_id in mention_targets
+                        if agent_id not in self._mention_dispatched_ids
+                        and not self._mention_target_terminal(agent_id)
+                    ]
+                if not targets:
+                    targets = [
+                        agent_id
+                        for agent_id in mention_targets
+                        if not self._mention_target_terminal(agent_id)
+                    ]
+                if not targets:
+                    targets = mention_targets
+                decision.decision_type = "parallel" if len(targets) > 1 else "assign"
+                decision.action = "assign"
+                decision.target_agent_id = targets[0]
+                decision.target_agent_ids = targets
+                decision.rationale = _append_reason(
+                    decision.rationale,
+                    "Explicit user mention scope restricts this turn to the mentioned Agent(s).",
+                )
+                return decision
+            if decision.decision_type == "complete":
+                unfinished = [
+                    agent_id
+                    for agent_id in mention_targets
+                    if not self._mention_target_terminal(agent_id)
+                ]
+                if unfinished:
+                    return self._mention_decision() or SchedulingDecision(
+                        decision_type="wait",
+                        action="wait",
+                        target_agent_id=unfinished[0],
+                        target_agent_ids=unfinished,
+                        task=self.current_task,
+                        task_description=self.current_task,
+                        rationale="Mentioned Agent has not reached a terminal report yet.",
+                    )
+                decision.target_agent_id = decision.target_agent_id or mention_targets[0]
+                decision.target_agent_ids = mention_targets
+                return decision
+            if decision.decision_type == "wait":
+                decision.target_agent_id = decision.target_agent_id or mention_targets[0]
+                decision.target_agent_ids = [
+                    target for target in self._valid_target_ids(decision.target_agent_ids) if target in mention_targets
+                ] or mention_targets
+                return decision
             return decision
 
         decision_text = "\n".join(
