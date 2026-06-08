@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -11,7 +12,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from db.base import Base
-from db.models import Agent, Conversation, Message, Task, User, WorkflowRun
+from db.models import Agent, Artifact, Conversation, Message, Task, User, WorkflowRun, utcnow
 from app.services.agents.function_loop import run_agent_function_call_loop
 from app.services.agents.function_types import AgentFunctionLoopResult
 from app.services.ark import LLMStreamEvent
@@ -167,6 +168,64 @@ async def test_retry_success_does_not_insert_failed_tool_runner_message(db: Sess
         await _publish_tool_artifacts(db, channel, retry_context)
 
     assert db.scalars(select(Message).where(Message.sender_name == "Tool Runner")).all() == []
+
+
+@pytest.mark.asyncio
+async def test_artifact_preview_publish_uses_backend_message_order_time(db: Session) -> None:
+    user, conversation, _message = _user_conversation_message(db, "生成 PDF")
+    old_time = utcnow() - timedelta(minutes=10)
+    artifact = Artifact(
+        conversation_id=conversation.id,
+        agent_id="agent-1",
+        type="document",
+        name="示例演示PDF文档",
+        status="ready",
+        content={"format": "pdf", "files": {}},
+        mime_type="application/pdf",
+    )
+    db.add(artifact)
+    db.flush()
+    preview = Message(
+        conversation_id=conversation.id,
+        sender_type="agent",
+        sender_id="agent-1",
+        sender_name="Master Agent",
+        content_type="preview_card",
+        content={
+            "artifact_id": artifact.id,
+            "title": artifact.name,
+            "format": "pdf",
+        },
+        status="completed",
+        created_at=old_time,
+        updated_at=old_time,
+    )
+    db.add(preview)
+    db.commit()
+    db.refresh(preview)
+    channel = f"conversation:{conversation.id}"
+    context = {
+        "executions": [
+            {
+                "tool_name": "artifact.create_pdf",
+                "output": {
+                    "status": "succeeded",
+                    "tool": "artifact.create_pdf",
+                    "artifact_id": artifact.id,
+                    "preview_message_id": preview.id,
+                },
+            }
+        ]
+    }
+
+    with patch("app.services.chat.artifacts.event_bus.publish", new_callable=AsyncMock) as publish:
+        await _publish_tool_artifacts(db, channel, context)
+
+    db.refresh(preview)
+    assert preview.created_at.replace(tzinfo=None) > old_time.replace(tzinfo=None)
+    message_events = [call.args for call in publish.await_args_list if call.args[1] == "message:new"]
+    assert len(message_events) == 1
+    assert message_events[0][2]["id"] == preview.id
 
 
 @pytest.mark.asyncio
@@ -697,6 +756,7 @@ async def test_independent_group_completion_updates_last_preview(db: Session) ->
                 {"agent_name": "Frontend Worker", "text": "前端已回复"},
                 {"agent_name": "Backend Worker", "text": "后端已回复"},
             ],
+            {},
             f"conversation:{conversation.id}",
         )
 
@@ -705,6 +765,61 @@ async def test_independent_group_completion_updates_last_preview(db: Session) ->
     assert task.status == "COMPLETED"
     assert "Frontend Worker" in conversation.last_message_preview
     assert "正在回答" not in conversation.last_message_preview
+
+
+@pytest.mark.asyncio
+async def test_independent_group_publishes_preview_before_generation_finished(db: Session) -> None:
+    user, conversation, user_message = _user_conversation_message(db, "生成 PDF")
+    conversation.chat_type = "group"
+    task = Task(
+        conversation_id=conversation.id,
+        creator_id=user.id,
+        title="group",
+        description="group",
+        status="EXECUTING",
+        progress=80,
+    )
+    workflow = _parallel_agent_workflow(conversation.id, [])
+    workflow_run = WorkflowRun(
+        conversation_id=conversation.id,
+        trigger_message_id=user_message.id,
+        started_by=user.id,
+        status="running",
+        mode="canvas",
+        workflow_snapshot=workflow,
+        node_states=build_node_states(workflow),
+        edge_states=build_edge_states(workflow),
+        progress=80,
+    )
+    db.add_all([task, workflow_run])
+    db.commit()
+    events: list[str] = []
+
+    async def fake_finalize(*_args: Any, **_kwargs: Any) -> None:
+        events.append("final-agent")
+
+    async def fake_publish_artifacts(*_args: Any, **_kwargs: Any) -> None:
+        events.append("preview-card")
+
+    async def fake_publish(_channel: str, event: str, _payload: dict[str, Any]) -> None:
+        events.append(event)
+
+    with patch("app.services.chat.orchestrator.finalize_streaming_agent_messages", new=fake_finalize):
+        with patch("app.services.chat.orchestrator._publish_tool_artifacts", new=fake_publish_artifacts):
+            with patch("app.services.chat.orchestrator.event_bus.publish", new=fake_publish):
+                await _complete_independent_group(
+                    db,
+                    conversation,
+                    task,
+                    workflow_run,
+                    [],
+                    [{"agent_name": "Daily Chat Agent", "text": "已生成 PDF"}],
+                    {"executions": [{"tool_name": "artifact.create_pdf"}]},
+                    f"conversation:{conversation.id}",
+                )
+
+    assert events.index("final-agent") < events.index("preview-card")
+    assert events.index("preview-card") < events.index("generation_finished")
 
 
 def _user() -> User:

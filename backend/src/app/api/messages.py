@@ -26,7 +26,7 @@ from app.services.files.attachments import (
 )
 from app.services.files.references import file_reference_text, resolve_file_reference_attachments
 from app.services.chat.code_runner import run_message_code_block
-from app.services.chat.message_prompt import runtime_prompt_for_message
+from app.services.chat.message_prompt import agent_mentions_for_message, runtime_prompt_for_message
 
 
 router = APIRouter(tags=["messages"])
@@ -87,6 +87,7 @@ async def _send_async(
             thinking_enabled=bool(payload.get("thinking_enabled")),
             user_message_id=str(message.id),
             client_message_id=message.client_message_id,
+            agent_mentions=agent_mentions_for_message(message),
         )
 
     return message
@@ -280,6 +281,7 @@ async def stream_conversation(
             thinking_enabled=bool(message_payload.get("thinking_enabled")),
             user_message_id=str(message.id),
             client_message_id=message.client_message_id,
+            agent_mentions=agent_mentions_for_message(message),
         )
 
         queue = sse_sink.get_queue()

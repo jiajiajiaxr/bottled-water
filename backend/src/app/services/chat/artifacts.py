@@ -56,6 +56,10 @@ async def _publish_artifact_outputs(
     if artifact:
         preview = _preview_message_for_artifact_output(db, output, artifact, tool_name)
         if preview:
+            preview.created_at = utcnow()
+            preview.updated_at = utcnow()
+            db.commit()
+            db.refresh(preview)
             await event_bus.publish(channel, "message:new", message_to_dict(preview))
 
 

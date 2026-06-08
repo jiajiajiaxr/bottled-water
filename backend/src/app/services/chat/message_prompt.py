@@ -40,6 +40,21 @@ def runtime_prompt_for_message(message: Message) -> str:
     return "\n\n".join(part for part in sections if part)
 
 
+def agent_mentions_for_message(message: Message) -> list[dict[str, str]]:
+    content = message.content if isinstance(message.content, dict) else {}
+    mentions = content.get("agent_mentions") if isinstance(content.get("agent_mentions"), list) else []
+    normalized: list[dict[str, str]] = []
+    for item in mentions:
+        if not isinstance(item, dict):
+            continue
+        agent_id = str(item.get("agent_id") or item.get("id") or "").strip()
+        agent_name = str(item.get("agent_name") or item.get("name") or "").strip()
+        if not agent_id:
+            continue
+        normalized.append({"agent_id": agent_id, "agent_name": agent_name})
+    return normalized
+
+
 def _file_reference_lines(attachments: list[Any]) -> str:
     lines: list[str] = []
     for item in attachments:

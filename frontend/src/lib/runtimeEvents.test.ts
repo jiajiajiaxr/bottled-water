@@ -41,6 +41,26 @@ describe("applyRuntimeEvent", () => {
     });
   });
 
+  it("records legacy control scheduling decisions in the active generation", () => {
+    const patch = applyRuntimeEvent(conversation(), "control.scheduling_decision", {
+      generation_id: "gen-1",
+      round: 1,
+      decision: "assign",
+      target: "deploy-agent",
+      task: "reply to deploy mention",
+      rationale: "Deploy Agent is the mentioned participant",
+    });
+
+    const generation = patch.runtime?.generations?.[0];
+    expect(patch.generation_status).toBe("running");
+    expect(generation?.decisions?.[0]).toMatchObject({
+      round: 1,
+      decision: "assign",
+      target: "deploy-agent",
+      task: "reply to deploy mention",
+    });
+  });
+
   it("updates agent runs from nested agent reports", () => {
     const base = conversation({
       runtime: {

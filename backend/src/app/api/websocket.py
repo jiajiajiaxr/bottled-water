@@ -13,7 +13,7 @@ from agent_runtime.core.types import Event as RuntimeEvent
 from app.core.errors import NotFoundError, UnauthorizedError
 from app.core.security import decode_access_token
 from app.events import WebSocketSink
-from app.services.chat.message_prompt import runtime_prompt_for_message
+from app.services.chat.message_prompt import agent_mentions_for_message, runtime_prompt_for_message
 from app.services.chat.user_messages import message_text, save_user_message
 from app.services.conversation_session_manager import ConversationSessionManager
 from common.logger import get_logger
@@ -159,6 +159,7 @@ async def _handle_chat_send(
                 else str(message.content)
             )
             runtime_content = runtime_prompt_for_message(message)
+            agent_mentions = agent_mentions_for_message(message)
             asyncio.create_task(
                 _send_user_input_async(
                     session_manager,
@@ -168,6 +169,7 @@ async def _handle_chat_send(
                     bool(data.get("thinking_enabled")),
                     str(message.id),
                     message.client_message_id,
+                    agent_mentions,
                 ),
                 name=f"ws-send-{conversation_id}",
             )
@@ -199,6 +201,7 @@ async def _send_user_input_async(
     thinking_enabled: bool = False,
     user_message_id: str | None = None,
     client_message_id: str | None = None,
+    agent_mentions: list[dict[str, str]] | None = None,
 ) -> None:
     """Send user input to the session in the background."""
     try:
@@ -209,6 +212,7 @@ async def _send_user_input_async(
             thinking_enabled=thinking_enabled,
             user_message_id=user_message_id,
             client_message_id=client_message_id,
+            agent_mentions=agent_mentions,
         )
     except Exception as exc:
         await WebSocketSink(conversation_id).emit(

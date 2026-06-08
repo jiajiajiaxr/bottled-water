@@ -293,12 +293,12 @@ class Orchestrator:
                 return
 
             # --- 6. 执行决策 ---
-            should_continue, events = await self._execute_decision(
-                decision, current_task, blackboard_view
-            )
-            for event in events:
+            execution_state = {"should_continue": True}
+            async for event in self._execute_decision_stream(
+                decision, current_task, blackboard_view, execution_state
+            ):
                 yield event
-            if not should_continue:
+            if not execution_state["should_continue"]:
                 break
 
             # --- 7. 判断循环是否继续 ---
@@ -371,6 +371,194 @@ class Orchestrator:
 
         logger.warning("未知决策类型", session_id=self.session_id, decision_type=decision_type)
         return True, events
+
+    async def _execute_decision_stream(
+        self,
+        decision: SchedulingDecision,
+        current_task: str,
+        blackboard_view: dict,
+        execution_state: dict[str, bool],
+    ) -> AsyncIterator[Event]:
+        if decision.decision_type == "assign":
+            async for event in self._execute_assign_stream(
+                decision, current_task, blackboard_view, execution_state
+            ):
+                yield event
+            return
+
+        should_continue, events = await self._execute_decision(
+            decision, current_task, blackboard_view
+        )
+        execution_state["should_continue"] = should_continue
+        for event in events:
+            yield event
+
+    async def _execute_assign_stream(
+        self,
+        decision: SchedulingDecision,
+        current_task: str,
+        blackboard_view: dict,
+        execution_state: dict[str, bool],
+    ) -> AsyncIterator[Event]:
+        """Execute a single-agent assignment while yielding runtime events live."""
+        target_ids = self._decision_target_ids(decision.target_agent_id)
+        if len(target_ids) > 1:
+            decision.target_agent_ids = target_ids
+            decision.decision_type = "parallel"
+            should_continue, events = await self._execute_parallel(
+                decision, current_task, blackboard_view
+            )
+            execution_state["should_continue"] = should_continue
+            for event in events:
+                yield event
+            return
+
+        agent_id = target_ids[0] if target_ids else None
+        if not agent_id or agent_id not in self.agents:
+            logger.error("指派目标无效", session_id=self.session_id, target=agent_id)
+            execution_state["should_continue"] = True
+            return
+
+        agent = self.agents[agent_id]
+        agent_loop = self._agent_loops[agent_id]
+        task = decision.task_description or current_task
+
+        logger.info("Agent 执行开始", session_id=self.session_id, agent_id=agent_id, task=task[:50])
+
+        agent_ctx = self.agent_ctx_mgr.get(agent_id, self.session_id)
+        agent_ctx.add("task", task)
+        agent_ctx.current_round = self.round_num
+        agent_ctx.current_task = task
+
+        yield Event(
+            type="system.agent_started",
+            payload={
+                "round": self.round_num,
+                "agent_id": agent_id,
+                "agent_name": agent.name,
+                "task": task,
+            },
+        )
+
+        try:
+            internal_events: asyncio.Queue[Event] = asyncio.Queue()
+
+            async def _emit_agent_event(event: Event):
+                await internal_events.put(event)
+
+            agent_task = asyncio.create_task(
+                agent_loop.run(
+                    task=task,
+                    blackboard_view=blackboard_view,
+                    tool_executor=self.tool_executor,
+                    agent_ctx=agent_ctx,
+                    emit_event=_emit_agent_event,
+                    context_provider=self.context_provider,
+                    context_metadata=self._current_context_metadata,
+                ),
+                name=f"orchestrator-agent:{agent_id}",
+            )
+
+            while not agent_task.done():
+                try:
+                    event = await asyncio.wait_for(internal_events.get(), timeout=0.05)
+                except asyncio.TimeoutError:
+                    continue
+                yield event
+
+            while not internal_events.empty():
+                yield internal_events.get_nowait()
+
+            result = agent_task.result()
+
+            work_product = result["work_product"]
+            status_report = result["status_report"]
+            self._pending_agent_reports[agent_id] = status_report
+
+            for tool_event in result.get("tool_events", []):
+                yield Event(type="agent.tool_calls_executed", payload=tool_event)
+
+            tokens_used = self.model_provider.count_tokens(work_product)
+            self.watchdog.add_tokens(tokens_used)
+
+            await self._append_blackboard_history(
+                {
+                    "type": "agent_work",
+                    "round": self.round_num,
+                    "agent_id": agent_id,
+                    "work_product": work_product,
+                    "status_report": {
+                        "state": status_report.state,
+                        "will": status_report.will.value,
+                        "confidence": status_report.confidence,
+                        "rationale": status_report.rationale,
+                    },
+                }
+            )
+
+            if self.persistence:
+                archive = agent_ctx.archive()
+                async with self._persistence_lock:
+                    await self.persistence.save_agent_context(
+                        agent_id, self.session_id, archive["frames"]
+                    )
+
+            self.watchdog.record_progress(tokens_used)
+
+            yield Event(
+                type="system.agent_completed",
+                payload={
+                    "round": self.round_num,
+                    "agent_id": agent_id,
+                    "agent_name": agent.name,
+                    "work_product": work_product,
+                    "status_report": {
+                        "state": status_report.state,
+                        "will": status_report.will.value,
+                        "confidence": status_report.confidence,
+                        "rationale": status_report.rationale,
+                    },
+                },
+            )
+
+            logger.info(
+                "Agent 执行完成",
+                session_id=self.session_id,
+                agent_id=agent_id,
+                state=status_report.state,
+                will=status_report.will.value,
+            )
+        except Exception as e:
+            logger.error("Agent 执行失败", session_id=self.session_id, agent_id=agent_id, error=str(e))
+            self._pending_agent_reports[agent_id] = AgentReport(
+                agent_id=agent_id,
+                state=AgentState.FAILED,
+                will=AgentWill.BLOCKED,
+                blockers=[str(e)],
+                confidence=0.0,
+                rationale=f"Agent execution failed: {type(e).__name__}",
+            )
+            await self._append_blackboard_history(
+                {
+                    "type": "agent_error",
+                    "round": self.round_num,
+                    "agent_id": agent_id,
+                    "task": task,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
+            yield Event(
+                type="system.agent_failed",
+                payload={
+                    "round": self.round_num,
+                    "agent_id": agent_id,
+                    "error": str(e),
+                },
+            )
+            self.watchdog.record_no_progress()
+
+        execution_state["should_continue"] = True
 
     async def _execute_assign(
         self,

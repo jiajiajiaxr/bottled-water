@@ -61,6 +61,45 @@ describe("mergeVisibleMessagesForDisplay", () => {
     ]);
   });
 
+  it("keeps a persisted assistant reply after its triggering user when server time is earlier", () => {
+    const persistedAssistant = {
+      ...message("agent-1", "assistant", "2026-06-07T09:58:00.000Z"),
+      rawContent: {
+        _streamHistoryBoundaryIds: ["user-1"],
+      },
+    };
+    const history = [
+      persistedAssistant,
+      message("user-1", "user", "2026-06-07T10:00:00.000Z"),
+    ];
+
+    const merged = mergeVisibleMessagesForDisplay(history, new Map(), []);
+
+    expect(merged.map((item) => item.id)).toEqual(["user-1", "agent-1"]);
+  });
+
+  it("keeps a persisted assistant reply at its stream position when completion time is later", () => {
+    const persistedAssistant = {
+      ...message("agent-1", "assistant", "2026-06-07T10:03:00.000Z"),
+      rawContent: {
+        _streamHistoryBoundaryIds: ["user-1"],
+      },
+    };
+    const history = [
+      message("user-1", "user", "2026-06-07T10:00:00.000Z"),
+      message("user-2", "user", "2026-06-07T10:02:00.000Z"),
+      persistedAssistant,
+    ];
+
+    const merged = mergeVisibleMessagesForDisplay(history, new Map(), []);
+
+    expect(merged.map((item) => item.id)).toEqual([
+      "user-1",
+      "agent-1",
+      "user-2",
+    ]);
+  });
+
   it("keeps the assistant anchored when the optimistic user id is replaced", () => {
     const persistedUser = {
       ...message("server-user-1", "user", "2026-06-07T10:05:00.000Z"),

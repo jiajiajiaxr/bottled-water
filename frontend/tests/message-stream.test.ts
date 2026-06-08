@@ -220,4 +220,53 @@ describe("conversation WebSocket stream", () => {
     });
     await expect(promise).resolves.toBe("completed");
   });
+
+  it("dispatches authoritative conversation snapshots and legacy scheduling events", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    window.localStorage.setItem("agenthub_token", "test-token");
+    const onRuntimeEvent = vi.fn();
+    const promise = sendMessageWs(
+      "conversation-runtime",
+      { content: { text: "@Deploy Agent hello" } },
+      { onRuntimeEvent },
+    );
+
+    await vi.waitFor(() => expect(FakeWebSocket.latest).toBeDefined());
+    const ws = FakeWebSocket.latest!;
+    await vi.waitFor(() => expect(ws.sent.length).toBeGreaterThan(0));
+    ws.emit("conversation:updated", {
+      id: "conversation-runtime",
+      generation_status: "running",
+      runtime: {
+        active_generation_id: "gen-1",
+        generations: [{ id: "gen-1", status: "running" }],
+      },
+    });
+    ws.emit("control.scheduling_decision", {
+      generation_id: "gen-1",
+      decision: "assign",
+      target: "deploy-agent",
+      task: "reply to deploy mention",
+    });
+
+    expect(onRuntimeEvent).toHaveBeenCalledWith(
+      "conversation:updated",
+      expect.objectContaining({
+        id: "conversation-runtime",
+        generation_status: "running",
+      }),
+    );
+    expect(onRuntimeEvent).toHaveBeenCalledWith(
+      "control.scheduling_decision",
+      expect.objectContaining({
+        target: "deploy-agent",
+      }),
+    );
+
+    ws.emit("generation_finished", {
+      conversation_id: "conversation-runtime",
+      status: "completed",
+    });
+    await expect(promise).resolves.toBe("completed");
+  });
 });

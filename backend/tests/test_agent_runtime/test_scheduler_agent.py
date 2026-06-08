@@ -105,6 +105,84 @@ async def test_scheduler_agent_mentions_dispatch_once_then_complete():
 
 
 @pytest.mark.asyncio
+async def test_scheduler_agent_uses_structured_mention_metadata():
+    bus = EventDispatcher()
+    blackboard = BlackboardManager(event_bus=bus)
+    events: list[Event] = []
+    bus.subscribe("*", lambda event: _append(events, event), target="*")
+    scheduler = SchedulerAgent(
+        session_id="sess_scheduler_structured_mention",
+        agents={
+            "daily": AgentConfig(id="daily", name="Daily Chat Agent", system_prompt="chat"),
+            "deploy": AgentConfig(id="deploy", name="Deploy Agent", system_prompt="deploy"),
+        },
+        event_bus=bus,
+        blackboard_mgr=blackboard,
+        model_provider=None,
+    )
+    scheduler.start()
+
+    await bus.publish(
+        Event(
+            type=USER_INPUT,
+            payload={
+                "content": "## Required Agent Mentions\n- @Deploy Agent (agent_id=deploy)\n\n你会干嘛",
+                "context_metadata": {
+                    "mention_target_agent_ids": ["deploy"],
+                    "agent_mentions": [{"agent_id": "deploy", "agent_name": "Deploy Agent"}],
+                },
+            },
+            source="user",
+        )
+    )
+    assign = await _wait_for(events, CONTROL_ASSIGN)
+
+    await bus.publish(
+        Event(
+            type=AGENT_REPORT,
+            payload={
+                "agent_id": "deploy",
+                "task": "你会干嘛",
+                "work_product": "deploy answer",
+                "report": {
+                    "agent_id": "deploy",
+                    "state": "completed",
+                    "will": "complete",
+                    "confidence": 1.0,
+                },
+            },
+            source="agent:deploy",
+        )
+    )
+    await _wait_for(events, CONTROL_COMPLETE)
+    await asyncio.sleep(0.05)
+    await scheduler.stop()
+
+    assignments = [event for event in events if event.type == CONTROL_ASSIGN]
+    decisions = [event for event in events if event.type == SCHEDULER_DECISION]
+    assert assign.target == "deploy"
+    assert len(assignments) == 1
+    assert decisions[0].payload["decision"]["target_agent_id"] == "deploy"
+    assert decisions[-1].payload["decision"]["decision_type"] == "complete"
+
+
+def test_scheduler_agent_name_matching_ignores_generic_agent_token():
+    bus = EventDispatcher()
+    scheduler = SchedulerAgent(
+        session_id="sess_scheduler_matching",
+        agents={
+            "daily": AgentConfig(id="daily", name="Daily Chat Agent", system_prompt="chat"),
+            "deploy": AgentConfig(id="deploy", name="Deploy Agent", system_prompt="deploy"),
+        },
+        event_bus=bus,
+        blackboard_mgr=BlackboardManager(event_bus=bus),
+        model_provider=None,
+    )
+
+    assert scheduler._agent_ids_mentioned_in("@Deploy Agent 你会干嘛") == ["deploy"]
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_forces_artifact_tool_when_model_only_returns_text():
     events: list[Event] = []
     executor = FakeToolExecutor()

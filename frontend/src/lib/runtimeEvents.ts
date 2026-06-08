@@ -19,13 +19,21 @@ export function applyRuntimeEvent(
     [event]: (generation.event_counts?.[event] || 0) + 1,
   };
 
-  if (event === "scheduler.decision") {
-    const decision = payload.decision as Record<string, unknown> | undefined;
+  if (event === "scheduler.decision" || event === "control.scheduling_decision") {
+    const decision =
+      payload.decision && typeof payload.decision === "object"
+        ? (payload.decision as Record<string, unknown>)
+        : undefined;
     generation.decisions = [
       ...(generation.decisions || []),
       {
         round: numberOrUndefined(payload.round),
-        decision: stringOrUndefined(decision?.action ?? decision?.decision_type ?? decision?.decision),
+        decision: stringOrUndefined(
+          decision?.action ??
+            decision?.decision_type ??
+            decision?.decision ??
+            payload.decision,
+        ),
         target: stringOrUndefined(decision?.target_agent_id ?? payload.target),
         target_agent_ids: arrayOfStrings(decision?.target_agent_ids ?? payload.target_agent_ids),
         task: stringOrUndefined(decision?.task ?? decision?.task_description ?? payload.task),

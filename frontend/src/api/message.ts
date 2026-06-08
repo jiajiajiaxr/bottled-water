@@ -146,6 +146,9 @@ function dispatchStreamEvent(
     case "message:updated":
       handlers.onMessageUpdated?.(normalizeChatMessage(data as ChatMessage));
       break;
+    case "conversation:updated":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
+      break;
     case "generation_finished":
     case "generation:finished":
     case "generation:cancelled":
@@ -277,6 +280,7 @@ function dispatchStreamEvent(
     case "user.waiting_for_input":
     case "user.input_received":
     case "user.input_queued":
+      handlers.onRuntimeEvent?.(event, data as Record<string, unknown>);
       break;
   }
 }

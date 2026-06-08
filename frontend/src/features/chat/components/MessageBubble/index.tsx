@@ -184,9 +184,8 @@ function MessageBubbleComponent({
     streamThinkingEnabled;
   const showThinkingBlock = Boolean(
     !isUser &&
-      messageThinkingEnabled &&
-      (thinkingText ||
-        (message.streamState === "streaming" && streamThinkingEnabled)),
+    messageThinkingEnabled &&
+    thinkingText,
   );
   const activeToolCalls = message.rawContent?._activeToolCalls as
     | Array<{ toolName: string }>

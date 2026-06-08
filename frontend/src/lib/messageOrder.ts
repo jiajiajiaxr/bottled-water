@@ -31,6 +31,8 @@ export function mergeVisibleMessagesForDisplay(
     })
     .map((record, index) => ({ ...record, rank: index }));
 
+  applyHistoryAnchorRanks(historyRecords);
+
   historyRecords.forEach((record) => {
     const { message, rank } = record;
     for (const key of messageIdentityKeys(message)) {
@@ -46,8 +48,8 @@ export function mergeVisibleMessagesForDisplay(
     if (messageIdentityKeys(message).some((key) => historyKeys.has(key))) {
       return;
     }
-    const anchorRank = streamAnchorRank(message, historyKeyRanks);
-    if (anchorRank === undefined && streamBoundaryKeys(message).length > 0) {
+    const anchorRank = messageAnchorRank(message, historyKeyRanks);
+    if (anchorRank === undefined && messageBoundaryKeys(message).length > 0) {
       return;
     }
     records.push({
@@ -74,6 +76,34 @@ export function mergeVisibleMessagesForDisplay(
     .map((record) => record.message);
 }
 
+function applyHistoryAnchorRanks(historyRecords: TimelineRecord[]): void {
+  for (let iteration = 0; iteration < historyRecords.length; iteration += 1) {
+    const historyKeyRanks = new Map<string, number>();
+    for (const record of historyRecords) {
+      for (const key of messageIdentityKeys(record.message)) {
+        historyKeyRanks.set(key, record.rank);
+      }
+    }
+
+    let changed = false;
+    historyRecords.forEach((record, index) => {
+      const anchorRank = messageAnchorRank(
+        record.message,
+        historyKeyRanks,
+        messageIdentityKeys(record.message),
+      );
+      if (anchorRank === undefined) return;
+
+      const nextRank = anchorRank + 0.5 + index / 1000000;
+      if (Math.abs(record.rank - nextRank) <= Number.EPSILON) return;
+      record.rank = nextRank;
+      changed = true;
+    });
+
+    if (!changed) break;
+  }
+}
+
 function messageTime(message: ChatMessage): number {
   const time = Date.parse(message.createdAt);
   return Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER;
@@ -94,12 +124,15 @@ function messageIdentityKeys(message: ChatMessage): string[] {
     .filter(Boolean);
 }
 
-function streamAnchorRank(
+function messageAnchorRank(
   message: ChatMessage,
   historyKeyRanks: Map<string, number>,
+  excludedKeys: string[] = [],
 ): number | undefined {
   let rank: number | undefined;
-  for (const value of streamBoundaryKeys(message)) {
+  const excluded = new Set(excludedKeys);
+  for (const value of messageBoundaryKeys(message)) {
+    if (excluded.has(value)) continue;
     const itemRank = historyKeyRanks.get(String(value));
     if (itemRank === undefined) continue;
     rank = rank === undefined ? itemRank : Math.max(rank, itemRank);
@@ -107,11 +140,15 @@ function streamAnchorRank(
   return rank;
 }
 
-function streamBoundaryKeys(message: ChatMessage): string[] {
+function messageBoundaryKeys(message: ChatMessage): string[] {
   const raw = message.rawContent ?? {};
-  return Array.isArray(raw._streamHistoryBoundaryIds)
-    ? raw._streamHistoryBoundaryIds
-        .map((value) => (typeof value === "string" ? value.trim() : ""))
+  return rawStringArray(raw._streamHistoryBoundaryIds);
+}
+
+function rawStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
         .filter(Boolean)
     : [];
 }

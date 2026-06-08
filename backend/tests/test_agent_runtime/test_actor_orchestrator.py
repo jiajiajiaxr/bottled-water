@@ -106,3 +106,43 @@ async def test_actor_runtime_mention_assigns_once_and_completes(mock_provider, m
     assert decisions[0].payload["decision"]["decision_type"] == "assign"
     assert decisions[-1].payload["decision"]["decision_type"] == "complete"
     assert CONTROL_COMPLETE in [event.type for event in events]
+
+
+@pytest.mark.asyncio
+async def test_actor_runtime_structured_mention_metadata_does_not_create_second_round(mock_provider, mock_tool_executor):
+    mock_provider.responses = [
+        ChatResponse(
+            content='deploy answer\n```status_report\n{"state":"completed","will":"complete","confidence":0.9}\n```'
+        ),
+        ChatResponse(
+            content='{"decision_type":"assign","target_agent_id":"deploy","task_description":"repeat","rationale":"should not run"}'
+        ),
+    ]
+    session = Session.create(
+        agents=[
+            AgentConfig(id="daily", name="Daily Chat Agent", system_prompt="You are chat.", role="chat"),
+            AgentConfig(id="deploy", name="Deploy Agent", system_prompt="You are deploy.", role="deploy"),
+        ],
+        scheduler_config={"strategy": "tech_lead", "runtime": "actor", "max_runtime_seconds": 5},
+        model_provider=mock_provider,
+        tool_executor=mock_tool_executor,
+        session_id="sess_actor_structured_mention",
+    )
+
+    events = []
+    async for event in session.run(
+        "## Required Agent Mentions\n- @Deploy Agent (agent_id=deploy)\n\n你会干嘛",
+        context_metadata={
+            "mention_target_agent_ids": ["deploy"],
+            "agent_mentions": [{"agent_id": "deploy", "agent_name": "Deploy Agent"}],
+        },
+    ):
+        events.append(event)
+
+    assignments = [event for event in events if event.type == CONTROL_ASSIGN]
+    decisions = [event for event in events if event.type == SCHEDULER_DECISION]
+
+    assert [event.target for event in assignments] == ["deploy"]
+    assert decisions[0].payload["decision"]["decision_type"] == "assign"
+    assert decisions[-1].payload["decision"]["decision_type"] == "complete"
+    assert mock_provider.call_count == 1
