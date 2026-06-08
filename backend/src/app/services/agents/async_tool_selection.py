@@ -14,7 +14,7 @@ from app.services.agents.capability_permissions import (
     configured_tool_names,
 )
 from app.services.mcp import tool_name
-from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.builtins.registry import BUILTIN_TOOLS, active_builtin_tool_names
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -167,11 +167,22 @@ def builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> dic
         args.setdefault("target", prompt)
     if name == "document.review":
         args.setdefault("text", prompt)
+    if name == "external_agent.invoke":
+        args.setdefault("action", "run")
+        args.setdefault("provider", external_agent_provider_for_prompt(prompt))
     return args
 
 
+def external_agent_provider_for_prompt(prompt: str) -> str:
+    if re.search(r"(claude|claude\s*code|claude-code)", prompt, re.I):
+        return "claude_code"
+    if re.search(r"(opencode|open\s*code|open-code)", prompt, re.I):
+        return "opencode"
+    return "codex"
+
+
 def select_agent_builtin_tools(agent: Agent, prompt: str, limit: int) -> list[str]:
-    names = list(BUILTIN_TOOLS.keys()) if agent_uses_default_full_permissions(agent) else configured_tool_names(agent)
+    names = active_builtin_tool_names() if agent_uses_default_full_permissions(agent) else configured_tool_names(agent)
     allowed = [name for name in names if name in BUILTIN_TOOLS]
     if not allowed:
         return []
@@ -203,6 +214,12 @@ def select_agent_builtin_tools(agent: Agent, prompt: str, limit: int) -> list[st
         preferred.append("sandbox.run")
     if re.search("(\u5ba1\u67e5|\u5b89\u5168|\u98ce\u9669|\u5408\u89c4)", prompt, re.I):
         preferred.extend([name for name in ("security.audit", "document.review") if name in allowed])
+    if re.search(
+        "(codex|claude|opencode|open\\s*code|external\\s*(agent|coding)|coding\\s*agent|\\u5916\\u90e8|\\u667a\\u80fd\\u4f53)",
+        prompt,
+        re.I,
+    ) and "external_agent.invoke" in allowed:
+        preferred.append("external_agent.invoke")
     if not preferred and TOOL_INTENT_PATTERN.search(prompt):
         preferred = allowed[:1]
     return list(dict.fromkeys(preferred))[:limit]

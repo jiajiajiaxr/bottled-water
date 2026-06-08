@@ -24,6 +24,7 @@ const { Text } = Typography;
 const PROVIDER_LABELS: Record<string, string> = {
   codex: "Codex CLI",
   claude_code: "Claude Code CLI",
+  opencode: "OpenCode CLI",
 };
 
 export function ExternalAgentsPanel() {
@@ -69,7 +70,7 @@ export function ExternalAgentsPanel() {
   return (
     <Space className="external-agents-panel" direction="vertical" size={16}>
       <Card
-        title="外部 Coding Agent"
+        title="调用外部智能体"
         extra={
           <Button
             icon={<ReloadOutlined />}
@@ -81,8 +82,8 @@ export function ExternalAgentsPanel() {
         }
       >
         <Text type="secondary">
-          Codex / Claude Code 作为外部长任务 Coding Agent 接入。Agent 获得
-          external_agent.* 工具权限后，才能在工作区隔离目录中启动、查询或取消运行。
+          Codex / Claude Code / OpenCode 通过统一适配网关接入。Agent 获得
+          external_agent.invoke 工具权限后，可按 provider 启动、探测、查询或取消外部智能体运行。
         </Text>
         <ExternalAgentStatusCards
           probes={probes}
@@ -108,7 +109,7 @@ export function ExternalAgentStatusCards({
 }) {
   const items = useMemo(
     () =>
-      ["codex", "claude_code"].map(
+      ["codex", "claude_code", "opencode"].map(
         (provider) =>
           probes.find((item) => item.provider === provider) ?? {
             provider,

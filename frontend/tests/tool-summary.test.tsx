@@ -73,7 +73,7 @@ describe("tool call summary", () => {
   it("keeps external agent run metadata in the summary details", () => {
     const summary = summarizeToolEvents([
       {
-        toolName: "external_agent.run_codex",
+        toolName: "external_agent.invoke",
         status: "completed",
         run_id: "run-123",
         provider: "codex",
@@ -81,7 +81,7 @@ describe("tool call summary", () => {
       },
     ]);
 
-    expect(summary?.label).toBe("调用：external_agent.run_codex");
+    expect(summary?.label).toBe("调用：external_agent.invoke");
     expect(summary?.details[0].run_id).toBe("run-123");
     expect(summary?.details[0].changed_files_count).toBe(2);
   });

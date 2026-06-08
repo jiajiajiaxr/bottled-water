@@ -22,6 +22,8 @@ def invoke_external_agent_tool(
     name: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
+    if name == "external_agent.invoke":
+        return _invoke(db, user, arguments)
     if name == "external_agent.probe":
         return _probe(arguments)
     if name == "external_agent.run_codex":
@@ -33,6 +35,20 @@ def invoke_external_agent_tool(
     if name == "external_agent.status":
         return _status(db, user, arguments)
     raise ValidationAppError("未知外部 Agent 工具")
+
+
+def _invoke(db: Session, user: User, arguments: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_invoke_arguments(arguments)
+    action = _action(normalized)
+    if action == "probe":
+        return _probe(normalized)
+    if action == "run":
+        return _run(db, user, _provider(normalized), normalized)
+    if action == "cancel":
+        return _cancel(db, user, normalized)
+    if action == "status":
+        return _status(db, user, normalized)
+    raise ValidationAppError("external_agent.invoke action must be run, probe, cancel, or status")
 
 
 def list_recent_external_agent_runs(
@@ -77,7 +93,7 @@ def _run(db: Session, user: User, provider: str, arguments: dict[str, Any]) -> d
         cwd=cwd,
         timeout_ms=_timeout_ms(arguments),
         wait=bool(arguments.get("wait", True)),
-        metadata={"source": "tool", "tool": f"external_agent.run_{provider}"},
+        metadata={"source": "tool", "tool": "external_agent.invoke", "provider": provider},
     )
     return adapter.start_run(db, user=user, request=request)
 
@@ -92,6 +108,64 @@ def _status(db: Session, user: User, arguments: dict[str, Any]) -> dict[str, Any
     run = get_run_for_user(db, user, str(arguments.get("run_id") or ""))
     adapter = get_external_agent_adapter(run.provider)
     return adapter.run_payload(run)
+
+
+def _normalize_invoke_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    legacy_tool = str(arguments.get("_legacy_tool_name") or "")
+    if legacy_tool == "external_agent.probe":
+        return {**arguments, "action": arguments.get("action") or "probe"}
+    if legacy_tool == "external_agent.run_codex":
+        return {
+            **arguments,
+            "action": arguments.get("action") or "run",
+            "provider": arguments.get("provider") or "codex",
+        }
+    if legacy_tool == "external_agent.run_claude_code":
+        return {
+            **arguments,
+            "action": arguments.get("action") or "run",
+            "provider": arguments.get("provider") or "claude_code",
+        }
+    if legacy_tool == "external_agent.cancel":
+        return {**arguments, "action": arguments.get("action") or "cancel"}
+    if legacy_tool == "external_agent.status":
+        return {**arguments, "action": arguments.get("action") or "status"}
+    return arguments
+
+
+def _action(arguments: dict[str, Any]) -> str:
+    value = str(arguments.get("action") or "").strip().lower().replace("-", "_")
+    aliases = {
+        "start": "run",
+        "invoke": "run",
+        "call": "run",
+        "detect": "probe",
+        "list": "probe",
+        "stop": "cancel",
+        "query": "status",
+        "get": "status",
+    }
+    value = aliases.get(value, value)
+    if value:
+        return value
+    if arguments.get("run_id"):
+        return "status"
+    if arguments.get("prompt") or arguments.get("task"):
+        return "run"
+    return "probe"
+
+
+def _provider(arguments: dict[str, Any]) -> str:
+    value = str(arguments.get("provider") or arguments.get("agent") or "codex").strip().lower().replace("-", "_")
+    aliases = {
+        "claude": "claude_code",
+        "claudecode": "claude_code",
+        "claude_code_cli": "claude_code",
+        "open_code": "opencode",
+        "open_code_cli": "opencode",
+        "opencode_cli": "opencode",
+    }
+    return aliases.get(value, value)
 
 
 def _timeout_ms(arguments: dict[str, Any]) -> int:

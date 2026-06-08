@@ -16,8 +16,9 @@ from app.services.agents.capability_permissions import (
 )
 from app.services.mcp import invoke_mcp_tool_recorded, tool_name
 from app.services.skills.runtime import SkillRuntime
-from app.services.tools.builtins.registry import BUILTIN_TOOLS
+from app.services.tools.builtins.registry import BUILTIN_TOOLS, active_builtin_tool_names
 from app.services.tools.executor import invoke_tool, invoke_tool_async
+from app.services.tools.permissions import canonical_tool_name
 
 
 TOOL_INTENT_PATTERN = re.compile(
@@ -190,7 +191,18 @@ def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> di
         args.setdefault("target", prompt)
     if name == "document.review":
         args.setdefault("text", prompt)
+    if name == "external_agent.invoke":
+        args.setdefault("action", "run")
+        args.setdefault("provider", _external_agent_provider_for_prompt(prompt))
     return args
+
+
+def _external_agent_provider_for_prompt(prompt: str) -> str:
+    if re.search(r"(claude|claude\s*code|claude-code)", prompt, re.I):
+        return "claude_code"
+    if re.search(r"(opencode|open\s*code|open-code)", prompt, re.I):
+        return "opencode"
+    return "codex"
 
 
 def _document_template_for_prompt(prompt: str) -> str:
@@ -245,6 +257,12 @@ def _select_agent_builtin_tools(agent: Agent, prompt: str, limit: int) -> list[s
         preferred.append("sandbox.run")
     if re.search(r"(审查|安全|风险|合规)", prompt, re.I):
         preferred.extend([name for name in ("security.audit", "document.review") if name in allowed])
+    if re.search(
+        "(codex|claude|opencode|open\\s*code|external\\s*(agent|coding)|coding\\s*agent|\\u5916\\u90e8|\\u667a\\u80fd\\u4f53)",
+        prompt,
+        re.I,
+    ) and "external_agent.invoke" in allowed:
+        preferred.append("external_agent.invoke")
     if not preferred and TOOL_INTENT_PATTERN.search(prompt):
         preferred = allowed[:1]
     return list(dict.fromkeys(preferred))[:limit]
@@ -521,6 +539,11 @@ async def execute_tool_by_name(
 ) -> dict[str, Any]:
     """根据 tool_name 路由到内置工具/Skill/MCP 执行器。"""
 
+    original_tool_name = tool_name
+    tool_name = canonical_tool_name(tool_name)
+    if original_tool_name != tool_name:
+        arguments = {**arguments, "_legacy_tool_name": original_tool_name}
+
     # 内置工具
     if tool_name in BUILTIN_TOOLS:
         if not _is_configured_tool(db, agent, tool_name):
@@ -666,7 +689,7 @@ def _resolve_authorized_db_tool(db: Session, agent: Agent, tool_name: str) -> To
 
 def _allowed_tool_names(agent: Agent) -> list[str]:
     if agent_uses_default_full_permissions(agent):
-        return list(BUILTIN_TOOLS.keys())
+        return active_builtin_tool_names()
     configured = configured_tool_names(agent)
     return list(dict.fromkeys(configured))
 
