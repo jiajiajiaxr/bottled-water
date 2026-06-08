@@ -101,7 +101,7 @@ They expose probe, run, status, and cancel operations for Codex and Claude Code.
 - Artifacts: `services/artifacts.py`, `services/document_model`, `api/artifacts.py`
 - Deployment preview: `services/deployments.py`, `api/deployments.py`
 
-Deployment preview is a local/demo preview record system with health checks and rollback records. Production cloud deployment is roadmap.
+Deployment preview is a local/Docker-stack preview record system with health checks and rollback records. Supported modes include `preview_link`, `static_site`, `source_download`, and `container`; container mode uses the AgentHub app container stack to expose the artifact preview URL. Production cloud orchestration remains roadmap.
 
 ## Safety Boundaries
 

@@ -11,7 +11,7 @@ This file is the compact status reference for current docs. It avoids historical
 - External coding agent tools for Codex and Claude Code, including persisted runs and status/cancel paths.
 - Model provider management and Ark/OpenAI-compatible fallback configuration.
 - File upload, workspace file tree, preview/download operations, and attachment context.
-- Artifact generation, preview, versioning, diff, export, and deployment preview records.
+- Artifact generation, preview, versioning, diff, export, and deployment preview records, including local/Docker-stack container mode.
 - Workflow generation, editing, save/enable, run start, polling, runtime state persistence, and real node execution for supported node types.
 - Skill and MCP management with probe, invoke, and recorded degraded failures when external runtimes are unavailable.
 - Security operations for audit logs, roles, permissions, and user role changes.
@@ -23,7 +23,7 @@ This file is the compact status reference for current docs. It avoids historical
 - Office/PDF preview quality depends on available conversion tools in the runtime environment.
 - Sandbox and external coding agent execution depend on installed command runtimes and workspace-safe cwd constraints.
 - MCP stdio/HTTP calls depend on external server availability and declared transport support.
-- Deployment preview validates accessible artifacts; full production cloud/container deployment remains outside the current local runtime.
+- Deployment preview validates accessible artifacts. Container mode is implemented as an AgentHub app or Docker Compose stack preview endpoint; full production cloud orchestration remains outside the current runtime.
 
 ## Recently Hardened
 
@@ -33,6 +33,7 @@ This file is the compact status reference for current docs. It avoids historical
 - Ark streaming tool-call parsing now handles `finish_reason == "tool_calls"` correctly.
 - Daily Chat context summaries now reflect default full tool permissions, including Claude Code tools.
 - Docker one-command deployment now uses correct build contexts, backend `PYTHONPATH`, startup migrations, psycopg Postgres URLs, nginx streaming/WebSocket proxying, and Docker-specific env isolation.
+- Container deployment mode now creates a health-checked artifact preview endpoint instead of failing with "runtime not enabled".
 
 ## Roadmap / Not A Current Guarantee
 

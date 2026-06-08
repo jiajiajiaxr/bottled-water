@@ -176,9 +176,11 @@ def test_task_approval_and_deployment_operations(
     )
     assert container_deployment.status_code == 200, container_deployment.text
     container_body = unwrap(container_deployment.json())
-    assert container_body["status"] == "failed"
-    assert container_body["health_status"] == "failed"
-    assert "未启用 container 部署运行时" in container_body["error_message"]
+    assert container_body["status"] == "deployed"
+    assert container_body["health_status"] == "healthy"
+    assert container_body["mode"] == "container"
+    assert container_body["access_url"]
+    assert "container 模式" in container_body["health"]["checks"][1]["message"]
 
     rollback = client.post(f"/api/v1/deployments/{deployment_id}/rollback", json={}, headers=auth_headers)
     assert rollback.status_code == 200, rollback.text

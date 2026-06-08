@@ -145,9 +145,9 @@ Key code:
 
 ## Deployment Preview
 
-Deployment preview creates records, health-checks accessible artifacts, supports rollback records, and exposes clear failure states when container/cloud deployment runtimes are not available.
+Deployment preview creates records, health-checks accessible artifacts, supports rollback records, and supports `preview_link`, `static_site`, `source_download`, and `container` modes. In the current runtime, `container` means the artifact is exposed through the running AgentHub app or Docker Compose stack and receives the same health-checked preview URL; it is not a separate production orchestrator.
 
-The Docker stack is for running the AgentHub app itself, not for claiming full production cloud deployment automation.
+The Docker stack is for running the AgentHub app itself. Full production cloud deployment automation remains a separate roadmap item.
 
 Key code:
 

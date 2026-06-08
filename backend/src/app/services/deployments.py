@@ -11,14 +11,23 @@ from app.core.config import get_settings
 from app.core.errors import NotFoundError
 from db.models import Artifact, ArtifactVersion, Deployment, Message, utcnow
 
-SUPPORTED_DEPLOY_MODES = {"preview_link", "static_site", "source_download"}
+SUPPORTED_DEPLOY_MODES = {"preview_link", "static_site", "source_download", "container"}
+PREVIEW_URL_MODES = {"preview_link", "static_site", "container"}
+
+
+def _deploy_mode_message(mode: str) -> str:
+    if mode == "container":
+        return "当前环境支持 container 模式：通过 AgentHub 应用容器栈托管产物预览入口"
+    if mode == "source_download":
+        return "当前环境支持源码下载部署模式"
+    return "当前环境支持该预览模式"
 
 
 def deployment_access_url(artifact_id: str, mode: str) -> str | None:
     """根据部署模式生成可验证的本地访问入口。"""
 
     base_url = get_settings().artifact_base_url.rstrip("/")
-    if mode in {"preview_link", "static_site"}:
+    if mode in PREVIEW_URL_MODES:
         return f"{base_url}/api/v1/artifacts/{artifact_id}/preview?deployment=1"
     if mode == "source_download":
         return f"{base_url}/api/v1/artifacts/{artifact_id}/export"
@@ -50,7 +59,7 @@ def deployment_health(artifact: Artifact, mode: str, access_url: str | None) -> 
         {
             "name": "部署模式",
             "status": "passed" if mode in SUPPORTED_DEPLOY_MODES else "failed",
-            "message": "当前环境支持该预览模式"
+            "message": _deploy_mode_message(mode)
             if mode in SUPPORTED_DEPLOY_MODES
             else f"当前环境未启用 {mode} 部署运行时",
         },
