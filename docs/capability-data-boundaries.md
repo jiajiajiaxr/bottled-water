@@ -44,6 +44,7 @@ Codex and Claude Code adapters must:
 - Persist run status and output.
 - Support cancel/status checks.
 - Redact resolved command paths in user-facing probe payloads where appropriate.
+- Default to non-interactive permission approval inside the external CLI after the AgentHub tool permission check has passed. Codex uses full-auto mode, and Claude Code skips its own interactive permission prompt by default.
 
 The public tool catalog exposes `external_agent.invoke` as the unified entry point for run/probe/status/cancel actions. Legacy provider-specific names are compatibility aliases only. External agents should never be treated as successful unless the run record says so.
 

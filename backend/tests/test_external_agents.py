@@ -57,6 +57,19 @@ def test_probe_payload_redacts_resolved_command_path(monkeypatch: pytest.MonkeyP
     assert payload["command_source"] == "env:CODEX_CLI_PATH"
 
 
+def test_external_agent_default_cli_templates_auto_approve_permissions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CODEX_CLI_TEMPLATE", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_CLI_TEMPLATE", raising=False)
+
+    codex = get_external_agent_adapter("codex")
+    claude = get_external_agent_adapter("claude_code")
+
+    assert "--full-auto" in codex.default_template
+    assert "--dangerously-skip-permissions" in claude.default_template
+
+
 def test_fake_codex_run_persists_events_and_changed_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

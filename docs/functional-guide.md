@@ -98,6 +98,8 @@ The unified tool accepts action-style calls for run/probe/status/cancel while pr
 
 Runs persist provider, command, cwd, stdout, stderr, changed files, status, exit code, duration, and error message. CWD is constrained to workspace-safe paths, and unavailable runtimes degrade explicitly instead of pretending success.
 
+After an Agent has `external_agent.invoke` permission, Codex and Claude Code run non-interactively by default: Codex uses full-auto mode, and Claude Code skips its internal permission confirmation. This only affects the external CLI prompt; AgentHub still enforces tool authorization, workspace cwd isolation, persisted run records, and secret redaction.
+
 Key code:
 
 - Backend: `backend/src/app/services/external_agents`, `backend/src/app/api/external_agents.py`

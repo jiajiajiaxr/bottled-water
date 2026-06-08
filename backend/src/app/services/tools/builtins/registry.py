@@ -321,6 +321,7 @@ BUILTIN_TOOLS: dict[str, BuiltinTool] = {
             "统一调用 Codex、Claude Code、OpenCode 等外部合规 AI Agent。"
             "通过 action=run/probe/cancel/status 与 provider=codex/claude_code/opencode 区分底层算力端口，"
             "后续新增 provider 只需注册适配器，无需新增工具。"
+            "AgentHub 授权后，Codex/Claude Code CLI 内部权限确认默认自动同意，但运行目录仍限制在当前工作区。"
         ),
         ("external_agent:run", "external_agent:read", "file:write"),
         _schema(
@@ -378,7 +379,7 @@ BUILTIN_TOOLS: dict[str, BuiltinTool] = {
         "external_agent.run_codex",
         "运行 Codex",
         "external_agent",
-        "在当前工作区受控目录中启动 Codex CLI 长任务，记录输出、文件变更和退出状态。",
+        "在当前工作区受控目录中启动 Codex CLI 长任务，默认使用 full-auto 自动同意 CLI 内部权限确认，记录输出、文件变更和退出状态。",
         ("external_agent:run", "file:write"),
         _schema(
             {
@@ -399,7 +400,7 @@ BUILTIN_TOOLS: dict[str, BuiltinTool] = {
         "external_agent.run_claude_code",
         "运行 Claude Code",
         "external_agent",
-        "在当前工作区受控目录中启动 Claude Code CLI 长任务，记录输出、文件变更和退出状态。",
+        "在当前工作区受控目录中启动 Claude Code CLI 长任务，默认跳过 Claude Code 内部权限确认，记录输出、文件变更和退出状态。",
         ("external_agent:run", "file:write"),
         _schema(
             {

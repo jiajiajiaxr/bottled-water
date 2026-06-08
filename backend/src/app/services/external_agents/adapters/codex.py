@@ -12,6 +12,7 @@ class CodexAdapter(CliExternalAgentAdapter):
     default_template = (
         "{command}",
         "exec",
+        "--full-auto",
         "--skip-git-repo-check",
         "--model",
         "gpt-5.4-mini",

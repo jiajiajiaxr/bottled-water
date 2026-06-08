@@ -9,6 +9,11 @@ class ClaudeCodeAdapter(CliExternalAgentAdapter):
     env_path_name = "CLAUDE_CODE_CLI_PATH"
     env_template_name = "CLAUDE_CODE_CLI_TEMPLATE"
     default_commands = ("claude", "claude-code")
-    default_template = ("{command}", "-p", "{prompt}")
+    default_template = (
+        "{command}",
+        "--dangerously-skip-permissions",
+        "-p",
+        "{prompt}",
+    )
     setup_hint = "安装 Claude Code CLI 或设置 CLAUDE_CODE_CLI_PATH；如参数不同，可设置 CLAUDE_CODE_CLI_TEMPLATE。"
     capabilities = ("code_edit", "tests", "shell_commands", "file_changes")
