@@ -16,8 +16,10 @@ from app.services.context.group import SpeakerIdentity, format_group_message_con
 
 RECENT_DIGEST_TURNS = 8
 SENSITIVE_PATTERN = re.compile(r"(api[_-]?key|secret|password|token|私钥|密码|密钥)", re.I)
-EXPLICIT_MEMORY_PATTERN = re.compile(r"(请记住|帮我记住|记住一下|长期记住|保存到长期记忆|以后都记住)")
-TRANSIENT_PATTERN = re.compile(r"^(你好|hello|hi|在吗|谢谢|1\s*[+＋]\s*1|再加上|算一下)")
+EXPLICIT_MEMORY_PATTERN = re.compile(
+    r"(请记住|帮我记住|记住这个|长期记住|保存到长期记忆|以后都记住|作为我的偏好|作为项目背景)"
+)
+TRANSIENT_PATTERN = re.compile(r"^(你好|hello|hi|在吗|谢谢|1\s*[+＋]\s*1|再加|算一下)", re.I)
 
 
 @dataclass
@@ -126,7 +128,7 @@ def should_remember_workspace_fact(text: str) -> bool:
         return False
     if SENSITIVE_PATTERN.search(clean):
         return False
-    if TRANSIENT_PATTERN.search(clean.lower()):
+    if TRANSIENT_PATTERN.search(clean):
         return False
     return bool(EXPLICIT_MEMORY_PATTERN.search(clean))
 
@@ -150,7 +152,7 @@ def recent_turns_digest(messages: list[Message], *, max_turns: int = RECENT_DIGE
             facts.append(f"{role}: {trim_text(text, max_chars=220)}")
         if re.search(r"(继续|再加上|改一下|刚才|那个|还要|下一步|未完成|待办)", text):
             pending.append(f"{role}: {trim_text(text, max_chars=180)}")
-        matches = re.findall(r"[\w\u4e00-\u9fff.-]{1,40}\s*(?:=|是|叫|为)\s*[\w\u4e00-\u9fff.-]{1,80}", text)
+        matches = re.findall(r"[\w\u4e00-\u9fff.-]{1,40}\s*(?:=|是|为|叫)\s*[\w\u4e00-\u9fff.-]{1,80}", text)
         matches.extend(re.findall(r"\d+(?:\.\d+)?", text))
         references.extend(matches[:6])
     sections = [
@@ -268,7 +270,7 @@ def _workspace_id(conversation: Conversation) -> str | None:
 
 
 def _looks_like_fact(text: str) -> bool:
-    return bool(re.search(r"(=|等于|是|叫|为|项目|目标|偏好|默认|版本|地址|名称)", text))
+    return bool(re.search(r"(=|等于|是|为|项目|目标|偏好|默认|版本|地址|名称)", text))
 
 
 def _memory_kind(text: str) -> str:

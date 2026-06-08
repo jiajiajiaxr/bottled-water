@@ -91,7 +91,7 @@ def _sync_variables(variables: dict[str, Any], state: dict[str, Any]) -> dict[st
 
 
 def _extract_math_result(user_text: str, assistant_text: str) -> int | float | None:
-    if not re.search(r"(\d|加|减|乘|除|等于|算|多少|几)", user_text + assistant_text):
+    if not re.search(r"(\d|加|减|乘|除|等于|结果|多少|几)", user_text + assistant_text):
         return None
     primary_text = re.split(r"(?:当然|特殊|不过|另外|比如)", assistant_text, maxsplit=1)[0]
     candidates = re.findall(r"(?:答案|结果|等于|为|是)\D{0,8}(-?\d+(?:\.\d+)?)", primary_text)
@@ -110,7 +110,7 @@ def _extract_topic(text: str) -> str:
     clean = re.sub(r"\s+", " ", text).strip()
     if not clean:
         return ""
-    if re.fullmatch(r"[\d\s+\-*/÷×=＝？?呢几多少加减乘除]+", clean):
+    if re.fullmatch(r"[\d\s+\-*/×=＝？?呢几多少加减乘除]+", clean):
         return ""
     return trim_text(clean, max_chars=120)
 

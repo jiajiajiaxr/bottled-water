@@ -204,9 +204,7 @@ def _authorized_mcp_servers(db: Session, agent: Agent | None) -> list[dict[str, 
     )
     if agent:
         query = query.where(or_(McpServer.owner_id == agent.owner_id, McpServer.owner_id.is_(None)))
-    rows = db.scalars(
-        query.order_by(McpServer.updated_at.desc()).limit(10)
-    ).all()
+    rows = db.scalars(query.order_by(McpServer.updated_at.desc()).limit(10)).all()
     return [
         {
             "id": item.id,

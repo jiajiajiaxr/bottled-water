@@ -123,11 +123,7 @@ def _format_history_entry(entry: Any) -> str:
 
 def _agent_frames(extra: dict[str, Any], agent_id: str) -> list[dict[str, Any]]:
     contexts = _dict(extra.get("agent_contexts") or extra.get("agent_context"))
-    candidates = [
-        agent_id,
-        str(agent_id),
-    ]
-    for key in candidates:
+    for key in (agent_id, str(agent_id)):
         frames = contexts.get(key)
         if isinstance(frames, list):
             return [item for item in frames if isinstance(item, dict)]
