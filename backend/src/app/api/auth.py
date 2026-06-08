@@ -188,6 +188,8 @@ async def update_me(
     user.display_name = display_name[:100]
     if "avatar_url" in raw:
         user.avatar_url = str(raw.get("avatar_url") or "") or None
+    if "signature" in raw:
+        user.extra = {**(user.extra or {}), "signature": str(raw.get("signature") or "").strip()[:120]}
     if isinstance(raw.get("settings"), dict):
         if not user.settings:
             db.add(UserSettings(user_id=user.id, theme="light"))

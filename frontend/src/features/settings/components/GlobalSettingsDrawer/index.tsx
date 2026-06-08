@@ -31,6 +31,7 @@ const copy = {
   account: "\u8d26\u53f7",
   profile: "\u4e2a\u4eba\u8d44\u6599",
   displayName: "\u663e\u793a\u540d\u79f0",
+  signature: "\u4e2a\u6027\u7b7e\u540d",
   saveProfile: "\u4fdd\u5b58\u8d44\u6599",
   profileUpdated: "\u4e2a\u4eba\u8d44\u6599\u5df2\u66f4\u65b0",
   avatar: "\u5934\u50cf",
@@ -75,9 +76,9 @@ export function GlobalSettingsDrawer({
 
   useEffect(() => {
     if (!open && !asPage) return;
-    profileForm.setFieldsValue({ display_name: user.name });
+    profileForm.setFieldsValue({ display_name: user.name, signature: user.signature ?? "" });
     setAvatarPreview(user.avatar_url ?? user.avatar);
-  }, [asPage, open, profileForm, user.avatar, user.avatar_url, user.id, user.name]);
+  }, [asPage, open, profileForm, user.avatar, user.avatar_url, user.id, user.name, user.signature]);
 
   const beforeAvatarUpload: UploadProps["beforeUpload"] = async (file) => {
     if (!file.type.startsWith("image/")) {
@@ -108,6 +109,7 @@ export function GlobalSettingsDrawer({
                     const updated = await api.updateProfile({
                       display_name: values.display_name,
                       avatar_url: avatarPreview,
+                      signature: values.signature,
                     });
                     onUserUpdated(updated);
                     message.success(copy.profileUpdated);
@@ -147,6 +149,9 @@ export function GlobalSettingsDrawer({
                     rules={[{ required: true }]}
                   >
                     <Input />
+                  </Form.Item>
+                  <Form.Item name="signature" label={copy.signature}>
+                    <Input.TextArea rows={2} maxLength={80} showCount />
                   </Form.Item>
                   <Button type="primary" htmlType="submit">
                     {copy.saveProfile}

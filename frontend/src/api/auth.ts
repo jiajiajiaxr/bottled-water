@@ -26,6 +26,7 @@ export async function updateProfile(payload: {
   display_name?: string;
   name?: string;
   avatar_url?: string;
+  signature?: string;
   settings?: Record<string, unknown>;
 }): Promise<User> {
   return await patch<User>("/auth/me", payload);

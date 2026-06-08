@@ -21,7 +21,8 @@ export const demoUser: User = {
   id: "demo-user",
   name: "演示用户",
   role: "demo",
-  avatar: "演"
+  avatar: "演",
+  signature: "把想法快速变成可预览的作品",
 };
 
 export const demoConversations: Conversation[] = [

@@ -523,10 +523,7 @@ export function AgentDirectoryDrawer({
                 </Tag>
               </Space>
               <Divider />
-              <Flex justify="space-between">
-                <Text type="secondary">
-                  {agent.response_latency_ms}ms · {agent.provider}
-                </Text>
+              <Flex justify="end">
                 <Space>
                   <Button
                     size="small"

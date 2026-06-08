@@ -85,6 +85,8 @@ export function ConversationSidebar({
   const [editForm] = Form.useForm();
   const [collapsed, setCollapsed] = useState(false);
   const [addingAgent, setAddingAgent] = useState(false);
+  const userSignature =
+    currentUser.signature?.trim() || "\u8fd9\u4e2a\u4eba\u5f88\u4f4e\u8c03\uff0c\u8fd8\u6ca1\u6709\u7b7e\u540d";
 
   const selectCategoryOptions = useMemo(() => {
     const existing = conversations.map(
@@ -316,8 +318,8 @@ export function ConversationSidebar({
               <Text strong ellipsis>
                 {currentUser.name}
               </Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {currentUser.role === "demo" ? "演示用户" : "成员"}
+              <Text type="secondary" style={{ fontSize: 12 }} ellipsis title={userSignature}>
+                {userSignature}
               </Text>
             </div>
           </div>
