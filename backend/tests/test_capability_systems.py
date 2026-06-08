@@ -861,6 +861,24 @@ def _document_model() -> dict[str, Any]:
     }
 
 
+def test_short_prompt_expands_to_rich_proposal_document() -> None:
+    model = normalize_document_model(
+        None,
+        title="结构化项目方案",
+        source_text="结构化项目方案",
+        template=None,
+    )
+
+    section_titles = [section["title"] for section in model["sections"]]
+    first_section_blocks = model["sections"][0]["blocks"]
+
+    assert model["template"] == "proposal"
+    assert "项目背景" in section_titles
+    assert "实施计划" in section_titles
+    assert any(block["type"] == "callout" for block in first_section_blocks)
+    assert any(block["type"] == "table" for block in model["sections"][1]["blocks"])
+
+
 def _memory_session() -> Any:
     engine = create_engine("sqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

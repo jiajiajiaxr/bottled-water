@@ -119,17 +119,20 @@ def _shell(body: str) -> str:
 <html><head><meta charset="utf-8"><style>
 body{{margin:0;background:#eef2f7;font-family:Inter,"Microsoft YaHei",system-ui,sans-serif;color:#111827}}
 .agenthub-word-preview{{min-height:100vh;padding:32px;box-sizing:border-box}}
-.page{{max-width:920px;margin:0 auto 24px;background:white;border:1px solid #dce4ef;border-radius:8px;box-shadow:0 18px 60px rgba(15,23,42,.12)}}
+.page{{max-width:920px;margin:0 auto 24px;background:white;border:1px solid #dce4ef;border-radius:10px;box-shadow:0 18px 60px rgba(15,23,42,.12)}}
 .a4-page{{width:min(794px,100%);min-height:1123px;padding:64px;box-sizing:border-box}}
 .cover-page{{display:flex;flex-direction:column;justify-content:center;text-align:center}}
 .label{{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#1677ff;font-weight:800;margin-bottom:18px}}
-h1{{font-size:36px;line-height:1.14;margin:0 0 16px}}.subtitle{{font-size:18px;color:#64748b;margin:0 0 32px}}
+.cover-kicker{{font-size:12px;letter-spacing:.12em;font-weight:800;color:#2563eb;margin:0 0 10px}}
+h1{{font-size:36px;line-height:1.14;margin:0 0 16px}}.subtitle{{font-size:18px;color:#64748b;margin:0 0 24px}}
 .cover-meta{{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;color:#64748b}}.cover-meta span{{border:1px solid #e5e7eb;border-radius:999px;padding:6px 12px}}
+.cover-line{{width:42%;height:2px;background:#2563eb;margin:18px auto 0;border-radius:999px}}
+.cover-note{{margin-top:120px;color:#64748b;font-size:12px;letter-spacing:.02em}}
 h2{{font-size:24px;margin:28px 0 12px}}h3{{font-size:19px;margin:22px 0 8px}}h4{{font-size:16px;margin:18px 0 8px}}
 p{{line-height:1.85;color:#374151;margin:10px 0}}ul,ol{{padding-left:24px}}li{{margin:7px 0;line-height:1.7}}
 .toc{{list-style:none;padding:0}}.toc li{{display:flex;gap:14px;border-bottom:1px dashed #cbd5e1;padding:10px 0}}.toc span{{color:#1677ff;font-weight:800}}
-table{{width:100%;border-collapse:collapse;margin:18px 0;table-layout:fixed}}th,td{{border:1px solid #d6deea;padding:10px;vertical-align:top;word-break:break-word}}th{{background:#eef6ff;text-align:left}}
-.callout{{border-left:4px solid #1677ff;background:#f0f7ff;padding:12px 16px;margin:16px 0;border-radius:6px}}.callout.warning{{border-color:#f59e0b;background:#fff7ed}}.callout.success{{border-color:#22c55e;background:#f0fdf4}}
+table{{width:100%;border-collapse:collapse;margin:18px 0;table-layout:fixed}}th,td{{border:1px solid #d6deea;padding:10px;vertical-align:top;word-break:break-word}}th{{background:#d9ecff;text-align:left}}
+.callout{{border-left:4px solid #1677ff;background:#eff6ff;padding:12px 16px;margin:16px 0;border-radius:6px}}.callout.warning{{border-color:#f59e0b;background:#fff7ed}}.callout.success{{border-color:#22c55e;background:#f0fdf4}}
 blockquote{{border-left:4px solid #cbd5e1;margin:16px 0;padding:8px 16px;color:#475569;background:#f8fafc}}
 .image-placeholder{{border:1px dashed #94a3b8;border-radius:8px;padding:20px;text-align:center;color:#64748b}}.image-placeholder div{{height:120px;background:#f8fafc;border-radius:6px;margin-bottom:8px}}
 .page-break{{border-top:1px dashed #94a3b8;color:#64748b;text-align:center;margin:26px 0;padding-top:8px}}.hint{{color:#64748b}}.appendix-label{{max-width:920px;margin:8px auto;color:#64748b;font-weight:700}}
