@@ -1,22 +1,32 @@
 FROM python:3.11-slim
 
-WORKDIR /app/backend
+# 安装 uv（官方脚本）
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/backend/src \
-    PATH="/app/backend/.venv/bin:${PATH}"
+ENV PATH="/root/.local/bin:/root/.cargo/bin:${PATH}"
 
-COPY backend/pyproject.toml backend/uv.lock* ./
-RUN pip install --no-cache-dir uv && \
-    uv sync --frozen --no-install-project --no-dev
+WORKDIR /app
 
-COPY backend/ .
+# 安装依赖
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --frozen --no-install-project --no-dev
+
+# 复制源码
+COPY . .
+
+# src/ 目录加入 Python 路径，使 import app 正常工作
+ENV PYTHONPATH="/app/src"
+
+# 安装项目（包含所有依赖）
 RUN uv sync --frozen --no-dev
 
+# 健康检查（uv run 自动使用 .venv）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8888/health')" || exit 1
+    CMD uv run python -c "import httpx; httpx.get('http://localhost:8888/health')" || exit 1
 
 EXPOSE 8888
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT:-8888}"]
+# 项目启动入口为 server.py（内部读取配置并调用 uvicorn）
+CMD ["uv", "run", "server.py"]

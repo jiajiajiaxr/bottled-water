@@ -28,7 +28,8 @@
             "**/node_modules": true,
             "**/.pytest_cache": true,
             "**/.ruff_cache": true,
-            "**/*.egg-info": true
+            "**/*.egg-info": true,
+            "**/.pnpm-store": true
         }
     },
     "launch": {

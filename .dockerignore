@@ -1,25 +1,27 @@
-.git
-.env
-.env.*
-logs
-*.log
-
+# frontend
 frontend/node_modules
 frontend/dist
-frontend/logs
 frontend/.env
 frontend/.env.*
+frontend/.vscode
+frontend/.idea
+frontend/*.log
+frontend/coverage
+frontend/.nyc_output
+frontend/*.tsbuildinfo
 
+# backend
 backend/.venv
-backend/.pytest_cache
-backend/.ruff_cache
 backend/__pycache__
-backend/logs
-backend/*.db
-backend/*.db-shm
-backend/*.db-wal
-backend/.env
-backend/.env.*
+backend/.pytest_cache
+backend/.mypy_cache
+backend/.ruff_cache
+backend/.uv
+backend/uv.lock
 
-**/__pycache__
-**/*.pyc
+# common
+.git
+.github
+docs
+*.md
+LICENSE
