@@ -20,6 +20,20 @@ const agents: Agent[] = [
   },
 ];
 
+const agent = (id: string, name: string, type: string, label: string): Agent => ({
+  id,
+  name,
+  type,
+  version: "1.0.0",
+  capabilities: [{ label, category: type, proficiency: 90 }],
+  description: name,
+  status: "online",
+  provider: "official",
+  is_official: true,
+  response_latency_ms: 0,
+  config: {},
+});
+
 describe("CreateConversationModal", () => {
   it("creates a single chat with the default Daily Chat Agent", async () => {
     const onCreate = vi.fn();
@@ -43,6 +57,43 @@ describe("CreateConversationModal", () => {
         expect.objectContaining({
           agentIds: ["daily-agent"],
           group: false,
+          folder: "Default",
+        }),
+      );
+    });
+  });
+
+  it("defaults a group chat to only the Daily Chat Agent", async () => {
+    const onCreate = vi.fn();
+
+    render(
+      <CreateConversationModal
+        open
+        group
+        agents={[
+          agent("master", "Master Agent", "master", "调度/拆解"),
+          agent("frontend", "Frontend Worker", "frontend", "前端/React"),
+          agent("backend", "Backend Worker", "backend", "后端/API"),
+          agent("reviewer", "Reviewer", "reviewer", "审查/质量"),
+          agent("daily-agent", "Daily Chat Agent", "chat", "日常问答"),
+        ]}
+        categoryOptions={["Default"]}
+        onCancel={vi.fn()}
+        onCreate={onCreate}
+      />,
+    );
+
+    await screen.findByText(/Daily Chat Agent/);
+    expect(screen.queryByText(/Master Agent/)).toBeNull();
+    expect(screen.queryByText(/Frontend Worker/)).toBeNull();
+
+    fireEvent.click(screen.getByTestId("create-conversation-confirm"));
+
+    await waitFor(() => {
+      expect(onCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentIds: ["daily-agent"],
+          group: true,
           folder: "Default",
         }),
       );
