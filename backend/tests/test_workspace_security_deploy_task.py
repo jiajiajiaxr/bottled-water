@@ -1,5 +1,6 @@
 import uuid
 from typing import Any
+from urllib.parse import urlparse
 
 
 def unwrap(body: dict[str, Any]) -> Any:
@@ -154,6 +155,10 @@ def test_task_approval_and_deployment_operations(
     assert deployment_body["status"] == "deployed"
     assert deployment_body["health_status"] == "healthy"
     assert deployment_body["health"]["checks"]
+    site_path = urlparse(deployment_body["access_url"]).path
+    site = client.get(site_path)
+    assert site.status_code == 200, site.text
+    assert "deploy" in site.text
 
     logs = client.get(f"/api/v1/deployments/{deployment_id}/logs", headers=auth_headers)
     assert logs.status_code == 200, logs.text

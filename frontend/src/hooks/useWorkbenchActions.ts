@@ -81,7 +81,7 @@ export function useWorkbenchActions(
   };
 
   const deploy = async () => {
-    if (!activeId) return;
+    if (!activeId) return undefined;
     setDeployment({
       id: "pending",
       status: "building",
@@ -91,6 +91,7 @@ export function useWorkbenchActions(
     const result = await api.deploy(activeId, artifact?.id);
     setDeployment(result);
     message.success("部署任务已提交");
+    return result;
   };
 
   const uploadFile = async (file: File) => {
@@ -167,6 +168,12 @@ export function useWorkbenchActions(
         return;
       }
       setArtifact(current);
+      try {
+        const deployments = await api.deploymentsForArtifact(current.id);
+        setDeployment(deployments.items?.[0]);
+      } catch {
+        setDeployment(undefined);
+      }
       setArtifactPanelOpen(true);
     } catch (error) {
       const reason =

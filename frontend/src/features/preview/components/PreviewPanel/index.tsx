@@ -6,6 +6,7 @@ import {
   DiffOutlined,
   EditOutlined,
   EyeOutlined,
+  LinkOutlined,
   RocketOutlined,
 } from "@ant-design/icons";
 import {
@@ -61,7 +62,7 @@ export function PreviewPanel({
   knowledgeBases: KnowledgeBase[];
   onClose: () => void;
   onSave: (artifact: WorkspaceArtifact) => void;
-  onDeploy: () => void;
+  onDeploy: () => Promise<Deployment | undefined> | Deployment | undefined | void;
   onCreateKb: (payload: {
     name: string;
     description: string;
@@ -89,6 +90,36 @@ export function PreviewPanel({
   }>();
   const [previewError, setPreviewError] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [latestDeployment, setLatestDeployment] = useState<
+    Deployment | undefined
+  >(deployment);
+  const [deploying, setDeploying] = useState(false);
+
+  useEffect(() => {
+    setLatestDeployment(deployment);
+  }, [deployment]);
+
+  useEffect(() => {
+    if (!artifact?.id) {
+      setLatestDeployment(undefined);
+      return;
+    }
+
+    let cancelled = false;
+    api
+      .deploymentsForArtifact(artifact.id)
+      .then((result) => {
+        if (cancelled) return;
+        setLatestDeployment(result.items?.[0] ?? deployment);
+      })
+      .catch(() => {
+        if (!cancelled) setLatestDeployment(deployment);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact?.id, deployment]);
 
   useEffect(() => {
     const previewHtml =
@@ -158,6 +189,10 @@ export function PreviewPanel({
   const previewKind = artifactPreviewKind(artifact);
   const preferredFormat = preferredArtifactFormat(artifact);
   const exportFormats = artifactExportFormats(preferredFormat);
+  const currentDeployment = latestDeployment ?? deployment;
+  const deploymentUrl =
+    currentDeployment?.url || currentDeployment?.access_url || "";
+  const deploymentCommit = currentDeployment?.commit ?? currentDeployment?.id?.slice(0, 8);
 
   return (
     <Sider
@@ -298,7 +333,7 @@ export function PreviewPanel({
           {
             key: "deploy",
             label: (
-              <Tooltip title="部署预览：创建或查看当前产物的部署状态">
+              <Tooltip title="部署预览：创建或查看当前产物的可访问部署地址">
                 <RocketOutlined aria-label="部署预览" />
               </Tooltip>
             ),
@@ -307,28 +342,55 @@ export function PreviewPanel({
                 <Space direction="vertical" size={14}>
                   <Tag
                     color={
-                      deployment?.status === "ready" ||
-                      deployment?.status === "deployed"
+                      currentDeployment?.status === "ready" ||
+                      currentDeployment?.status === "deployed"
                         ? "success"
                         : "processing"
                     }
                     icon={<RocketOutlined />}
                   >
-                    {deployment?.status ?? "idle"}
+                    {currentDeployment?.status ?? "idle"}
                   </Tag>
+                  {deploymentUrl ? (
+                    <Text strong copyable>
+                      {deploymentUrl}
+                    </Text>
+                  ) : (
                   <Text strong>{deployment?.url ?? "尚未部署"}</Text>
+                  )}
                   <Text type="secondary">
-                    Commit: {deployment?.commit ?? "pending"}
+                    Commit: {deploymentCommit ?? "pending"}
                   </Text>
-                  <Progress percent={deployment ? 100 : 0} size="small" />
-                  <Button
-                    type="primary"
-                    icon={<RocketOutlined />}
-                    onClick={onDeploy}
-                    data-testid="deploy-artifact"
-                  >
-                    部署当前版本
-                  </Button>
+                  <Progress percent={currentDeployment ? 100 : 0} size="small" />
+                  <Space wrap>
+                    <Button
+                      type="primary"
+                      icon={<RocketOutlined />}
+                      loading={deploying}
+                      onClick={async () => {
+                        setDeploying(true);
+                        try {
+                          const next = await onDeploy();
+                          if (next) setLatestDeployment(next);
+                        } finally {
+                          setDeploying(false);
+                        }
+                      }}
+                      data-testid="deploy-artifact"
+                    >
+                      部署当前版本
+                    </Button>
+                    {deploymentUrl && (
+                      <Button
+                        icon={<LinkOutlined />}
+                        href={deploymentUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        打开访问 URL
+                      </Button>
+                    )}
+                  </Space>
                 </Space>
               </Card>
             ),

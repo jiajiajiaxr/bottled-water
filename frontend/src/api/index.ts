@@ -61,7 +61,7 @@ export {
   updateWorkflowNode,
 } from "./workflow";
 
-export { deploy } from "./deploy";
+export { deploy, deploymentsForArtifact } from "./deploy";
 
 export {
   agents,

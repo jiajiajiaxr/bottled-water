@@ -248,6 +248,10 @@ export interface WorkspaceArtifact {
 
 export interface Deployment {
   id: string;
+  artifact_id?: string;
+  artifactId?: string;
+  conversation_id?: string;
+  conversationId?: string;
   status:
     | "idle"
     | "building"
@@ -257,6 +261,10 @@ export interface Deployment {
     | "deploying"
     | "pending";
   url?: string;
-  commit: string;
-  updatedAt: string;
+  access_url?: string;
+  mode?: string;
+  commit?: string;
+  health_status?: string;
+  updatedAt?: string;
+  updated_at?: string;
 }

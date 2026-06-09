@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +18,7 @@ from app.schemas.common import ApiResponse, DeploymentOut
 from app.schemas.requests import CreateDeploymentRequest
 from app.events import app_event_bus as event_bus
 from app.services.audit import write_audit_log
-from app.services.deployments import create_deployment, rerun_deployment_health
+from app.services.deployments import create_deployment, deployment_site_file, rerun_deployment_health
 from app.services.serialization import deployment_to_dict
 
 
@@ -117,6 +120,31 @@ async def get_deployment(
 ):
     deployment = await _check_deployment_owner(db, user, deployment_id)
     return ok(deployment_to_dict(deployment))
+
+
+@router.get("/deployments/{deployment_id}/site")
+@router.get("/deployments/{deployment_id}/site/{path:path}")
+async def get_deployment_site(
+    deployment_id: str,
+    path: str = "index.html",
+    db: AsyncSession = Depends(get_db),
+):
+    deployment = await db.get(Deployment, deployment_id)
+    if not deployment or deployment.deleted_at is not None:
+        raise NotFoundError("部署不存在")
+    if deployment.status not in {"deployed", "ready"}:
+        return Response(
+            content="<main><h1>部署尚未就绪</h1><p>请稍后重试或重新部署。</p></main>",
+            media_type="text/html; charset=utf-8",
+            status_code=503,
+        )
+    target, content_type = deployment_site_file(deployment, path)
+    if not target.exists() or not target.is_file():
+        index, index_type = deployment_site_file(deployment, "index.html")
+        if index.exists() and index.is_file() and not Path(path).suffix:
+            return FileResponse(str(index), media_type=index_type)
+        raise NotFoundError("部署文件不存在")
+    return FileResponse(str(target), media_type=content_type)
 
 
 @router.get("/deployments/{deployment_id}/logs", response_model=ApiResponse[dict])
