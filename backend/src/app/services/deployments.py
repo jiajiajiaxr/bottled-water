@@ -88,11 +88,6 @@ def publish_deployment_site(artifact: Artifact, deployment: Deployment) -> dict[
             }
         )
 
-    if not (site_root / "index.html").exists():
-        fallback = _deployment_index_html(artifact)
-        (site_root / "index.html").write_text(fallback, encoding="utf-8")
-        written.append({"path": "index.html", "size": len(fallback.encode("utf-8")), "content_type": "text/html"})
-
     deployment.config = {
         **(deployment.config or {}),
         "site_root": str(site_root),

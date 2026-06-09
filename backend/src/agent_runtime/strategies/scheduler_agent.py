@@ -1350,6 +1350,9 @@ class SchedulerAgent(AgentActor):
         visible: bool,
     ) -> str | None:
         requirement = str(task or "").strip()
+        override = self._fullstack_task_override(requirement, agent_id, visible=visible)
+        if override:
+            return override
         if self._is_backend_agent(agent_id):
             if visible:
                 return "先完成后端数据模型、服务接口和前端对接契约"
@@ -1384,6 +1387,53 @@ class SchedulerAgent(AgentActor):
                 f"部署或预览用户需求“{requirement}”对应的前端预览产物或工作区入口文件。"
                 "优先基于 Frontend Worker 生成的 HTML/Web 预览卡片调用 deploy.preview，"
                 "并回填真实可访问链接与部署状态；如果缺少 artifact_id 或入口文件，明确说明阻塞原因。"
+            )
+        return None
+
+    def _fullstack_task_override(self, requirement: str, agent_id: str, *, visible: bool) -> str | None:
+        """Clean project-delivery instructions layered over legacy prompt text."""
+
+        if self._is_backend_agent(agent_id):
+            if visible:
+                return "先完成后端数据模型、服务接口、存储逻辑和前端对接契约"
+            return (
+                f"用户需求：{requirement}\n\n"
+                "你负责后端/服务端交付。请先设计真实数据模型、存储字段、业务规则和 API 契约，"
+                "再调用 file.write 在当前工作区写入可运行的后端项目文件，例如 main.py、requirements.txt、README 或 API 文档。"
+                "输出必须贴合用户原始需求，不要复用其他历史示例或把任务替换成五子棋/模板页面。"
+                "如果无法写入真实文件，请明确说明阻塞原因，不要口头声称已经完成。"
+            )
+        if self._is_frontend_agent(agent_id):
+            if visible:
+                return "基于后端 API 契约实现真实可运行前端，并在需要时创建预览卡片"
+            return (
+                f"用户需求：{requirement}\n\n"
+                "你负责前端交付。必须先读取或引用 Backend Worker 给出的 API 契约、数据字段和启动方式，"
+                "再调用 file.write 写入真实前端项目文件。若产物是单页 HTML/Web 应用，可以基于同一份真实入口文件调用 "
+                "artifact.create_html 或 artifact.create_web_app 创建预览卡片；不要生成说明页、死模板或与需求无关的示例。"
+                "如果这是需要后端联动的项目，请在前端代码中清楚配置 API 地址，并说明如何与后端一起启动。"
+            )
+        if self._agent_can_create_docs(agent_id):
+            if visible:
+                return "在代码产物完成后，基于真实实现生成说明文档"
+            return (
+                f"用户需求：{requirement}\n\n"
+                "你负责文档交付，只有在用户明确需要 PDF/Word/说明文档，或前后端核心实现已经完成后才生成文档。"
+                "文档必须基于真实上游产物，包含项目结构、接口、运行步骤、验收方式和风险说明；不要替代前端或后端代码交付。"
+            )
+        kind = self._agent_collaboration_kind(agent_id)
+        if kind == "review":
+            return (
+                f"审查用户需求“{requirement}”对应的真实代码、文件、接口和预览结果，"
+                "重点检查需求一致性、可运行性、数据链路和交付风险。"
+            )
+        if kind == "release":
+            return (
+                f"用户需求：{requirement}\n\n"
+                "你负责部署/运行验证。若 Frontend Worker 已生成真实 HTML/Web artifact，请调用 deploy.preview 发布并返回真实可访问 URL。"
+                "若这是前后端分离项目，应优先使用 terminal.start、terminal.wait_for、terminal.snapshot 或 sandbox.run "
+                "启动/验证后端和前端服务，并在回复中给出可访问地址、端口、健康检查结果和未完成阻塞项。"
+                "没有真实 artifact、入口文件或服务运行记录时，不要声称已部署。"
             )
         return None
 

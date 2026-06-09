@@ -698,6 +698,28 @@ class AgentLoop:
             )
 
         # 将本轮对话归档回 AgentContext
+        missing_delivery = self._project_delivery_missing_result(task, tool_results)
+        if missing_delivery:
+            work_product = missing_delivery
+            status_report = AgentReport(
+                agent_id=status_report.agent_id,
+                state=AgentState.FAILED,
+                will=AgentWill.BLOCKED,
+                target_task=status_report.target_task,
+                blockers=[missing_delivery],
+                priority=status_report.priority,
+                confidence=0.0,
+                rationale="Project delivery requires persisted tool results; narration alone is not accepted.",
+                expected_duration=status_report.expected_duration,
+            )
+            if self.use_streaming:
+                await self._emit_text_response(
+                    _emit,
+                    stream_message_id,
+                    work_product,
+                    stream_context=self._stream_context_payload(context_metadata),
+                )
+
         if agent_ctx:
             agent_ctx.add("thought", work_product)
             if status_report.rationale:
@@ -967,6 +989,8 @@ class AgentLoop:
     ) -> dict[str, Any] | None:
         if not tools:
             return None
+        if self._looks_like_project_code_delivery(task):
+            return None
         try:
             from app.services.llm.tool_calls import artifact_arguments, detect_artifact_tool
         except Exception:
@@ -1017,10 +1041,9 @@ class AgentLoop:
             if isinstance(tool, dict)
         }
         role = f"{self.agent.name} {self.agent.role}".lower()
-        is_backend = any(token in role for token in ("back", "backend", "api", "server", "后端", "服务端", "接口"))
         is_release = any(token in role for token in ("deploy", "release", "ops", "部署", "发布", "上线"))
         if is_release and "deploy.preview" in available and not self._tool_succeeded(tool_results, "deploy.preview"):
-            artifact_id = self._latest_artifact_id(tool_results, messages or [], task)
+            artifact_id = self._latest_artifact_id(tool_results, [], task)
             if artifact_id:
                 return self._tool_call(
                     "deploy.preview",
@@ -1030,15 +1053,6 @@ class AgentLoop:
                     },
                     prefix="project_deploy",
                 )
-        if is_backend and "file.write" in available and not self._tool_succeeded(tool_results, "file.write"):
-            return self._tool_call(
-                "file.write",
-                {
-                    "path": f"{self._project_slug(task)}/backend/main.py",
-                    "content": self._backend_project_fallback(task),
-                },
-                prefix="project_backend",
-            )
         return None
 
     @staticmethod
@@ -1074,6 +1088,33 @@ class AgentLoop:
             str(result.get("tool") or "") == tool_name and result.get("success") is True
             for result in tool_results
         )
+
+    def _project_delivery_missing_result(
+        self,
+        task: str,
+        tool_results: List[Dict[str, Any]],
+    ) -> str | None:
+        if not self._looks_like_project_code_delivery(task):
+            return None
+        role = f"{self.agent.name} {self.agent.role}".lower()
+        is_backend = any(token in role for token in ("back", "backend", "api", "server", "后端", "服务端", "接口"))
+        is_frontend = any(token in role for token in ("front", "frontend", "ui", "web", "前端", "页面"))
+        is_release = any(token in role for token in ("deploy", "release", "ops", "部署", "发布", "上线"))
+        has_file_write = self._tool_succeeded(tool_results, "file.write")
+        has_artifact = self._artifact_tool_succeeded(tool_results)
+        has_deploy = self._tool_succeeded(tool_results, "deploy.preview")
+        has_run = self._tool_succeeded(tool_results, "sandbox.run")
+        has_terminal = any(
+            str(result.get("tool") or "").startswith("terminal.") and result.get("success") is True
+            for result in tool_results
+        )
+        if is_backend and not has_file_write:
+            return "后端项目交付需要通过 file.write 写入真实后端代码文件；本轮没有检测到文件写入结果，已拒绝口头完成。"
+        if is_frontend and not (has_file_write or has_artifact):
+            return "前端项目交付需要写入真实前端文件，或生成真实可运行的 HTML/Web 产物；本轮没有检测到真实文件或产物，已拒绝口头完成。"
+        if is_release and not (has_deploy or has_run or has_terminal):
+            return "部署交付需要真实部署预览、沙箱运行或终端服务验证结果；本轮没有检测到成功的部署/运行记录，已拒绝口头完成。"
+        return None
 
     @staticmethod
     def _tool_call(tool_name: str, arguments: dict[str, Any], *, prefix: str) -> dict[str, Any]:

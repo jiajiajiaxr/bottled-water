@@ -37,7 +37,17 @@ TOOLBOXES = {
         "api.test",
     ],
     "reviewer": ["artifact.diff", "test.run", "security.audit", "document.review"],
-    "deploy": ["artifact.export", "deploy.preview", "deploy.rollback", "sandbox.run"],
+    "deploy": [
+        "artifact.export",
+        "deploy.preview",
+        "deploy.rollback",
+        "sandbox.run",
+        "terminal.start",
+        "terminal.send",
+        "terminal.wait_for",
+        "terminal.snapshot",
+        "terminal.stop",
+    ],
     "writing": [
         "file.extract_text",
         "file.summarize",

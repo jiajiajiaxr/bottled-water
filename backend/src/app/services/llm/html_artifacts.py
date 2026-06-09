@@ -32,17 +32,10 @@ def normalize_html_artifact_arguments(prompt: str, arguments: dict[str, Any]) ->
 
 
 def build_html_fallback(prompt: str, *, title: str | None = None) -> str:
-    title = title or _title_from_prompt(prompt)
-    kind = _template_kind(prompt)
-    if kind == "calculator":
-        return _calculator_template(title)
-    if kind == "form":
-        return _form_template(title)
-    if kind == "dashboard":
-        return _dashboard_template(title)
-    if kind == "login":
-        return _login_template(title)
-    return _default_template(title, prompt)
+    raise ValueError(
+        "HTML artifact fallback templates are disabled. "
+        "The Agent must provide real HTML/CSS/JS content generated for the current task."
+    )
 
 
 def html_quality_issues(prompt: str, html: str) -> list[str]:

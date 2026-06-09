@@ -167,6 +167,9 @@ def _deploy_preview(db: Session, user: User, arguments: dict[str, Any]) -> dict[
     )
     return {
         "status": "succeeded" if deployment.status == "deployed" else "failed",
+        "url": deployment.access_url,
+        "public_url": deployment.access_url,
+        "deployment_id": deployment.id,
         "deployment": {
             "id": deployment.id,
             "url": deployment.access_url,
