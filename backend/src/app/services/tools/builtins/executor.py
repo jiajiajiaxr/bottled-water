@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import inspect
@@ -160,12 +161,19 @@ def _document_review(arguments: dict[str, Any]) -> dict[str, Any]:
 
 def _deploy_preview(db: Session, user: User, arguments: dict[str, Any]) -> dict[str, Any]:
     artifact = _artifact(db, user, str(arguments.get("artifact_id") or ""))
+
+    # 查找工作区目录用于全栈部署（检测后端文件）
+    workspace_dir = _find_workspace_dir(db, arguments, artifact)
+
     deployment = create_sync_deployment(
         db,
         artifact,
         str(arguments.get("mode") or "preview_link"),
+        workspace_dir=workspace_dir,
     )
-    return {
+
+    backend_port = deployment.config.get("backend_port") if deployment.config else None
+    result: dict[str, Any] = {
         "status": "succeeded" if deployment.status == "deployed" else "failed",
         "url": deployment.access_url,
         "public_url": deployment.access_url,
@@ -178,3 +186,28 @@ def _deploy_preview(db: Session, user: User, arguments: dict[str, Any]) -> dict[
             "error_message": deployment.error_message,
         },
     }
+    if backend_port:
+        result["backend_port"] = backend_port
+        result["backend_url"] = f"http://localhost:{backend_port}"
+    return result
+
+
+def _find_workspace_dir(
+    db: Session, arguments: dict[str, Any], artifact: Artifact
+) -> Path | None:
+    """根据 conversation_id 查找工作区沙箱目录。"""
+    from app.services.workspaces.filesystem import (
+        scoped_dir,
+        workspace_id_from_conversation,
+    )
+
+    conversation_id = str(arguments.get("conversation_id") or "") or artifact.conversation_id
+    if not conversation_id:
+        return None
+
+    workspace_id = workspace_id_from_conversation(db, conversation_id) or "default"
+    # scoped_dir 已经返回 .../sandbox/conversations/{conv_id}，不要再拼接子目录
+    sandbox_root = scoped_dir(workspace_id, "sandbox", conversation_id=conversation_id)
+    if sandbox_root.is_dir():
+        return sandbox_root
+    return None

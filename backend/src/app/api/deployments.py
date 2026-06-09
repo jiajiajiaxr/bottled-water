@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -129,15 +129,45 @@ async def get_deployment_site(
     path: str = "index.html",
     db: AsyncSession = Depends(get_db),
 ):
-    deployment = await db.get(Deployment, deployment_id)
-    if not deployment or deployment.deleted_at is not None:
-        raise NotFoundError("部署不存在")
-    if deployment.status not in {"deployed", "ready"}:
-        return Response(
-            content="<main><h1>部署尚未就绪</h1><p>请稍后重试或重新部署。</p></main>",
-            media_type="text/html; charset=utf-8",
-            status_code=503,
-        )
+    return await _serve_site(deployment_id, path, db)
+
+
+@router.post("/deployments/{deployment_id}/site/{path:path}")
+async def post_deployment_site(
+    deployment_id: str,
+    path: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _proxy_request(deployment_id, path, request, db, method="POST")
+
+
+@router.put("/deployments/{deployment_id}/site/{path:path}")
+async def put_deployment_site(
+    deployment_id: str,
+    path: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _proxy_request(deployment_id, path, request, db, method="PUT")
+
+
+@router.delete("/deployments/{deployment_id}/site/{path:path}")
+async def delete_deployment_site(
+    deployment_id: str,
+    path: str,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _proxy_request(deployment_id, path, None, db, method="DELETE")
+
+
+async def _serve_site(deployment_id: str, path: str, db: AsyncSession) -> Response:
+    """GET 请求：静态文件或 API 代理。"""
+    deployment = await _get_deployment(deployment_id, db)
+    backend_port = (deployment.config or {}).get("backend_port")
+    if backend_port and path.startswith("api/"):
+        return await _proxy_to_backend(backend_port, path, "GET")
+
     target, content_type = deployment_site_file(deployment, path)
     if not target.exists() or not target.is_file():
         index, index_type = deployment_site_file(deployment, "index.html")
@@ -145,6 +175,68 @@ async def get_deployment_site(
             return FileResponse(str(index), media_type=index_type)
         raise NotFoundError("部署文件不存在")
     return FileResponse(str(target), media_type=content_type)
+
+
+async def _proxy_request(
+    deployment_id: str, path: str, request: "Request | None",
+    db: AsyncSession, method: str,
+) -> Response:
+    """POST/PUT/DELETE 请求代理到后端。"""
+    deployment = await _get_deployment(deployment_id, db)
+    backend_port = (deployment.config or {}).get("backend_port")
+    if not backend_port or not path.startswith("api/"):
+        raise NotFoundError("部署不支持此操作")
+    body = await request.body() if request else None
+    content_type = request.headers.get("content-type", "application/json") if request else "application/json"
+    return await _proxy_to_backend(backend_port, path, method, body=body, content_type=content_type)
+
+
+async def _get_deployment(deployment_id: str, db: AsyncSession) -> Deployment:
+    deployment = await db.get(Deployment, deployment_id)
+    if not deployment or deployment.deleted_at is not None:
+        raise NotFoundError("部署不存在")
+    if deployment.status not in {"deployed", "ready"}:
+        raise NotFoundError("部署尚未就绪")
+    return deployment
+
+
+async def _proxy_to_backend(
+    backend_port: int, path: str, method: str = "GET",
+    body: bytes | None = None, content_type: str = "application/json",
+) -> Response:
+    """将请求代理到后端服务进程。"""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    # path 以 "api/" 开头，转发到后端对应路径
+    # "api/" → http://localhost:PORT/ (健康检查)
+    # "api/persons" → http://localhost:PORT/api/persons (CRUD)
+    if path.rstrip("/") == "api":
+        backend_url = f"http://127.0.0.1:{backend_port}/"
+    else:
+        backend_url = f"http://127.0.0.1:{backend_port}/{path}"
+    try:
+        req = urllib.request.Request(
+            backend_url,
+            data=body,
+            method=method,
+        )
+        if body:
+            req.add_header("Content-Type", content_type)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp_body = resp.read()
+            resp_ct = resp.headers.get("Content-Type", "application/json")
+            return Response(content=resp_body, status_code=resp.status, media_type=resp_ct)
+    except urllib.error.HTTPError as e:
+        resp_body = e.read() if e.fp else b""
+        return Response(content=resp_body, status_code=e.code, media_type="application/json")
+    except Exception:
+        return Response(
+            content=_json.dumps({"detail": "后端服务暂时不可用"}),
+            status_code=502,
+            media_type="application/json",
+        )
 
 
 @router.get("/deployments/{deployment_id}/logs", response_model=ApiResponse[dict])

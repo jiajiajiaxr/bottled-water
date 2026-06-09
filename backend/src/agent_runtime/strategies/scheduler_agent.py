@@ -1428,13 +1428,51 @@ class SchedulerAgent(AgentActor):
                 "重点检查需求一致性、可运行性、数据链路和交付风险。"
             )
         if kind == "release":
+            artifact_id = self._find_frontend_artifact_id()
+            artifact_hint = f"\n前端产物 artifact_id: {artifact_id}" if artifact_id else ""
             return (
-                f"用户需求：{requirement}\n\n"
-                "你负责部署/运行验证。若 Frontend Worker 已生成真实 HTML/Web artifact，请调用 deploy.preview 发布并返回真实可访问 URL。"
-                "若这是前后端分离项目，应优先使用 terminal.start、terminal.wait_for、terminal.snapshot 或 sandbox.run "
-                "启动/验证后端和前端服务，并在回复中给出可访问地址、端口、健康检查结果和未完成阻塞项。"
+                f"用户需求：{requirement}{artifact_hint}\n\n"
+                "你负责部署/运行验证。"
+                + (f"请调用 deploy.preview(artifact_id=\"{artifact_id}\") 发布前端产物并返回真实可访问 URL。" if artifact_id else
+                   "若 Frontend Worker 已生成真实 HTML/Web artifact，请调用 deploy.preview 发布并返回真实可访问 URL。")
+                + "若这是前后端分离项目，deploy.preview 会自动检测并启动后端服务。"
                 "没有真实 artifact、入口文件或服务运行记录时，不要声称已部署。"
             )
+        return None
+
+    def _find_frontend_artifact_id(self) -> str | None:
+        """从前端 Agent 的输出中提取 artifact_id。"""
+        import re as _re
+
+        for agent_id, output in self._agent_outputs.items():
+            role = str(output.get("task", "") or "").lower()
+            is_frontend = any(
+                kw in role for kw in ("前端", "frontend", "html", "web", "页面")
+            ) or any(
+                kw in agent_id.lower() for kw in ("frontend", "前端")
+            )
+            if not is_frontend:
+                continue
+
+            # 从 tool_events 中提取
+            for event in output.get("tool_events", []):
+                result = event.get("result") if isinstance(event, dict) else None
+                if isinstance(result, dict):
+                    aid = result.get("artifact_id") or (result.get("artifact") or {}).get("id")
+                    if aid:
+                        return str(aid)
+
+            # 从输出文本中提取
+            text = str(output.get("output", ""))
+            for pattern in (
+                r"artifact_id\s*[:=]\s*['\"]?([0-9a-fA-F-]{16,})",
+                r'"artifact_id"\s*:\s*"([0-9a-fA-F-]{16,})"',
+                r"/artifacts/([0-9a-fA-F-]{16,})/",
+            ):
+                matches = _re.findall(pattern, text)
+                if matches:
+                    return str(matches[-1])
+
         return None
 
     @staticmethod

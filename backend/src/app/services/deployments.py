@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
+import re
 from pathlib import Path, PurePosixPath
 from shutil import rmtree
 from datetime import datetime, timezone
@@ -15,6 +17,8 @@ from app.core.config import get_settings
 from app.core.errors import NotFoundError
 from app.services.tools.builtins.artifact.export import export_artifact
 from db.models import Artifact, ArtifactVersion, Deployment, Message, utcnow
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_DEPLOY_MODES = {"preview_link", "static_site", "source_download", "container"}
 PREVIEW_URL_MODES = {"preview_link", "static_site", "container"}
@@ -87,6 +91,14 @@ def publish_deployment_site(artifact: Artifact, deployment: Deployment) -> dict[
                 "content_type": mimetypes.guess_type(rel.name)[0] or "application/octet-stream",
             }
         )
+
+    _prepare_deployment_site_html(deployment)
+    backend_port = (deployment.config or {}).get("backend_port")
+    if backend_port:
+        try:
+            _inject_backend_url_to_site(deployment, int(backend_port))
+        except (TypeError, ValueError):
+            logger.warning("部署记录中的后端端口无效: %r", backend_port)
 
     deployment.config = {
         **(deployment.config or {}),
@@ -274,8 +286,14 @@ def create_sync_deployment(
     db: Session,
     artifact: Artifact,
     mode: str = "preview_link",
+    *,
+    workspace_dir: Path | None = None,
 ) -> Deployment:
-    """同步工具执行链路使用的部署创建入口。"""
+    """同步工具执行链路使用的部署创建入口。
+
+    Args:
+        workspace_dir: 工作区目录，传入时会自动检测后端入口文件并启动后端服务。
+    """
 
     version_id = db.scalar(
         select(ArtifactVersion.id)
@@ -292,6 +310,9 @@ def create_sync_deployment(
     )
     if mode in DEPLOYMENT_SITE_MODES:
         publish_deployment_site(artifact, deployment)
+        # 全栈部署：检测并启动后端服务
+        if workspace_dir is not None:
+            _try_start_backend(deployment, workspace_dir)
     deployment.access_url = deployment_access_url(artifact.id, mode, deployment_id=deployment.id)
     health = deployment_health(artifact, mode, deployment.access_url, deployment)
     apply_health_to_deployment(deployment, artifact=artifact, health=health)
@@ -301,6 +322,155 @@ def create_sync_deployment(
     db.commit()
     db.refresh(deployment)
     return deployment
+
+
+def _try_start_backend(deployment: Deployment, workspace_dir: Path) -> None:
+    """尝试在工作区中检测后端入口文件并启动后端服务。"""
+    from app.services.backend_process_manager import BACKEND_PROCESS_MANAGER
+
+    backend_proc = BACKEND_PROCESS_MANAGER.start_backend(
+        deployment_id=deployment.id,
+        workspace_dir=workspace_dir,
+    )
+    if backend_proc:
+        deployment.config = {
+            **(deployment.config or {}),
+            "backend_port": backend_proc.port,
+            "backend_process_id": backend_proc.id,
+            "backend_health_url": backend_proc.health_url,
+        }
+        # 前端 HTML 中注入后端地址
+        _inject_backend_url_to_site(deployment, backend_proc.port)
+        logger.info("全栈部署：后端已启动 port=%d", backend_proc.port)
+
+
+def _prepare_deployment_site_html(deployment: Deployment) -> None:
+    """Normalize generated HTML so a deployed page does not render blank."""
+
+    site_root = deployment_site_root(deployment.id)
+    index_file = site_root / "index.html"
+    if not index_file.exists():
+        return
+    try:
+        content = index_file.read_text(encoding="utf-8", errors="replace")
+        normalized = _ensure_boot_fallback(_normalize_cdn_scripts(content), deployment)
+        if normalized != content:
+            index_file.write_text(normalized, encoding="utf-8")
+    except Exception as exc:
+        logger.warning("准备部署 HTML 失败: %s", exc)
+
+
+def _normalize_cdn_scripts(content: str) -> str:
+    normalized = content.replace("https://unpkg.com/", "https://cdn.jsdelivr.net/npm/")
+
+    uses_antd = "antd.min.js" in normalized or "antd@" in normalized
+    if uses_antd and "dayjs" not in normalized.lower():
+        dayjs_script = '<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/dayjs.min.js"></script>\n'
+        antd_match = re.search(r'<script[^>]+antd@[^>]+antd\.min\.js[^>]*></script>\s*', normalized)
+        if antd_match:
+            normalized = normalized[: antd_match.start()] + dayjs_script + normalized[antd_match.start() :]
+        else:
+            normalized = normalized.replace("</head>", f"{dayjs_script}</head>")
+
+    has_jsx = bool(
+        re.search(r"root\.render\(\s*<", normalized)
+        or re.search(
+            r"<(?:Space|Button|Modal|Form|Table|Card|Tag|Popconfirm|Select|Switch|Input|Row|Col|Divider|Tooltip|Badge|Tabs|Menu|Layout|Typography)[\s>/]",
+            normalized,
+        )
+    )
+    if has_jsx and "babel" not in normalized.lower():
+        normalized = normalized.replace(
+            "</head>",
+            '<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.6/babel.min.js"></script>\n</head>',
+        )
+    if has_jsx:
+        normalized = re.sub(
+            r"<script>(\s*(?:const|let|var|function)\s+)",
+            r'<script type="text/babel">\1',
+            normalized,
+            count=1,
+        )
+    return normalized
+
+
+def _ensure_boot_fallback(content: str, deployment: Deployment) -> str:
+    if "agenthub-deploy-fallback" in content:
+        return content
+    if 'id="root"' not in content and "id='root'" not in content:
+        return content
+    title = _escape_html(str((deployment.config or {}).get("artifact_name") or "AgentHub 部署预览"))
+    fallback = f"""
+<div class="agenthub-deploy-fallback" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:32px;max-width:720px;margin:48px auto;border:1px solid #dbe5f2;border-radius:18px;background:#fff;box-shadow:0 20px 60px rgba(20,40,80,.12);color:#172033">
+  <h1 style="margin:0 0 12px;font-size:24px">{title}</h1>
+  <p style="margin:0 0 12px;color:#667085;line-height:1.7">正在加载部署页面。如果页面长时间停留在这里，通常是浏览器无法加载外部依赖，或生成代码存在运行时错误。</p>
+  <p style="margin:0;color:#667085;line-height:1.7">可以下载原始产物，或让 Agent 改成无外部 CDN 依赖的纯 HTML/CSS/JS 版本后重新部署。</p>
+</div>"""
+    return re.sub(
+        r"<div\s+id=[\"']root[\"']\s*>\s*</div>",
+        f'<div id="root">{fallback}</div>',
+        content,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+
+
+def _inject_backend_url_to_site(deployment: Deployment, backend_port: int) -> None:
+    """将后端 API 地址注入到前端 HTML 中，并修复 JSX 语法兼容性。"""
+    site_root = deployment_site_root(deployment.id)
+    index_file = site_root / "index.html"
+    if not index_file.exists():
+        return
+    try:
+        content = index_file.read_text(encoding="utf-8")
+        import re
+
+        # 1. 注入后端 API 地址（使用 site 相对路径，走反向代理避免 CORS 问题）
+        proxy_api = f"/api/v1/deployments/{deployment.id}/site/api"
+        pattern = r"(const\s+API(?:_BASE)?(?:_URL)?\s*=\s*['\"])(http://[^'\"]+)(['\"])"
+        match = re.search(pattern, content)
+        if match:
+            content = content.replace(match.group(0), f"{match.group(1)}{proxy_api}{match.group(3)}")
+            logger.info("已注入后端 API 地址: %s -> %s (走反向代理)", match.group(2), proxy_api)
+
+        # 2. 替换所有 localhost:8000 引用（错误提示、硬编码地址等）
+        if "localhost:8000" in content:
+            content = content.replace("http://localhost:8000", proxy_api)
+
+        # 3. 修复 axios 健康检测路径
+        content = content.replace("await api.get('/')", "await api.get('/api/')")
+
+        # 4. 替换不稳定的 CDN（unpkg.com 国内访问差，替换为 cdn.jsdelivr.net）
+        if "unpkg.com" in content:
+            content = content.replace("https://unpkg.com/", "https://cdn.jsdelivr.net/npm/")
+            logger.info("已替换 unpkg.com -> cdn.jsdelivr.net")
+
+        # 5. 检测 JSX 语法并注入 Babel（前端生成的代码可能混用 JSX 和 React.createElement）
+        has_jsx = bool(re.search(r"<(?:Space|Button|Modal|Form|Table|Card|Tag|Popconfirm|Select|Switch|Input|Row|Col|Divider|Tooltip|Badge|Tabs|Menu|Layout|Typography)[\s>]", content))
+        has_babel = "babel" in content.lower()
+        if has_jsx and not has_babel:
+            # 注入 Babel standalone
+            content = content.replace(
+                "</head>",
+                '<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.6/babel.min.js"></script>\n</head>',
+            )
+            # 将内联 script 标记为 text/babel
+            content = re.sub(
+                r'<script>(\s*const\s+\{)',
+                r'<script type="text/babel">\1',
+                content,
+            )
+            logger.info("已注入 Babel 以支持 JSX 语法")
+
+        content = _ensure_boot_fallback(_normalize_cdn_scripts(content), deployment)
+        index_file.write_text(content, encoding="utf-8")
+    except Exception as e:
+        logger.warning("注入后端地址失败: %s", e)
+
+
+def deployment_backend_port(deployment: Deployment) -> int | None:
+    """获取部署关联的后端服务端口。"""
+    return (deployment.config or {}).get("backend_port")
 
 
 def _deployment_message(artifact: Artifact, deployment: Deployment) -> Message:

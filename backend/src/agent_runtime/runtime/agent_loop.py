@@ -379,6 +379,7 @@ class AgentLoop:
                     tools,
                     tool_results,
                     messages,
+                    metadata=context_metadata,
                 )
                 if forced_tool_call is None and forced_artifact_tool_name is None:
                     forced_tool_call = self._forced_artifact_tool_call(task, tools)
@@ -1024,6 +1025,7 @@ class AgentLoop:
         tools: List[Dict[str, Any]],
         tool_results: List[Dict[str, Any]],
         messages: List[ChatMessage] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Enforce real workspace/code delivery for project-building turns.
 
@@ -1043,14 +1045,20 @@ class AgentLoop:
         role = f"{self.agent.name} {self.agent.role}".lower()
         is_release = any(token in role for token in ("deploy", "release", "ops", "部署", "发布", "上线"))
         if is_release and "deploy.preview" in available and not self._tool_succeeded(tool_results, "deploy.preview"):
-            artifact_id = self._latest_artifact_id(tool_results, [], task)
+            artifact_id = self._latest_artifact_id(tool_results, messages or [], task)
             if artifact_id:
+                deploy_args: dict[str, Any] = {
+                    "artifact_id": artifact_id,
+                    "mode": "preview_link",
+                }
+                # 传递 conversation_id 以支持全栈部署（检测后端工作区文件）
+                if metadata:
+                    conv_id = str(metadata.get("conversation_id") or metadata.get("session_id") or "")
+                    if conv_id:
+                        deploy_args["conversation_id"] = conv_id
                 return self._tool_call(
                     "deploy.preview",
-                    {
-                        "artifact_id": artifact_id,
-                        "mode": "preview_link",
-                    },
+                    deploy_args,
                     prefix="project_deploy",
                 )
         return None
