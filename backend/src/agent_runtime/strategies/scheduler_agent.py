@@ -1023,12 +1023,12 @@ class SchedulerAgent(AgentActor):
         schedulable = self._schedulable_agent_ids()
         if not schedulable:
             return []
-        if named_targets and not self._is_collaboration_request(task):
-            return named_targets
         if self._looks_like_fullstack_delivery(task):
             selected = self._fullstack_delivery_targets(schedulable, named_targets, task)
             if selected:
                 return selected[:MAX_PLAN_TASKS]
+        if named_targets and not self._is_collaboration_request(task):
+            return named_targets
         if not self._looks_like_multi_agent_task(task):
             return self._single_best_target(task, named_targets, schedulable)
 
@@ -1060,8 +1060,6 @@ class SchedulerAgent(AgentActor):
         task: str,
     ) -> list[str]:
         selected: list[str] = []
-        if named_targets:
-            selected.extend(named_targets)
 
         backend_id = self._first_agent_matching(
             schedulable,
@@ -1099,6 +1097,7 @@ class SchedulerAgent(AgentActor):
         for agent_id in (backend_id, frontend_id, doc_id, review_id, release_id):
             if agent_id:
                 selected.append(agent_id)
+        selected.extend(named_targets)
         if not selected:
             selected.extend(schedulable[: min(3, len(schedulable))])
         return list(dict.fromkeys(self._valid_target_ids(selected)))
@@ -1931,6 +1930,8 @@ class SchedulerAgent(AgentActor):
             "full-stack",
             "frontend backend",
             "backend frontend",
+            "frontend and backend",
+            "backend and frontend",
             "front end back end",
             "frontend",
             "五子棋",
@@ -1967,6 +1968,8 @@ class SchedulerAgent(AgentActor):
             "full-stack",
             "frontend backend",
             "backend frontend",
+            "frontend and backend",
+            "backend and frontend",
             "front end back end",
         )
         has_frontend_project = any(marker in normalized for marker in frontend_or_project_markers)

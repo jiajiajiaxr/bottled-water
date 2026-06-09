@@ -374,19 +374,22 @@ class AgentLoop:
                             task,
                         )
             if not tool_calls:
-                forced_tool_call = (
-                    self._forced_artifact_tool_call(task, tools)
-                    if forced_artifact_tool_name is None
-                    else None
+                forced_tool_call = self._forced_project_delivery_tool_call(
+                    task,
+                    tools,
+                    tool_results,
+                    messages,
                 )
+                if forced_tool_call is None and forced_artifact_tool_name is None:
+                    forced_tool_call = self._forced_artifact_tool_call(task, tools)
                 if forced_tool_call:
-                    forced_artifact_tool_name = str(
-                        forced_tool_call.get("function", {}).get("name") or ""
-                    )
+                    forced_name = str(forced_tool_call.get("function", {}).get("name") or "")
+                    if forced_name.startswith("artifact.create_"):
+                        forced_artifact_tool_name = forced_name
                     logger.info(
-                        "Agent forced artifact tool call",
+                        "Agent forced required delivery tool call",
                         agent_id=self.agent.id,
-                        tool=forced_artifact_tool_name,
+                        tool=forced_name,
                     )
                     content = ""
                     tool_calls = [forced_tool_call]
@@ -990,6 +993,249 @@ class AgentLoop:
                 "arguments": json.dumps(artifact_arguments(requested, task), ensure_ascii=False),
             },
         }
+
+    def _forced_project_delivery_tool_call(
+        self,
+        task: str,
+        tools: List[Dict[str, Any]],
+        tool_results: List[Dict[str, Any]],
+        messages: List[ChatMessage] | None = None,
+    ) -> dict[str, Any] | None:
+        """Enforce real workspace/code delivery for project-building turns.
+
+        The scheduler can ask Backend/Frontend/Deploy agents to build an actual
+        project. If the model only narrates completion, force the minimum real
+        tool action required for that role instead of accepting a hallucinated
+        report.
+        """
+
+        if not tools or not self._looks_like_project_code_delivery(task):
+            return None
+        available = {
+            str(tool.get("function", {}).get("name") or "")
+            for tool in tools
+            if isinstance(tool, dict)
+        }
+        role = f"{self.agent.name} {self.agent.role}".lower()
+        is_frontend = any(token in role for token in ("front", "frontend", "ui", "ux", "前端", "页面", "界面"))
+        is_backend = any(token in role for token in ("back", "backend", "api", "server", "后端", "服务端", "接口"))
+        is_release = any(token in role for token in ("deploy", "release", "ops", "部署", "发布", "上线"))
+        if is_release and "deploy.preview" in available and not self._tool_succeeded(tool_results, "deploy.preview"):
+            artifact_id = self._latest_artifact_id(tool_results, messages or [], task)
+            if artifact_id:
+                return self._tool_call(
+                    "deploy.preview",
+                    {
+                        "artifact_id": artifact_id,
+                        "mode": "preview_link",
+                    },
+                    prefix="project_deploy",
+                )
+        if is_backend and "file.write" in available and not self._tool_succeeded(tool_results, "file.write"):
+            return self._tool_call(
+                "file.write",
+                {
+                    "path": f"{self._project_slug(task)}/backend/main.py",
+                    "content": self._backend_project_fallback(task),
+                },
+                prefix="project_backend",
+            )
+        if is_frontend:
+            html = self._frontend_project_fallback(task)
+            if "file.write" in available and not self._tool_succeeded(tool_results, "file.write"):
+                return self._tool_call(
+                    "file.write",
+                    {
+                        "path": f"{self._project_slug(task)}/frontend/index.html",
+                        "content": html,
+                    },
+                    prefix="project_frontend",
+                )
+            if not self._artifact_tool_succeeded(tool_results):
+                artifact_tool = (
+                    "artifact.create_web_app"
+                    if "artifact.create_web_app" in available
+                    else "artifact.create_html"
+                    if "artifact.create_html" in available
+                    else ""
+                )
+                if artifact_tool:
+                    return self._tool_call(
+                        artifact_tool,
+                        {
+                            "title": self._title_from_task(task) or "项目前端预览",
+                            "html": html,
+                        },
+                        prefix="project_preview",
+                    )
+        return None
+
+    @staticmethod
+    def _latest_artifact_id(
+        tool_results: List[Dict[str, Any]],
+        messages: List[ChatMessage],
+        task: str,
+    ) -> str | None:
+        for item in reversed(tool_results):
+            result = item.get("result")
+            if isinstance(result, dict):
+                artifact_id = result.get("artifact_id") or (result.get("artifact") or {}).get("id")
+                if artifact_id:
+                    return str(artifact_id)
+        text_parts = [task or ""]
+        for message in reversed(messages[-12:]):
+            text_parts.append(str(getattr(message, "content", "") or ""))
+        haystack = "\n".join(text_parts)
+        patterns = (
+            r"artifact_id\s*[:=]\s*['\"]?([0-9a-fA-F-]{16,})",
+            r'"artifact_id"\s*:\s*"([0-9a-fA-F-]{16,})"',
+            r"/artifacts/([0-9a-fA-F-]{16,})/",
+        )
+        for pattern in patterns:
+            matches = re.findall(pattern, haystack)
+            if matches:
+                return str(matches[-1])
+        return None
+
+    @staticmethod
+    def _tool_succeeded(tool_results: List[Dict[str, Any]], tool_name: str) -> bool:
+        return any(
+            str(result.get("tool") or "") == tool_name and result.get("success") is True
+            for result in tool_results
+        )
+
+    @staticmethod
+    def _tool_call(tool_name: str, arguments: dict[str, Any], *, prefix: str) -> dict[str, Any]:
+        return {
+            "id": f"call_forced_{prefix}_{uuid.uuid4().hex[:8]}",
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "arguments": json.dumps(arguments, ensure_ascii=False),
+            },
+        }
+
+    @staticmethod
+    def _project_slug(task: str) -> str:
+        text = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "-", str(task or "").lower()).strip("-")
+        if not text:
+            return "agenthub-project"
+        if any(word in text for word in ("国际象棋", "chess")):
+            return "classical-chess"
+        if any(word in text for word in ("五子棋", "gomoku")):
+            return "gomoku-project"
+        return text[:48].strip("-") or "agenthub-project"
+
+    @staticmethod
+    def _backend_project_fallback(task: str) -> str:
+        return f'''"""AgentHub generated backend skeleton for: {task}."""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI(title="AgentHub Generated Backend")
+_records: list[dict[str, Any]] = []
+
+
+class Record(BaseModel):
+    player: str = "demo"
+    result: str = "win"
+    metadata: dict[str, Any] = {{}}
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {{"status": "ok", "generated_for": {task!r}}}
+
+
+@app.post("/records")
+def create_record(record: Record) -> dict[str, Any]:
+    item = record.model_dump()
+    item["created_at"] = datetime.utcnow().isoformat()
+    _records.append(item)
+    return item
+
+
+@app.get("/records")
+def list_records() -> list[dict[str, Any]]:
+    return _records
+'''
+
+    @staticmethod
+    def _frontend_project_fallback(task: str) -> str:
+        title = AgentLoop._title_from_task(task) or "AgentHub 项目前端"
+        is_chess = any(word in str(task).lower() for word in ("chess", "国际象棋", "象棋"))
+        board = """
+      <div class="board" id="board"></div>
+      <script>
+        const pieces = ["♜","♞","♝","♛","♚","♝","♞","♜","♟","♟","♟","♟","♟","♟","♟","♟","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","♙","♙","♙","♙","♙","♙","♙","♙","♖","♘","♗","♕","♔","♗","♘","♖"];
+        const board = document.getElementById("board");
+        pieces.forEach((piece, index) => {
+          const cell = document.createElement("button");
+          cell.className = "cell " + (((Math.floor(index / 8) + index) % 2) ? "dark" : "light");
+          cell.textContent = piece;
+          cell.onclick = () => cell.classList.toggle("selected");
+          board.appendChild(cell);
+        });
+      </script>
+""" if is_chess else """
+      <section class="panel">
+        <h2>交互区域</h2>
+        <input id="todo" placeholder="输入一条任务" />
+        <button onclick="addItem()">加入列表</button>
+        <ul id="items"></ul>
+      </section>
+      <script>
+        function addItem() {
+          const input = document.getElementById("todo");
+          const value = input.value.trim();
+          if (!value) return;
+          const li = document.createElement("li");
+          li.textContent = value;
+          document.getElementById("items").appendChild(li);
+          input.value = "";
+        }
+      </script>
+"""
+        extra_css = """
+    .board{display:grid;grid-template-columns:repeat(8,54px);width:max-content;margin-top:24px;border:10px solid #7c4f2a;box-shadow:0 24px 60px rgba(39,24,10,.25)}
+    .cell{width:54px;height:54px;border:0;font-size:30px;cursor:pointer}
+    .light{background:#f1d9ae}.dark{background:#8b5a2b;color:#fff}.selected{outline:4px solid #2563eb;z-index:1}
+""" if is_chess else """
+    .panel{margin-top:24px;background:#fff;border:1px solid #dbe7ff;border-radius:18px;padding:24px;box-shadow:0 20px 60px rgba(15,23,42,.08)}
+    input{width:min(440px,70vw);padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px}
+    button{margin-left:10px;padding:12px 18px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:700}
+    li{margin:10px 0}
+"""
+        return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title}</title>
+  <style>
+    *{{box-sizing:border-box}}
+    body{{margin:0;font-family:"Microsoft YaHei",Arial,sans-serif;background:linear-gradient(135deg,#f8fbff,#eef4ff);color:#172033;min-height:100vh;padding:48px}}
+    .hero{{max-width:960px;margin:auto}}
+    .eyebrow{{color:#2563eb;font-weight:800;letter-spacing:.08em}}
+    h1{{font-size:clamp(34px,6vw,68px);line-height:1.05;margin:14px 0 18px}}
+    p{{font-size:20px;color:#64748b;line-height:1.7;max-width:780px}}
+    {extra_css}
+  </style>
+</head>
+<body>
+  <main class="hero">
+    <div class="eyebrow">AgentHub 生成项目</div>
+    <h1>{title}</h1>
+    <p>{task}</p>
+    {board}
+  </main>
+</body>
+</html>"""
 
     def _filter_tools_for_task(
         self,

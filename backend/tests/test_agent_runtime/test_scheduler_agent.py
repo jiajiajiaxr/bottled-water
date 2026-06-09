@@ -79,6 +79,25 @@ async def test_scheduler_agent_publishes_plan_inputs_and_summary():
         Event(
             type=AGENT_REPORT,
             payload={
+                "agent_id": "backend",
+                "task": "build backend",
+                "work_product": "backend done",
+                "report": {
+                    "agent_id": "backend",
+                    "state": "completed",
+                    "will": "complete",
+                    "confidence": 0.8,
+                    "rationale": "API complete",
+                },
+            },
+            source="agent:backend",
+        )
+    )
+    await _wait_for(events, CONTROL_ASSIGN)
+    await bus.publish(
+        Event(
+            type=AGENT_REPORT,
+            payload={
                 "agent_id": "frontend",
                 "task": "build frontend",
                 "work_product": "frontend done",
@@ -94,41 +113,23 @@ async def test_scheduler_agent_publishes_plan_inputs_and_summary():
             source="agent:frontend",
         )
     )
-    await bus.publish(
-        Event(
-            type=AGENT_REPORT,
-            payload={
-                "agent_id": "backend",
-                "task": "build backend",
-                "work_product": "backend done",
-                "report": {
-                    "agent_id": "backend",
-                    "state": "completed",
-                    "will": "complete",
-                    "confidence": 0.8,
-                    "rationale": "API complete",
-                },
-            },
-            source="agent:backend",
-        )
-    )
     summary = await _wait_for(events, SCHEDULER_SUMMARY)
     complete = await _wait_for(events, CONTROL_COMPLETE)
     await scheduler.stop()
 
     assignments = [event for event in events if event.type == CONTROL_ASSIGN]
-    assert [item["agent_id"] for item in plan.payload["plan"]] == ["frontend", "backend"]
+    assert [item["agent_id"] for item in plan.payload["plan"]] == ["backend", "frontend"]
     assert first_assign.payload["task_input"]["user_request"] == "build frontend and backend"
-    assert first_assign.payload["task_input"]["plan"][0]["agent_id"] == "frontend"
+    assert first_assign.payload["task_input"]["plan"][0]["agent_id"] == "backend"
     assert {event.target for event in assignments} == {"frontend", "backend"}
     assert summary.payload["status"] == "completed"
-    assert summary.payload["completed_agent_ids"] == ["frontend", "backend"]
+    assert summary.payload["completed_agent_ids"] == ["backend", "frontend"]
     assert "Frontend" in summary.payload["final_answer"]
     assert "## 最终成品" in summary.payload["final_answer"]
     assert summary.payload["final_product"]["type"] == "integrated"
     assert "## 归集" in summary.payload["final_answer"]
     assert summary.payload["compliance_checks"]
-    assert complete.payload["summary"]["agent_outputs"][0]["agent_id"] == "frontend"
+    assert complete.payload["summary"]["agent_outputs"][0]["agent_id"] == "backend"
 
 
 def test_scheduler_final_answer_keeps_single_agent_product_direct():
@@ -635,8 +636,8 @@ def test_scheduler_agent_repairs_single_assign_to_planned_parallel_targets():
         reports=list(scheduler._initial_reports().values()),
     )
 
-    assert repaired.decision_type == "parallel"
-    assert repaired.target_agent_ids == ["frontend", "backend"]
+    assert repaired.decision_type == "assign"
+    assert repaired.target_agent_ids == ["backend"]
 
 
 def test_scheduler_agent_waits_for_inflight_planned_targets():
@@ -697,25 +698,32 @@ def test_scheduler_agent_dispatches_collaboration_plan_by_dependency_stage():
         reports=list(scheduler._initial_reports().values()),
     )
     assert first.decision_type == "parallel"
-    assert first.target_agent_ids == ["frontend", "backend"]
+    assert first.target_agent_ids == ["backend"]
 
-    scheduler.reports["frontend"] = _completed_report("frontend")
     scheduler.reports["backend"] = _completed_report("backend")
     second = scheduler._repair_decision(
         SchedulingDecision(decision_type="complete", task_description=scheduler.current_task),
-        reports=[scheduler.reports["frontend"], scheduler.reports["backend"]],
+        reports=[scheduler.reports["backend"]],
     )
     assert second.decision_type == "assign"
-    assert second.target_agent_ids == ["qa"]
+    assert second.target_agent_ids == ["frontend"]
     assert second.fallback_reason == "complete_guard_ready_stage"
 
-    scheduler.reports["qa"] = _completed_report("qa")
+    scheduler.reports["frontend"] = _completed_report("frontend")
     third = scheduler._repair_decision(
+        SchedulingDecision(decision_type="complete", task_description=scheduler.current_task),
+        reports=[scheduler.reports["frontend"], scheduler.reports["backend"]],
+    )
+    assert third.decision_type == "assign"
+    assert third.target_agent_ids == ["qa"]
+
+    scheduler.reports["qa"] = _completed_report("qa")
+    fourth = scheduler._repair_decision(
         SchedulingDecision(decision_type="complete", task_description=scheduler.current_task),
         reports=[scheduler.reports["frontend"], scheduler.reports["backend"], scheduler.reports["qa"]],
     )
-    assert third.decision_type == "assign"
-    assert third.target_agent_ids == ["devops"]
+    assert fourth.decision_type == "assign"
+    assert fourth.target_agent_ids == ["devops"]
 
 
 def test_scheduler_agent_recognizes_chinese_collaboration_task():
@@ -737,9 +745,9 @@ def test_scheduler_agent_recognizes_chinese_collaboration_task():
         "组织多智能体完成企业知识库问答 MVP：前端、后端、测试和发布方案都要闭环，并给出最终可交付方案。"
     )
 
-    assert [item["agent_id"] for item in plan] == ["frontend", "backend", "qa", "devops"]
-    assert plan[2]["depends_on"] == ["frontend", "backend"]
-    assert plan[3]["depends_on"] == ["frontend", "backend", "qa"]
+    assert [item["agent_id"] for item in plan] == ["backend", "frontend", "qa", "devops"]
+    assert plan[2]["depends_on"] == ["backend", "frontend"]
+    assert plan[3]["depends_on"] == ["backend", "frontend", "qa"]
 
 
 @pytest.mark.asyncio
@@ -773,7 +781,8 @@ async def test_scheduler_agent_assigns_target_specific_plan_tasks():
 
     assign = next(event for event in events if event.type == CONTROL_ASSIGN)
     assert assign.target == "backend"
-    assert "Backend Worker" in assign.payload["task"]
+    assert "file.write" in assign.payload["task"]
+    assert "后端" in assign.payload["task"]
     assert assign.payload["task"] == assign.payload["task_input"]["assigned_task"]
     assert assign.payload["task_input"]["scheduler_task"] == "generic implementation task"
 
@@ -1164,6 +1173,75 @@ def test_project_delivery_filters_document_artifact_tools_for_code_agents():
     assert "file.write" in frontend_tools
     assert not any(name.startswith("artifact.create_") for name in backend_tools)
     assert "file.write" in backend_tools
+
+
+def test_project_delivery_forces_frontend_file_then_preview_artifact():
+    task = "Build a chess web app with backend API and deploy preview"
+    tools = [
+        {"function": {"name": "file.write"}},
+        {"function": {"name": "artifact.create_html"}},
+        {"function": {"name": "artifact.create_web_app"}},
+        {"function": {"name": "artifact.create_pdf"}},
+    ]
+    loop = AgentLoop(
+        AgentConfig(id="frontend", name="Frontend Worker", system_prompt="build ui", role="frontend"),
+        FakeModelProvider(),
+    )
+    filtered = loop._filter_tools_for_task(task, tools)
+
+    first = loop._forced_project_delivery_tool_call(task, filtered, [])
+    assert first["function"]["name"] == "file.write"
+    assert "frontend/index.html" in first["function"]["arguments"]
+
+    second = loop._forced_project_delivery_tool_call(
+        task,
+        filtered,
+        [{"tool": "file.write", "success": True, "result": {"path": "project/frontend/index.html"}}],
+    )
+    assert second["function"]["name"] == "artifact.create_web_app"
+
+
+def test_project_delivery_forces_backend_workspace_file():
+    task = "Build an app with backend API, database storage, frontend and deploy"
+    tools = [
+        {"function": {"name": "file.write"}},
+        {"function": {"name": "artifact.create_html"}},
+        {"function": {"name": "artifact.create_pdf"}},
+    ]
+    loop = AgentLoop(
+        AgentConfig(id="backend", name="Backend Worker", system_prompt="build api", role="backend"),
+        FakeModelProvider(),
+    )
+    filtered = loop._filter_tools_for_task(task, tools)
+
+    forced = loop._forced_project_delivery_tool_call(task, filtered, [])
+    assert forced["function"]["name"] == "file.write"
+    assert "backend/main.py" in forced["function"]["arguments"]
+    assert "artifact.create_html" not in {item["function"]["name"] for item in filtered}
+
+
+def test_project_delivery_forces_deploy_preview_from_artifact_context():
+    task = (
+        "Deploy the generated frontend artifact.\n"
+        "Frontend Worker output: artifact_id: 123e4567-e89b-12d3-a456-426614174000"
+    )
+    tools = [{"function": {"name": "deploy.preview"}}]
+    loop = AgentLoop(
+        AgentConfig(
+            id="deploy",
+            name="Deploy Agent",
+            system_prompt="deploy",
+            role="deploy",
+            tools=["deploy.preview"],
+        ),
+        FakeModelProvider(),
+    )
+
+    forced = loop._forced_project_delivery_tool_call(task, tools, [], [])
+
+    assert forced is not None
+    assert forced["function"]["name"] == "deploy.preview"
+    assert "123e4567-e89b-12d3-a456-426614174000" in forced["function"]["arguments"]
 
 
 @pytest.mark.asyncio

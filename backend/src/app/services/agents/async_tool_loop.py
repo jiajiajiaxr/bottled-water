@@ -53,9 +53,18 @@ async def _invoke_catalog_tool(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     if _is_async_session(db):
-        return await db.run_sync(
-            lambda session: invoke_tool_sync(session, user, tool_name, arguments)
-        )
+        try:
+            payload = await db.run_sync(
+                lambda session: invoke_tool_sync(session, user, tool_name, arguments)
+            )
+        except Exception:
+            # invoke_tool_sync records failed ToolInvocation before re-raising.
+            # Commit that audit trail so async agent_runtime does not leave
+            # zombie "running" invocations when a tool fails.
+            await db.commit()
+            raise
+        await db.commit()
+        return payload
     return invoke_tool_sync(db, user, tool_name, arguments)
 
 
