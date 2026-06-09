@@ -254,6 +254,123 @@ BUILTIN_TOOLS: dict[str, BuiltinTool] = {
             }
         ),
     ),
+    "terminal.start": BuiltinTool(
+        "terminal.start",
+        "Interactive terminal start",
+        "runtime",
+        "Start a controlled interactive CLI process in the workspace sandbox. Use this for init/scaffold commands that prompt for input.",
+        ("sandbox:run",),
+        _schema(
+            {
+                "command": {"type": "string"},
+                "sandbox_id": {"type": "string"},
+                "workspace_id": {"type": "string"},
+                "conversation_id": {"type": "string"},
+                "agent_id": {"type": "string"},
+                "task_id": {"type": "string"},
+                "workdir": {"type": "string"},
+                "timeout": {"type": "integer"},
+                "timeout_seconds": {"type": "integer"},
+                "env": {"type": "object"},
+            },
+            ["command"],
+        ),
+        _schema(
+            {
+                "session_id": {"type": "string"},
+                "session_status": {"type": "string"},
+                "transport": {"type": "string"},
+                "stdout_tail": {"type": "string"},
+                "stderr_tail": {"type": "string"},
+                "exit_code": {"type": "integer"},
+                "files": {"type": "array"},
+            }
+        ),
+        ("terminal", "interactive", "cli", "scaffold", "init"),
+    ),
+    "terminal.send": BuiltinTool(
+        "terminal.send",
+        "Interactive terminal send",
+        "runtime",
+        "Send stdin text to a running controlled interactive terminal session.",
+        ("sandbox:run",),
+        _schema({"session_id": {"type": "string"}, "input": {"type": "string"}}, ["session_id", "input"]),
+        _schema(
+            {
+                "session_id": {"type": "string"},
+                "session_status": {"type": "string"},
+                "stdout_tail": {"type": "string"},
+                "stderr_tail": {"type": "string"},
+                "exit_code": {"type": "integer"},
+            }
+        ),
+        ("terminal", "interactive", "stdin"),
+    ),
+    "terminal.wait_for": BuiltinTool(
+        "terminal.wait_for",
+        "Interactive terminal wait",
+        "runtime",
+        "Wait until a running interactive terminal prints one of the requested text patterns, or until the wait times out.",
+        ("sandbox:run",),
+        _schema(
+            {
+                "session_id": {"type": "string"},
+                "patterns": {"type": "array", "items": {"type": "string"}},
+                "timeout_ms": {"type": "integer"},
+                "timeout": {"type": "integer"},
+            },
+            ["session_id", "patterns"],
+        ),
+        _schema(
+            {
+                "matched": {"type": "boolean"},
+                "matched_pattern": {"type": "string"},
+                "session_status": {"type": "string"},
+                "stdout_tail": {"type": "string"},
+                "stderr_tail": {"type": "string"},
+                "exit_code": {"type": "integer"},
+            }
+        ),
+        ("terminal", "interactive", "wait"),
+    ),
+    "terminal.snapshot": BuiltinTool(
+        "terminal.snapshot",
+        "Interactive terminal snapshot",
+        "runtime",
+        "Return current output, status, exit code, duration, and generated files for a running terminal session.",
+        ("sandbox:run",),
+        _schema({"session_id": {"type": "string"}}, ["session_id"]),
+        _schema(
+            {
+                "session_id": {"type": "string"},
+                "session_status": {"type": "string"},
+                "stdout_tail": {"type": "string"},
+                "stderr_tail": {"type": "string"},
+                "exit_code": {"type": "integer"},
+                "files": {"type": "array"},
+            }
+        ),
+        ("terminal", "interactive", "status"),
+    ),
+    "terminal.stop": BuiltinTool(
+        "terminal.stop",
+        "Interactive terminal stop",
+        "runtime",
+        "Terminate a running interactive terminal session and return its final output snapshot.",
+        ("sandbox:run",),
+        _schema({"session_id": {"type": "string"}}, ["session_id"]),
+        _schema(
+            {
+                "session_id": {"type": "string"},
+                "session_status": {"type": "string"},
+                "stdout_tail": {"type": "string"},
+                "stderr_tail": {"type": "string"},
+                "exit_code": {"type": "integer"},
+                "files": {"type": "array"},
+            }
+        ),
+        ("terminal", "interactive", "stop"),
+    ),
     "browser.preview": BuiltinTool(
         "browser.preview",
         "浏览器预览",

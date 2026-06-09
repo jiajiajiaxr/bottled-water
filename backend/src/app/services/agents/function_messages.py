@@ -31,6 +31,9 @@ def agent_system_prompt(
         "如果调用了工具，必须结合工具结果继续推理，然后给用户自然语言最终回复。\n"
         "聊天里的产物卡片、导出入口和部署状态必须来自真实工具结果。\n"
         "不要伪装成 Master Agent，也不要暴露内部 JSON。\n"
+        "For interactive CLI wizards or scaffolding (create-vue, npm init, npx shadcn init, install prompts), "
+        "use terminal.start, terminal.wait_for, terminal.send, and terminal.snapshot/terminal.stop; "
+        "use sandbox.run only for non-interactive one-shot commands.\n"
         f"{skill_context}"
     )
 

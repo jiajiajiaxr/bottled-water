@@ -10,6 +10,7 @@ This file is the compact status reference for current docs. It avoids historical
 - Actor-runtime multi-agent coordination with Team Leader planning, suitable-agent selection, visible progress, agent reports, and optional aggregated final deliverables.
 - Agent directory and configurable model/tool/skill/MCP permissions.
 - Tool catalog, built-in tools, invocation records, and permission checks.
+- Interactive terminal tools for real CLI scaffolding and prompts, including stdin send, wait, snapshot, stop, and persisted invocation records.
 - Unified external coding agent tool invocation for Codex, Claude Code, and compatible adapters, including persisted runs and status/cancel paths.
 - Model provider management and Ark/OpenAI-compatible fallback configuration.
 - File upload, workspace file tree, preview/download operations, and attachment context.
@@ -24,6 +25,7 @@ This file is the compact status reference for current docs. It avoids historical
 - Real LLM responses depend on configured model provider credentials. Without keys, local mock/fallback behavior is expected.
 - Office/PDF preview quality depends on available conversion tools in the runtime environment.
 - Sandbox and external coding agent execution depend on installed command runtimes and workspace-safe cwd constraints.
+- Interactive terminal sessions depend on the command runtime being installed and on a single live backend process for the active session.
 - MCP stdio/HTTP calls depend on external server availability and declared transport support.
 - Deployment preview validates accessible artifacts. Container mode is implemented as an AgentHub app or Docker Compose stack preview endpoint; full production cloud orchestration remains outside the current runtime.
 
@@ -43,6 +45,7 @@ This file is the compact status reference for current docs. It avoids historical
 - Daily Chat context summaries now reflect default full tool permissions, including Claude Code tools.
 - Docker one-command deployment now uses correct build contexts, backend `PYTHONPATH`, startup migrations, psycopg Postgres URLs, nginx streaming/WebSocket proxying, and Docker-specific env isolation.
 - Container deployment mode now creates a health-checked artifact preview endpoint instead of failing with "runtime not enabled".
+- Interactive CLI/scaffolding requests now prefer `terminal.*` tools over one-shot `sandbox.run`, and the sandbox panel exposes manual start/send/wait/snapshot/stop controls.
 
 ## Roadmap / Not A Current Guarantee
 

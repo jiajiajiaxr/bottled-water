@@ -54,6 +54,9 @@ export function summarizeToolEvents(
 
 export function isFailedToolEvent(event: ToolEventRecord) {
   const status = String(event.status || "").toLowerCase();
+  if (event.toolName === "terminal.wait_for" && status === "timeout") {
+    return false;
+  }
   if (FAILED_STATUSES.has(status)) return true;
   if (status === "succeeded" || status === "completed") return false;
   const exitCode = Number(event.exit_code);
@@ -98,10 +101,14 @@ function normalizeToolEvent(value: unknown): ToolEventRecord {
     status: stringValue(record.status),
     exit_code: primitiveValue(record.exit_code ?? record.exitCode),
     duration_ms: primitiveValue(record.duration_ms ?? record.durationMs),
-    stdout: stringValue(record.stdout),
-    stderr: stringValue(record.stderr),
-    summary: stringValue(record.summary),
+    stdout: stringValue(record.stdout ?? record.stdout_tail ?? record.stdoutTail),
+    stderr: stringValue(record.stderr ?? record.stderr_tail ?? record.stderrTail),
+    summary: stringValue(record.summary ?? record.session_status ?? record.sessionStatus),
     error: stringValue(record.error ?? record.error_message),
+    session_id: stringValue(record.session_id ?? record.sessionId),
+    session_status: stringValue(record.session_status ?? record.sessionStatus),
+    command: stringValue(record.command),
+    cwd: stringValue(record.cwd),
   };
 }
 

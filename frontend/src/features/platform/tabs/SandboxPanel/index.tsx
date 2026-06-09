@@ -12,16 +12,26 @@ import {
   Select,
   Space,
   Tag,
+  Typography,
 } from "antd";
-import { CloudUploadOutlined } from "@ant-design/icons";
+import {
+  CloudUploadOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
+  SendOutlined,
+  SyncOutlined,
+} from "@ant-design/icons";
 import { api } from "@/api";
 import { parseList } from "@/lib/format";
 import type {
   RemoteConnection,
   SandboxCommandResult,
   SandboxSession,
+  TerminalSnapshot,
   Workspace,
 } from "@/types";
+
+const { Text } = Typography;
 
 interface SandboxPanelProps {
   activeWorkspace?: Workspace;
@@ -31,6 +41,8 @@ export function SandboxPanel({ activeWorkspace }: SandboxPanelProps) {
   const { message } = AntApp.useApp();
   const [sandboxForm] = Form.useForm();
   const [commandForm] = Form.useForm();
+  const [stdinForm] = Form.useForm();
+  const [waitForm] = Form.useForm();
   const [remoteForm] = Form.useForm();
 
   const [sandboxes, setSandboxes] = useState<SandboxSession[]>([]);
@@ -39,6 +51,9 @@ export function SandboxPanel({ activeWorkspace }: SandboxPanelProps) {
     RemoteConnection[]
   >([]);
   const [sandboxResult, setSandboxResult] = useState<SandboxCommandResult>();
+  const [terminal, setTerminal] = useState<TerminalSnapshot>();
+  const [terminalBusy, setTerminalBusy] = useState(false);
+  const terminalRunning = terminal?.session_status === "running";
 
   const load = async () => {
     try {
@@ -57,6 +72,27 @@ export function SandboxPanel({ activeWorkspace }: SandboxPanelProps) {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!terminalRunning || !terminal?.session_id) return undefined;
+    const timer = window.setInterval(async () => {
+      try {
+        setTerminal(await api.terminalSnapshot(terminal.session_id));
+      } catch {
+        window.clearInterval(timer);
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [terminal?.session_id, terminalRunning]);
+
+  const appendNewline = (value: string) =>
+    value.endsWith("\n") || value.endsWith("\r") ? value : `${value}\n`;
+
+  const refreshSelectedSandbox = (sandbox: SandboxSession) => {
+    setSandboxes((current) =>
+      current.map((item) => (item.id === sandbox.id ? sandbox : item)),
+    );
+  };
 
   return (
     <div className="workspace-grid">
@@ -116,11 +152,7 @@ export function SandboxPanel({ activeWorkspace }: SandboxPanelProps) {
               values,
             );
             setSandboxResult(result.result);
-            setSandboxes((current) =>
-              current.map((item) =>
-                item.id === selectedSandbox ? result.sandbox : item,
-              ),
-            );
+            refreshSelectedSandbox(result.sandbox);
           }}
         >
           <Form.Item
@@ -144,9 +176,136 @@ export function SandboxPanel({ activeWorkspace }: SandboxPanelProps) {
         {sandboxResult && (
           <div className="terminal-box">
             <span>{sandboxResult.command}</span>
-            <pre>{sandboxResult.stdout || sandboxResult.stderr}</pre>
+            <pre>{sandboxResult.stdout || sandboxResult.stderr || "(no output)"}</pre>
           </div>
         )}
+        <Divider />
+        <div className="interactive-terminal">
+          <Space className="full-width terminal-header" align="center">
+            <Text strong>Interactive CLI</Text>
+            {terminal && (
+              <Tag color={terminalRunning ? "processing" : "default"}>
+                {terminal.session_status}
+              </Tag>
+            )}
+            {terminal?.transport && <Tag>{terminal.transport}</Tag>}
+          </Space>
+          <Form
+            layout="vertical"
+            initialValues={{
+              command: "npm create vue@latest my-vue-app",
+              timeout_seconds: 300,
+            }}
+            onFinish={async (values) => {
+              setTerminalBusy(true);
+              try {
+                const snapshot = await api.startTerminal({
+                  workspace_id: activeWorkspace?.id,
+                  sandbox_id: selectedSandbox,
+                  ...values,
+                });
+                setTerminal(snapshot);
+                message.success("Interactive terminal started");
+              } finally {
+                setTerminalBusy(false);
+              }
+            }}
+          >
+            <Form.Item
+              name="command"
+              label="Interactive command"
+              rules={[{ required: true }]}
+            >
+              <Input placeholder="npm create vue@latest my-vue-app" />
+            </Form.Item>
+            <Space.Compact className="full-width">
+              <Form.Item name="workdir" noStyle>
+                <Input placeholder="workdir" />
+              </Form.Item>
+              <Form.Item name="timeout_seconds" noStyle>
+                <Input type="number" placeholder="timeout" />
+              </Form.Item>
+              <Button
+                type="primary"
+                htmlType="submit"
+                icon={<PlayCircleOutlined />}
+                loading={terminalBusy}
+                disabled={!activeWorkspace && !selectedSandbox}
+              >
+                Start
+              </Button>
+            </Space.Compact>
+          </Form>
+          <Form
+            form={stdinForm}
+            className="mt-8"
+            onFinish={async ({ input }) => {
+              if (!terminal?.session_id || !input) return;
+              setTerminal(
+                await api.sendTerminalInput(
+                  terminal.session_id,
+                  appendNewline(String(input)),
+                ),
+              );
+              stdinForm.resetFields();
+            }}
+          >
+            <Space.Compact className="full-width">
+              <Form.Item name="input" noStyle>
+                <Input placeholder="stdin, e.g. my-vue-app" disabled={!terminalRunning} />
+              </Form.Item>
+              <Button htmlType="submit" icon={<SendOutlined />} disabled={!terminalRunning} />
+            </Space.Compact>
+          </Form>
+          <Form
+            form={waitForm}
+            className="mt-8"
+            onFinish={async ({ pattern }) => {
+              if (!terminal?.session_id || !pattern) return;
+              setTerminal(
+                await api.waitTerminalOutput(terminal.session_id, {
+                  patterns: [String(pattern)],
+                  timeout_ms: 5000,
+                }),
+              );
+            }}
+          >
+            <Space.Compact className="full-width">
+              <Form.Item name="pattern" noStyle>
+                <Input placeholder="wait for text, e.g. Project name" disabled={!terminal?.session_id} />
+              </Form.Item>
+              <Button htmlType="submit" icon={<SyncOutlined />} disabled={!terminal?.session_id} />
+              <Button
+                danger
+                icon={<PauseCircleOutlined />}
+                disabled={!terminalRunning}
+                onClick={async () => {
+                  if (!terminal?.session_id) return;
+                  setTerminal(await api.stopTerminal(terminal.session_id));
+                }}
+              />
+            </Space.Compact>
+          </Form>
+          {terminal && (
+            <div className="terminal-box terminal-box-interactive">
+              <span>{terminal.command}</span>
+              <pre>
+                {terminal.stdout_tail || terminal.stderr_tail || "(waiting for output)"}
+              </pre>
+              {terminal.stderr_tail && (
+                <pre className="terminal-error">{terminal.stderr_tail}</pre>
+              )}
+              <div className="terminal-meta">
+                <Text type="secondary">
+                  {terminal.cwd} · {terminal.duration_ms}ms
+                  {terminal.exit_code !== undefined && terminal.exit_code !== null
+                    ? ` · exit ${terminal.exit_code}`
+                    : ""}
+                </Text>
+              </div>
+            </div>
+          )}
+        </div>
       </Card>
       <Card title="远程连接">
         <Form

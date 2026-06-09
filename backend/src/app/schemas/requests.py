@@ -398,6 +398,32 @@ class CreateSandboxRequest(BaseModel):
 class RunSandboxCommandRequest(BaseModel):
     command: str
     timeout_seconds: int = 30
+    workdir: str = ""
+    conversation_id: str | None = None
+    agent_id: str | None = None
+    task_id: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class TerminalStartRequest(BaseModel):
+    command: str
+    sandbox_id: str | None = None
+    workspace_id: str | None = None
+    conversation_id: str | None = None
+    agent_id: str | None = None
+    task_id: str | None = None
+    workdir: str = ""
+    timeout_seconds: int = 300
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class TerminalSendRequest(BaseModel):
+    input: str
+
+
+class TerminalWaitRequest(BaseModel):
+    patterns: list[str]
+    timeout_ms: int = 5000
 
 
 class RunMessageCodeRequest(BaseModel):

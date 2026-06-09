@@ -177,6 +177,10 @@ export interface ToolEventRecord {
   stderr?: string;
   summary?: string;
   error?: string;
+  session_id?: string;
+  session_status?: string;
+  command?: string;
+  cwd?: string;
 }
 
 export interface CodeRunRecord {

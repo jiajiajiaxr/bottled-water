@@ -72,7 +72,8 @@ The tool catalog includes built-in and custom tools. Built-ins cover:
 
 - File read/write/extract/preview/convert/summarize/embed/upload
 - Artifact create/preview/revise/diff/export
-- Sandbox command execution
+- Sandbox command execution for non-interactive one-shot commands
+- Interactive terminal sessions for CLI wizards and scaffolding
 - Browser preview
 - API test and test runner
 - Database inspection
@@ -82,11 +83,20 @@ The tool catalog includes built-in and custom tools. Built-ins cover:
 
 Tool calls are recorded through persisted invocation records. Agents must use real tool results as facts; UI cards and deployment states should not be faked by text-only answers.
 
+Interactive CLI work uses the terminal tool family:
+
+- `terminal.start`: start a controlled process such as `npm create vue@latest my-vue-app`, `npm init`, or `npx shadcn@latest init`.
+- `terminal.wait_for`: wait for prompt text or completion text without killing the process on timeout.
+- `terminal.send`: send stdin to the running session.
+- `terminal.snapshot` and `terminal.stop`: inspect or terminate the session.
+
+Use `sandbox.run` for commands that can finish without stdin. Use `terminal.*` when a command may ask questions, scaffold projects, or otherwise block waiting for input. Terminal sessions persist every tool call through `ToolInvocation`; the live process itself is currently held in backend memory, so a backend restart or non-sticky multi-worker deployment loses active sessions.
+
 Key code:
 
 - Catalog and execution: `backend/src/app/services/tools`
 - Built-ins: `backend/src/app/services/tools/builtins`
-- API: `backend/src/app/api/tools.py`
+- API: `backend/src/app/api/tools.py`, `backend/src/app/api/sandbox.py`
 
 ## External Coding Agents
 

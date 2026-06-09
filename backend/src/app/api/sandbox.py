@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import shlex
-
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +14,13 @@ from app.schemas.requests import (
     CreateRemoteConnectionRequest,
     CreateSandboxRequest,
     RunSandboxCommandRequest,
+    TerminalSendRequest,
+    TerminalStartRequest,
+    TerminalWaitRequest,
 )
 from app.services.serialization import remote_connection_to_dict, sandbox_to_dict
+from app.services.tools.builtins.sandbox.executor import run_existing_sandbox_command
+from app.services.tools.executor import invoke_tool
 
 
 router = APIRouter(tags=["sandbox-remote"])
@@ -105,21 +108,118 @@ async def run_sandbox_command(
     blocked = {"rm -rf /", "format", "shutdown", "reboot"}
     if any(item in command.lower() for item in blocked):
         raise ValidationAppError("命令被沙箱安全策略拦截")
-    session.status = "running"
-    session.last_command_at = utcnow()
-    output = {
-        "command": command,
-        "argv": shlex.split(command, posix=False),
-        "exit_code": 0,
-        "stdout": f"[mock-sandbox] 已在 {session.image} 中执行：{command}",
-        "stderr": "",
-        "duration_ms": min(payload.timeout_seconds * 1000, 1200),
-        "created_at": utcnow().isoformat(),
-    }
-    session.command_history = [output, *(session.command_history or [])][:50]
-    session.status = "ready"
+    output = await db.run_sync(
+        lambda sync_db: run_existing_sandbox_command(
+            sync_db,
+            user,
+            session,
+            command=command,
+            timeout=payload.timeout_seconds,
+            workdir=payload.workdir,
+        )
+    )
     await db.commit()
+    await db.refresh(session)
     return ok({"sandbox": sandbox_to_dict(session), "result": output}, "命令执行完成")
+
+
+@router.post("/terminals", response_model=ApiResponse[dict])
+async def start_terminal(
+    payload: TerminalStartRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await ensure_sandbox_tables(db)
+    if payload.workspace_id:
+        await _validate_workspace(db, user, payload.workspace_id)
+    result = await db.run_sync(
+        lambda session: invoke_tool(
+            session,
+            user,
+            "terminal.start",
+            payload.model_dump(exclude_none=True),
+        )
+    )
+    await db.commit()
+    return ok(result["result"], "terminal started")
+
+
+@router.post("/terminals/{session_id}/input", response_model=ApiResponse[dict])
+async def send_terminal_input(
+    session_id: str,
+    payload: TerminalSendRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.run_sync(
+        lambda session: invoke_tool(
+            session,
+            user,
+            "terminal.send",
+            {"session_id": session_id, "input": payload.input},
+        )
+    )
+    await db.commit()
+    return ok(result["result"], "terminal input sent")
+
+
+@router.post("/terminals/{session_id}/wait", response_model=ApiResponse[dict])
+async def wait_terminal_output(
+    session_id: str,
+    payload: TerminalWaitRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.run_sync(
+        lambda session: invoke_tool(
+            session,
+            user,
+            "terminal.wait_for",
+            {
+                "session_id": session_id,
+                "patterns": payload.patterns,
+                "timeout_ms": payload.timeout_ms,
+            },
+        )
+    )
+    await db.commit()
+    return ok(result["result"], "terminal wait completed")
+
+
+@router.get("/terminals/{session_id}", response_model=ApiResponse[dict])
+async def terminal_snapshot(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.run_sync(
+        lambda session: invoke_tool(
+            session,
+            user,
+            "terminal.snapshot",
+            {"session_id": session_id},
+        )
+    )
+    await db.commit()
+    return ok(result["result"], "terminal snapshot")
+
+
+@router.post("/terminals/{session_id}/stop", response_model=ApiResponse[dict])
+async def stop_terminal_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.run_sync(
+        lambda session: invoke_tool(
+            session,
+            user,
+            "terminal.stop",
+            {"session_id": session_id},
+        )
+    )
+    await db.commit()
+    return ok(result["result"], "terminal stopped")
 
 
 @router.post("/sandboxes/{sandbox_id}/stop", response_model=ApiResponse[SandboxOut])

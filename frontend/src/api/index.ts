@@ -151,6 +151,11 @@ export {
   createSandbox,
   runSandboxCommand,
   runMessageCodeBlock,
+  startTerminal,
+  sendTerminalInput,
+  waitTerminalOutput,
+  terminalSnapshot,
+  stopTerminal,
 } from "./sandbox";
 
 export {

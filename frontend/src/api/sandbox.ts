@@ -1,5 +1,9 @@
 import { get, post } from "./client";
-import type { SandboxSession, SandboxCommandResult } from "@/types";
+import type {
+  SandboxSession,
+  SandboxCommandResult,
+  TerminalSnapshot,
+} from "@/types";
 
 export async function sandboxes(): Promise<SandboxSession[]> {
   const result = await get<{ items: SandboxSession[] }>("/sandboxes");
@@ -21,7 +25,7 @@ export async function runSandboxCommand(
   payload: {
     command: string;
     timeout_seconds?: number;
-    cwd?: string;
+    workdir?: string;
     env?: Record<string, string>;
   },
 ): Promise<{ sandbox: SandboxSession; result: SandboxCommandResult }> {
@@ -48,4 +52,46 @@ export async function runMessageCodeBlock(
     `/conversations/${conversationId}/messages/${messageId}/code-runs`,
     payload,
   );
+}
+
+export async function startTerminal(payload: {
+  command: string;
+  sandbox_id?: string;
+  workspace_id?: string;
+  conversation_id?: string;
+  agent_id?: string;
+  task_id?: string;
+  workdir?: string;
+  timeout_seconds?: number;
+  env?: Record<string, string>;
+}): Promise<TerminalSnapshot> {
+  return await post<TerminalSnapshot>("/terminals", payload);
+}
+
+export async function sendTerminalInput(
+  sessionId: string,
+  input: string,
+): Promise<TerminalSnapshot> {
+  return await post<TerminalSnapshot>(`/terminals/${sessionId}/input`, {
+    input,
+  });
+}
+
+export async function waitTerminalOutput(
+  sessionId: string,
+  payload: { patterns: string[]; timeout_ms?: number },
+): Promise<TerminalSnapshot> {
+  return await post<TerminalSnapshot>(`/terminals/${sessionId}/wait`, payload);
+}
+
+export async function terminalSnapshot(
+  sessionId: string,
+): Promise<TerminalSnapshot> {
+  return await get<TerminalSnapshot>(`/terminals/${sessionId}`);
+}
+
+export async function stopTerminal(
+  sessionId: string,
+): Promise<TerminalSnapshot> {
+  return await post<TerminalSnapshot>(`/terminals/${sessionId}/stop`, {});
 }

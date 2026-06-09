@@ -677,6 +677,7 @@
 .terminal-box {
   background: #0f172a;
   color: #dbeafe;
+  overflow: hidden;
 
   .ant-typography {
     color: #93c5fd;
@@ -684,8 +685,30 @@
 
   pre {
     margin: $spacing-sm 0 0;
+    max-height: 260px;
+    overflow: auto;
     color: #e2e8f0;
     white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+}
+
+.terminal-box-interactive {
+  .terminal-error {
+    color: #fecaca;
+  }
+}
+
+.interactive-terminal {
+  .terminal-header {
+    justify-content: space-between;
+    margin-bottom: $spacing-sm;
+  }
+
+  .terminal-meta {
+    margin-top: $spacing-sm;
   }
 }
 
@@ -697,6 +720,12 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: $spacing-xl;
+}
+
+@media (max-width: 960px) {
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .workspace-active {

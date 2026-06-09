@@ -30,6 +30,7 @@ import {
 } from "@/lib/message";
 import type { ChatMessage, CodeRunRecord, MessageAttachment } from "@/types";
 import ThinkingBlock from "./ThinkingBlock";
+import { TerminalToolCards } from "./TerminalToolCards";
 import { ToolCallSummary } from "./ToolCallSummary";
 
 const { Text, Paragraph } = Typography;
@@ -250,6 +251,7 @@ function MessageBubbleComponent({
               onRunCode={!isUser ? runCodeBlock : undefined}
             />
           </div>
+          <TerminalToolCards message={message} />
           {attachments.length > 0 && (
             <div
               className="message-attachments"

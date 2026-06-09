@@ -163,6 +163,8 @@ def builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> dic
         args.setdefault("command", "pytest -q")
     if name == "sandbox.run":
         args.setdefault("command", "echo AgentHub worker sandbox")
+    if name == "terminal.start":
+        args.setdefault("command", terminal_command_for_prompt(prompt))
     if name == "security.audit":
         args.setdefault("target", prompt)
     if name == "document.review":
@@ -171,6 +173,28 @@ def builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> dic
         args.setdefault("action", "run")
         args.setdefault("provider", external_agent_provider_for_prompt(prompt))
     return args
+
+
+def interactive_cli_requested(prompt: str) -> bool:
+    return bool(
+        re.search(
+            r"(interactive|wizard|scaffold|create-vue|create vue|shadcn|npm init|pnpm create|npx|交互|脚手架|初始化)",
+            prompt,
+            re.I,
+        )
+    )
+
+
+def terminal_command_for_prompt(prompt: str) -> str:
+    if re.search(r"(create-vue|create vue|vue)", prompt, re.I):
+        return "npm create vue@latest my-vue-app"
+    if re.search(r"shadcn", prompt, re.I):
+        return "npx shadcn@latest init"
+    if re.search(r"npm init", prompt, re.I):
+        return "npm init"
+    if re.search(r"pnpm create", prompt, re.I):
+        return "pnpm create vite my-app"
+    return "python --version"
 
 
 def external_agent_provider_for_prompt(prompt: str) -> str:
@@ -210,6 +234,8 @@ def select_agent_builtin_tools(agent: Agent, prompt: str, limit: int) -> list[st
         preferred.extend([name for name in ("api.test", "test.run") if name in allowed])
     if re.search("(\u6570\u636e\u5e93|db|schema|\u8868)", prompt, re.I) and "db.inspect" in allowed:
         preferred.append("db.inspect")
+    if interactive_cli_requested(prompt) and "terminal.start" in allowed:
+        preferred.append("terminal.start")
     if re.search("(\u547d\u4ee4|\u8fd0\u884c|\u6c99\u7bb1|\u4ee3\u7801)", prompt, re.I) and "sandbox.run" in allowed:
         preferred.append("sandbox.run")
     if re.search("(\u5ba1\u67e5|\u5b89\u5168|\u98ce\u9669|\u5408\u89c4)", prompt, re.I):

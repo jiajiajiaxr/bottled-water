@@ -187,6 +187,8 @@ def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> di
         args.setdefault("command", "pytest -q")
     if name == "sandbox.run":
         args.setdefault("command", "python --version")
+    if name == "terminal.start":
+        args.setdefault("command", _terminal_command_for_prompt(prompt))
     if name == "security.audit":
         args.setdefault("target", prompt)
     if name == "document.review":
@@ -195,6 +197,28 @@ def _builtin_tool_args(conversation: Conversation, prompt: str, name: str) -> di
         args.setdefault("action", "run")
         args.setdefault("provider", _external_agent_provider_for_prompt(prompt))
     return args
+
+
+def _interactive_cli_requested(prompt: str) -> bool:
+    return bool(
+        re.search(
+            r"(interactive|wizard|scaffold|create-vue|create vue|shadcn|npm init|pnpm create|npx|交互|脚手架|初始化)",
+            prompt,
+            re.I,
+        )
+    )
+
+
+def _terminal_command_for_prompt(prompt: str) -> str:
+    if re.search(r"(create-vue|create vue|vue)", prompt, re.I):
+        return "npm create vue@latest my-vue-app"
+    if re.search(r"shadcn", prompt, re.I):
+        return "npx shadcn@latest init"
+    if re.search(r"npm init", prompt, re.I):
+        return "npm init"
+    if re.search(r"pnpm create", prompt, re.I):
+        return "pnpm create vite my-app"
+    return "python --version"
 
 
 def _external_agent_provider_for_prompt(prompt: str) -> str:
@@ -253,6 +277,8 @@ def _select_agent_builtin_tools(agent: Agent, prompt: str, limit: int) -> list[s
         preferred.extend([name for name in ("api.test", "test.run") if name in allowed])
     if re.search(r"(数据库|db|schema|表)", prompt, re.I) and "db.inspect" in allowed:
         preferred.append("db.inspect")
+    if _interactive_cli_requested(prompt) and "terminal.start" in allowed:
+        preferred.append("terminal.start")
     if re.search(r"(命令|运行|沙箱|代码)", prompt, re.I) and "sandbox.run" in allowed:
         preferred.append("sandbox.run")
     if re.search(r"(审查|安全|风险|合规)", prompt, re.I):

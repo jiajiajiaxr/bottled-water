@@ -276,6 +276,61 @@
   margin: $spacing-lg 0 !important;
 }
 
+.message-terminal-cards {
+  display: grid;
+  gap: $spacing-sm;
+  margin-top: $spacing-md;
+}
+
+.message-terminal-card {
+  min-width: 0;
+  padding: $spacing-md;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: $radius-md;
+  background: #0f172a;
+  color: #dbeafe;
+
+  .ant-tag {
+    margin-inline-end: 0;
+  }
+
+  .ant-typography {
+    color: #dbeafe;
+  }
+
+  pre {
+    max-height: 220px;
+    margin: $spacing-sm 0;
+    padding: $spacing-md;
+    overflow: auto;
+    border-radius: $radius-sm;
+    background: rgba(15, 23, 42, 0.7);
+    color: #e2e8f0;
+    font-family: $font-mono;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+
+.message-terminal-head {
+  width: 100%;
+  margin-bottom: $spacing-xs;
+}
+
+.message-terminal-command {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: #bfdbfe !important;
+  font-family: $font-mono;
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .markdown-content {
   color: #111827;
   line-height: 1.7;

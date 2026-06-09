@@ -22,6 +22,27 @@ export interface SandboxSession {
   updated_at?: string;
 }
 
+export interface TerminalSnapshot {
+  status?: "succeeded" | "timeout" | "failed" | string;
+  capability_level?: "interactive" | string;
+  session_id: string;
+  sandbox_id?: string;
+  session_status: "running" | "completed" | "failed" | "timeout" | "cancelled" | string;
+  transport?: "pty" | "pipes" | string;
+  command: string;
+  argv: string[];
+  cwd: string;
+  stdout_tail: string;
+  stderr_tail: string;
+  exit_code?: number | null;
+  duration_ms: number;
+  files?: Array<{ path: string; size: number; updated_at?: number }>;
+  matched?: boolean;
+  matched_pattern?: string | null;
+  waited_ms?: number;
+  input_events?: Array<{ at: string; text: string }>;
+}
+
 export interface RemoteConnection {
   id: string;
   workspace_id?: string;

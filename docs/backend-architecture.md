@@ -71,6 +71,13 @@ Agent tool execution has three important layers:
 
 The model may request a tool call, but backend permission checks and schema validation decide whether it actually executes. Tool results must be persisted and used as the factual source for UI cards, artifact links, and deployment status.
 
+Interactive command execution is split by behavior:
+
+- `sandbox.run` executes non-interactive commands and returns real stdout, stderr, exit code, duration, cwd, and file listings.
+- `terminal.start/send/wait_for/snapshot/stop` manages long-lived CLI sessions for tools that prompt on stdin. It captures output tails, stdin events, status, exit code, duration, generated files, and persists each step as a normal tool invocation.
+
+The terminal runtime is intentionally controlled: it uses argv execution rather than shell execution, validates executables and workspace paths, redacts captured input/output, and limits time and buffered output. Active terminal processes are in-memory per backend process; persisted invocation records remain the audit source, but live sessions require sticky routing or a future distributed runtime.
+
 ## Workflows
 
 Workflow execution lives in `backend/src/app/services/workflows`.
