@@ -981,6 +981,59 @@ async def _append(target: list[Event], event: Event) -> None:
     target.append(event)
 
 
+def test_fullstack_delivery_plan_is_dependency_ordered():
+    scheduler = SchedulerAgent(
+        session_id="sess_fullstack_plan",
+        agents={
+            "backend": AgentConfig(
+                id="backend",
+                name="Backend Worker",
+                system_prompt="build api",
+                role="backend",
+                tools=["file.write", "sandbox.run", "api.test"],
+            ),
+            "frontend": AgentConfig(
+                id="frontend",
+                name="Frontend Worker",
+                system_prompt="build ui",
+                role="frontend",
+                tools=["artifact.create_web_app", "file.write"],
+            ),
+            "daily": AgentConfig(
+                id="daily",
+                name="Daily Chat Agent",
+                system_prompt="chat",
+                role="chat",
+                tools=["artifact.create_pdf", "artifact.create_docx", "artifact.create_html"],
+            ),
+            "reviewer": AgentConfig(
+                id="reviewer",
+                name="Reviewer",
+                system_prompt="review",
+                role="reviewer",
+                tools=["test.run"],
+            ),
+        },
+        event_bus=EventDispatcher(),
+        blackboard_mgr=BlackboardManager(),
+        model_provider=None,
+    )
+    task = "生成一个五子棋项目，包含前端后端，pdf说明文档"
+    scheduler.current_task = task
+
+    plan = scheduler._build_turn_plan(task)
+    by_agent = {item["agent_id"]: item for item in plan}
+
+    assert [item["agent_id"] for item in plan] == ["backend", "frontend", "daily", "reviewer"]
+    assert by_agent["backend"]["stage"] == 1
+    assert by_agent["frontend"]["depends_on"] == ["backend"]
+    assert by_agent["daily"]["depends_on"] == ["backend", "frontend"]
+    assert by_agent["reviewer"]["depends_on"] == ["backend", "frontend", "daily"]
+    assert "后端" in by_agent["backend"]["assigned_task"]
+    assert "HTML/Web" in by_agent["frontend"]["assigned_task"]
+    assert "PDF" in by_agent["daily"]["assigned_task"]
+
+
 async def _wait_for(events: list[Event], event_type: str) -> Event:
     for _ in range(50):
         for event in events:

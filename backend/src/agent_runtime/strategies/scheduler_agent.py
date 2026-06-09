@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from collections.abc import Callable
 from typing import Any
 
 from model_provider.core.interfaces import BaseModelProvider
@@ -1023,6 +1024,10 @@ class SchedulerAgent(AgentActor):
             return []
         if named_targets and not self._is_collaboration_request(task):
             return named_targets
+        if self._looks_like_fullstack_delivery(task):
+            selected = self._fullstack_delivery_targets(schedulable, named_targets)
+            if selected:
+                return selected[:MAX_PLAN_TASKS]
         if not self._looks_like_multi_agent_task(task):
             return self._single_best_target(task, named_targets, schedulable)
 
@@ -1046,6 +1051,78 @@ class SchedulerAgent(AgentActor):
         if self._is_collaboration_request(task):
             return self._ordered_targets_for_plan(schedulable[: min(3, len(schedulable))])
         return self._single_best_target(task, named_targets, schedulable)
+
+    def _fullstack_delivery_targets(self, schedulable: list[str], named_targets: list[str]) -> list[str]:
+        selected: list[str] = []
+        if named_targets:
+            selected.extend(named_targets)
+
+        backend_id = self._first_agent_matching(
+            schedulable,
+            self._is_backend_agent,
+        )
+        if not backend_id:
+            backend_id = self._first_agent_matching(
+                schedulable,
+                lambda agent_id: self._agent_collaboration_kind(agent_id) == "implementation"
+                and not self._is_frontend_agent(agent_id)
+                and not self._agent_can_create_docs(agent_id),
+            )
+        frontend_id = self._first_agent_matching(
+            schedulable,
+            self._is_frontend_agent,
+        )
+        doc_id = self._first_agent_matching(
+            schedulable,
+            lambda agent_id: agent_id not in {backend_id, frontend_id}
+            and self._agent_can_create_docs(agent_id),
+        )
+        review_id = self._first_agent_matching(
+            schedulable,
+            lambda agent_id: self._agent_collaboration_kind(agent_id) == "review",
+        )
+
+        for agent_id in (backend_id, frontend_id, doc_id, review_id):
+            if agent_id:
+                selected.append(agent_id)
+        if not selected:
+            selected.extend(schedulable[: min(3, len(schedulable))])
+        return list(dict.fromkeys(self._valid_target_ids(selected)))
+
+    @staticmethod
+    def _first_agent_matching(agent_ids: list[str], predicate: Callable[[str], bool]) -> str | None:
+        for agent_id in agent_ids:
+            if predicate(agent_id):
+                return agent_id
+        return None
+
+    def _agent_role_text(self, agent_id: str) -> str:
+        agent = self.agents.get(agent_id)
+        if not agent:
+            return ""
+        return f"{agent.name} {agent.role} {getattr(agent, 'description', '')}".lower()
+
+    def _agent_can_create_docs(self, agent_id: str) -> bool:
+        agent = self.agents.get(agent_id)
+        if not agent:
+            return False
+        tools = set(agent.tools or [])
+        role_text = self._agent_role_text(agent_id)
+        return bool(
+            tools.intersection({"artifact.create_pdf", "artifact.create_docx", "artifact.create_pptx"})
+            or self._agent_collaboration_kind(agent_id) == "content"
+            or any(token in role_text for token in ("writing", "writer", "content", "daily", "chat", "doc", "pdf"))
+        )
+
+    def _is_backend_agent(self, agent_id: str) -> bool:
+        role_text = self._agent_role_text(agent_id)
+        return any(token in role_text for token in ("backend", "back-end", "server", "api", "后端", "接口", "服务端"))
+
+    def _is_frontend_agent(self, agent_id: str) -> bool:
+        role_text = self._agent_role_text(agent_id)
+        return self._agent_collaboration_kind(agent_id) == "design" or any(
+            token in role_text for token in ("frontend", "front-end", "front", "ui", "ux", "web", "前端", "界面")
+        )
 
     def _ordered_targets_for_plan(self, targets: list[str]) -> list[str]:
         original_index = {agent_id: index for index, agent_id in enumerate(self._schedulable_agent_ids())}
@@ -1114,6 +1191,10 @@ class SchedulerAgent(AgentActor):
         )
 
     def _display_task_for_agent(self, task: str, agent_id: str, agent: AgentConfig) -> str:
+        if self._looks_like_fullstack_delivery(task):
+            specialized = self._fullstack_task_for_agent(agent_id, agent, visible=True)
+            if specialized:
+                return specialized
         normalized = str(task or "").lower()
         kind = self._agent_collaboration_kind(agent_id)
         if kind == "planning":
@@ -1143,6 +1224,8 @@ class SchedulerAgent(AgentActor):
         targets: list[str],
     ) -> tuple[int, list[str]]:
         kind = self._agent_collaboration_kind(agent_id)
+        if self._looks_like_fullstack_delivery(self.current_task):
+            return self._fullstack_stage_for_agent(agent_id, targets)
         planning_ids = [
             target_id
             for target_id in targets
@@ -1174,6 +1257,40 @@ class SchedulerAgent(AgentActor):
             return (4 if planning_ids else 3), list(dict.fromkeys(dependencies))
         return (2, planning_ids) if planning_ids else (1, [])
 
+    def _fullstack_stage_for_agent(self, agent_id: str, targets: list[str]) -> tuple[int, list[str]]:
+        backend_ids = [
+            target_id
+            for target_id in targets
+            if target_id != agent_id and self._is_backend_agent(target_id)
+        ]
+        frontend_ids = [
+            target_id
+            for target_id in targets
+            if target_id != agent_id and self._is_frontend_agent(target_id)
+        ]
+        doc_ids = [
+            target_id
+            for target_id in targets
+            if target_id != agent_id and self._agent_can_create_docs(target_id)
+        ]
+        review_ids = [
+            target_id
+            for target_id in targets
+            if target_id != agent_id and self._agent_collaboration_kind(target_id) == "review"
+        ]
+
+        if self._is_backend_agent(agent_id):
+            return 1, []
+        if self._is_frontend_agent(agent_id):
+            return 2, list(dict.fromkeys(backend_ids))
+        if self._agent_can_create_docs(agent_id):
+            return 3, list(dict.fromkeys(backend_ids + frontend_ids))
+        if self._agent_collaboration_kind(agent_id) == "review":
+            return 4, list(dict.fromkeys(backend_ids + frontend_ids + doc_ids))
+        if self._agent_collaboration_kind(agent_id) == "release":
+            return 5, list(dict.fromkeys(backend_ids + frontend_ids + doc_ids + review_ids))
+        return 2, list(dict.fromkeys(backend_ids))
+
     def _agent_collaboration_kind(self, agent_id: str) -> str:
         agent = self.agents.get(agent_id)
         if not agent:
@@ -1199,12 +1316,38 @@ class SchedulerAgent(AgentActor):
             return "support"
         return "implementation"
 
-    @staticmethod
-    def _task_for_agent(task: str, agent: AgentConfig) -> str:
+    def _task_for_agent(self, task: str, agent: AgentConfig) -> str:
         role_hint = f"{agent.name} ({agent.role})"
         if not task:
             return f"Handle the next suitable subtask as {role_hint}."
-        return f"{task}\n\nFocus as {role_hint}; provide a concrete, user-visible result."
+        if self._looks_like_fullstack_delivery(task):
+            specialized = self._fullstack_task_for_agent(agent.id, agent, visible=False)
+            if specialized:
+                return specialized
+        return f"{task}\n\n请以 {role_hint} 的职责完成可见交付；不要重复其他 Agent 的工作。"
+
+    def _fullstack_task_for_agent(self, agent_id: str, agent: AgentConfig, *, visible: bool) -> str | None:
+        if self._is_backend_agent(agent_id):
+            return "设计五子棋后端能力：规则服务、棋局状态模型、落子/胜负判断 API 契约，并输出前端可直接对接的接口说明。"
+        if self._is_frontend_agent(agent_id):
+            if visible:
+                return "基于后端契约实现可运行的五子棋前端页面"
+            return (
+                "基于上游后端 API 契约实现可运行的五子棋前端。必须生成真实 HTML/Web 产物，"
+                "包含 15x15 棋盘、落子交互、胜负判断、重新开始和接口对接说明。不要只做说明页。"
+            )
+        if self._agent_can_create_docs(agent_id):
+            if visible:
+                return "基于前后端产物生成 PDF 说明文档"
+            return (
+                "基于上游后端契约和前端实现生成 PDF 说明文档。文档需要包含项目概述、架构、接口、玩法、"
+                "运行步骤和验收清单，并生成真实 PDF 产物。"
+            )
+        if self._agent_collaboration_kind(agent_id) == "review":
+            return "审查五子棋项目前后端和说明文档的一致性、可运行性与交付风险。"
+        if self._agent_collaboration_kind(agent_id) == "release":
+            return "部署或预览五子棋项目产物，并回填可访问链接与部署状态。"
+        return None
 
     @staticmethod
     def _expected_outputs_for_agent(agent: AgentConfig) -> list[str]:
@@ -1724,6 +1867,8 @@ class SchedulerAgent(AgentActor):
         if len(named_targets) > 1:
             return True
         task = self.current_task if text is None else text
+        if self._looks_like_fullstack_delivery(task):
+            return True
         if len(named_targets) == 1 and not self._looks_like_multi_agent_task(task):
             return False
         return self._should_default_collaborative_turn(task) or self._looks_like_multi_agent_task(task)
@@ -1733,10 +1878,45 @@ class SchedulerAgent(AgentActor):
             return False
         return len(self._schedulable_agent_ids()) > 2 and self._looks_like_complex_task(text)
 
+    def _looks_like_fullstack_delivery(self, text: str) -> bool:
+        normalized = str(text or "").lower()
+        if not normalized.strip():
+            return False
+        fullstack_markers = (
+            "前后端",
+            "前端后端",
+            "前端和后端",
+            "后端和前端",
+            "fullstack",
+            "full-stack",
+            "frontend backend",
+            "backend frontend",
+            "front end back end",
+            "五子棋",
+            "gomoku",
+            "gobang",
+            "项目",
+            "project",
+        )
+        doc_markers = (
+            "pdf",
+            "说明文档",
+            "项目说明",
+            "说明书",
+            "文档",
+            "documentation",
+            "readme",
+        )
+        return any(marker in normalized for marker in fullstack_markers) and any(
+            marker in normalized for marker in doc_markers
+        )
+
     def _looks_like_complex_task(self, text: str) -> bool:
         normalized = str(text or "").lower()
         if _is_simple_greeting_utf8(normalized):
             return False
+        if self._looks_like_fullstack_delivery(normalized):
+            return True
         complex_markers = (
             "mvp",
             "端到端",
@@ -1794,6 +1974,8 @@ class SchedulerAgent(AgentActor):
         normalized = (text or "").lower()
         if _is_simple_greeting_utf8(normalized):
             return False
+        if self._looks_like_fullstack_delivery(normalized):
+            return True
         explicit_keywords = (
             "multi-agent",
             "multi agent",

@@ -16,6 +16,12 @@ ARTIFACT_TOOL_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "网站",
             "web app",
             "webapp",
+            "web project",
+            "game",
+            "gomoku",
+            "gobang",
+            "五子棋",
+            "小游戏",
             "计算器",
             "表单",
             "看板",
@@ -67,6 +73,8 @@ def detect_artifact_tool(prompt: str) -> str | None:
     for tool_name, patterns in ARTIFACT_TOOL_PATTERNS:
         if any(_normalize_text(pattern) in lower for pattern in patterns):
             return tool_name
+    if any(token in lower for token in ("说明文档", "项目说明", "说明书", "documentation", "readme")):
+        return "artifact.create_pdf"
     return None
 
 

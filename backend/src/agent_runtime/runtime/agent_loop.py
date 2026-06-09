@@ -973,6 +973,12 @@ class AgentLoop:
             if isinstance(tool, dict)
         }
         requested = detect_artifact_tool(task)
+        if (
+            requested == "artifact.create_html"
+            and requested not in available
+            and "artifact.create_web_app" in available
+        ):
+            requested = "artifact.create_web_app"
         if not requested or requested not in available:
             return None
         return {
