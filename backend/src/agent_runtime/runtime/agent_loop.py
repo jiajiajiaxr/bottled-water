@@ -309,6 +309,7 @@ class AgentLoop:
                 tools = [t for t in all_tools if t.get("function", {}).get("name") in allowed]
             else:
                 tools = all_tools
+            tools = self._filter_tools_for_task(task, tools)
             logger.debug("Agent 可用工具", agent_id=self.agent.id, tool_count=len(tools))
 
         # 工具调用循环
@@ -989,6 +990,98 @@ class AgentLoop:
                 "arguments": json.dumps(artifact_arguments(requested, task), ensure_ascii=False),
             },
         }
+
+    def _filter_tools_for_task(
+        self,
+        task: str,
+        tools: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Narrow visible tools for project-code delivery turns.
+
+        Agents may have broad permissions, but a frontend/backend project task should not
+        accidentally become a PDF/Word/PPT artifact just because those tools are also
+        authorized. The scheduler still decides who acts; this only removes misleading
+        document tools from the current role's tool view.
+        """
+
+        if not self._looks_like_project_code_delivery(task):
+            return tools
+        role = f"{self.agent.name} {self.agent.role}".lower()
+        is_frontend = any(token in role for token in ("front", "frontend", "ui", "ux", "前端", "页面", "界面"))
+        is_backend = any(token in role for token in ("back", "backend", "api", "server", "后端", "服务端", "接口"))
+        is_release = any(token in role for token in ("deploy", "release", "ops", "部署", "发布", "上线"))
+        if not (is_frontend or is_backend or is_release):
+            return tools
+
+        blocked_document_tools = {
+            "artifact.create_pdf",
+            "artifact.create_docx",
+            "artifact.create_pptx",
+            "artifact.create_xlsx",
+        }
+        filtered: List[Dict[str, Any]] = []
+        for tool in tools:
+            name = str(tool.get("function", {}).get("name") or "") if isinstance(tool, dict) else ""
+            if name in blocked_document_tools:
+                continue
+            if is_backend and name.startswith("artifact.create_"):
+                continue
+            filtered.append(tool)
+        return filtered
+
+    @staticmethod
+    def _looks_like_project_code_delivery(task: str) -> bool:
+        normalized = "".join(str(task or "").lower().split())
+        if not normalized:
+            return False
+        project_markers = (
+            "前后端",
+            "前端后端",
+            "前端",
+            "后端",
+            "api",
+            "接口",
+            "应用",
+            "项目",
+            "游戏",
+            "网页",
+            "页面",
+            "工作区",
+            "文件夹",
+            "代码",
+            "试一下",
+            "体验",
+            "部署",
+            "project",
+            "app",
+            "game",
+            "frontend",
+            "backend",
+            "web",
+            "deploy",
+        )
+        doc_only_markers = ("说明文档", "pdf说明", "报告", "文档")
+        has_project = any(marker in normalized for marker in project_markers)
+        has_code_or_delivery = any(
+            marker in normalized
+            for marker in (
+                "前端",
+                "后端",
+                "api",
+                "接口",
+                "代码",
+                "工作区",
+                "文件夹",
+                "试一下",
+                "体验",
+                "部署",
+                "frontend",
+                "backend",
+                "web",
+                "deploy",
+            )
+        )
+        return has_project and (has_code_or_delivery or not any(marker in normalized for marker in doc_only_markers))
 
     @staticmethod
     def _recover_tool_call_arguments(tool_name: str, task: str) -> dict[str, Any] | None:

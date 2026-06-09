@@ -1356,16 +1356,19 @@ class SchedulerAgent(AgentActor):
                 return "先完成后端数据模型、服务接口和前端对接契约"
             return (
                 f"用户需求：{requirement}\n\n"
-                "请先完成后端/服务端部分：明确数据模型、存储字段、核心业务规则、API 契约、请求/响应示例、"
-                "错误处理和前端对接说明。不要假设这是某个固定示例项目；所有设计必须贴合用户原始需求。"
+                "请先完成后端/服务端部分：使用 file.write 在当前工作区创建清晰的后端项目目录和代码文件，"
+                "明确数据模型、存储字段、核心业务规则、API 契约、请求/响应示例、错误处理和前端对接说明。"
+                "不要假设这是某个固定示例项目；所有设计和文件命名必须贴合用户原始需求。"
             )
         if self._is_frontend_agent(agent_id):
             if visible:
                 return "等待后端契约后实现可运行前端页面"
             return (
                 f"用户需求：{requirement}\n\n"
-                "请基于上游后端 API 契约实现前端/页面部分，生成贴合用户需求的真实可运行 HTML/Web 产物或前端交付。"
-                "需要体现后端数据/API 如何接入，不能只做说明页，也不能把其他示例项目的功能套进来。"
+                "请基于上游后端 API 契约实现前端/页面部分：先使用 file.write 在当前工作区创建前端项目目录，"
+                "写入 index.html、样式和脚本等真实代码文件；然后用同一份入口 HTML 调用 artifact.create_html "
+                "或 artifact.create_web_app 创建可点击预览卡片，方便用户直接试用。"
+                "不要用 PDF/Word/说明文档代替前端交付；不能只做说明页，也不能把其他示例项目的功能套进来。"
             )
         if self._agent_can_create_docs(agent_id):
             if visible:
@@ -1378,7 +1381,11 @@ class SchedulerAgent(AgentActor):
         if self._agent_collaboration_kind(agent_id) == "review":
             return f"审查用户需求“{requirement}”对应产物的一致性、可运行性与交付风险。"
         if self._agent_collaboration_kind(agent_id) == "release":
-            return f"部署或预览用户需求“{requirement}”对应产物，并回填可访问链接与部署状态。"
+            return (
+                f"部署或预览用户需求“{requirement}”对应的前端预览产物或工作区入口文件。"
+                "优先基于 Frontend Worker 生成的 HTML/Web 预览卡片调用 deploy.preview，"
+                "并回填真实可访问链接与部署状态；如果缺少 artifact_id 或入口文件，明确说明阻塞原因。"
+            )
         return None
 
     @staticmethod

@@ -1031,7 +1031,8 @@ def test_fullstack_delivery_plan_is_dependency_ordered():
     assert by_agent["daily"]["depends_on"] == ["backend", "frontend"]
     assert by_agent["reviewer"]["depends_on"] == ["backend", "frontend", "daily"]
     assert "后端" in by_agent["backend"]["assigned_task"]
-    assert "HTML/Web" in by_agent["frontend"]["assigned_task"]
+    assert "file.write" in by_agent["frontend"]["assigned_task"]
+    assert "预览卡片" in by_agent["frontend"]["assigned_task"]
     assert "PDF" in by_agent["daily"]["assigned_task"]
 
 
@@ -1124,6 +1125,45 @@ def test_fullstack_agent_tasks_follow_user_requirement_not_game_template():
     assert "数据库管理应用" in by_agent["frontend"]["assigned_task"]
     assert "五子棋" not in by_agent["backend"]["assigned_task"]
     assert "五子棋" not in by_agent["frontend"]["assigned_task"]
+
+
+def test_project_delivery_filters_document_artifact_tools_for_code_agents():
+    task = "生成古典风国际象棋游戏，前后端分离，后端储存用户胜利数据，做到工作区新文件夹里面，最后把前端发给我试一下"
+    tools = [
+        {"function": {"name": "file.write"}},
+        {"function": {"name": "sandbox.run"}},
+        {"function": {"name": "artifact.create_pdf"}},
+        {"function": {"name": "artifact.create_docx"}},
+        {"function": {"name": "artifact.create_html"}},
+        {"function": {"name": "artifact.create_web_app"}},
+        {"function": {"name": "deploy.preview"}},
+    ]
+
+    frontend_loop = AgentLoop(
+        AgentConfig(id="frontend", name="Frontend Worker", system_prompt="build ui", role="frontend"),
+        FakeModelProvider(),
+    )
+    frontend_tools = {
+        item["function"]["name"]
+        for item in frontend_loop._filter_tools_for_task(task, tools)
+    }
+
+    backend_loop = AgentLoop(
+        AgentConfig(id="backend", name="Backend Worker", system_prompt="build api", role="backend"),
+        FakeModelProvider(),
+    )
+    backend_tools = {
+        item["function"]["name"]
+        for item in backend_loop._filter_tools_for_task(task, tools)
+    }
+
+    assert "artifact.create_pdf" not in frontend_tools
+    assert "artifact.create_docx" not in frontend_tools
+    assert "artifact.create_html" in frontend_tools
+    assert "artifact.create_web_app" in frontend_tools
+    assert "file.write" in frontend_tools
+    assert not any(name.startswith("artifact.create_") for name in backend_tools)
+    assert "file.write" in backend_tools
 
 
 @pytest.mark.asyncio
