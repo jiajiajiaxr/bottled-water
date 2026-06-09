@@ -204,6 +204,7 @@ class SchedulerAgent(AgentActor):
                             "session_id": self.session_id,
                             "current_task": self.current_task,
                             "agent_count": len(self.agents),
+                            "turn_plan": self._turn_plan,
                         },
                     ),
                     timeout=SCHEDULER_DECISION_TIMEOUT_SECONDS,
@@ -396,7 +397,7 @@ class SchedulerAgent(AgentActor):
             agent = self.agents.get(agent_id)
             if not agent:
                 continue
-            stage, depends_on = self._plan_stage_for_agent(agent_id, agent, targets)
+            stage, depends_on = self._plan_stage_for_agent(agent_id, agent, targets, task)
             display_task = self._display_task_for_agent(task, agent_id, agent)
             assigned_task = self._task_for_agent(task, agent)
             plan.append(
@@ -1025,7 +1026,7 @@ class SchedulerAgent(AgentActor):
         if named_targets and not self._is_collaboration_request(task):
             return named_targets
         if self._looks_like_fullstack_delivery(task):
-            selected = self._fullstack_delivery_targets(schedulable, named_targets)
+            selected = self._fullstack_delivery_targets(schedulable, named_targets, task)
             if selected:
                 return selected[:MAX_PLAN_TASKS]
         if not self._looks_like_multi_agent_task(task):
@@ -1052,7 +1053,12 @@ class SchedulerAgent(AgentActor):
             return self._ordered_targets_for_plan(schedulable[: min(3, len(schedulable))])
         return self._single_best_target(task, named_targets, schedulable)
 
-    def _fullstack_delivery_targets(self, schedulable: list[str], named_targets: list[str]) -> list[str]:
+    def _fullstack_delivery_targets(
+        self,
+        schedulable: list[str],
+        named_targets: list[str],
+        task: str,
+    ) -> list[str]:
         selected: list[str] = []
         if named_targets:
             selected.extend(named_targets)
@@ -1072,17 +1078,25 @@ class SchedulerAgent(AgentActor):
             schedulable,
             self._is_frontend_agent,
         )
-        doc_id = self._first_agent_matching(
-            schedulable,
-            lambda agent_id: agent_id not in {backend_id, frontend_id}
-            and self._agent_can_create_docs(agent_id),
-        )
+        doc_id = None
+        if self._needs_documentation_artifact(task):
+            doc_id = self._first_agent_matching(
+                schedulable,
+                lambda agent_id: agent_id not in {backend_id, frontend_id}
+                and self._agent_can_create_docs(agent_id),
+            )
         review_id = self._first_agent_matching(
             schedulable,
             lambda agent_id: self._agent_collaboration_kind(agent_id) == "review",
         )
+        release_id = None
+        if self._needs_release(task):
+            release_id = self._first_agent_matching(
+                schedulable,
+                lambda agent_id: self._agent_collaboration_kind(agent_id) == "release",
+            )
 
-        for agent_id in (backend_id, frontend_id, doc_id, review_id):
+        for agent_id in (backend_id, frontend_id, doc_id, review_id, release_id):
             if agent_id:
                 selected.append(agent_id)
         if not selected:
@@ -1222,9 +1236,11 @@ class SchedulerAgent(AgentActor):
         agent_id: str,
         agent: AgentConfig,
         targets: list[str],
+        task: str | None = None,
     ) -> tuple[int, list[str]]:
         kind = self._agent_collaboration_kind(agent_id)
-        if self._looks_like_fullstack_delivery(self.current_task):
+        current_task = self.current_task if task is None else task
+        if self._looks_like_fullstack_delivery(current_task):
             return self._fullstack_stage_for_agent(agent_id, targets)
         planning_ids = [
             target_id
@@ -1882,7 +1898,44 @@ class SchedulerAgent(AgentActor):
         normalized = str(text or "").lower()
         if not normalized.strip():
             return False
-        fullstack_markers = (
+        frontend_or_project_markers = (
+            "前后端",
+            "前端后端",
+            "前端和后端",
+            "后端和前端",
+            "前端",
+            "fullstack",
+            "full-stack",
+            "frontend backend",
+            "backend frontend",
+            "front end back end",
+            "frontend",
+            "五子棋",
+            "gomoku",
+            "gobang",
+            "应用",
+            "项目",
+            "project",
+            "app",
+            "game",
+        )
+        backend_markers = (
+            "后端",
+            "服务端",
+            "接口",
+            "api",
+            "backend",
+            "server",
+            "数据",
+            "数据库",
+            "存储",
+            "储存",
+            "保存",
+            "用户数据",
+            "sqlite",
+            "postgres",
+        )
+        explicit_fullstack_markers = (
             "前后端",
             "前端后端",
             "前端和后端",
@@ -1892,12 +1945,14 @@ class SchedulerAgent(AgentActor):
             "frontend backend",
             "backend frontend",
             "front end back end",
-            "五子棋",
-            "gomoku",
-            "gobang",
-            "项目",
-            "project",
         )
+        has_frontend_project = any(marker in normalized for marker in frontend_or_project_markers)
+        has_backend = any(marker in normalized for marker in backend_markers)
+        has_explicit_fullstack = any(marker in normalized for marker in explicit_fullstack_markers)
+        return (has_frontend_project and has_backend) or has_explicit_fullstack
+
+    def _needs_documentation_artifact(self, text: str) -> bool:
+        normalized = str(text or "").lower()
         doc_markers = (
             "pdf",
             "说明文档",
@@ -1907,9 +1962,11 @@ class SchedulerAgent(AgentActor):
             "documentation",
             "readme",
         )
-        return any(marker in normalized for marker in fullstack_markers) and any(
-            marker in normalized for marker in doc_markers
-        )
+        return any(marker in normalized for marker in doc_markers)
+
+    def _needs_release(self, text: str) -> bool:
+        normalized = str(text or "").lower()
+        return any(marker in normalized for marker in ("部署", "发布", "上线", "deploy", "release", "launch"))
 
     def _looks_like_complex_task(self, text: str) -> bool:
         normalized = str(text or "").lower()

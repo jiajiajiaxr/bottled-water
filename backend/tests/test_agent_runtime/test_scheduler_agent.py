@@ -17,6 +17,7 @@ from agent_runtime.runtime.agent_loop import AgentLoop
 from agent_runtime.runtime.agent_actor import AgentActor
 from agent_runtime.runtime.event_dispatcher import EventDispatcher
 from agent_runtime.strategies.scheduler_agent import SchedulerAgent
+from agent_runtime.strategies.tech_lead import TechLeadScheduler
 from model_provider.core.interfaces import ChatResponse
 
 
@@ -1034,6 +1035,97 @@ def test_fullstack_delivery_plan_is_dependency_ordered():
     assert "PDF" in by_agent["daily"]["assigned_task"]
 
 
+def test_backend_data_app_plan_waits_for_backend_before_frontend():
+    scheduler = SchedulerAgent(
+        session_id="sess_backend_first_plan",
+        agents={
+            "backend": AgentConfig(
+                id="backend",
+                name="Backend Worker",
+                system_prompt="build api",
+                role="backend",
+                tools=["file.write", "sandbox.run", "api.test"],
+            ),
+            "frontend": AgentConfig(
+                id="frontend",
+                name="Frontend Worker",
+                system_prompt="build ui",
+                role="frontend",
+                tools=["artifact.create_web_app", "file.write"],
+            ),
+            "deploy": AgentConfig(
+                id="deploy",
+                name="Deploy Agent",
+                system_prompt="deploy",
+                role="deploy",
+                tools=["deploy.preview"],
+            ),
+        },
+        event_bus=EventDispatcher(),
+        blackboard_mgr=BlackboardManager(),
+        model_provider=None,
+    )
+    task = "生成五子棋应用，后端储存用户数据"
+    scheduler.current_task = task
+
+    plan = scheduler._build_turn_plan(task)
+    by_agent = {item["agent_id"]: item for item in plan}
+
+    assert [item["agent_id"] for item in plan] == ["backend", "frontend"]
+    assert by_agent["backend"]["stage"] == 1
+    assert by_agent["frontend"]["stage"] == 2
+    assert by_agent["frontend"]["depends_on"] == ["backend"]
+    scheduler._turn_plan = plan
+    assert scheduler._ready_plan_targets() == ["backend"]
+
+
+@pytest.mark.asyncio
+async def test_tech_lead_scheduler_receives_turn_plan_context(monkeypatch):
+    captured: dict[str, str] = {}
+
+    async def fake_collect_chat_stream(_provider, *, messages, system_prompt, temperature):
+        captured["system_prompt"] = system_prompt
+        captured["user_prompt"] = messages[0].content
+        captured["temperature"] = str(temperature)
+        return ChatResponse(
+            content='{"decision_type":"assign","target_agent_id":"backend","target_agent_ids":["backend"],"task_description":"先完成后端数据接口","rationale":"按计划先做依赖项"}'
+        )
+
+    monkeypatch.setattr(
+        "agent_runtime.strategies.tech_lead.collect_chat_stream",
+        fake_collect_chat_stream,
+    )
+    scheduler = TechLeadScheduler(
+        agents={
+            "backend": AgentConfig(id="backend", name="Backend Worker", system_prompt="build api", role="backend"),
+            "frontend": AgentConfig(id="frontend", name="Frontend Worker", system_prompt="build ui", role="frontend"),
+        },
+        model_provider=object(),
+    )
+
+    decision = await scheduler.make_decision(
+        {},
+        [
+            _ready_report("backend"),
+            _ready_report("frontend"),
+        ],
+        {
+            "round": 1,
+            "session_id": "sess",
+            "current_task": "生成五子棋应用，后端储存用户数据",
+            "turn_plan": [
+                {"agent_id": "backend", "stage": 1, "depends_on": []},
+                {"agent_id": "frontend", "stage": 2, "depends_on": ["backend"]},
+            ],
+        },
+    )
+
+    assert decision.target_agent_ids == ["backend"]
+    assert "turn_plan" in captured["user_prompt"]
+    assert "backend_before_frontend_for_data_apps" in captured["user_prompt"]
+    assert "documentation should be" in captured["system_prompt"]
+
+
 async def _wait_for(events: list[Event], event_type: str) -> Event:
     for _ in range(50):
         for event in events:
@@ -1050,6 +1142,17 @@ def _completed_report(agent_id: str):
         agent_id=agent_id,
         state=AgentState.COMPLETED,
         will=AgentWill.COMPLETE,
+        confidence=1.0,
+    )
+
+
+def _ready_report(agent_id: str):
+    from agent_runtime.core.types import AgentReport, AgentState, AgentWill
+
+    return AgentReport(
+        agent_id=agent_id,
+        state=AgentState.READY,
+        will=AgentWill.EXECUTE,
         confidence=1.0,
     )
 

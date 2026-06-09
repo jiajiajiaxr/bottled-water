@@ -19,10 +19,24 @@ logger = get_logger(__name__)
 class TechLeadScheduler(Scheduler):
     """LLM-backed scheduler with deterministic fallbacks."""
 
-    SYSTEM_PROMPT = """You are the scheduling lead for an AgentHub multi-agent conversation.
+    SYSTEM_PROMPT = """You are the Team Leader Agent for an AgentHub multi-agent conversation.
 
-Choose exactly one next scheduling action based on the task, available agents,
-blackboard summary, and current agent reports.
+Choose exactly one next scheduling action based on the user task, available agents,
+the current turn plan, blackboard summary, and current agent reports.
+
+You are a real scheduler, not a hidden super-agent. You can only assign current
+conversation members. Prefer the smallest useful set of agents, and respect
+dependencies:
+- If the task asks for a full-stack app/project with backend data/API/storage,
+  assign backend/service work first. Frontend should wait for backend output
+  before implementing UI/API integration.
+- If the task also asks for PDF/Word/documentation, documentation should be
+  produced after implementation outputs are available.
+- If the task asks for deployment/release, deploy after implementation and review.
+- Independent subtasks can be parallel, but dependent subtasks must be staged.
+- For greetings or broad chat, assign only the most suitable chat agent.
+- If the current turn plan contains queued stages, follow that plan unless a
+  report says a dependency failed or the user explicitly changed direction.
 
 Return JSON only, with these fields:
 {{
@@ -88,6 +102,13 @@ Agent reports:
                 "session_id": conversation_context.get("session_id", "unknown"),
                 "current_task": conversation_context.get("current_task", ""),
                 "agent_count": conversation_context.get("agent_count", len(self.agents)),
+                "turn_plan": conversation_context.get("turn_plan") or [],
+                "scheduler_policy": {
+                    "respect_plan_dependencies": True,
+                    "backend_before_frontend_for_data_apps": True,
+                    "documentation_last": True,
+                    "deploy_after_implementation": True,
+                },
             },
             ensure_ascii=False,
         )
