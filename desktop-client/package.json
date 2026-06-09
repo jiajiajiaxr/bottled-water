@@ -1,0 +1,65 @@
+{
+  "name": "agenthub-desktop-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main/main.js",
+  "description": "AgentHub desktop client for local encrypted files, native notifications, and long-running agent process control.",
+  "scripts": {
+    "dev": "electron .",
+    "pack": "electron-builder --dir",
+    "pack:win": "electron-builder --win nsis",
+    "pack:mac": "electron-builder --mac dmg",
+    "pack:linux": "electron-builder --linux AppImage deb"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.agenthub.desktop",
+    "productName": "AgentHub Desktop",
+    "copyright": "Copyright (c) 2026 AgentHub",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office"
+    }
+  }
+}

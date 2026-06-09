@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#243b38" />
+    <title>AgentHub 平台实操 Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="demo-shell">
+      <aside class="side">
+        <div class="brand">
+          <span>A</span>
+          <strong>AgentHub Demo</strong>
+        </div>
+        <nav aria-label="Demo navigation">
+          <a href="#overview">总览</a>
+          <a href="#run">一键任务</a>
+          <a href="#preview">成果预览</a>
+          <a href="#debug">调试日志</a>
+        </nav>
+        <div class="side-card">
+          <small>当前运行地址</small>
+          <strong id="localUrl">-</strong>
+        </div>
+        <div class="side-card">
+          <small>发布方式</small>
+          <strong id="publishMode">静态演示模式</strong>
+        </div>
+      </aside>
+
+      <section class="content">
+        <header class="hero" id="overview">
+          <div>
+            <p class="kicker">GitHub Pages 可静态托管的平台实操 Demo</p>
+            <h1>一套页面跑通 AgentHub 三端协同、任务流和成果核验</h1>
+            <p>
+              这个 Demo 可以直接作为静态站点发布到 GitHub Pages；本地运行服务时，会自动切换为联调模式，展示健康检查、事件流和调试 API。
+            </p>
+          </div>
+          <button id="startRun" class="primary">启动实操任务</button>
+        </header>
+
+        <section class="status-grid">
+          <article class="status-card">
+            <span id="backendDot" class="dot"></span>
+            <small>Demo API / AgentHub 后端</small>
+            <strong id="backendStatus">检测中</strong>
+            <p id="backendMeta">静态页面会自动使用浏览器模拟数据</p>
+          </article>
+          <article class="status-card">
+            <span class="dot ok"></span>
+            <small>桌面端</small>
+            <strong>本地文件与 Agent 进程就绪</strong>
+            <p>Electron 安装包方案</p>
+          </article>
+          <article class="status-card">
+            <span class="dot ok"></span>
+            <small>移动端</small>
+            <strong>审批与成果核验就绪</strong>
+            <p>PWA + Capacitor 方案</p>
+          </article>
+        </section>
+
+        <section class="workspace-grid" id="run">
+          <article class="panel chat-panel">
+            <div class="panel-head">
+              <strong>IM 协同实操流</strong>
+              <small id="runStatus">未启动</small>
+            </div>
+            <div class="chat-list" id="chatList">
+              <div class="bubble incoming">
+                <strong>Team Leader</strong>
+                <p>点击“启动实操任务”，我会模拟一次多 Agent 协同交付。静态 GitHub Pages 上也能完整播放。</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel run-panel">
+            <div class="panel-head">
+              <strong>任务进度</strong>
+              <small id="runId">无运行</small>
+            </div>
+            <meter id="progressMeter" min="0" max="100" value="0"></meter>
+            <ol id="agentList" class="agent-list"></ol>
+          </article>
+        </section>
+
+        <section class="workspace-grid" id="preview">
+          <article class="panel preview-panel">
+            <div class="panel-head">
+              <strong>全域成果预览核验</strong>
+              <small id="artifactTitle">等待成果</small>
+            </div>
+            <iframe id="artifactFrame" title="artifact preview"></iframe>
+          </article>
+
+          <article class="panel mobile-panel">
+            <div class="phone">
+              <div class="phone-top"></div>
+              <h2>移动审批</h2>
+              <p>允许发布预览环境</p>
+              <div class="phone-actions">
+                <button type="button">驳回</button>
+                <button type="button">通过</button>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="panel" id="debug">
+          <div class="panel-head">
+            <strong>调试日志</strong>
+            <small>静态模拟 / 本地 API / 事件流</small>
+          </div>
+          <pre id="debugLog" class="debug-log">等待运行。</pre>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

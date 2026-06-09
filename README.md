@@ -65,6 +65,18 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml up --build
 
 See [docker/README.md](./docker/README.md).
 
+## Client Packages and Demo
+
+- `desktop-client/`: Electron desktop client shell for local encrypted files, native notifications, and long-running local agent process control.
+- `mobile-client/`: PWA/Capacitor mobile client shell for lightweight conversations, approvals, artifact review, and progress tracking.
+- `platform-demo/`: static-first platform operations demo. Publish `platform-demo/public/` to GitHub Pages, or open `/platform-demo/` after building the main frontend because the static demo is also mounted under `frontend/public/platform-demo/`.
+
+Local demo mode:
+
+```powershell
+.\platform-demo\start.ps1
+```
+
 ## Configuration
 
 The backend reads environment values from the repository `.env`, then `backend/.env`, then process environment.

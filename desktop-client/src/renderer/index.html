@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgentHub Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app" class="desktop-shell">
+      <aside class="desktop-rail">
+        <div class="brand">
+          <span class="brand-mark">A</span>
+          <strong>AgentHub</strong>
+        </div>
+        <nav aria-label="桌面端模块">
+          <button class="rail-item active" data-view="command">工作台</button>
+          <button class="rail-item" data-view="files">本地文件</button>
+          <button class="rail-item" data-view="agent">Agent 进程</button>
+          <button class="rail-item" data-view="settings">连接</button>
+        </nav>
+        <div class="rail-status">
+          <span class="status-dot"></span>
+          <span id="apiStatusText">检测后端中</span>
+        </div>
+      </aside>
+
+      <main class="desktop-main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">桌面本地专属客户端</p>
+            <h1>本地资源、系统提醒、后台 Agent 的安全操作台</h1>
+          </div>
+          <div class="topbar-actions">
+            <button id="notifyButton" class="ghost-button">发送测试通知</button>
+            <button id="startAgentButton" class="primary-button">启动后台 Agent</button>
+          </div>
+        </header>
+
+        <section id="commandView" class="view-grid">
+          <article class="panel im-panel">
+            <div class="panel-title">
+              <span>沉浸式 IM 协同</span>
+              <small>云端主工作台联动</small>
+            </div>
+            <div class="message-list">
+              <div class="message incoming">
+                <strong>Team Leader</strong>
+                <p>桌面端已接管本地加密文件库，后续可把文件安全上传给 Web 主端任务。</p>
+              </div>
+              <div class="message outgoing">
+                <strong>本地客户端</strong>
+                <p>已开启系统通知和后台 Agent 心跳监控。</p>
+              </div>
+              <div class="message incoming muted">
+                <strong>Compliance Bot</strong>
+                <p>本地文件只在主进程解密，渲染层拿不到原始路径。</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel code-panel">
+            <div class="panel-title">
+              <span>代码调试快照</span>
+              <small>本地离线调试场景</small>
+            </div>
+            <pre class="code-block"><code>agenthub.desktop.vault.import(files)
+  .encrypt("AES-256-GCM")
+  .registerCompliance({
+    source: "local",
+    uploadPolicy: "confirm-before-send"
+  })
+  .notify("纳管完成");</code></pre>
+          </article>
+
+          <article class="panel preview-panel">
+            <div class="panel-title">
+              <span>成果预览核验</span>
+              <small>离线预览 + 云端核验</small>
+            </div>
+            <div class="preview-card">
+              <div class="preview-window">
+                <span></span><span></span><span></span>
+              </div>
+              <h2>课题成果核验区</h2>
+              <p>本地文件、Web 产物、部署链接可以在桌面端统一拉起核验。</p>
+            </div>
+          </article>
+        </section>
+
+        <section id="filesView" class="view-stack hidden">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Encrypted local resources</p>
+              <h2>本地合规文件快速读取上传前置区</h2>
+            </div>
+            <button id="importFilesButton" class="primary-button">选择并加密纳管</button>
+          </div>
+          <div id="vaultList" class="vault-list"></div>
+          <article class="panel">
+            <div class="panel-title">
+              <span>文件预览</span>
+              <small id="previewFileName">未选择文件</small>
+            </div>
+            <pre id="filePreview" class="file-preview">选择 vault 文件后在这里预览文本内容。</pre>
+          </article>
+        </section>
+
+        <section id="agentView" class="view-stack hidden">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Long-running agent process</p>
+              <h2>后台 Agent 算力进程长效管控</h2>
+            </div>
+            <div class="button-row">
+              <button id="stopAgentButton" class="ghost-button">停止 Agent</button>
+              <button id="agentRefreshButton" class="primary-button">刷新状态</button>
+            </div>
+          </div>
+          <div class="agent-status-card">
+            <div>
+              <span id="agentBadge" class="badge idle">Idle</span>
+              <strong id="agentPid">PID 未分配</strong>
+            </div>
+            <p id="agentStartedAt">等待启动后台任务守护进程。</p>
+          </div>
+          <pre id="agentLogs" class="log-stream">暂无 Agent 日志。</pre>
+        </section>
+
+        <section id="settingsView" class="view-stack hidden">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Backend connection</p>
+              <h2>连接 Web 云端主力办公端</h2>
+            </div>
+            <button id="healthButton" class="primary-button">检查连接</button>
+          </div>
+          <label class="field">
+            <span>API Base</span>
+            <input id="apiBaseInput" value="http://127.0.0.1:8000/api/v1" />
+          </label>
+          <div class="settings-grid">
+            <article class="panel">
+              <h3>文件上传策略</h3>
+              <p>默认先加密纳管，上传前由用户确认，后续接入 Web 主端 `/files/upload`。</p>
+            </article>
+            <article class="panel">
+              <h3>通知策略</h3>
+              <p>任务完成、审批待确认、后台 Agent 异常会触发系统通知。</p>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
