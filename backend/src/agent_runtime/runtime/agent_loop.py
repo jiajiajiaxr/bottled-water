@@ -1017,7 +1017,6 @@ class AgentLoop:
             if isinstance(tool, dict)
         }
         role = f"{self.agent.name} {self.agent.role}".lower()
-        is_frontend = any(token in role for token in ("front", "frontend", "ui", "ux", "前端", "页面", "界面"))
         is_backend = any(token in role for token in ("back", "backend", "api", "server", "后端", "服务端", "接口"))
         is_release = any(token in role for token in ("deploy", "release", "ops", "部署", "发布", "上线"))
         if is_release and "deploy.preview" in available and not self._tool_succeeded(tool_results, "deploy.preview"):
@@ -1040,34 +1039,6 @@ class AgentLoop:
                 },
                 prefix="project_backend",
             )
-        if is_frontend:
-            html = self._frontend_project_fallback(task)
-            if "file.write" in available and not self._tool_succeeded(tool_results, "file.write"):
-                return self._tool_call(
-                    "file.write",
-                    {
-                        "path": f"{self._project_slug(task)}/frontend/index.html",
-                        "content": html,
-                    },
-                    prefix="project_frontend",
-                )
-            if not self._artifact_tool_succeeded(tool_results):
-                artifact_tool = (
-                    "artifact.create_web_app"
-                    if "artifact.create_web_app" in available
-                    else "artifact.create_html"
-                    if "artifact.create_html" in available
-                    else ""
-                )
-                if artifact_tool:
-                    return self._tool_call(
-                        artifact_tool,
-                        {
-                            "title": self._title_from_task(task) or "项目前端预览",
-                            "html": html,
-                        },
-                        prefix="project_preview",
-                    )
         return None
 
     @staticmethod

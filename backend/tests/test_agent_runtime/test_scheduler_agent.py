@@ -1175,7 +1175,7 @@ def test_project_delivery_filters_document_artifact_tools_for_code_agents():
     assert "file.write" in backend_tools
 
 
-def test_project_delivery_forces_frontend_file_then_preview_artifact():
+def test_project_delivery_does_not_fabricate_frontend_html_preview():
     task = "Build a chess web app with backend API and deploy preview"
     tools = [
         {"function": {"name": "file.write"}},
@@ -1190,15 +1190,14 @@ def test_project_delivery_forces_frontend_file_then_preview_artifact():
     filtered = loop._filter_tools_for_task(task, tools)
 
     first = loop._forced_project_delivery_tool_call(task, filtered, [])
-    assert first["function"]["name"] == "file.write"
-    assert "frontend/index.html" in first["function"]["arguments"]
+    assert first is None
 
     second = loop._forced_project_delivery_tool_call(
         task,
         filtered,
         [{"tool": "file.write", "success": True, "result": {"path": "project/frontend/index.html"}}],
     )
-    assert second["function"]["name"] == "artifact.create_web_app"
+    assert second is None
 
 
 def test_project_delivery_forces_backend_workspace_file():

@@ -32,6 +32,8 @@ def make_artifact_from_content(
     conversation = _get_conversation(db, user, conversation_id)
     artifact_type = artifact_type_for_format(format_name)
     export_format = "html" if format_name in {"html", "web_app"} else format_name
+    if export_format == "html":
+        _validate_agent_html(html_content)
     model_text = content_model.get("source_text") if isinstance(content_model, dict) else None
     source_text = body or str(model_text or title)
     normalized_model = build_content_model(
@@ -86,6 +88,17 @@ def make_artifact_from_content(
     db.refresh(artifact)
     db.refresh(preview)
     return _artifact_tool_result(artifact, preview.id, export_format, generated.filename, generated.media_type)
+
+
+def _validate_agent_html(html_content: str | None) -> None:
+    html = (html_content or "").strip()
+    lower = html.lower()
+    if not html:
+        raise ValidationAppError("Agent 未提供真实 HTML 代码，已拒绝生成模板化 HTML 产物。请让 Agent 重新输出完整 HTML/CSS/JS。")
+    if "<html" not in lower or "<body" not in lower:
+        raise ValidationAppError("HTML 产物缺少完整 <html>/<body> 结构，已拒绝套用兜底模板。")
+    if len(html) < 300:
+        raise ValidationAppError("HTML 产物内容过短，可能不是可运行页面，已拒绝生成假预览卡片。")
 
 
 def _create_artifact_record(

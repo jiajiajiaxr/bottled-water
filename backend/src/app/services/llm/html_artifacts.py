@@ -12,7 +12,6 @@ def html_artifact_arguments(prompt: str) -> dict[str, str]:
     return {
         "title": title,
         "body": prompt,
-        "html": build_html_fallback(prompt, title=title),
     }
 
 
@@ -22,10 +21,10 @@ def normalize_html_artifact_arguments(prompt: str, arguments: dict[str, Any]) ->
     html = str(normalized.get("html") or "")
     issues = html_quality_issues(prompt, html)
     if issues:
-        normalized["html"] = build_html_fallback(prompt, title=title)
         normalized["quality_report"] = {
-            "fallback_applied": True,
+            "fallback_applied": False,
             "issues": issues,
+            "message": "HTML 参数质量不足，已保留 Agent 原始输出；不会自动套用兜底模板。",
         }
     normalized.setdefault("title", title)
     normalized.setdefault("body", prompt)
