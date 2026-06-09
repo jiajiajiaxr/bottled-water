@@ -32,7 +32,7 @@ from app.services.files.workspace_tree import (
 from app.services.files.previewers import office as office_preview
 from app.services.tools.builtins.file.preview import preview_payload
 from app.services.tools.executor import invoke_tool
-from app.services.workspaces.filesystem import scoped_dir, workspace_root
+from app.services.workspaces.filesystem import backend_var_dir, scoped_dir, workspace_root
 
 
 @pytest.fixture
@@ -63,6 +63,15 @@ def test_workspace_directories_are_isolated(db: Session) -> None:
         assert {item.name for item in right_root.iterdir()} >= {"files", "artifacts", "sandbox", "tools", "logs"}
     finally:
         _cleanup(left.id, right.id)
+
+
+def test_workspace_runtime_files_are_outside_backend_src() -> None:
+    root = backend_var_dir().resolve()
+    backend_src = (Path(__file__).resolve().parents[1] / "src").resolve()
+
+    assert root.name == "var"
+    assert root != backend_src
+    assert backend_src not in root.parents
 
 
 def test_file_write_then_sandbox_run_reads_same_workspace_scope(db: Session) -> None:

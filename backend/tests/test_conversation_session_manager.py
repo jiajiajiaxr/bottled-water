@@ -485,6 +485,50 @@ class TestConversationSessionManagerStatus:
             await engine.dispose()
 
     @pytest.mark.asyncio
+    async def test_recover_conversation_persists_visible_interruption_notice(self, tmp_path):
+        conversation_id = "conv-generation-stale-running"
+        engine, factory = await _create_runtime_db(tmp_path, conversation_id)
+        try:
+            async with factory() as session:
+                generation_id = await create_generation_record(
+                    session,
+                    conversation_id,
+                    session_id="old-process-session",
+                    agents=[
+                        SimpleNamespace(
+                            id="agent-a",
+                            name="Frontend Worker",
+                            role="frontend",
+                        )
+                    ],
+                    prompt="build chinese chess",
+                )
+
+            mgr = ConversationSessionManager(session_factory=factory)
+            assert await mgr.recover_conversation(conversation_id) is True
+            assert await mgr.recover_conversation(conversation_id) is False
+
+            async with factory() as session:
+                messages = (
+                    await session.execute(
+                        select(Message).where(Message.conversation_id == conversation_id)
+                    )
+                ).scalars().all()
+                conversation = await session.get(Conversation, conversation_id)
+
+            assert len(messages) == 1
+            assert messages[0].sender_id == "system"
+            assert messages[0].status == "cancelled"
+            assert messages[0].extra["runtime_generation_id"] == generation_id
+            assert messages[0].extra["runtime_recovery_notice"] is True
+            assert "已中断" in messages[0].content["text"]
+            assert conversation.generation_status == "cancelled"
+            assert conversation.message_count == 1
+            assert conversation.last_message_sender == "System"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
     async def test_actor_runtime_events_are_persisted_for_recovery(self, tmp_path):
         conversation_id = "conv-generation-actor"
         engine, factory = await _create_runtime_db(tmp_path, conversation_id)

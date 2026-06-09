@@ -171,6 +171,15 @@ class ConversationSessionManager:
             if not recovered:
                 return False
             generation_id = recovered.generation_id
+            recovered_message: Message | None = None
+            if recovered.status in {"cancelled", "failed"}:
+                recovered_message = await self._persist_recovered_generation_notice(
+                    db,
+                    conversation_id,
+                    generation_id,
+                    status=recovered.status,
+                    error=recovered.error,
+                )
             self._generation_ids.pop(conversation_id, None)
             self._pending_preview_message_ids.pop(generation_id, None)
             self._clear_generation_thinking(generation_id)
@@ -178,6 +187,13 @@ class ConversationSessionManager:
             self._active_user_message_ids.pop(conversation_id, None)
             self._queued_inputs.pop(conversation_id, None)
         await self._publish_conversation_snapshot(conversation_id)
+        if recovered_message is not None:
+            await WebSocketSink(conversation_id).emit(
+                RuntimeEvent(
+                    type="message:created",
+                    payload=message_to_dict(recovered_message),
+                )
+            )
         event_type = "generation_finished" if recovered.status == "completed" else f"generation:{recovered.status}"
         await WebSocketSink(conversation_id).emit(
             RuntimeEvent(
@@ -258,6 +274,77 @@ class ConversationSessionManager:
             )
 
         logger.info("Generation started", conversation_id=conversation_id, content_preview=content[:50])
+
+
+    async def _persist_recovered_generation_notice(
+        self,
+        db: AsyncSession,
+        conversation_id: str,
+        generation_id: str,
+        *,
+        status: str,
+        error: str | None,
+    ) -> Message | None:
+        existing = await db.scalar(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.extra["runtime_generation_id"].as_string() == generation_id,
+                Message.extra["runtime_recovery_notice"].as_boolean().is_(True),
+                Message.deleted_at.is_(None),
+            )
+            .order_by(Message.created_at.desc())
+        )
+        if existing:
+            return existing
+
+        has_visible_agent_message = await db.scalar(
+            select(Message.id)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.sender_type == "agent",
+                Message.extra["runtime_generation_id"].as_string() == generation_id,
+                Message.deleted_at.is_(None),
+            )
+            .limit(1)
+        )
+        if has_visible_agent_message:
+            return None
+
+        reason = str(error or "server_restarted")
+        reason_text = "服务重启" if reason == "server_restarted" else "运行中断"
+        text = f"本次生成因{reason_text}已中断，未能完成输出。请重新发送上一条需求再试。"
+        if status == "failed":
+            text = f"本次生成失败：{reason[:160] or '运行异常'}。请重新发送上一条需求再试。"
+        message = Message(
+            conversation_id=conversation_id,
+            sender_type="agent",
+            sender_id="system",
+            sender_name="System",
+            sender_avatar_url=None,
+            content_type="text",
+            content={
+                "text": text,
+                "runtime_recovery_notice": True,
+                "status": status,
+                "error": reason,
+            },
+            status=status,
+            extra={
+                "runtime_generation_id": generation_id,
+                "runtime_recovery_notice": True,
+            },
+        )
+        conversation = await db.get(Conversation, conversation_id)
+        if conversation:
+            conversation.last_message_preview = text[:300]
+            conversation.last_message_sender = "System"
+            conversation.last_message_at = utcnow()
+            conversation.message_count += 1
+        db.add(message)
+        await db.commit()
+        await db.refresh(message)
+        return message
 
 
     async def _run_generation(
