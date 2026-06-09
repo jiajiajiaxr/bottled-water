@@ -1079,6 +1079,53 @@ def test_backend_data_app_plan_waits_for_backend_before_frontend():
     assert scheduler._ready_plan_targets() == ["backend"]
 
 
+def test_fullstack_agent_tasks_follow_user_requirement_not_game_template():
+    scheduler = SchedulerAgent(
+        session_id="sess_generic_fullstack_plan",
+        agents={
+            "backend": AgentConfig(
+                id="backend",
+                name="Backend Worker",
+                system_prompt="build api",
+                role="backend",
+                tools=["file.write", "sandbox.run", "api.test"],
+            ),
+            "frontend": AgentConfig(
+                id="frontend",
+                name="Frontend Worker",
+                system_prompt="build ui",
+                role="frontend",
+                tools=["artifact.create_web_app", "file.write"],
+            ),
+            "deploy": AgentConfig(
+                id="deploy",
+                name="Deploy Agent",
+                system_prompt="deploy",
+                role="deploy",
+                tools=["deploy.preview"],
+            ),
+        },
+        event_bus=EventDispatcher(),
+        blackboard_mgr=BlackboardManager(),
+        model_provider=None,
+    )
+    task = "生成数据库管理应用，后端储存用户数据，前端根据后端 api 做出来精美页面，然后最后部署"
+    scheduler.current_task = task
+
+    plan = scheduler._build_turn_plan(task)
+    by_agent = {item["agent_id"]: item for item in plan}
+
+    assert [item["agent_id"] for item in plan] == ["backend", "frontend", "deploy"]
+    assert by_agent["backend"]["stage"] == 1
+    assert by_agent["frontend"]["stage"] == 2
+    assert by_agent["deploy"]["stage"] == 5
+    assert by_agent["frontend"]["depends_on"] == ["backend"]
+    assert "数据库管理应用" in by_agent["backend"]["assigned_task"]
+    assert "数据库管理应用" in by_agent["frontend"]["assigned_task"]
+    assert "五子棋" not in by_agent["backend"]["assigned_task"]
+    assert "五子棋" not in by_agent["frontend"]["assigned_task"]
+
+
 @pytest.mark.asyncio
 async def test_tech_lead_scheduler_receives_turn_plan_context(monkeypatch):
     captured: dict[str, str] = {}

@@ -1206,7 +1206,7 @@ class SchedulerAgent(AgentActor):
 
     def _display_task_for_agent(self, task: str, agent_id: str, agent: AgentConfig) -> str:
         if self._looks_like_fullstack_delivery(task):
-            specialized = self._fullstack_task_for_agent(agent_id, agent, visible=True)
+            specialized = self._fullstack_task_for_agent(task, agent_id, agent, visible=True)
             if specialized:
                 return specialized
         normalized = str(task or "").lower()
@@ -1337,32 +1337,48 @@ class SchedulerAgent(AgentActor):
         if not task:
             return f"Handle the next suitable subtask as {role_hint}."
         if self._looks_like_fullstack_delivery(task):
-            specialized = self._fullstack_task_for_agent(agent.id, agent, visible=False)
+            specialized = self._fullstack_task_for_agent(task, agent.id, agent, visible=False)
             if specialized:
                 return specialized
         return f"{task}\n\n请以 {role_hint} 的职责完成可见交付；不要重复其他 Agent 的工作。"
 
-    def _fullstack_task_for_agent(self, agent_id: str, agent: AgentConfig, *, visible: bool) -> str | None:
+    def _fullstack_task_for_agent(
+        self,
+        task: str,
+        agent_id: str,
+        agent: AgentConfig,
+        *,
+        visible: bool,
+    ) -> str | None:
+        requirement = str(task or "").strip()
         if self._is_backend_agent(agent_id):
-            return "设计五子棋后端能力：规则服务、棋局状态模型、落子/胜负判断 API 契约，并输出前端可直接对接的接口说明。"
+            if visible:
+                return "先完成后端数据模型、服务接口和前端对接契约"
+            return (
+                f"用户需求：{requirement}\n\n"
+                "请先完成后端/服务端部分：明确数据模型、存储字段、核心业务规则、API 契约、请求/响应示例、"
+                "错误处理和前端对接说明。不要假设这是某个固定示例项目；所有设计必须贴合用户原始需求。"
+            )
         if self._is_frontend_agent(agent_id):
             if visible:
-                return "基于后端契约实现可运行的五子棋前端页面"
+                return "等待后端契约后实现可运行前端页面"
             return (
-                "基于上游后端 API 契约实现可运行的五子棋前端。必须生成真实 HTML/Web 产物，"
-                "包含 15x15 棋盘、落子交互、胜负判断、重新开始和接口对接说明。不要只做说明页。"
+                f"用户需求：{requirement}\n\n"
+                "请基于上游后端 API 契约实现前端/页面部分，生成贴合用户需求的真实可运行 HTML/Web 产物或前端交付。"
+                "需要体现后端数据/API 如何接入，不能只做说明页，也不能把其他示例项目的功能套进来。"
             )
         if self._agent_can_create_docs(agent_id):
             if visible:
-                return "基于前后端产物生成 PDF 说明文档"
+                return "在实现产物完成后生成说明文档"
             return (
-                "基于上游后端契约和前端实现生成 PDF 说明文档。文档需要包含项目概述、架构、接口、玩法、"
-                "运行步骤和验收清单，并生成真实 PDF 产物。"
+                f"用户需求：{requirement}\n\n"
+                "请在后端契约和前端实现完成后，再基于真实上游产物生成说明文档。文档内容必须匹配用户需求，"
+                "包含项目概述、架构、接口、运行步骤和验收清单；只有用户要求 PDF/Word/文档时才生成真实文档产物。"
             )
         if self._agent_collaboration_kind(agent_id) == "review":
-            return "审查五子棋项目前后端和说明文档的一致性、可运行性与交付风险。"
+            return f"审查用户需求“{requirement}”对应产物的一致性、可运行性与交付风险。"
         if self._agent_collaboration_kind(agent_id) == "release":
-            return "部署或预览五子棋项目产物，并回填可访问链接与部署状态。"
+            return f"部署或预览用户需求“{requirement}”对应产物，并回填可访问链接与部署状态。"
         return None
 
     @staticmethod
