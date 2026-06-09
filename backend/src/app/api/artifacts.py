@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from pathlib import Path
 
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -12,7 +12,7 @@ from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from db import get_db
-from db.models import Artifact, Conversation, FileAsset, KnowledgeBase, User, utcnow
+from db.models import Artifact, Conversation, ConversationParticipant, FileAsset, KnowledgeBase, User, utcnow
 from app.schemas.common import (
     ApiResponse,
     ArtifactOut,
@@ -54,20 +54,44 @@ router = APIRouter(tags=["artifacts"])
 compat_router = APIRouter(tags=["artifacts-compat"])
 
 
+def _conversation_access_filter(user: User):
+    return or_(
+        Conversation.creator_id == user.id,
+        Conversation.participants.any(
+            and_(
+                ConversationParticipant.user_id == user.id,
+                ConversationParticipant.left_at.is_(None),
+            )
+        ),
+    )
+
+
 async def _owned_artifact(db: AsyncSession, user: User, artifact_id: str) -> Artifact:
     if not hasattr(db, "run_sync"):
         artifact = db.get(Artifact, artifact_id)
         if not artifact:
             raise NotFoundError("产物不存在")
-        conversation = db.get(Conversation, artifact.conversation_id)
-        if not conversation or conversation.creator_id != user.id:
+        conversation = db.scalar(
+            select(Conversation).where(
+                Conversation.id == artifact.conversation_id,
+                _conversation_access_filter(user),
+                Conversation.deleted_at.is_(None),
+            )
+        )
+        if not conversation:
             raise NotFoundError("产物不存在")
         return artifact
     artifact = await db.get(Artifact, artifact_id)
     if not artifact:
         raise NotFoundError("产物不存在")
-    conversation = await db.get(Conversation, artifact.conversation_id)
-    if not conversation or conversation.creator_id != user.id:
+    conversation = await db.scalar(
+        select(Conversation).where(
+            Conversation.id == artifact.conversation_id,
+            _conversation_access_filter(user),
+            Conversation.deleted_at.is_(None),
+        )
+    )
+    if not conversation:
         raise NotFoundError("产物不存在")
     return artifact
 
@@ -100,7 +124,7 @@ async def _latest_for_conversation(db: AsyncSession, user: User, conversation_id
     conversation = await db.scalar(
         select(Conversation).where(
             Conversation.id == conversation_id,
-            Conversation.creator_id == user.id,
+            _conversation_access_filter(user),
             Conversation.deleted_at.is_(None),
         )
     )

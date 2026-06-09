@@ -1,5 +1,5 @@
 const CACHE_NAME = "agenthub-mobile-v1";
-const APP_SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon.svg"];
+const APP_SHELL = ["/", "/index.html", "/offline.html", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -25,6 +25,6 @@ self.addEventListener("fetch", (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
         return response;
       })
-      .catch(() => caches.match(request).then((cached) => cached || caches.match("/index.html"))),
+      .catch(() => caches.match(request).then((cached) => cached || caches.match("/offline.html"))),
   );
 });

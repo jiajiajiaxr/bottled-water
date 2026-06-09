@@ -31,11 +31,15 @@ __pycache__/
 
 # Frontend dependencies and build output
 frontend/node_modules/
+desktop-client/node_modules/
+mobile-client/node_modules/
 node_modules/
 frontend/.pnpm-store/
 .pnpm-store/
 frontend/pnpm-lock.yaml
 frontend/dist/
+desktop-client/release/
+mobile-client/dist/
 dist/
 coverage/
 

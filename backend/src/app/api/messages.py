@@ -3,7 +3,7 @@ import json
 import uuid
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -11,7 +11,7 @@ from app.core.errors import NotFoundError, ValidationAppError
 from app.core.response import ok
 from app.deps import get_current_user
 from db import get_db
-from db.models import Conversation, FileAsset, Message, User, utcnow
+from db.models import Conversation, ConversationParticipant, FileAsset, Message, User, utcnow
 from app.schemas.common import ApiResponse
 from app.schemas.requests import RunMessageCodeRequest, SendMessagePayload
 from app.events import SseSink
@@ -34,11 +34,23 @@ compat_router = APIRouter(tags=["messages-compat"])
 ORCHESTRATION_TASKS: dict[str, asyncio.Task] = {}
 
 
+def _conversation_access_filter(user: User):
+    return or_(
+        Conversation.creator_id == user.id,
+        Conversation.participants.any(
+            and_(
+                ConversationParticipant.user_id == user.id,
+                ConversationParticipant.left_at.is_(None),
+            )
+        ),
+    )
+
+
 async def _get_conversation(db: AsyncSession, user: User, conversation_id: str) -> Conversation:
     conversation = await db.scalar(
         select(Conversation).where(
             Conversation.id == conversation_id,
-            Conversation.creator_id == user.id,
+            _conversation_access_filter(user),
             Conversation.deleted_at.is_(None),
         )
     )
@@ -105,7 +117,7 @@ def _send_sync(db, user: User, conversation_id: str, payload: dict, *, trigger_a
     conversation = db.scalar(
         select(Conversation).where(
             Conversation.id == conversation_id,
-            Conversation.creator_id == user.id,
+            _conversation_access_filter(user),
             Conversation.deleted_at.is_(None),
         )
     )

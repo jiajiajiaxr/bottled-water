@@ -1,12 +1,12 @@
 {
   "name": "AgentHub Mobile",
   "short_name": "AgentHub",
-  "description": "AgentHub mobile collaboration, approvals, and artifact review client.",
+  "description": "AgentHub mobile collaboration, artifact review, and progress tracking client.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f5efe6",
-  "theme_color": "#23433d",
+  "background_color": "#edf1f7",
+  "theme_color": "#1677ff",
   "orientation": "portrait",
   "icons": [
     {

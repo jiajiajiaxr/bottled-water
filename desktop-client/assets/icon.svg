@@ -1,0 +1,6 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AgentHub Desktop">
+  <rect width="512" height="512" rx="92" fill="#253432"/>
+  <path d="M119 363L226 108H287L393 363H321L302 312H208L189 363H119Z" fill="#eac46a"/>
+  <path d="M229 255H281L256 184L229 255Z" fill="#253432"/>
+  <path d="M121 393H391" stroke="#fff4dd" stroke-width="22" stroke-linecap="round"/>
+</svg>

@@ -5,9 +5,12 @@
   "type": "module",
   "description": "AgentHub mobile lightweight collaboration client with PWA and Capacitor packaging.",
   "scripts": {
+    "check": "node --check src/api.js && node --check src/main.js",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
+    "pwa:installable": "npm run check && npm run build",
+    "native:prepare": "powershell -ExecutionPolicy Bypass -File scripts/prepare-native.ps1",
     "sync:android": "npm run build && cap sync android",
     "sync:ios": "npm run build && cap sync ios",
     "open:android": "cap open android",
@@ -15,12 +18,17 @@
   },
   "dependencies": {
     "@capacitor/app": "^7.0.0",
-    "@capacitor/core": "^7.0.0"
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/device": "^7.0.0",
+    "@capacitor/network": "^7.0.0",
+    "@capacitor/preferences": "^7.0.0",
+    "pdfjs-dist": "^4.10.38"
   },
   "devDependencies": {
     "@capacitor/android": "^7.0.0",
     "@capacitor/cli": "^7.0.0",
     "@capacitor/ios": "^7.0.0",
+    "typescript": "^5.7.2",
     "vite": "^6.0.7"
   }
 }

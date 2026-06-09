@@ -45,6 +45,22 @@ import type {
 } from "@/types";
 import type { MessageAgentMention, MessageFileReference } from "@/types/messages";
 
+declare global {
+  interface Window {
+    agentHubDesktop?: {
+      onScreenshotCaptured?: (
+        callback: (payload: {
+          filename?: string;
+          contentType?: string;
+          dataUrl?: string;
+          prompt?: string;
+          capturedAt?: string;
+        }) => void,
+      ) => () => void;
+    };
+  }
+}
+
 const { Content } = Layout;
 const { Text } = Typography;
 const AGENT_MODEL_SENTINEL = "__agent_model__";
@@ -576,6 +592,49 @@ export function ChatPanel({
   };
 
   useEffect(() => {
+    const unsubscribe = window.agentHubDesktop?.onScreenshotCaptured?.(
+      async (payload) => {
+        if (!active?.id) {
+          message.warning("请先选择一个会话");
+          return;
+        }
+        if (!payload?.dataUrl) {
+          message.warning("没有收到截图内容");
+          return;
+        }
+        try {
+          const file = dataUrlToFile(
+            payload.dataUrl,
+            payload.filename || `agenthub-screenshot-${Date.now()}.png`,
+            payload.contentType || "image/png",
+          );
+          const uploaded = await api.uploadFile(
+            file,
+            active.id,
+            "attachment",
+            active.workspace_id,
+          );
+          setPendingFiles((current) => {
+            if (current.some((item) => item.id === uploaded.id)) return current;
+            return [...current, uploaded];
+          });
+          if (payload.prompt) {
+            setText((current) =>
+              current
+                ? `${current}${current.endsWith("\n") ? "" : "\n"}${payload.prompt}`
+                : payload.prompt || "",
+            );
+          }
+          message.success("截图已加入输入框");
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : "截图上传失败");
+        }
+      },
+    );
+    return () => unsubscribe?.();
+  }, [active?.id, active?.workspace_id, message]);
+
+  useEffect(() => {
     setPendingFiles([]);
   }, [activeConversationId]);
 
@@ -983,4 +1042,16 @@ function removeMentionToken(text: string, name: string) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function dataUrlToFile(dataUrl: string, filename: string, contentType: string) {
+  const [meta, payload] = dataUrl.split(",");
+  if (!payload) throw new Error("截图数据格式无效");
+  const mime = /data:(.*?);base64/.exec(meta)?.[1] || contentType;
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], filename, { type: mime });
 }

@@ -4,13 +4,15 @@
   "private": true,
   "type": "module",
   "main": "src/main/main.js",
-  "description": "AgentHub desktop client for local encrypted files, native notifications, and long-running agent process control.",
+  "description": "Lightweight AgentHub desktop client wrapping the web app with tray, global shortcut, quick input, notifications, and detached windows.",
   "scripts": {
+    "check": "node --check src/main/main.js && node --check src/preload/preload.js && node --check src/renderer/app.js",
     "dev": "electron .",
     "pack": "electron-builder --dir",
-    "pack:win": "electron-builder --win nsis",
+    "pack:win": "electron-builder --win nsis portable",
     "pack:mac": "electron-builder --mac dmg",
-    "pack:linux": "electron-builder --linux AppImage deb"
+    "pack:linux": "electron-builder --linux AppImage deb",
+    "installable:win": "powershell -ExecutionPolicy Bypass -File scripts/build-win.ps1"
   },
   "devDependencies": {
     "electron": "^35.0.0",
@@ -26,10 +28,12 @@
     "files": [
       "src/**/*",
       "assets/**/*",
+      "config/**/*",
       "package.json"
     ],
     "asar": true,
     "win": {
+      "icon": "assets/icon.svg",
       "target": [
         {
           "target": "nsis",
@@ -38,7 +42,10 @@
           ]
         }
       ],
-      "artifactName": "${productName}-${version}-setup.${ext}"
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -48,6 +55,7 @@
       "createStartMenuShortcut": true
     },
     "mac": {
+      "icon": "assets/icon.svg",
       "target": [
         "dmg",
         "zip"
@@ -55,6 +63,7 @@
       "category": "public.app-category.productivity"
     },
     "linux": {
+      "icon": "assets/icon.svg",
       "target": [
         "AppImage",
         "deb"

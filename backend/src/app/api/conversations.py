@@ -136,7 +136,13 @@ def _conversation_workspace_id(conversation: Conversation) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-async def _list(db: AsyncSession, user: User, workspace_id: str | None = None) -> list[dict]:
+async def _list(
+    db: AsyncSession,
+    user: User,
+    workspace_id: str | None = None,
+    *,
+    include_workspace: bool = False,
+) -> list[dict]:
     await _accessible_workspace(db, user, workspace_id)
     conversations = (
         await db.scalars(
@@ -151,7 +157,7 @@ async def _list(db: AsyncSession, user: User, workspace_id: str | None = None) -
         conversations = [
             it for it in conversations if _conversation_workspace_id(it) == workspace_id
         ]
-    else:
+    elif not include_workspace:
         conversations = [it for it in conversations if _conversation_workspace_id(it) is None]
     return [conversation_to_dict(it) for it in conversations]
 
@@ -905,10 +911,11 @@ async def _patch(db: AsyncSession, user: User, conversation_id: str, payload: di
 @router.get("/conversations", response_model=ApiResponse[dict])
 async def list_conversations(
     workspace_id: str | None = None,
+    include_workspace: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    items = await _list(db, user, workspace_id)
+    items = await _list(db, user, workspace_id, include_workspace=include_workspace)
     return ok(
         {
             "items": items,

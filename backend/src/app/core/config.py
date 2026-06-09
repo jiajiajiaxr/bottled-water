@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     frontend_port: int = 5173
 
     cors_origins: list[str] = Field(default_factory=list)
+    cors_origin_regex: str | None = None
 
     @model_validator(mode="after")
     def populate_cors_origins(self) -> "Settings":
@@ -56,7 +57,21 @@ class Settings(BaseSettings):
                 f"http://127.0.0.1:{self.frontend_port}",
                 "http://localhost:4173",
                 "http://127.0.0.1:4173",
+                "http://localhost:5174",
+                "http://127.0.0.1:5174",
+                "http://localhost:5190",
+                "http://127.0.0.1:5190",
             ]
+        if not self.cors_origin_regex and self.environment != "production":
+            self.cors_origin_regex = (
+                r"^https?://(?:"
+                r"localhost|"
+                r"127(?:\.\d{1,3}){3}|"
+                r"10(?:\.\d{1,3}){3}|"
+                r"192\.168(?:\.\d{1,3}){2}|"
+                r"172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}"
+                r")(?:\:\d+)?$"
+            )
         return self
 
     redis_url: str = "redis://localhost:6380/0"

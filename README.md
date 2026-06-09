@@ -7,6 +7,9 @@ The current implementation is centered on:
 - `backend/src`: FastAPI, SQLAlchemy, Alembic, runtime services, tools, skills, MCP, files, artifacts, and workflow execution.
 - `frontend/src`: React 18, TypeScript, Vite, Ant Design, Zustand, chat workbench, platform panels, preview panel, workflow studio, and docs page.
 - `docker/`: one-command local deployment with nginx, backend, PostgreSQL, and Redis.
+- `desktop-client/`: lightweight Electron desktop client that wraps the Web app and adds tray, global shortcut, quick input, notifications, and detached windows.
+- `mobile-client/`: PWA/Capacitor mobile client for lightweight conversations, artifact review, progress tracking, and installable PWA flow.
+- `platform-demo/`: one-command local operational demo for deployment and debugging.
 
 `backend/app-old` is retained only as historical reference. New work should go into `backend/src`.
 
@@ -67,8 +70,8 @@ See [docker/README.md](./docker/README.md).
 
 ## Client Packages and Demo
 
-- `desktop-client/`: Electron desktop client shell for local encrypted files, native notifications, and long-running local agent process control.
-- `mobile-client/`: PWA/Capacitor mobile client shell for lightweight conversations, approvals, artifact review, and progress tracking.
+- `desktop-client/`: Electron desktop client that keeps Web capabilities fully synchronized while adding desktop-only tray, global shortcut, quick input, notifications, and detached windows.
+- `mobile-client/`: PWA/Capacitor mobile client for lightweight conversations, artifact review, installation flow, and progress tracking.
 - `platform-demo/`: static-first platform operations demo. Publish `platform-demo/public/` to GitHub Pages, or open `/platform-demo/` after building the main frontend because the static demo is also mounted under `frontend/public/platform-demo/`.
 
 Local demo mode:
