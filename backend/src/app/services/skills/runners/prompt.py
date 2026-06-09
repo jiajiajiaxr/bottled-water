@@ -14,7 +14,7 @@ async def run_prompt_skill(
     *,
     purpose: str = "skill_execution",
 ) -> dict[str, Any]:
-    response = await ark_client.complete_stream_chat(
+    response = await ark_client.chat(
         [
             {"role": "system", "content": system_prompt(skill, manifest)},
             {"role": "user", "content": json.dumps(runtime_input, ensure_ascii=False)},

@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy import JSON
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base, TimestampMixin, utcnow, uuid_str
+from ..types import ContentJSON, EncryptedText
 
 if TYPE_CHECKING:
     from .agents import Agent
@@ -21,14 +21,14 @@ class Task(Base, TimestampMixin):
     creator_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     executor_agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(500))
-    description: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str] = mapped_column(EncryptedText, default="")
     status: Mapped[str] = mapped_column(String(40), default="PENDING", index=True)
     priority: Mapped[str] = mapped_column(String(20), default="medium")
     progress: Mapped[int] = mapped_column(Integer, default=0)
-    plan: Mapped[dict] = mapped_column(JSON, default=dict)
-    input: Mapped[dict] = mapped_column(JSON, default=dict)
-    output: Mapped[dict] = mapped_column(JSON, default=dict)
-    error_info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    plan: Mapped[dict] = mapped_column(ContentJSON, default=dict)
+    input: Mapped[dict] = mapped_column(ContentJSON, default=dict)
+    output: Mapped[dict] = mapped_column(ContentJSON, default=dict)
+    error_info: Mapped[dict | None] = mapped_column(ContentJSON, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -45,12 +45,12 @@ class Subtask(Base, TimestampMixin):
         ForeignKey("tasks.id", ondelete="CASCADE"), index=True
     )
     title: Mapped[str] = mapped_column(String(500))
-    description: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str] = mapped_column(EncryptedText, default="")
     status: Mapped[str] = mapped_column(String(40), default="PENDING", index=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
-    input: Mapped[dict] = mapped_column(JSON, default=dict)
-    output: Mapped[dict] = mapped_column(JSON, default=dict)
+    input: Mapped[dict] = mapped_column(ContentJSON, default=dict)
+    output: Mapped[dict] = mapped_column(ContentJSON, default=dict)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

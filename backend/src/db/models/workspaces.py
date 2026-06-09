@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base, TimestampMixin, utcnow, uuid_str
+from ..types import ContentJSON, EncryptedText, SensitiveJSON
 
 if TYPE_CHECKING:
     from .users import User
@@ -20,16 +21,16 @@ class Workspace(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(120), index=True)
-    description: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str] = mapped_column(EncryptedText, default="")
     type: Mapped[str] = mapped_column(String(40), default="custom", index=True)
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
     avatar_color: Mapped[str] = mapped_column(String(20), default="#1677ff")
     tags: Mapped[list] = mapped_column(JSON, default=list)
-    config: Mapped[dict] = mapped_column(JSON, default=dict)
-    workflow: Mapped[dict] = mapped_column(JSON, default=dict)
-    resource_bindings: Mapped[dict] = mapped_column(JSON, default=dict)
+    config: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
+    workflow: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
+    resource_bindings: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
     owner: Mapped["User"] = relationship(back_populates="workspaces")
     members: Mapped[list["WorkspaceMember"]] = relationship(
@@ -63,14 +64,14 @@ class Project(Base, TimestampMixin):
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(160), index=True)
-    description: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str] = mapped_column(EncryptedText, default="")
     type: Mapped[str] = mapped_column(String(40), default="code_project", index=True)
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
-    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    context: Mapped[dict] = mapped_column(ContentJSON, default=dict)
     file_count: Mapped[int] = mapped_column(Integer, default=0)
     current_version: Mapped[int] = mapped_column(Integer, default=1)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
     workspace: Mapped["Workspace"] = relationship(back_populates="projects")
     files: Mapped[list["ProjectFile"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -84,11 +85,11 @@ class ProjectFile(Base, TimestampMixin):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     path: Mapped[str] = mapped_column(String(800), index=True)
     language: Mapped[str] = mapped_column(String(80), default="text")
-    content: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(EncryptedText, default="")
     checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     size: Mapped[int] = mapped_column(Integer, default=0)
     version: Mapped[int] = mapped_column(Integer, default=1)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
     project: Mapped["Project"] = relationship(back_populates="files")
 
@@ -100,14 +101,14 @@ class PromptTemplate(Base, TimestampMixin):
     owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(160), index=True)
-    description: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str] = mapped_column(EncryptedText, default="")
     scope: Mapped[str] = mapped_column(String(30), default="workspace", index=True)
     category: Mapped[str] = mapped_column(String(80), default="general", index=True)
-    content: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(EncryptedText)
     variables: Mapped[list] = mapped_column(JSON, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
 
 class ShortcutCommand(Base, TimestampMixin):
@@ -117,8 +118,8 @@ class ShortcutCommand(Base, TimestampMixin):
     workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), nullable=True, index=True)
     owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(80), index=True)
-    description: Mapped[str] = mapped_column(Text, default="")
-    prompt_template: Mapped[str] = mapped_column(Text)
-    agent_route: Mapped[dict] = mapped_column(JSON, default=dict)
-    parameters_schema: Mapped[dict] = mapped_column(JSON, default=dict)
+    description: Mapped[str] = mapped_column(EncryptedText, default="")
+    prompt_template: Mapped[str] = mapped_column(EncryptedText)
+    agent_route: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
+    parameters_schema: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)

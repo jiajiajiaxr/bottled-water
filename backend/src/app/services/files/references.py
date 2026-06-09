@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import ValidationAppError
 from app.models import Conversation, FileAsset, User
 from app.services.context.attachments import readable_attachment_text
+from app.services.files import plaintext_file_path
 from app.services.tools.builtins.file.extractors import extract_text_from_path
 from app.services.workspaces.filesystem import (
     normalize_relative_path,
@@ -123,11 +124,12 @@ def _attachment_from_file_asset(asset: FileAsset, workspace_id: str) -> dict[str
         }
     )
     if not extracted and Path(asset.storage_path).is_file():
-        result = extract_text_from_path(
-            Path(asset.storage_path),
-            content_type=asset.content_type,
-            filename=asset.original_filename,
-        )
+        with plaintext_file_path(asset) as path:
+            result = extract_text_from_path(
+                path,
+                content_type=asset.content_type,
+                filename=asset.original_filename,
+            )
         extracted = result["text"]
         metadata = {**metadata, **(result.get("metadata") or {})}
         asset.extracted_text = extracted

@@ -38,6 +38,8 @@ class Settings(BaseSettings):
 
     secret_key: str = "agenthub-dev-secret-change-me"
     access_token_expire_minutes: int = 60 * 24
+    data_encryption_key: str | None = None
+    data_encryption_key_id: str | None = None
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000

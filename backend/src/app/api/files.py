@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -13,7 +12,11 @@ from app.deps import get_current_user
 from db import get_db
 from db.models import FileAsset, User, Workspace, WorkspaceMember, utcnow
 from app.schemas.common import ApiResponse, FileAssetOut
-from app.services.files import save_upload
+from app.services.files import (
+    encrypted_file_response_content,
+    plaintext_file_path,
+    save_upload,
+)
 from app.services.tools.builtins.file import (
     convert_file,
     embed_text,
@@ -144,6 +147,13 @@ async def download_file(
     user: User = Depends(get_current_user),
 ):
     asset = await _get_file(db, user, file_id)
+    decrypted = encrypted_file_response_content(asset)
+    if decrypted is not None:
+        return Response(
+            content=decrypted,
+            media_type=asset.content_type,
+            headers={"Content-Disposition": f'attachment; filename="{asset.original_filename}"'},
+        )
     return FileResponse(
         asset.storage_path, media_type=asset.content_type, filename=asset.original_filename
     )
@@ -156,11 +166,12 @@ async def extract_file_text(
     user: User = Depends(get_current_user),
 ):
     asset = await _get_file(db, user, file_id)
-    result = extract_text_from_path(
-        Path(asset.storage_path),
-        content_type=asset.content_type,
-        filename=asset.original_filename,
-    )
+    with plaintext_file_path(asset) as path:
+        result = extract_text_from_path(
+            path,
+            content_type=asset.content_type,
+            filename=asset.original_filename,
+        )
     asset.extracted_text = result["text"]
     asset.parse_status = result["status"]
     asset.extra = {
@@ -182,11 +193,12 @@ async def preview_file(
     user: User = Depends(get_current_user),
 ):
     asset = await _get_file(db, user, file_id)
-    payload = preview_payload(
-        Path(asset.storage_path),
-        content_type=asset.content_type,
-        filename=asset.original_filename,
-    )
+    with plaintext_file_path(asset) as path:
+        payload = preview_payload(
+            path,
+            content_type=asset.content_type,
+            filename=asset.original_filename,
+        )
     return ok({**payload, "download_url": f"/api/v1/files/{asset.id}/download"})
 
 
@@ -199,11 +211,12 @@ async def summarize_file(
     asset = await _get_file(db, user, file_id)
     text = asset.extracted_text
     if not text:
-        result = extract_text_from_path(
-            Path(asset.storage_path),
-            content_type=asset.content_type,
-            filename=asset.original_filename,
-        )
+        with plaintext_file_path(asset) as path:
+            result = extract_text_from_path(
+                path,
+                content_type=asset.content_type,
+                filename=asset.original_filename,
+            )
         text = result["text"]
         asset.extracted_text = text
         asset.parse_status = result["status"]
@@ -243,12 +256,13 @@ async def convert_uploaded_file(
     user: User = Depends(get_current_user),
 ):
     asset = await _get_file(db, user, file_id)
-    generated = convert_file(
-        Path(asset.storage_path),
-        content_type=asset.content_type,
-        filename=asset.original_filename,
-        target_format=format,
-    )
+    with plaintext_file_path(asset) as path:
+        generated = convert_file(
+            path,
+            content_type=asset.content_type,
+            filename=asset.original_filename,
+            target_format=format,
+        )
     return Response(
         content=generated.content,
         media_type=generated.media_type,

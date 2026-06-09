@@ -146,6 +146,15 @@ class ArkProvider(BaseModelProvider):
                         f"status={response.status_code} body={body}"
                     )
 
+                content_type = getattr(response, "headers", {}).get("content-type", "")
+                if content_type and "text/event-stream" not in content_type.lower():
+                    body = (await response.aread()).decode("utf-8", "replace")
+                    try:
+                        yield json.loads(body)
+                    except json.JSONDecodeError:
+                        logger.warning("skip malformed chat completion payload", payload=body[:200])
+                    return
+
                 async for line in response.aiter_lines():
                     data_text = _sse_data_text(line)
                     if data_text is None:
@@ -220,7 +229,7 @@ def _stream_chunks_from_payload(data: dict[str, Any]) -> list[StreamChunk]:
         if not isinstance(choice, dict):
             continue
 
-        delta = choice.get("delta") or {}
+        delta = choice.get("delta") or choice.get("message") or {}
         if not isinstance(delta, dict):
             delta = {}
 

@@ -34,7 +34,12 @@ from app.services.artifacts import (
     update_artifact_files,
 )
 from app.services.files.previewers.office import build_office_preview, is_office_file
-from app.services.files import attachment_path, ensure_extension_tables, save_upload
+from app.services.files import (
+    attachment_path,
+    encrypted_file_response_content,
+    ensure_extension_tables,
+    save_upload,
+)
 from app.services.knowledge import index_document, retrieve
 from app.services.serialization import (
     artifact_to_dict,
@@ -390,6 +395,13 @@ async def download_file(
     user: User = Depends(get_current_user),
 ):
     file_asset = await _owned_file(db, user, file_id)
+    decrypted = encrypted_file_response_content(file_asset)
+    if decrypted is not None:
+        return Response(
+            content=decrypted,
+            media_type=file_asset.content_type,
+            headers={"Content-Disposition": _attachment_header(file_asset.original_filename)},
+        )
     return FileResponse(
         attachment_path(file_asset),
         media_type=file_asset.content_type,
@@ -642,6 +654,13 @@ async def compat_download_file(
     user: User = Depends(get_current_user),
 ):
     file_asset = await _owned_file(db, user, file_id)
+    decrypted = encrypted_file_response_content(file_asset)
+    if decrypted is not None:
+        return Response(
+            content=decrypted,
+            media_type=file_asset.content_type,
+            headers={"Content-Disposition": _attachment_header(file_asset.original_filename)},
+        )
     return FileResponse(
         attachment_path(file_asset),
         media_type=file_asset.content_type,

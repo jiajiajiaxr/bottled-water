@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, TimestampMixin, utcnow, uuid_str
+from ..types import ContentJSON, EncryptedText, SensitiveJSON
 
 if TYPE_CHECKING:
     pass
@@ -22,14 +22,14 @@ class Artifact(Base, TimestampMixin):
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
     type: Mapped[str] = mapped_column(String(40), default="web_app", index=True)
     name: Mapped[str] = mapped_column(String(500))
-    description: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str] = mapped_column(EncryptedText, default="")
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     storage_url: Mapped[str] = mapped_column(Text, default="")
-    content: Mapped[dict] = mapped_column(JSON, default=dict)
+    content: Mapped[dict] = mapped_column(ContentJSON, default=dict)
     current_version: Mapped[int] = mapped_column(Integer, default=1)
     file_size: Mapped[int] = mapped_column(Integer, default=0)
     mime_type: Mapped[str] = mapped_column(String(100), default="text/html")
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
 
 class ArtifactVersion(Base):
@@ -39,8 +39,8 @@ class ArtifactVersion(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id", ondelete="CASCADE"), index=True)
     version: Mapped[int] = mapped_column(Integer)
-    content: Mapped[dict] = mapped_column(JSON, default=dict)
-    change_summary: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[dict] = mapped_column(ContentJSON, default=dict)
+    change_summary: Mapped[str] = mapped_column(EncryptedText, default="")
     checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -55,10 +55,10 @@ class Deployment(Base, TimestampMixin):
     mode: Mapped[str] = mapped_column(String(40), default="preview_link", index=True)
     status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
     access_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    config: Mapped[dict] = mapped_column(JSON, default=dict)
-    deploy_log: Mapped[str] = mapped_column(Text, default="")
-    steps: Mapped[list] = mapped_column(JSON, default=list)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    config: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
+    deploy_log: Mapped[str] = mapped_column(EncryptedText, default="")
+    steps: Mapped[list] = mapped_column(ContentJSON, default=list)
+    error_message: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     deployed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)

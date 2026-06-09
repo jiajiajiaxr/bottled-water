@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import Artifact, FileAsset
+from app.services.crypto import write_encrypted_file
 from app.services.tools.builtins.artifact.renderers import build_content_model
 from app.services.tools.builtins.file.converters import GeneratedFile, generate_file
 from app.services.workspaces.filesystem import scoped_dir, safe_segment, workspace_id_from_conversation
@@ -105,7 +106,7 @@ def persist_artifact_file(
     ) / safe_segment(artifact.id) / f"v{version}"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{role}-{checksum[:12]}-{safe_name}"
-    path.write_bytes(raw)
+    encryption_info = write_encrypted_file(path, raw)
 
     asset = FileAsset(
         owner_id=owner_id,
@@ -124,6 +125,7 @@ def persist_artifact_file(
         extra={
             "artifact_id": artifact.id,
             "artifact_version": version,
+            "encryption": encryption_info,
             "format": format_name,
             "role": role,
         },
@@ -150,6 +152,7 @@ def file_descriptor(
         "checksum": asset.checksum,
         "storage_path": asset.storage_path,
         "download_url": asset.public_url or f"/api/v1/files/{asset.id}/download",
+        "encryption": (asset.extra or {}).get("encryption") if isinstance(asset.extra, dict) else None,
         "version": version,
         "role": role,
     }

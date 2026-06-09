@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models import Artifact
+from app.services.crypto import read_encrypted_file
 from app.services.serialization import artifact_to_dict
 from app.services.tools.builtins.artifact.storage import BINARY_ARTIFACT_FORMATS
 from app.services.tools.builtins.file.converters import generate_docx, generate_pdf
@@ -241,7 +242,7 @@ def _stored_artifact_export(artifact: Artifact, fmt: str) -> ArtifactExport | No
         return None
     media_type = str(descriptor.get("media_type") or OFFICE_MIME_TYPES.get(fmt) or artifact.mime_type)
     filename = str(descriptor.get("filename") or f"{_safe_name(artifact.name, artifact.id[:8])}.{fmt}")
-    return ArtifactExport(path.read_bytes(), media_type, filename)
+    return ArtifactExport(read_encrypted_file(path), media_type, filename)
 
 
 def _artifact_zip_bytes(artifact: Artifact, files: dict[str, str], metadata: dict[str, Any]) -> bytes:
@@ -263,7 +264,7 @@ def _artifact_binary_files(artifact: Artifact) -> dict[str, bytes]:
     if not path.exists() or not path.is_file():
         return {}
     filename = str(descriptor.get("filename") or path.name)
-    return {f"source/{filename}": path.read_bytes()}
+    return {f"source/{filename}": read_encrypted_file(path)}
 
 
 def _normalize_export_format(value: Any) -> str:

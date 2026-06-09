@@ -57,7 +57,7 @@ def attachment_preflight_reply(prompt: str, attachments: list[Any]) -> str | Non
         hint = str(metadata.get("setup_hint") or "请安装 Tesseract OCR 或启用视觉模型后再自动识别图片。")
         return (
             f"我已收到图片附件（{names}），但当前环境未提取到可用 OCR/视觉文本，无法判断图片内容。"
-            f"当前未启用视觉/OCR 解析：{hint}"
+            f"当前未启用视觉/OCR解析：{hint}"
         )
     if not readable and normalized:
         names = "、".join(attachment_filename(item) for item in normalized[:4])

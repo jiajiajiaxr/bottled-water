@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import NotFoundError
+from app.services.crypto import read_encrypted_file
 from app.services.tools.builtins.artifact.storage import regenerate_binary_from_preview
 from db.models import Artifact, ArtifactVersion, Conversation, Deployment, Message, Task, utcnow
 
@@ -413,7 +414,7 @@ def _checksum_from_file(path: Any) -> str | None:
     try:
         file_path = Path(str(path))
         if file_path.exists() and file_path.is_file():
-            return hashlib.sha256(file_path.read_bytes()).hexdigest()
+            return hashlib.sha256(read_encrypted_file(file_path)).hexdigest()
     except OSError:
         return None
     return None

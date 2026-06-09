@@ -58,8 +58,6 @@ async def download_workspace_file(
     target = await _sync_call(db, lambda session: get_workspace_file_target(session, user, workspace_id, node_id))
     filename = str(target.get("filename") or "workspace-file")
     media_type = str(target.get("mime_type") or "application/octet-stream")
-    if target.get("path"):
-        return FileResponse(str(target["path"]), media_type=media_type, filename=filename)
     content = target.get("bytes")
     if isinstance(content, bytes):
         return Response(
@@ -67,6 +65,8 @@ async def download_workspace_file(
             media_type=media_type,
             headers={"Content-Disposition": _attachment_header(filename)},
         )
+    if target.get("path"):
+        return FileResponse(str(target["path"]), media_type=media_type, filename=filename)
     text = str(target.get("text") or "")
     return Response(
         content=text.encode("utf-8"),

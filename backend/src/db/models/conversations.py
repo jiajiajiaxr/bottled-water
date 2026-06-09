@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base, TimestampMixin, utcnow, uuid_str
+from ..types import ContentJSON, EncryptedText, SensitiveJSON
 
 if TYPE_CHECKING:
     from .agents import Agent
@@ -21,18 +21,18 @@ class Conversation(Base, TimestampMixin):
     creator_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     chat_type: Mapped[str] = mapped_column(String(20), default="single", index=True)
     title: Mapped[str] = mapped_column(String(200))
-    description: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str] = mapped_column(EncryptedText, default="")
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="active", index=True)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     unread_count: Mapped[int] = mapped_column(Integer, default=0)
-    last_message_preview: Mapped[str] = mapped_column(Text, default="")
+    last_message_preview: Mapped[str] = mapped_column(EncryptedText, default="")
     last_message_sender: Mapped[str] = mapped_column(String(120), default="")
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     activity_score: Mapped[int] = mapped_column(Integer, default=0)
     message_count: Mapped[int] = mapped_column(Integer, default=0)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", ContentJSON, default=dict)
     generation_status: Mapped[str] = mapped_column(String(20), default="idle")
     active_session_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
@@ -79,13 +79,13 @@ class Message(Base, TimestampMixin):
     sender_name: Mapped[str] = mapped_column(String(120), default="")
     sender_avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_type: Mapped[str] = mapped_column(String(40), default="text", index=True)
-    content: Mapped[dict] = mapped_column(JSON, default=dict)
+    content: Mapped[dict] = mapped_column(ContentJSON, default=dict)
     status: Mapped[str] = mapped_column(String(30), default="sent", index=True)
     reply_to_message_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     version_count: Mapped[int] = mapped_column(Integer, default=1)
     current_version: Mapped[int] = mapped_column(Integer, default=1)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
 
@@ -97,7 +97,7 @@ class MessageVersion(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     message_id: Mapped[str] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
-    content: Mapped[dict] = mapped_column(JSON, default=dict)
+    content: Mapped[dict] = mapped_column(ContentJSON, default=dict)
     edit_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     edited_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

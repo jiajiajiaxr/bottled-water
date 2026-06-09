@@ -86,12 +86,12 @@ def _source_file(workspace_id: str, node_id: str, target: dict[str, Any], filena
     suffix = Path(filename).suffix.lower() or ".office"
     safe_name = safe_segment(Path(filename).stem or "source", default="source")
     cached_source = cache_dir / f"{safe_name}{suffix}"
-    if source_path and source_path.exists():
-        if not cached_source.exists() or cached_source.stat().st_mtime < source_path.stat().st_mtime:
-            shutil.copyfile(source_path, cached_source)
-    elif source_bytes is not None:
+    if source_bytes is not None:
         if not cached_source.exists() or cached_source.read_bytes() != source_bytes:
             cached_source.write_bytes(source_bytes)
+    elif source_path and source_path.exists():
+        if not cached_source.exists() or cached_source.stat().st_mtime < source_path.stat().st_mtime:
+            shutil.copyfile(source_path, cached_source)
     else:
         cached_source.write_bytes(b"")
 
@@ -116,13 +116,13 @@ def _fingerprint(
     hasher.update(node_id.encode("utf-8", errors="ignore"))
     hasher.update(filename.encode("utf-8", errors="ignore"))
     hasher.update(mime_type.encode("utf-8", errors="ignore"))
-    if source_path and source_path.exists():
+    if source_bytes is not None:
+        hasher.update(str(len(source_bytes)).encode())
+        hasher.update(hashlib.sha256(source_bytes).digest())
+    elif source_path and source_path.exists():
         stat = source_path.stat()
         hasher.update(str(stat.st_size).encode())
         hasher.update(str(int(stat.st_mtime_ns)).encode())
-    elif source_bytes is not None:
-        hasher.update(str(len(source_bytes)).encode())
-        hasher.update(hashlib.sha256(source_bytes).digest())
     return hasher.hexdigest()[:32]
 
 

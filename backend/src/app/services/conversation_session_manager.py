@@ -799,13 +799,21 @@ class ConversationSessionManager:
             if existing:
                 return existing
         if work_product:
-            return await db.scalar(
-                select(Message)
-                .where(
-                    *base_conditions,
-                    Message.content["text"].as_string() == work_product,
+            candidates = (
+                await db.scalars(
+                    select(Message)
+                    .where(*base_conditions)
+                    .order_by(Message.created_at.desc())
+                    .limit(20)
                 )
-                .order_by(Message.created_at.desc())
+            ).all()
+            return next(
+                (
+                    message
+                    for message in candidates
+                    if str((message.content or {}).get("text") or "") == work_product
+                ),
+                None,
             )
         return None
 

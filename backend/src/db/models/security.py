@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, TimestampMixin, utcnow, uuid_str
+from ..types import ContentJSON
 
 
 class AuditLog(Base):
@@ -20,7 +20,7 @@ class AuditLog(Base):
     ip_address: Mapped[str | None] = mapped_column(String(80), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     risk_score: Mapped[float] = mapped_column(Float, default=0)
-    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    detail: Mapped[dict] = mapped_column(ContentJSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

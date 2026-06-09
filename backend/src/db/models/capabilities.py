@@ -8,6 +8,7 @@ from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base, TimestampMixin, uuid_str
+from ..types import ContentJSON, EncryptedText, SensitiveJSON
 
 if TYPE_CHECKING:
     pass
@@ -25,14 +26,14 @@ class Skill(Base, TimestampMixin):
     source: Mapped[str] = mapped_column(String(40), default="manual", index=True)
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
     version: Mapped[str] = mapped_column(String(50), default="1.0.0")
-    content: Mapped[str] = mapped_column(Text, default="")
-    prompt: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(EncryptedText, default="")
+    prompt: Mapped[str] = mapped_column(EncryptedText, default="")
     input_schema: Mapped[dict] = mapped_column(JSON, default=dict)
     output_schema: Mapped[dict] = mapped_column(JSON, default=dict)
     tools: Mapped[list] = mapped_column(JSON, default=list)
     tags: Mapped[list] = mapped_column(JSON, default=list)
-    config: Mapped[dict] = mapped_column(JSON, default=dict)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    config: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
 
 class SkillRun(Base, TimestampMixin):
@@ -46,13 +47,13 @@ class SkillRun(Base, TimestampMixin):
     )
     runtime_type: Mapped[str] = mapped_column(String(40), default="prompt_skill", index=True)
     status: Mapped[str] = mapped_column(String(40), default="running", index=True)
-    input: Mapped[dict] = mapped_column(JSON, default=dict)
-    output: Mapped[dict] = mapped_column(JSON, default=dict)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input: Mapped[dict] = mapped_column(ContentJSON, default=dict)
+    output: Mapped[dict] = mapped_column(ContentJSON, default=dict)
+    error_message: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
 
 class ToolDefinition(Base, TimestampMixin):
@@ -74,10 +75,10 @@ class ToolDefinition(Base, TimestampMixin):
     input_schema: Mapped[dict] = mapped_column(JSON, default=dict)
     output_schema: Mapped[dict] = mapped_column(JSON, default=dict)
     permissions: Mapped[list] = mapped_column(JSON, default=list)
-    implementation: Mapped[dict] = mapped_column(JSON, default=dict)
-    runtime: Mapped[dict] = mapped_column(JSON, default=dict)
+    implementation: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
+    runtime: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
     tags: Mapped[list] = mapped_column(JSON, default=list)
-    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    config: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
     extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 
 
@@ -91,14 +92,14 @@ class ToolInvocation(Base, TimestampMixin):
     conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True, index=True)
     tool_name: Mapped[str] = mapped_column(String(200), index=True)
     tool_type: Mapped[str] = mapped_column(String(60), default="builtin", index=True)
-    arguments: Mapped[dict] = mapped_column(JSON, default=dict)
-    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    arguments: Mapped[dict] = mapped_column(ContentJSON, default=dict)
+    result: Mapped[dict] = mapped_column(ContentJSON, default=dict)
     status: Mapped[str] = mapped_column(String(40), default="running", index=True)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
 
 class ExternalAgentRun(Base, TimestampMixin):
@@ -111,18 +112,18 @@ class ExternalAgentRun(Base, TimestampMixin):
     conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True, index=True)
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
-    command: Mapped[list] = mapped_column(JSON, default=list)
+    command: Mapped[list] = mapped_column(SensitiveJSON, default=list)
     cwd: Mapped[str] = mapped_column(Text, default="")
-    input_prompt: Mapped[str] = mapped_column(Text, default="")
-    stdout_tail: Mapped[str] = mapped_column(Text, default="")
-    stderr_tail: Mapped[str] = mapped_column(Text, default="")
+    input_prompt: Mapped[str] = mapped_column(EncryptedText, default="")
+    stdout_tail: Mapped[str] = mapped_column(EncryptedText, default="")
+    stderr_tail: Mapped[str] = mapped_column(EncryptedText, default="")
     changed_files: Mapped[list] = mapped_column(JSON, default=list)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
 
 class ModelProvider(Base, TimestampMixin):
@@ -133,13 +134,13 @@ class ModelProvider(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(160), index=True)
     provider_type: Mapped[str] = mapped_column(String(60), default="openai_compatible", index=True)
     base_url: Mapped[str] = mapped_column(Text)
-    api_key_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    api_key_ref: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     default_model: Mapped[str] = mapped_column(String(160), default="")
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
     supports_streaming: Mapped[bool] = mapped_column(Boolean, default=True)
     supports_embeddings: Mapped[bool] = mapped_column(Boolean, default=False)
-    config: Mapped[dict] = mapped_column(JSON, default=dict)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    config: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
     models: Mapped[list["ModelConfig"]] = relationship(back_populates="provider", cascade="all, delete-orphan")
 
@@ -156,7 +157,7 @@ class ModelConfig(Base, TimestampMixin):
     max_output_tokens: Mapped[int] = mapped_column(Integer, default=8192)
     temperature_default: Mapped[float] = mapped_column(Float, default=0.7)
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
-    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    config: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
 
     provider: Mapped["ModelProvider"] = relationship(back_populates="models")
 
@@ -172,8 +173,8 @@ class McpServer(Base, TimestampMixin):
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     command: Mapped[str | None] = mapped_column(Text, nullable=True)
     args: Mapped[list] = mapped_column(JSON, default=list)
-    env: Mapped[dict] = mapped_column(JSON, default=dict)
-    headers: Mapped[dict] = mapped_column(JSON, default=dict)
+    env: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
+    headers: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     tool_filter: Mapped[list] = mapped_column(JSON, default=list)
     timeout_ms: Mapped[int] = mapped_column(Integer, default=30000)
@@ -194,14 +195,14 @@ class McpToolInvocation(Base, TimestampMixin):
     conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True, index=True)
     tool_name: Mapped[str] = mapped_column(String(200), index=True)
     transport: Mapped[str] = mapped_column(String(40), default="httpStream", index=True)
-    arguments: Mapped[dict] = mapped_column(JSON, default=dict)
+    arguments: Mapped[dict] = mapped_column(ContentJSON, default=dict)
     status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
-    result: Mapped[dict] = mapped_column(JSON, default=dict)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result: Mapped[dict] = mapped_column(ContentJSON, default=dict)
+    error_message: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
     server: Mapped["McpServer"] = relationship()
 
@@ -217,11 +218,11 @@ class SandboxSession(Base, TimestampMixin):
     image: Mapped[str] = mapped_column(String(200), default="python:3.11-slim")
     status: Mapped[str] = mapped_column(String(40), default="ready", index=True)
     resource_limits: Mapped[dict] = mapped_column(JSON, default=dict)
-    mounted_files: Mapped[list] = mapped_column(JSON, default=list)
-    command_history: Mapped[list] = mapped_column(JSON, default=list)
+    mounted_files: Mapped[list] = mapped_column(SensitiveJSON, default=list)
+    command_history: Mapped[list] = mapped_column(ContentJSON, default=list)
     last_command_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)
 
 
 class RemoteConnection(Base, TimestampMixin):
@@ -235,7 +236,7 @@ class RemoteConnection(Base, TimestampMixin):
     endpoint: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(40), default="disconnected", index=True)
     capabilities: Mapped[list] = mapped_column(JSON, default=list)
-    credentials_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
-    session_state: Mapped[dict] = mapped_column(JSON, default=dict)
+    credentials_ref: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
+    session_state: Mapped[dict] = mapped_column(SensitiveJSON, default=dict)
     last_connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    extra: Mapped[dict] = mapped_column("metadata", SensitiveJSON, default=dict)

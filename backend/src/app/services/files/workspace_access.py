@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.models import Artifact, Conversation, FileAsset, Project, ProjectFile, User, Workspace, WorkspaceMember
+from app.services.files import encrypted_file_response_content
 from app.services.workspaces.filesystem import normalize_relative_path, resolve_workspace_path, workspace_root
 
 
@@ -72,7 +73,7 @@ def project_file(db: Session, workspace_id: str, file_id: str) -> ProjectFile:
 def file_asset_target(workspace_id: str, asset: FileAsset) -> dict[str, Any]:
     root = workspace_root(workspace_id)
     relative_path = relative_or_compat(root, Path(asset.storage_path), f"uploads/legacy/{asset.original_filename}")
-    return {
+    target = {
         "kind": "file",
         "path": Path(asset.storage_path),
         "filename": asset.original_filename,
@@ -80,6 +81,10 @@ def file_asset_target(workspace_id: str, asset: FileAsset) -> dict[str, Any]:
         "relative_path": relative_path,
         "file_asset": asset,
     }
+    decrypted = encrypted_file_response_content(asset)
+    if decrypted is not None:
+        target["bytes"] = decrypted
+    return target
 
 
 def safe_workspace_file_path(workspace_id: str, encoded_path: str) -> Path:

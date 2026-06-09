@@ -17,6 +17,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.errors import ValidationAppError
+from common.crypto import is_file_encrypted, read_encrypted_file
 from db.base import Base
 from db.models import (
     Agent,
@@ -174,7 +175,10 @@ def test_office_artifacts_persist_real_files_and_versions(tool_name: str, fmt: s
     assert artifact.content["source_text"]
     assert artifact.content["content_model"]["kind"] in {"document", "spreadsheet", "slides"}
     assert source_file == artifact.content["export_file"]
-    assert Path(source_file["storage_path"]).read_bytes() == exported.content
+    stored_path = Path(source_file["storage_path"])
+    assert is_file_encrypted(stored_path)
+    assert stored_path.read_bytes() != exported.content
+    assert read_encrypted_file(stored_path) == exported.content
     assert default_exported.content == exported.content
     assert default_exported.filename.endswith(f".{fmt}")
     assert asset is not None
@@ -339,7 +343,7 @@ def test_artifact_exports_cover_zip_and_text_formats(tool_name: str, fmt: str, p
         names = set(archive.namelist())
         source_name = f"source/{artifact.content['source_file']['filename']}"
         assert {"metadata.json", "README.md", "preview.html", source_name}.issubset(names)
-        assert archive.read(source_name) == Path(artifact.content["source_file"]["storage_path"]).read_bytes()
+        assert archive.read(source_name) == read_encrypted_file(Path(artifact.content["source_file"]["storage_path"]))
 
 
 def test_html_artifact_preview_and_export_use_real_html_file() -> None:
@@ -362,7 +366,10 @@ def test_html_artifact_preview_and_export_use_real_html_file() -> None:
     assert artifact.content["preview_html"] == html
     assert artifact.content["source_file"]["format"] == "html"
     assert exported.content.decode("utf-8") == html
-    assert Path(artifact.content["source_file"]["storage_path"]).read_text(encoding="utf-8") == html
+    stored_path = Path(artifact.content["source_file"]["storage_path"])
+    assert is_file_encrypted(stored_path)
+    assert stored_path.read_text(encoding="utf-8", errors="ignore") != html
+    assert read_encrypted_file(stored_path).decode("utf-8") == html
 
 
 def test_sandbox_run_timeout_and_denied_command_are_recorded() -> None:

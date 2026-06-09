@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import re
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import ValidationAppError
+from app.services.crypto import (
+    is_file_encrypted,
+    materialized_plaintext_file,
+    read_encrypted_file,
+    write_encrypted_file,
+)
 from app.services.tools.builtins.file import extract_text_from_path
 from app.services.workspaces.filesystem import scoped_dir, workspace_id_from_conversation
 from db.models import AuditLog, FileAsset, KnowledgeBase, KnowledgeDocument, User
@@ -118,6 +126,29 @@ def attachment_path(file_asset: FileAsset) -> Path:
     return path
 
 
+def file_asset_bytes(file_asset: FileAsset) -> bytes:
+    return read_encrypted_file(attachment_path(file_asset))
+
+
+def file_asset_text(file_asset: FileAsset, *, encoding: str = "utf-8") -> str:
+    return file_asset_bytes(file_asset).decode(encoding, errors="ignore")
+
+
+@contextmanager
+def plaintext_file_path(file_asset: FileAsset) -> Iterator[Path]:
+    path = attachment_path(file_asset)
+    suffix = Path(file_asset.original_filename or file_asset.filename or path.name).suffix
+    with materialized_plaintext_file(path, suffix=suffix) as plaintext:
+        yield plaintext
+
+
+def encrypted_file_response_content(file_asset: FileAsset) -> bytes | None:
+    path = attachment_path(file_asset)
+    if not is_file_encrypted(path):
+        return None
+    return read_encrypted_file(path)
+
+
 async def _resolve_upload_workspace_id(
     db: AsyncSession,
     *,
@@ -163,13 +194,15 @@ async def save_upload(
         folder = Path(settings.storage_dir) / "uploads" / user.id[:8]
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{checksum[:12]}-{name}"
-    path.write_bytes(raw)
+    encryption_info = write_encrypted_file(path, raw)
 
-    extracted_result = extract_text_from_path(path, content_type=content_type, filename=name)
+    with materialized_plaintext_file(path, suffix=Path(name).suffix) as plain_path:
+        extracted_result = extract_text_from_path(plain_path, content_type=content_type, filename=name)
     extracted = extracted_result["text"][:200_000]
     metadata = {
         "extension": Path(name).suffix.lower(),
         "tool_chain": ["file.upload", "file.extract_text"],
+        "encryption": encryption_info,
         **(extracted_result.get("metadata") or {}),
     }
     if resolved_workspace_id:

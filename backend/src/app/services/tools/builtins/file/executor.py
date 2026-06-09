@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ForbiddenError, NotFoundError
 from app.models import FileAsset, User
+from app.services.crypto import materialized_plaintext_file, read_encrypted_file
 from app.services.tools.builtins.file.converters import convert_file
 from app.services.tools.builtins.file.extractors import embed_text, extract_text_from_path, summarize_text
 from app.services.tools.builtins.file.preview import preview_payload
@@ -40,7 +41,7 @@ def _read_workspace_file(
 ) -> dict[str, Any]:
     if file_id:
         asset = _get_file(db, user, file_id)
-        content = Path(asset.storage_path).read_text(encoding="utf-8", errors="ignore")[:200_000]
+        content = _file_asset_text(asset)[:200_000]
         return {"status": "succeeded", "file_id": asset.id, "content": content}
     path = _safe_tool_path(db, arguments)
     relative_path = normalize_relative_path(str(arguments.get("path") or ""))
@@ -79,23 +80,30 @@ def _invoke_file_asset_tool(
     file_id: str,
 ) -> dict[str, Any]:
     asset = _get_file(db, user, file_id)
-    path = Path(asset.storage_path)
     if name == "file.extract_text":
-        result = extract_text_from_path(path, content_type=asset.content_type, filename=asset.original_filename)
+        with _plaintext_file_path(asset) as path:
+            result = extract_text_from_path(
+                path,
+                content_type=asset.content_type,
+                filename=asset.original_filename,
+            )
         asset.extracted_text = result["text"]
         asset.parse_status = result["status"]
         asset.extra = {**(asset.extra or {}), **(result.get("metadata") or {}), "tool_chain": ["file.extract_text"]}
         db.commit()
         return {"status": "succeeded", "text": asset.extracted_text, "metadata": asset.extra}
     if name == "file.preview":
-        return {"status": "succeeded", **preview_payload(path, content_type=asset.content_type, filename=asset.original_filename)}
+        with _plaintext_file_path(asset) as path:
+            payload = preview_payload(path, content_type=asset.content_type, filename=asset.original_filename)
+        return {"status": "succeeded", **payload}
     if name == "file.convert":
-        generated = convert_file(
-            path,
-            content_type=asset.content_type,
-            filename=asset.original_filename,
-            target_format=str(arguments.get("format") or "pdf"),
-        )
+        with _plaintext_file_path(asset) as path:
+            generated = convert_file(
+                path,
+                content_type=asset.content_type,
+                filename=asset.original_filename,
+                target_format=str(arguments.get("format") or "pdf"),
+            )
         return {
             "status": "succeeded",
             "filename": generated.filename,
@@ -103,7 +111,15 @@ def _invoke_file_asset_tool(
             "size": len(generated.content),
         }
     if name == "file.summarize":
-        text = asset.extracted_text or extract_text_from_path(path, content_type=asset.content_type, filename=asset.original_filename)["text"]
+        if asset.extracted_text:
+            text = asset.extracted_text
+        else:
+            with _plaintext_file_path(asset) as path:
+                text = extract_text_from_path(
+                    path,
+                    content_type=asset.content_type,
+                    filename=asset.original_filename,
+                )["text"]
         return {"status": "succeeded", "summary": summarize_text(text, max_chars=int(arguments.get("max_chars") or 1200))}
     text = asset.extracted_text or asset.original_filename
     return {"status": "succeeded", "embedding": embed_text(text), "provider": "local-hash"}
@@ -118,6 +134,23 @@ def _safe_tool_path(db: Session, arguments: dict[str, Any]) -> Path:
         task_id=str(arguments.get("task_id") or "") or None,
     )
     return resolve_workspace_path(root, str(arguments.get("path") or ""))
+
+
+def _file_asset_text(file_asset: FileAsset, *, encoding: str = "utf-8") -> str:
+    return read_encrypted_file(_file_asset_path(file_asset)).decode(encoding, errors="ignore")
+
+
+def _plaintext_file_path(file_asset: FileAsset):
+    path = _file_asset_path(file_asset)
+    suffix = Path(file_asset.original_filename or file_asset.filename or path.name).suffix
+    return materialized_plaintext_file(path, suffix=suffix)
+
+
+def _file_asset_path(file_asset: FileAsset) -> Path:
+    path = Path(file_asset.storage_path)
+    if not path.exists() or not path.is_file():
+        raise NotFoundError("file content not found")
+    return path
 
 
 def _get_file(db: Session, user: User, file_id: str) -> FileAsset:
