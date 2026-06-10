@@ -1,7 +1,7 @@
 const staticTimeline = [
   [0, 0, "等待调度", "Team Leader", "queued", ""],
   [600, 8, "Team Leader 正在拆解任务", "Team Leader", "running", "生成 Web、桌面、移动三端联调计划。"],
-  [1300, 23, "Frontend Worker 正在生成操作界面", "Frontend Worker", "running", "构建 IM、审批、成果预览演示流。"],
+  [1300, 23, "Frontend Worker 正在生成操作界面", "Frontend Worker", "running", "构建 IM、成果预览和部署核验演示流。"],
   [2100, 42, "Backend Worker 正在准备调试 API", "Backend Worker", "running", "提供健康检查、运行记录和事件流。"],
   [3100, 66, "QA Reviewer 正在核验部署闭环", "QA Reviewer", "running", "验证本地一键启动和预览卡片。"],
   [4300, 88, "正在生成成果预览卡", "Frontend Worker", "completed", "完成平台实操 Demo 页面。"],
@@ -170,6 +170,12 @@ function updateRun(run, progress, step, agentName, agentStatus, product) {
   run.progress = progress;
   run.current_step = step;
   run.status = progress >= 100 ? "completed" : "running";
+  if (progress >= 100) {
+    run.agents = run.agents.map((item) => ({
+      ...item,
+      status: item.work_product ? "completed" : item.status,
+    }));
+  }
   const agent = run.agents.find((item) => item.name === agentName);
   if (agent) {
     agent.status = agentStatus;
@@ -204,9 +210,11 @@ function renderArtifact(artifact) {
       <head>
         <meta charset="UTF-8" />
         <style>
-          body { margin: 0; padding: 24px; font-family: Inter, "Microsoft YaHei", sans-serif; background: #fffaf0; color: #243b38; }
-          h1 { margin-top: 0; font-size: 28px; letter-spacing: 0; }
-          li { margin: 8px 0; }
+          body { margin: 0; padding: 22px; font-family: Inter, "Microsoft YaHei", sans-serif; background: #f6f8fc; color: #111827; }
+          h1 { margin: 0 0 10px; font-size: 24px; letter-spacing: 0; }
+          p { color: #475569; line-height: 1.7; }
+          ul { display: grid; gap: 8px; margin: 18px 0 0; padding: 0; list-style: none; }
+          li { padding: 10px 12px; border: 1px solid #d9e2ef; border-radius: 8px; background: #ffffff; color: #334155; }
           .artifact-document { max-width: 720px; }
         </style>
       </head>
@@ -226,11 +234,11 @@ function createArtifact(id, summary) {
         <h1>AgentHub 平台实操 Demo</h1>
         <p>${escapeHtml(summary)}</p>
         <ul>
-          <li>GitHub Pages 纯静态演示</li>
-          <li>本地一键启动联调</li>
-          <li>健康检查与后端探测</li>
-          <li>多 Agent 任务流模拟</li>
-          <li>成果预览与部署核验</li>
+          <li>Web 工作台同款三栏布局</li>
+          <li>多 Agent 协作进度模拟</li>
+          <li>成果产物右侧预览</li>
+          <li>本地 API 自动探测</li>
+          <li>GitHub Pages 纯静态托管</li>
         </ul>
       </article>
     `,

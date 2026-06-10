@@ -101,7 +101,7 @@ function createRun() {
 function driveRun(run) {
   const timeline = [
     [600, 8, "Team Leader 正在拆解任务", "Team Leader", "running", "生成 Web、桌面、移动三端联调计划。"],
-    [1300, 23, "Frontend Worker 正在生成操作界面", "Frontend Worker", "running", "构建 IM、审批、成果预览演示流。"],
+    [1300, 23, "Frontend Worker 正在生成操作界面", "Frontend Worker", "running", "构建 IM、成果预览和部署核验演示流。"],
     [2100, 42, "Backend Worker 正在准备调试 API", "Backend Worker", "running", "提供健康检查、运行记录和事件流。"],
     [3100, 66, "QA Reviewer 正在核验部署闭环", "QA Reviewer", "running", "验证本地一键启动和预览卡片。"],
     [4300, 88, "正在生成成果预览卡", "Frontend Worker", "completed", "完成平台实操 Demo 页面。"],
@@ -114,6 +114,12 @@ function driveRun(run) {
       run.current_step = step;
       run.updated_at = new Date().toISOString();
       run.status = progress >= 100 ? "completed" : "running";
+      if (progress >= 100) {
+        run.agents = run.agents.map((item) => ({
+          ...item,
+          status: item.work_product ? "completed" : item.status,
+        }));
+      }
 
       const agent = run.agents.find((item) => item.name === agentName);
       if (agent) {
@@ -182,7 +188,7 @@ async function statusPayload() {
       {
         name: "移动端轻量化便捷端口",
         status: "ready",
-        capability: "会话查看、审批确认、成果核验",
+        capability: "会话查看、成果预览、进度跟踪",
       },
     ],
     active_runs: Array.from(runs.values()).slice(-5),
