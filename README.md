@@ -6,8 +6,9 @@
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
 
 > 面向 AI Agent 开发者、研究者和爱好者的综合性协同平台，把聊天、群协作、智能体配置、模型接入、工具链、工作流编排、文件与成果预览、审计和部署整合在同一产品界面中。
-## 展示视频
-sha256:5c76423009cbd59a430be6bc107ca6ce2371bd94c81b7d5f88f3e1a996858faa
+## Demo 演示视频
+
+[点击下载演示视频](https://github.com/jiajiajiaxr/bottled-water/releases/latest)
 ## 功能亮点
 
 - 🤖 **Agent 展示** - 发布、评分、评论、版本管理、分类检索
