@@ -19,6 +19,7 @@ def run_api_test(arguments: dict[str, Any]) -> dict[str, Any]:
     started = time.perf_counter()
     if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
         raise ValidationAppError(f"unsupported HTTP method: {method}")
+    is_platform_app_probe = not _is_absolute_url(path)
     response = _request(method, path, headers=headers, body=body)
     duration_ms = int((time.perf_counter() - started) * 1000)
     assertion_passed = response["status_code"] == expected_status
@@ -27,6 +28,8 @@ def run_api_test(arguments: dict[str, Any]) -> dict[str, Any]:
         "capability_level": "real",
         "method": method,
         "path": path,
+        "target": "agenthub_platform" if is_platform_app_probe else "external_url",
+        "is_platform_app_probe": is_platform_app_probe,
         "status_code": response["status_code"],
         "expected_status": expected_status,
         "assertion_passed": assertion_passed,

@@ -134,7 +134,9 @@ def _system_with_context_policy(system_prompt: str, context_text: str) -> str:
         "不要把一次性闲聊、敏感信息、临时计算过程写入长期记忆，也不要伪造长期记忆。\n"
         "Tool / Skill / MCP 的详细 schema 只通过 Function Calling tools 提供；普通上下文里只放当前 Agent 已授权能力摘要。\n"
         "图片附件如果没有视觉解析结果，只能说明当前未启用视觉解析，不能假装理解图片内容。\n"
-        "工具结果必须作为事实来源，不要伪造工具执行、产物、下载链接或部署状态。"
+        "工具结果必须作为事实来源，不要伪造工具执行、产物、下载链接或部署状态。\n"
+        "受控沙箱工具不经过 shell：sandbox.run、terminal.start 的 command 只能是单条可执行命令，不能包含 cd、&&、;、|、>、< 或换行；需要切换目录时使用 workdir 参数，例如 command=\"python main.py\", workdir=\"backend\"。\n"
+        "如果运行、测试、部署或终端工具失败，最终回复必须明确失败项和剩余风险，不能声称依赖已安装、服务已启动、测试通过或部署成功。"
         f"{context_block}"
     )
 

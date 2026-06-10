@@ -8,8 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.models import Agent, Conversation, ConversationParticipant, McpServer, Skill
 from app.services.context.compression import trim_text
-from app.services.tools.builtins.registry import BUILTIN_TOOLS
-from app.services.tools.permissions import normalize_tool_names
+from app.services.agents.capability_permissions import (
+    agent_uses_default_full_permissions,
+    configured_tool_names,
+)
+from app.services.tools.builtins.registry import BUILTIN_TOOLS, active_builtin_tool_names
 
 
 @dataclass
@@ -122,7 +125,7 @@ def format_group_message_content(
 
 
 def _tool_summary(agent: Agent) -> list[str]:
-    names = normalize_tool_names((agent.config or {}).get("tools") or [])
+    names = active_builtin_tool_names() if agent_uses_default_full_permissions(agent) else configured_tool_names(agent)
     output: list[str] = []
     for name in names[:12]:
         builtin = BUILTIN_TOOLS.get(name)

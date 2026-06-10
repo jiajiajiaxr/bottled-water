@@ -250,6 +250,74 @@ class TestBlackboardManager:
         finally:
             await engine.dispose()
 
+    @pytest.mark.asyncio
+    async def test_sqlalchemy_backend_preserves_runtime_when_saving_stale_blackboard(self, tmp_path):
+        db_url = f"sqlite+aiosqlite:///{(tmp_path / 'runtime_blackboard_merge.db').as_posix()}"
+        engine = create_async_engine(db_url, future=True)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                user = User(
+                    id="runtime-merge-user",
+                    email="runtime-merge@example.com",
+                    username="runtime-merge",
+                    password_hash="x",
+                    display_name="Runtime Merge",
+                )
+                conversation = Conversation(
+                    id="runtime-merge-conv",
+                    creator_id=user.id,
+                    chat_type="group",
+                    title="runtime merge",
+                    extra={"blackboard": {"version": 1, "raw_history": []}},
+                )
+                session.add_all([user, conversation])
+                await session.commit()
+
+            stale_session = factory()
+            runtime_session = factory()
+            try:
+                stale_backend = SQLAlchemyBackend(stale_session)
+                stale_conversation = await stale_session.get(Conversation, "runtime-merge-conv")
+                assert stale_conversation is not None
+                assert "runtime" not in (stale_conversation.extra or {})
+
+                runtime_conversation = await runtime_session.get(
+                    Conversation,
+                    "runtime-merge-conv",
+                )
+                assert runtime_conversation is not None
+                runtime_conversation.extra = {
+                    **(runtime_conversation.extra or {}),
+                    "runtime": {
+                        "active_generation_id": "gen-1",
+                        "generations": [{"id": "gen-1", "status": "running"}],
+                    },
+                }
+                runtime_conversation.generation_status = "running"
+                await runtime_session.commit()
+
+                await stale_backend.save_blackboard(
+                    "runtime-merge-conv",
+                    {"version": 2, "raw_history": [{"type": "after-runtime"}]},
+                )
+            finally:
+                await stale_session.close()
+                await runtime_session.close()
+
+            async with factory() as session:
+                conversation = await session.get(Conversation, "runtime-merge-conv")
+
+            extra = conversation.extra or {}
+            assert extra["runtime"]["active_generation_id"] == "gen-1"
+            assert extra["runtime"]["generations"][0]["status"] == "running"
+            assert extra["blackboard"]["version"] == 2
+        finally:
+            await engine.dispose()
+
 
 # ---------------------------------------------------------------------------
 # AgentContext Tests

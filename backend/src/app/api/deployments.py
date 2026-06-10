@@ -165,8 +165,10 @@ async def _serve_site(deployment_id: str, path: str, db: AsyncSession) -> Respon
     """GET 请求：静态文件或 API 代理。"""
     deployment = await _get_deployment(deployment_id, db)
     backend_port = (deployment.config or {}).get("backend_port")
-    if backend_port and path.startswith("api/"):
-        return await _proxy_to_backend(backend_port, path, "GET")
+    if backend_port and _is_backend_proxy_path(path):
+        proxied = await _proxy_to_backend(backend_port, path, "GET")
+        if proxied.status_code != 404 or _is_explicit_backend_proxy_path(path):
+            return proxied
 
     target, content_type = deployment_site_file(deployment, path)
     if not target.exists() or not target.is_file():
@@ -184,7 +186,7 @@ async def _proxy_request(
     """POST/PUT/DELETE 请求代理到后端。"""
     deployment = await _get_deployment(deployment_id, db)
     backend_port = (deployment.config or {}).get("backend_port")
-    if not backend_port or not path.startswith("api/"):
+    if not backend_port or not _is_backend_proxy_path(path):
         raise NotFoundError("部署不支持此操作")
     body = await request.body() if request else None
     content_type = request.headers.get("content-type", "application/json") if request else "application/json"
@@ -209,9 +211,50 @@ async def _proxy_to_backend(
     import urllib.error
     import urllib.request
 
+    last_404: urllib.error.HTTPError | None = None
+    for candidate in _backend_proxy_candidate_paths(path):
+        backend_url = (
+            f"http://127.0.0.1:{backend_port}/"
+            if candidate.rstrip("/") == "api" or not candidate
+            else f"http://127.0.0.1:{backend_port}/{candidate}"
+        )
+        try:
+            req = urllib.request.Request(
+                backend_url,
+                data=body,
+                method=method,
+            )
+            if body:
+                req.add_header("Content-Type", content_type)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                resp_body = resp.read()
+                resp_ct = resp.headers.get("Content-Type", "application/json")
+                return Response(content=resp_body, status_code=resp.status, media_type=resp_ct)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                last_404 = exc
+                continue
+            resp_body = exc.read() if exc.fp else b""
+            return Response(content=resp_body, status_code=exc.code, media_type="application/json")
+        except Exception:
+            return Response(
+                content=_json.dumps({"detail": "backend service is unavailable"}),
+                status_code=502,
+                media_type="application/json",
+            )
+    if last_404:
+        resp_body = last_404.read() if last_404.fp else b""
+        return Response(content=resp_body, status_code=404, media_type="application/json")
+    return Response(
+        content=_json.dumps({"detail": "backend service is unavailable"}),
+        status_code=502,
+        media_type="application/json",
+    )
+
     # path 以 "api/" 开头，转发到后端对应路径
     # "api/" → http://localhost:PORT/ (健康检查)
     # "api/persons" → http://localhost:PORT/api/persons (CRUD)
+    path = _normalize_backend_proxy_path(path)
     if path.rstrip("/") == "api":
         backend_url = f"http://127.0.0.1:{backend_port}/"
     else:
@@ -237,6 +280,52 @@ async def _proxy_to_backend(
             status_code=502,
             media_type="application/json",
         )
+
+
+def _normalize_backend_proxy_path(path: str) -> str:
+    normalized = path.lstrip("/")
+    while normalized.startswith("api/api/"):
+        normalized = "api/" + normalized[len("api/api/") :]
+    return normalized
+
+
+def _backend_proxy_candidate_paths(path: str) -> list[str]:
+    normalized = _normalize_backend_proxy_path(path)
+    if normalized.rstrip("/") == "api":
+        return [""]
+    candidates: list[str] = []
+
+    def add(candidate: str) -> None:
+        if candidate not in candidates:
+            candidates.append(candidate)
+
+    add(normalized)
+    if normalized.startswith("api/"):
+        suffix = normalized[len("api/") :]
+        if suffix:
+            add(suffix)
+    elif not _backend_proxy_path_has_file_suffix(normalized):
+        add(f"api/{normalized}")
+    return candidates
+
+
+def _is_explicit_backend_proxy_path(path: str) -> bool:
+    normalized = _normalize_backend_proxy_path(path)
+    return normalized in {"api", "api/", "docs", "openapi.json", "health"} or normalized.startswith("api/")
+
+
+def _is_backend_proxy_path(path: str) -> bool:
+    normalized = _normalize_backend_proxy_path(path)
+    if _is_explicit_backend_proxy_path(normalized):
+        return True
+    if not normalized or normalized in {"index.html", "index.htm"}:
+        return False
+    return not _backend_proxy_path_has_file_suffix(normalized)
+
+
+def _backend_proxy_path_has_file_suffix(path: str) -> bool:
+    leaf = path.rstrip("/").rsplit("/", 1)[-1]
+    return "." in leaf
 
 
 @router.get("/deployments/{deployment_id}/logs", response_model=ApiResponse[dict])

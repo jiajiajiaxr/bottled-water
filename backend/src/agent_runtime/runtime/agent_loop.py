@@ -610,11 +610,7 @@ class AgentLoop:
                     *messages,
                     ChatMessage(
                         role="user",
-                        content=(
-                            "工具已经执行完成。请用自然中文给用户一个简洁最终回复，"
-                            "说明你完成了什么，以及用户可以通过产物卡片预览或下载。"
-                            "不要再次调用工具，不要输出 JSON 或代码块。"
-                        ),
+                        content=self._summary_instruction(tool_results),
                     ),
                 ]
                 if self.use_streaming:
@@ -695,6 +691,30 @@ class AgentLoop:
                 priority=status_report.priority,
                 confidence=max(status_report.confidence, 0.9),
                 rationale=status_report.rationale or "Artifact tool succeeded.",
+                expected_duration=status_report.expected_duration,
+            )
+        runtime_failure = self._runtime_validation_failure_message(tool_results)
+        project_runtime_failure = self._project_runtime_validation_failure(task, tool_results)
+        if project_runtime_failure:
+            runtime_failure = (
+                f"{runtime_failure}；{project_runtime_failure}"
+                if runtime_failure
+                else project_runtime_failure
+            )
+        if runtime_failure and status_report.state == AgentState.COMPLETED:
+            if work_product.strip():
+                work_product = f"{work_product.rstrip()}\n\n注意：{runtime_failure}"
+            else:
+                work_product = runtime_failure
+            status_report = AgentReport(
+                agent_id=status_report.agent_id,
+                state=AgentState.FAILED,
+                will=AgentWill.BLOCKED,
+                target_task=status_report.target_task,
+                blockers=[runtime_failure],
+                priority=status_report.priority,
+                confidence=0.0,
+                rationale="Runtime validation tools failed; successful file/artifact creation alone does not prove the project ran.",
                 expected_duration=status_report.expected_duration,
             )
 
@@ -799,6 +819,173 @@ class AgentLoop:
         total = len(failures)
         suffix = f"；本轮共有 {total} 个工具调用失败。" if total > 1 else ""
         return f"{tool} 执行失败，未生成可交付产物：{error}{suffix}"
+
+    @classmethod
+    def _summary_instruction(cls, tool_results: List[Dict[str, Any]]) -> str:
+        deploy_success = cls._latest_successful_deployment_output(tool_results)
+        if deploy_success:
+            deployment_url = str(
+                deploy_success.get("url") or deploy_success.get("public_url") or ""
+            ).strip()
+            backend_path = str(
+                deploy_success.get("validated_backend_path")
+                or deploy_success.get("backend_health_url")
+                or ""
+            ).strip()
+            return (
+                "deploy.preview 已经成功创建真实部署。请只依据下面这些工具返回的事实回复用户，"
+                "不要手写、改写或重新拼接 deployment_id / artifact_id / URL；必须原样复制部署地址。"
+                "不要声明未被工具明确验证的接口、CRUD 流程或健康检查。"
+                f"\n部署地址：{deployment_url}"
+                f"\n后端验证路径：{backend_path or '以 deploy.preview health checks 为准'}"
+            )
+        instruction = (
+            "工具已经执行完成。请用自然中文给用户一个简洁最终回复，"
+            "说明你完成了什么，以及用户可以通过产物卡片预览或下载。"
+            "不要再次调用工具，不要输出 JSON 或代码块。"
+        )
+        runtime_failure = cls._runtime_validation_failure_message(tool_results)
+        if runtime_failure:
+            instruction += (
+                "\n\n注意：本轮存在运行、测试、部署或终端工具失败。最终回复必须如实说明失败项和剩余风险；"
+                "不得声称依赖已安装、服务已启动、测试通过、健康检查通过或部署成功，除非对应工具结果明确成功。"
+                f"\n失败摘要：{runtime_failure}"
+            )
+        return instruction
+
+    @staticmethod
+    def _runtime_validation_failure_message(tool_results: List[Dict[str, Any]]) -> str | None:
+        runtime_tools = {
+            "sandbox.run",
+            "terminal.start",
+            "terminal.send",
+            "terminal.wait_for",
+            "terminal.stop",
+            "api.test",
+            "browser.open",
+            "deploy.preview",
+            "test.run",
+        }
+        failures: list[str] = []
+        deploy_succeeded = AgentLoop._tool_succeeded(tool_results, "deploy.preview")
+        successful_runtime_validation = AgentLoop._has_successful_non_install_runtime_validation(tool_results)
+        for result in tool_results:
+            tool = str(result.get("tool") or result.get("tool_name") or "")
+            if tool not in runtime_tools:
+                continue
+            if deploy_succeeded and tool.startswith("terminal."):
+                continue
+            command = AgentLoop._runtime_command(result)
+            failed = result.get("success") is False
+            output = result.get("result")
+            if isinstance(output, dict):
+                status = str(output.get("status") or "").lower()
+                failed = failed or status in {"failed", "error", "timeout"}
+                nested = output.get("output")
+                if isinstance(nested, dict):
+                    nested_status = str(nested.get("status") or "").lower()
+                    failed = failed or nested_status in {"failed", "error", "timeout"}
+                    if nested.get("assertion_passed") is False:
+                        failed = True
+            if not failed:
+                continue
+            if successful_runtime_validation and AgentLoop._is_package_install_command(command):
+                continue
+            error = str(result.get("error") or "").strip()
+            if not error and isinstance(output, dict):
+                error = str(output.get("error") or output.get("message") or "").strip()
+                nested = output.get("output")
+                if not error and isinstance(nested, dict):
+                    error = str(
+                        nested.get("error")
+                        or nested.get("stderr")
+                        or nested.get("response_summary")
+                        or nested.get("message")
+                        or ""
+                    ).strip()
+            failures.append(f"{tool}: {error or '执行结果未通过'}")
+        if not failures:
+            return None
+        suffix = f"；另有 {len(failures) - 1} 个运行/验证工具失败" if len(failures) > 1 else ""
+        return f"{failures[0]}{suffix}"
+
+    @staticmethod
+    def _latest_successful_deployment_output(tool_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        for item in reversed(tool_results):
+            if str(item.get("tool") or item.get("tool_name") or "") != "deploy.preview":
+                continue
+            if item.get("success") is not True:
+                continue
+            result = item.get("result") if isinstance(item.get("result"), dict) else {}
+            output = result.get("output") if isinstance(result.get("output"), dict) else None
+            candidate = output if isinstance(output, dict) else result
+            if str(candidate.get("status") or "").lower() in {"failed", "error", "timeout"}:
+                continue
+            if candidate.get("url") or candidate.get("public_url"):
+                return candidate
+        return {}
+
+    @staticmethod
+    def _has_successful_non_install_runtime_validation(tool_results: List[Dict[str, Any]]) -> bool:
+        validation_tools = {"sandbox.run", "terminal.start", "api.test", "browser.open", "deploy.preview", "test.run"}
+        for result in tool_results:
+            tool = str(result.get("tool") or result.get("tool_name") or "")
+            if tool not in validation_tools or AgentLoop._is_package_install_command(AgentLoop._runtime_command(result)):
+                continue
+            if result.get("success") is False:
+                continue
+            output = result.get("result")
+            if isinstance(output, dict):
+                statuses = [str(output.get("status") or "").lower()]
+                nested = output.get("output")
+                if isinstance(nested, dict):
+                    statuses.append(str(nested.get("status") or "").lower())
+                    if nested.get("assertion_passed") is False:
+                        continue
+                if any(status in {"failed", "error", "timeout"} for status in statuses):
+                    continue
+            return True
+        return False
+
+    @staticmethod
+    def _runtime_command(result: Dict[str, Any]) -> str:
+        args = result.get("arguments") if isinstance(result.get("arguments"), dict) else None
+        command = str((args or {}).get("command") or "").strip()
+        output = result.get("result")
+        if not command and isinstance(output, dict):
+            nested = output.get("output")
+            if isinstance(nested, dict):
+                command = str(nested.get("command") or "").strip()
+        return command
+
+    @staticmethod
+    def _project_runtime_validation_failure(
+        task: str,
+        tool_results: List[Dict[str, Any]],
+    ) -> str | None:
+        if not AgentLoop._looks_like_project_code_delivery(task):
+            return None
+        for result in tool_results:
+            if str(result.get("tool") or result.get("tool_name") or "") != "api.test":
+                continue
+            output = result.get("result")
+            if isinstance(output, dict) and isinstance(output.get("output"), dict):
+                output = output["output"]
+            if not isinstance(output, dict):
+                continue
+            if output.get("is_platform_app_probe") is True:
+                return "api.test tested AgentHub's own app, not the generated backend service"
+        return None
+
+    @staticmethod
+    def _is_package_install_command(command: str) -> bool:
+        normalized = " ".join(str(command or "").strip().lower().split())
+        return bool(
+            normalized.startswith("pip install ")
+            or normalized.startswith("pip3 install ")
+            or normalized.startswith("python -m pip install ")
+            or normalized.startswith("py -m pip install ")
+        )
 
     @staticmethod
     def _only_artifact_create_calls(tool_calls: List[Dict[str, Any]]) -> bool:
@@ -1146,117 +1333,6 @@ class AgentLoop:
             return "gomoku-project"
         return text[:48].strip("-") or "agenthub-project"
 
-    @staticmethod
-    def _backend_project_fallback(task: str) -> str:
-        return f'''"""AgentHub generated backend skeleton for: {task}."""
-from __future__ import annotations
-
-from datetime import datetime
-from typing import Any
-
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-app = FastAPI(title="AgentHub Generated Backend")
-_records: list[dict[str, Any]] = []
-
-
-class Record(BaseModel):
-    player: str = "demo"
-    result: str = "win"
-    metadata: dict[str, Any] = {{}}
-
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {{"status": "ok", "generated_for": {task!r}}}
-
-
-@app.post("/records")
-def create_record(record: Record) -> dict[str, Any]:
-    item = record.model_dump()
-    item["created_at"] = datetime.utcnow().isoformat()
-    _records.append(item)
-    return item
-
-
-@app.get("/records")
-def list_records() -> list[dict[str, Any]]:
-    return _records
-'''
-
-    @staticmethod
-    def _frontend_project_fallback(task: str) -> str:
-        title = AgentLoop._title_from_task(task) or "AgentHub 项目前端"
-        is_chess = any(word in str(task).lower() for word in ("chess", "国际象棋", "象棋"))
-        board = """
-      <div class="board" id="board"></div>
-      <script>
-        const pieces = ["♜","♞","♝","♛","♚","♝","♞","♜","♟","♟","♟","♟","♟","♟","♟","♟","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","♙","♙","♙","♙","♙","♙","♙","♙","♖","♘","♗","♕","♔","♗","♘","♖"];
-        const board = document.getElementById("board");
-        pieces.forEach((piece, index) => {
-          const cell = document.createElement("button");
-          cell.className = "cell " + (((Math.floor(index / 8) + index) % 2) ? "dark" : "light");
-          cell.textContent = piece;
-          cell.onclick = () => cell.classList.toggle("selected");
-          board.appendChild(cell);
-        });
-      </script>
-""" if is_chess else """
-      <section class="panel">
-        <h2>交互区域</h2>
-        <input id="todo" placeholder="输入一条任务" />
-        <button onclick="addItem()">加入列表</button>
-        <ul id="items"></ul>
-      </section>
-      <script>
-        function addItem() {
-          const input = document.getElementById("todo");
-          const value = input.value.trim();
-          if (!value) return;
-          const li = document.createElement("li");
-          li.textContent = value;
-          document.getElementById("items").appendChild(li);
-          input.value = "";
-        }
-      </script>
-"""
-        extra_css = """
-    .board{display:grid;grid-template-columns:repeat(8,54px);width:max-content;margin-top:24px;border:10px solid #7c4f2a;box-shadow:0 24px 60px rgba(39,24,10,.25)}
-    .cell{width:54px;height:54px;border:0;font-size:30px;cursor:pointer}
-    .light{background:#f1d9ae}.dark{background:#8b5a2b;color:#fff}.selected{outline:4px solid #2563eb;z-index:1}
-""" if is_chess else """
-    .panel{margin-top:24px;background:#fff;border:1px solid #dbe7ff;border-radius:18px;padding:24px;box-shadow:0 20px 60px rgba(15,23,42,.08)}
-    input{width:min(440px,70vw);padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px}
-    button{margin-left:10px;padding:12px 18px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:700}
-    li{margin:10px 0}
-"""
-        return f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{title}</title>
-  <style>
-    *{{box-sizing:border-box}}
-    body{{margin:0;font-family:"Microsoft YaHei",Arial,sans-serif;background:linear-gradient(135deg,#f8fbff,#eef4ff);color:#172033;min-height:100vh;padding:48px}}
-    .hero{{max-width:960px;margin:auto}}
-    .eyebrow{{color:#2563eb;font-weight:800;letter-spacing:.08em}}
-    h1{{font-size:clamp(34px,6vw,68px);line-height:1.05;margin:14px 0 18px}}
-    p{{font-size:20px;color:#64748b;line-height:1.7;max-width:780px}}
-    {extra_css}
-  </style>
-</head>
-<body>
-  <main class="hero">
-    <div class="eyebrow">AgentHub 生成项目</div>
-    <h1>{title}</h1>
-    <p>{task}</p>
-    {board}
-  </main>
-</body>
-</html>"""
-
     def _filter_tools_for_task(
         self,
         task: str,
@@ -1291,6 +1367,12 @@ def list_records() -> list[dict[str, Any]]:
             if name in blocked_document_tools:
                 continue
             if is_backend and name.startswith("artifact.create_"):
+                continue
+            if is_backend and name == "api.test":
+                continue
+            if is_release and name.startswith("terminal."):
+                continue
+            if is_release and name == "sandbox.run":
                 continue
             filtered.append(tool)
         return filtered
@@ -1729,6 +1811,8 @@ def list_records() -> list[dict[str, Any]]:
 - 用户明确要求生成 PDF、Word、PPT、Excel、HTML、网页、可下载文件、预览卡片或正式产物时，才调用 artifact.create_* 工具。
 - 用户只是要求“写一段、介绍、说明、回答、总结文字”，或明确说“直接回复、不需要产物”时，必须直接用聊天文本回答，不要调用 artifact 工具。
 - 如果已经调用工具并成功生成产物，仍要给用户一段自然语言回复，说明完成了什么以及如何查看卡片。
+- sandbox.run、terminal.start 的 command 不经过 shell，只能是一条可执行命令；不能写 cd、&&、;、|、>、< 或换行。需要进入子目录时使用 workdir 参数，例如 command="python main.py", workdir="backend"。
+- 如果运行、测试、部署或终端工具失败，最终回复必须如实说明失败项；不能声称依赖已安装、服务已启动、测试通过或部署成功。
 
 你的当前任务：
 {task}

@@ -1081,12 +1081,53 @@ def test_backend_data_app_plan_waits_for_backend_before_frontend():
     plan = scheduler._build_turn_plan(task)
     by_agent = {item["agent_id"]: item for item in plan}
 
-    assert [item["agent_id"] for item in plan] == ["backend", "frontend"]
+    assert [item["agent_id"] for item in plan] == ["backend", "frontend", "deploy"]
     assert by_agent["backend"]["stage"] == 1
     assert by_agent["frontend"]["stage"] == 2
+    assert by_agent["deploy"]["stage"] == 5
     assert by_agent["frontend"]["depends_on"] == ["backend"]
+    assert by_agent["deploy"]["depends_on"] == ["backend", "frontend"]
     scheduler._turn_plan = plan
     assert scheduler._ready_plan_targets() == ["backend"]
+
+
+def test_fullstack_plan_blocks_frontend_when_backend_dependency_failed():
+    scheduler = SchedulerAgent(
+        session_id="sess_failed_backend_blocks_frontend",
+        agents={
+            "backend": AgentConfig(
+                id="backend",
+                name="Backend Worker",
+                system_prompt="build api",
+                role="backend",
+                tools=["file.write", "sandbox.run", "api.test"],
+            ),
+            "frontend": AgentConfig(
+                id="frontend",
+                name="Frontend Worker",
+                system_prompt="build ui",
+                role="frontend",
+                tools=["artifact.create_web_app", "file.write"],
+            ),
+            "deploy": AgentConfig(
+                id="deploy",
+                name="Deploy Agent",
+                system_prompt="deploy",
+                role="deploy",
+                tools=["deploy.preview"],
+            ),
+        },
+        event_bus=EventDispatcher(),
+        blackboard_mgr=BlackboardManager(),
+        model_provider=None,
+    )
+    task = "生成一个示例前后端数据管理项目"
+    scheduler.current_task = task
+    scheduler._turn_plan = scheduler._build_turn_plan(task)
+    scheduler.reports["backend"] = _failed_report("backend")
+
+    assert scheduler._ready_plan_targets() == []
+    assert scheduler._blocked_plan_targets() == ["frontend", "deploy"]
 
 
 def test_fullstack_agent_tasks_follow_user_requirement_not_game_template():
@@ -1146,6 +1187,7 @@ def test_project_delivery_filters_document_artifact_tools_for_code_agents():
         {"function": {"name": "artifact.create_html"}},
         {"function": {"name": "artifact.create_web_app"}},
         {"function": {"name": "deploy.preview"}},
+        {"function": {"name": "api.test"}},
     ]
 
     frontend_loop = AgentLoop(
@@ -1173,6 +1215,32 @@ def test_project_delivery_filters_document_artifact_tools_for_code_agents():
     assert "file.write" in frontend_tools
     assert not any(name.startswith("artifact.create_") for name in backend_tools)
     assert "file.write" in backend_tools
+    assert "api.test" not in backend_tools
+
+
+def test_fullstack_backend_assignment_includes_runtime_requirements():
+    scheduler = SchedulerAgent(
+        session_id="sess_backend_runtime_requirements",
+        agents={
+            "backend": AgentConfig(
+                id="backend",
+                name="Backend Worker",
+                system_prompt="build api",
+                role="backend",
+                tools=["file.write", "sandbox.run", "api.test"],
+            ),
+        },
+        event_bus=EventDispatcher(),
+        blackboard_mgr=BlackboardManager(),
+        model_provider=None,
+    )
+    assignment = scheduler._task_for_agent(
+        "generate a frontend backend data management app",
+        scheduler.agents["backend"],
+    )
+
+    assert "Pydantic v2" in assignment
+    assert "HTTP probing succeeds" in assignment
 
 
 def test_project_delivery_does_not_fabricate_frontend_html_preview():
@@ -1200,7 +1268,7 @@ def test_project_delivery_does_not_fabricate_frontend_html_preview():
     assert second is None
 
 
-def test_project_delivery_forces_backend_workspace_file():
+def test_project_delivery_does_not_fabricate_backend_workspace_file():
     task = "Build an app with backend API, database storage, frontend and deploy"
     tools = [
         {"function": {"name": "file.write"}},
@@ -1214,9 +1282,61 @@ def test_project_delivery_forces_backend_workspace_file():
     filtered = loop._filter_tools_for_task(task, tools)
 
     forced = loop._forced_project_delivery_tool_call(task, filtered, [])
-    assert forced["function"]["name"] == "file.write"
-    assert "backend/main.py" in forced["function"]["arguments"]
+    assert forced is None
     assert "artifact.create_html" not in {item["function"]["name"] for item in filtered}
+
+
+def test_runtime_validation_failure_is_reported_even_after_file_write():
+    tool_results = [
+        {
+            "tool": "file.write",
+            "success": True,
+            "result": {"path": "backend/main.py"},
+        },
+        {
+            "tool": "sandbox.run",
+            "success": False,
+            "error": "command contains shell metacharacters",
+            "result": None,
+        },
+    ]
+
+    failure = AgentLoop._runtime_validation_failure_message(tool_results)
+    instruction = AgentLoop._summary_instruction(tool_results)
+
+    assert failure == "sandbox.run: command contains shell metacharacters"
+    assert "不得声称依赖已安装、服务已启动" in instruction
+
+
+def test_runtime_validation_ignores_install_timeout_after_compile_success():
+    tool_results = [
+        {
+            "tool": "sandbox.run",
+            "success": True,
+            "result": {
+                "status": "timeout",
+                "output": {
+                    "status": "timeout",
+                    "command": "pip install -r requirements.txt",
+                    "stderr": "build timed out",
+                },
+            },
+        },
+        {
+            "tool": "sandbox.run",
+            "success": True,
+            "result": {
+                "status": "succeeded",
+                "output": {
+                    "status": "succeeded",
+                    "command": "python -m py_compile main.py",
+                    "exit_code": 0,
+                },
+            },
+        },
+    ]
+
+    assert AgentLoop._runtime_validation_failure_message(tool_results) is None
 
 
 def test_project_delivery_forces_deploy_preview_from_artifact_context():
@@ -1241,6 +1361,63 @@ def test_project_delivery_forces_deploy_preview_from_artifact_context():
     assert forced is not None
     assert forced["function"]["name"] == "deploy.preview"
     assert "123e4567-e89b-12d3-a456-426614174000" in forced["function"]["arguments"]
+
+
+def test_project_delivery_hides_terminal_tools_from_deploy_agent():
+    task = "Build a frontend backend app and deploy preview"
+    tools = [
+        {"function": {"name": "deploy.preview"}},
+        {"function": {"name": "terminal.start"}},
+        {"function": {"name": "terminal.wait_for"}},
+        {"function": {"name": "sandbox.run"}},
+        {"function": {"name": "artifact.export"}},
+    ]
+    loop = AgentLoop(
+        AgentConfig(
+            id="deploy",
+            name="Deploy Agent",
+            system_prompt="deploy",
+            role="deploy",
+            tools=["deploy.preview", "terminal.start", "terminal.wait_for", "sandbox.run"],
+        ),
+        FakeModelProvider(),
+    )
+
+    filtered = {item["function"]["name"] for item in loop._filter_tools_for_task(task, tools)}
+
+    assert "deploy.preview" in filtered
+    assert "terminal.start" not in filtered
+    assert "terminal.wait_for" not in filtered
+    assert "sandbox.run" not in filtered
+
+
+def test_deploy_preview_success_suppresses_prior_terminal_uvicorn_failure():
+    tool_results = [
+        {
+            "tool": "terminal.start",
+            "success": False,
+            "error": "command executable is not allowed: uvicorn",
+            "result": None,
+        },
+        {
+            "tool": "deploy.preview",
+            "success": True,
+            "result": {
+                "status": "succeeded",
+                "output": {
+                    "status": "succeeded",
+                    "url": "http://localhost:8000/api/v1/deployments/feab2a38-0b64-49b7-99a4-7fd983d0c082/site/",
+                    "deployment_id": "feab2a38-0b64-49b7-99a4-7fd983d0c082",
+                    "validated_backend_path": "/health",
+                },
+            },
+        },
+    ]
+
+    assert AgentLoop._runtime_validation_failure_message(tool_results) is None
+    instruction = AgentLoop._summary_instruction(tool_results)
+    assert "feab2a38-0b64-49b7-99a4-7fd983d0c082" in instruction
+    assert "不要手写、改写或重新拼接" in instruction
 
 
 @pytest.mark.asyncio
@@ -1318,6 +1495,17 @@ def _ready_report(agent_id: str):
         state=AgentState.READY,
         will=AgentWill.EXECUTE,
         confidence=1.0,
+    )
+
+
+def _failed_report(agent_id: str):
+    from agent_runtime.core.types import AgentReport, AgentState, AgentWill
+
+    return AgentReport(
+        agent_id=agent_id,
+        state=AgentState.FAILED,
+        will=AgentWill.BLOCKED,
+        confidence=0.0,
     )
 
 

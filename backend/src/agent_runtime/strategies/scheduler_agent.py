@@ -33,6 +33,13 @@ logger = get_logger(__name__)
 SCHEDULER_DECISION_TIMEOUT_SECONDS = 12.0
 MAX_PLAN_TASKS = 8
 MAX_SUMMARY_ITEMS = 8
+FULLSTACK_BACKEND_RUNTIME_REQUIREMENTS = (
+    "\n\nBackend runtime requirements:\n"
+    "- Generated FastAPI/Pydantic code must run on the current Pydantic v2 environment; "
+    "use ConfigDict(from_attributes=True) or model_config for ORM responses instead of legacy-only orm_mode.\n"
+    "- Expose /openapi.json or another HTTP-reachable health/business endpoint. Deployment only counts the backend as started after HTTP probing succeeds.\n"
+    "- Do not report backend startup or deployment success unless the real HTTP service is reachable."
+)
 
 TEAM_LEADER_RUNTIME_PROMPT = """你是 AgentHub 群聊中的 Team Leader Agent。
 你的职责是根据用户输入、Blackboard、各 Agent 状态报告，选择下一步调度动作：
@@ -1087,12 +1094,10 @@ class SchedulerAgent(AgentActor):
             schedulable,
             lambda agent_id: self._agent_collaboration_kind(agent_id) == "review",
         )
-        release_id = None
-        if self._needs_release(task):
-            release_id = self._first_agent_matching(
-                schedulable,
-                lambda agent_id: self._agent_collaboration_kind(agent_id) == "release",
-            )
+        release_id = self._first_agent_matching(
+            schedulable,
+            lambda agent_id: self._agent_collaboration_kind(agent_id) == "release",
+        )
 
         for agent_id in (backend_id, frontend_id, doc_id, review_id, release_id):
             if agent_id:
@@ -1338,6 +1343,8 @@ class SchedulerAgent(AgentActor):
         if self._looks_like_fullstack_delivery(task):
             specialized = self._fullstack_task_for_agent(task, agent.id, agent, visible=False)
             if specialized:
+                if self._is_backend_agent(agent.id):
+                    return specialized + FULLSTACK_BACKEND_RUNTIME_REQUIREMENTS
                 return specialized
         return f"{task}\n\n请以 {role_hint} 的职责完成可见交付；不要重复其他 Agent 的工作。"
 
@@ -1400,8 +1407,12 @@ class SchedulerAgent(AgentActor):
                 f"用户需求：{requirement}\n\n"
                 "你负责后端/服务端交付。请先设计真实数据模型、存储字段、业务规则和 API 契约，"
                 "再调用 file.write 在当前工作区写入可运行的后端项目文件，例如 main.py、requirements.txt、README 或 API 文档。"
-                "输出必须贴合用户原始需求，不要复用其他历史示例或把任务替换成五子棋/模板页面。"
-                "如果无法写入真实文件，请明确说明阻塞原因，不要口头声称已经完成。"
+                "如需运行校验，请优先使用稳定的非交互命令，例如 command=\"python -m py_compile main.py\", workdir=\"backend\"；"
+                "本阶段只做文件生成、语法/单元级校验和 API 契约说明，不要调用 uvicorn 启动长驻服务，也不要用 api.test 的相对路径验证生成后端，避免误测到 AgentHub 平台自身接口。"
+                "真正的服务启动和 HTTP 健康探测由 Deploy Agent 的 deploy.preview 完成。不要在 command 里写 cd、&&、;、管道或换行。"
+                "requirements.txt 尽量使用兼容范围或当前环境可安装版本，避免不必要地 pin 旧版依赖导致安装超时。"
+                "输出必须贴合用户原始需求，不要复用其他历史示例或把任务替换成无关游戏/模板页面。"
+                "如果无法写入真实文件，或运行/测试工具失败，请明确说明阻塞原因，不要口头声称已经完成、启动或验证通过。"
             )
         if self._is_frontend_agent(agent_id):
             if visible:
@@ -1412,6 +1423,7 @@ class SchedulerAgent(AgentActor):
                 "再调用 file.write 写入真实前端项目文件。若产物是单页 HTML/Web 应用，可以基于同一份真实入口文件调用 "
                 "artifact.create_html 或 artifact.create_web_app 创建预览卡片；不要生成说明页、死模板或与需求无关的示例。"
                 "如果这是需要后端联动的项目，请在前端代码中清楚配置 API 地址，并说明如何与后端一起启动。"
+                "如需运行前端校验，请使用 workdir 参数进入前端目录，不要在 command 里写 cd、&&、;、管道或换行；工具失败时必须如实说明。"
             )
         if self._agent_can_create_docs(agent_id):
             if visible:
@@ -1436,7 +1448,7 @@ class SchedulerAgent(AgentActor):
                 + (f"请调用 deploy.preview(artifact_id=\"{artifact_id}\") 发布前端产物并返回真实可访问 URL。" if artifact_id else
                    "若 Frontend Worker 已生成真实 HTML/Web artifact，请调用 deploy.preview 发布并返回真实可访问 URL。")
                 + "若这是前后端分离项目，deploy.preview 会自动检测并启动后端服务。"
-                "没有真实 artifact、入口文件或服务运行记录时，不要声称已部署。"
+                "没有真实 artifact、入口文件或服务运行记录时，不要声称已部署；deploy.preview 返回 failed 时必须报告失败。"
             )
         return None
 
@@ -1767,6 +1779,18 @@ class SchedulerAgent(AgentActor):
             if plan_targets and is_multi_agent_task:
                 ready_plan_targets = self._ready_plan_targets()
                 if not ready_plan_targets:
+                    blocked_plan_targets = self._blocked_plan_targets()
+                    if blocked_plan_targets:
+                        decision.decision_type = "complete"
+                        decision.action = "complete"
+                        decision.target_agent_id = blocked_plan_targets[0]
+                        decision.target_agent_ids = blocked_plan_targets
+                        decision.rationale = _append_reason(
+                            decision.rationale,
+                            "Stopping downstream collaboration because required upstream dependencies failed.",
+                        )
+                        decision.fallback_reason = "dependency_failed"
+                        return decision
                     waiting_plan_targets = [
                         agent_id
                         for agent_id in plan_targets
@@ -1874,6 +1898,20 @@ class SchedulerAgent(AgentActor):
                         ],
                         fallback_reason="complete_guard_ready_stage",
                     )
+                blocked_targets = self._blocked_plan_targets()
+                if blocked_targets:
+                    return SchedulingDecision(
+                        decision_type="complete",
+                        action="complete",
+                        target_agent_id=blocked_targets[0],
+                        target_agent_ids=blocked_targets,
+                        task=self.current_task,
+                        task_description=self.current_task,
+                        rationale=(
+                            "The scheduler tried to continue, but downstream tasks depend on failed upstream work."
+                        ),
+                        fallback_reason="dependency_failed",
+                    )
                 return SchedulingDecision(
                     decision_type="parallel" if len(pending) > 1 else "assign",
                     action="assign",
@@ -1915,7 +1953,7 @@ class SchedulerAgent(AgentActor):
                 for dep in item.get("depends_on") or []
                 if str(dep or "").strip()
             ]
-            if not all(self._agent_has_terminal_report(dep) for dep in depends_on):
+            if not all(self._agent_completed_successfully(dep) for dep in depends_on):
                 continue
             ready.append((int(item.get("stage") or 1), index, agent_id))
         if not ready:
@@ -1927,9 +1965,34 @@ class SchedulerAgent(AgentActor):
             if stage == next_stage
         ]
 
+    def _blocked_plan_targets(self) -> list[str]:
+        blocked: list[str] = []
+        for item in self._turn_plan:
+            if not isinstance(item, dict):
+                continue
+            agent_id = str(item.get("agent_id") or "")
+            if not agent_id or self._agent_has_terminal_report(agent_id):
+                continue
+            depends_on = [
+                str(dep)
+                for dep in item.get("depends_on") or []
+                if str(dep or "").strip()
+            ]
+            if any(self._agent_failed(dep) for dep in depends_on):
+                blocked.append(agent_id)
+        return self._valid_target_ids(blocked)
+
     def _agent_has_terminal_report(self, agent_id: str) -> bool:
         report = self.reports.get(agent_id)
         return bool(report and report.state in {AgentState.COMPLETED, AgentState.FAILED})
+
+    def _agent_completed_successfully(self, agent_id: str) -> bool:
+        report = self.reports.get(agent_id)
+        return bool(report and report.state == AgentState.COMPLETED)
+
+    def _agent_failed(self, agent_id: str) -> bool:
+        report = self.reports.get(agent_id)
+        return bool(report and report.state == AgentState.FAILED)
 
     def _valid_target_ids(self, ids: list[str] | tuple[str, ...] | None) -> list[str]:
         return [

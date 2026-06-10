@@ -367,6 +367,61 @@ def test_group_context_lists_members_and_warns_current_agent_not_to_impersonate(
     assert bundle.sections["group"]["enabled"] is True
 
 
+def test_group_context_lists_default_full_tools_for_unconfigured_agents() -> None:
+    db = _memory_session()
+    user = _user(db)
+    conversation = _group_conversation(db, user)
+    backend = _agent(
+        db,
+        user,
+        name="Backend Worker",
+        agent_type="backend",
+        description="负责 FastAPI 与数据库服务",
+        tools=None,
+    )
+    db.add(_participant(conversation, backend))
+    current = _message(conversation, user, "生成一个示例前后端数据管理项目")
+    db.add(current)
+    db.commit()
+
+    bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=current,
+        agent=backend,
+        system_prompt="系统提示",
+        prompt="生成一个示例前后端数据管理项目",
+        mode="workflow-agent",
+    )
+
+    system_message = str(bundle.messages[0]["content"])
+    assert "file.write" in system_message
+    assert "sandbox.run" in system_message
+    assert "external_agent.invoke" in system_message
+
+
+def test_context_system_prompt_explains_sandbox_command_shape() -> None:
+    db = _memory_session()
+    user, conversation = _user_conversation(db)
+    agent = _agent(db, user)
+    message = _message(conversation, user, "生成一个项目并运行")
+    db.add(message)
+    db.commit()
+
+    bundle = ContextBuilder(db).build_agent_messages(
+        conversation=conversation,
+        user_message=message,
+        agent=agent,
+        system_prompt="系统提示",
+        prompt="生成一个项目并运行",
+        mode="agent_runtime",
+    )
+
+    system_message = str(bundle.messages[0]["content"])
+    assert "sandbox.run、terminal.start 的 command 只能是单条可执行命令" in system_message
+    assert "workdir" in system_message
+    assert "不能声称依赖已安装、服务已启动" in system_message
+
+
 def test_context_builder_uses_blackboard_and_current_agent_private_context() -> None:
     db = _memory_session()
     user = _user(db)
@@ -893,12 +948,15 @@ def _agent(
     agent_type: str = "assistant",
     description: str = "用于上下文验收的智能体",
 ) -> Agent:
+    config = {"tools": tools or []}
+    if tools is not None:
+        config["capability_permissions_initialized"] = True
     agent = Agent(
         owner_id=user.id,
         name=name,
         type=agent_type,
         description=description,
-        config={"tools": tools or []},
+        config=config,
     )
     db.add(agent)
     db.commit()

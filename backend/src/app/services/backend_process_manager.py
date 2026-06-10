@@ -33,6 +33,8 @@ class BackendProcess:
     process: subprocess.Popen
     started_at: float = field(default_factory=time.time)
     health_url: str | None = None
+    ready_path: str | None = None
+    startup_error: str | None = None
 
     @property
     def is_running(self) -> bool:
@@ -107,6 +109,7 @@ class BackendProcessManager:
             logger.error("Failed to start generated backend process: %s", exc)
             return None
 
+        ready_path = self._wait_for_health(port)
         backend_proc = BackendProcess(
             id=process_id,
             deployment_id=deployment_id,
@@ -114,17 +117,28 @@ class BackendProcessManager:
             cwd=backend_path,
             port=port,
             process=process,
-            health_url=f"http://127.0.0.1:{port}/api/stats",
+            health_url=f"http://127.0.0.1:{port}{ready_path}" if ready_path else None,
+            ready_path=ready_path,
         )
 
-        if self._wait_for_health(port):
+        if ready_path:
             logger.info("Generated backend started on port=%d pid=%d", port, process.pid)
         else:
-            logger.warning("Generated backend startup timed out on port=%d", port)
+            startup_error = self._stop_and_collect_output(process)
+            backend_proc.startup_error = startup_error
+            logger.warning(
+                "Generated backend startup timed out on port=%d: %s",
+                port,
+                startup_error or "no output",
+            )
+            return None
 
         with self._lock:
             self._processes[process_id] = backend_proc
         return backend_proc
+
+    def has_backend_entry(self, workspace_dir: Path, backend_dir: Path | None = None) -> bool:
+        return self._detect_entry(workspace_dir, backend_dir) is not None
 
     def get_backend(self, deployment_id: str) -> BackendProcess | None:
         process_id = f"backend_{deployment_id[:8]}"
@@ -210,22 +224,42 @@ class BackendProcessManager:
         except OSError:
             return False
 
-    def _wait_for_health(self, port: int) -> bool:
+    def _wait_for_health(self, port: int) -> str | None:
         deadline = time.time() + HEALTH_CHECK_TIMEOUT_SECONDS
         while time.time() < deadline:
-            if self._is_port_open(port):
-                return True
+            ready_path = self._ready_path(port)
+            if ready_path:
+                return ready_path
             time.sleep(HEALTH_CHECK_INTERVAL_SECONDS)
-        return False
+        return None
 
     @staticmethod
-    def _is_port_open(port: int) -> bool:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1)
-                return sock.connect_ex(("127.0.0.1", port)) == 0
-        except Exception:
-            return False
+    def _ready_path(port: int) -> str | None:
+        import urllib.request
+
+        for path in ("/openapi.json", "/health", "/api/health", "/api/stats", "/"):
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=1):
+                    return path
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _stop_and_collect_output(process: subprocess.Popen) -> str:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                stdout, stderr = process.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = process.communicate(timeout=3)
+        else:
+            stdout, stderr = process.communicate(timeout=1)
+        combined = "\n".join(part for part in (stderr, stdout) if part).strip()
+        if not combined:
+            return f"process exited with code {process.returncode}"
+        return combined[-2000:]
 
     def _cleanup_stale(self) -> None:
         stale_ids = [process_id for process_id, proc in self._processes.items() if not proc.is_running]

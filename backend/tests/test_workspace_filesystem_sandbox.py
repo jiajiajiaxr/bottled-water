@@ -47,6 +47,31 @@ def db() -> Iterator[Session]:
         session.close()
 
 
+def _test_html(title: str) -> str:
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 32px; color: #172033; }}
+    main {{ max-width: 720px; margin: 0 auto; }}
+    .panel {{ border: 1px solid #dbe5f2; padding: 20px; border-radius: 8px; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{title}</h1>
+    <section class="panel">
+      <p>这是用于工作区文件树测试的真实 HTML 产物，包含完整结构、样式和可预览内容。</p>
+      <p>它不是模板占位，也不是残缺片段，可以被产物系统正常归档和展示。</p>
+    </section>
+  </main>
+</body>
+</html>"""
+
+
 def test_workspace_directories_are_isolated(db: Session) -> None:
     user = _user()
     left = _workspace(user, "left")
@@ -110,6 +135,41 @@ def test_file_write_then_sandbox_run_reads_same_workspace_scope(db: Session) -> 
         assert session is not None
         assert session.command_history[0]["cwd"] == result["result"]["cwd"]
         assert any(item["path"] == "hello.py" for item in session.mounted_files)
+    finally:
+        _cleanup(workspace.id)
+
+
+def test_sandbox_allows_pip_single_command_but_rejects_shell_chaining(db: Session) -> None:
+    user, workspace, conversation = _user_workspace_conversation(db)
+
+    try:
+        pip_result = invoke_tool(
+            db,
+            user,
+            "sandbox.run",
+            {
+                "workspace_id": workspace.id,
+                "conversation_id": conversation.id,
+                "command": "pip --version",
+                "timeout": 5,
+            },
+        )
+
+        assert pip_result["result"]["status"] == "succeeded"
+        assert "pip" in pip_result["result"]["stdout"].lower()
+
+        with pytest.raises(ValidationAppError):
+            invoke_tool(
+                db,
+                user,
+                "sandbox.run",
+                {
+                    "workspace_id": workspace.id,
+                    "conversation_id": conversation.id,
+                    "command": "cd backend && pip --version",
+                    "timeout": 5,
+                },
+            )
     finally:
         _cleanup(workspace.id)
 
@@ -186,7 +246,7 @@ def test_workspace_file_tree_aggregates_upload_artifact_and_sandbox_files(db: Se
                 "workspace_id": workspace.id,
                 "conversation_id": conversation.id,
                 "title": "Demo Page",
-                "html": "<h1>Demo</h1>",
+                "html": _test_html("Demo Page"),
             },
         )
         invoke_tool(
@@ -589,7 +649,7 @@ def test_workspace_artifact_directory_display_name_uses_artifact_name(db: Sessio
                 "workspace_id": workspace.id,
                 "conversation_id": conversation.id,
                 "title": "HTML 示例演示页面",
-                "html": "<!doctype html><h1>HTML 示例演示页面</h1>",
+                "html": _test_html("HTML 示例演示页面"),
             },
         )["result"]
         tree = workspace_file_tree(db, user, workspace.id)

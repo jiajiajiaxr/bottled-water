@@ -3,6 +3,9 @@ from __future__ import annotations
 import logging
 import mimetypes
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path, PurePosixPath
 from shutil import rmtree
 from datetime import datetime, timezone
@@ -115,6 +118,9 @@ def deployment_health(artifact: Artifact, mode: str, access_url: str | None, dep
     site_root = deployment_site_root(deployment.id) if deployment else None
     site_index = site_root / "index.html" if site_root else None
     site_ready = bool(site_index and site_index.exists() and site_index.stat().st_size > 0)
+    runtime_check = _deployment_runtime_check(site_index, mode, site_ready)
+    script_syntax_check = _deployment_inline_script_syntax_check(site_index, mode, site_ready)
+    fullstack_check = _deployment_fullstack_check(site_index, deployment, mode, site_ready)
     has_payload = any(
         [
             site_ready,
@@ -156,12 +162,101 @@ def deployment_health(artifact: Artifact, mode: str, access_url: str | None, dep
             "status": "passed" if mode not in DEPLOYMENT_SITE_MODES or site_ready else "failed",
             "message": "index.html 已发布" if site_ready else ("当前模式不需要静态站点" if mode not in DEPLOYMENT_SITE_MODES else "未生成可访问的 index.html"),
         },
+        runtime_check,
+        script_syntax_check,
+        fullstack_check,
     ]
     status = "healthy" if all(item["status"] == "passed" for item in checks) else "failed"
     return {
         "status": status,
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "checks": checks,
+    }
+
+
+def _deployment_runtime_check(site_index: Path | None, mode: str, site_ready: bool) -> dict[str, str]:
+    if mode not in DEPLOYMENT_SITE_MODES:
+        return {
+            "name": "前端启动脚本",
+            "status": "passed",
+            "message": "当前模式不需要静态站点脚本检查",
+        }
+    if not site_ready or site_index is None:
+        return {
+            "name": "前端启动脚本",
+            "status": "failed",
+            "message": "缺少可检查的 index.html",
+        }
+    try:
+        content = site_index.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return {
+            "name": "前端启动脚本",
+            "status": "failed",
+            "message": "无法读取 index.html",
+        }
+    if _html_has_uncompiled_jsx_script(content):
+        return {
+            "name": "前端启动脚本",
+            "status": "failed",
+            "message": "检测到未编译 JSX 脚本，浏览器会渲染失败",
+        }
+    return {
+        "name": "前端启动脚本",
+        "status": "passed",
+        "message": "未检测到会导致浏览器启动失败的内联 JSX 脚本",
+    }
+
+
+def _deployment_fullstack_check(
+    site_index: Path | None,
+    deployment: Deployment | None,
+    mode: str,
+    site_ready: bool,
+) -> dict[str, str]:
+    if mode not in DEPLOYMENT_SITE_MODES or not deployment:
+        return {
+            "name": "全栈联动",
+            "status": "passed",
+            "message": "当前模式不需要全栈联动检查",
+        }
+    backend_port = (deployment.config or {}).get("backend_port")
+    if (deployment.config or {}).get("backend_start_failed"):
+        return {
+            "name": "全栈联动",
+            "status": "failed",
+            "message": str((deployment.config or {}).get("backend_start_error") or "检测到后端入口，但后端服务启动失败"),
+        }
+    if not backend_port:
+        return {
+            "name": "全栈联动",
+            "status": "passed",
+            "message": "未检测到后端服务，按纯前端预览处理",
+        }
+    if not site_ready or site_index is None:
+        return {
+            "name": "全栈联动",
+            "status": "failed",
+            "message": "后端已启动，但缺少可检查的前端入口",
+        }
+    try:
+        content = site_index.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return {
+            "name": "全栈联动",
+            "status": "failed",
+            "message": "后端已启动，但无法读取前端入口",
+        }
+    if _html_uses_deployment_api(content, deployment.id):
+        return {
+            "name": "全栈联动",
+            "status": "passed",
+            "message": "前端已通过部署代理连接后端 API",
+        }
+    return {
+        "name": "全栈联动",
+        "status": "failed",
+        "message": "后端已启动，但前端未连接部署代理 API，疑似 mock-only 预览",
     }
 
 
@@ -338,10 +433,17 @@ def _try_start_backend(deployment: Deployment, workspace_dir: Path) -> None:
             "backend_port": backend_proc.port,
             "backend_process_id": backend_proc.id,
             "backend_health_url": backend_proc.health_url,
+            "backend_ready_path": backend_proc.ready_path,
         }
         # 前端 HTML 中注入后端地址
         _inject_backend_url_to_site(deployment, backend_proc.port)
         logger.info("全栈部署：后端已启动 port=%d", backend_proc.port)
+    elif BACKEND_PROCESS_MANAGER.has_backend_entry(workspace_dir):
+        deployment.config = {
+            **(deployment.config or {}),
+            "backend_start_failed": True,
+            "backend_start_error": "检测到后端入口文件，但后端服务未通过 HTTP 启动检查",
+        }
 
 
 def _prepare_deployment_site_html(deployment: Deployment) -> None:
@@ -364,13 +466,8 @@ def _normalize_cdn_scripts(content: str) -> str:
     normalized = content.replace("https://unpkg.com/", "https://cdn.jsdelivr.net/npm/")
 
     uses_antd = "antd.min.js" in normalized or "antd@" in normalized
-    if uses_antd and "dayjs" not in normalized.lower():
-        dayjs_script = '<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/dayjs.min.js"></script>\n'
-        antd_match = re.search(r'<script[^>]+antd@[^>]+antd\.min\.js[^>]*></script>\s*', normalized)
-        if antd_match:
-            normalized = normalized[: antd_match.start()] + dayjs_script + normalized[antd_match.start() :]
-        else:
-            normalized = normalized.replace("</head>", f"{dayjs_script}</head>")
+    if uses_antd:
+        normalized = _ensure_dayjs_before_antd(normalized)
 
     has_jsx = bool(
         re.search(r"root\.render\(\s*<", normalized)
@@ -386,12 +483,191 @@ def _normalize_cdn_scripts(content: str) -> str:
         )
     if has_jsx:
         normalized = re.sub(
-            r"<script>(\s*(?:const|let|var|function)\s+)",
-            r'<script type="text/babel">\1',
+            r"<script(?P<attrs>[^>]*)>(?P<body>.*?)</script>",
+            _babel_script_replacement,
             normalized,
-            count=1,
+            flags=re.IGNORECASE | re.DOTALL,
         )
     return normalized
+
+
+def _ensure_dayjs_before_antd(content: str) -> str:
+    dayjs_script = '<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/dayjs.min.js"></script>\n'
+    without_dayjs = re.sub(
+        r'<script[^>]+dayjs@[^>]+dayjs\.min\.js[^>]*></script>\s*',
+        "",
+        content,
+        flags=re.IGNORECASE,
+    )
+    antd_match = re.search(
+        r'<script[^>]+antd@[^>]+antd\.min\.js[^>]*></script>\s*',
+        without_dayjs,
+        flags=re.IGNORECASE,
+    )
+    if antd_match:
+        return without_dayjs[: antd_match.start()] + dayjs_script + without_dayjs[antd_match.start() :]
+    return without_dayjs.replace("</head>", f"{dayjs_script}</head>")
+
+
+def _babel_script_replacement(match: re.Match[str]) -> str:
+    attrs = match.group("attrs") or ""
+    body = match.group("body") or ""
+    if "text/babel" in attrs.lower():
+        return match.group(0)
+    if not re.match(r"\s*(?:const|let|var|function|class|import\s+)", body):
+        return match.group(0)
+    if not _script_body_contains_jsx(body):
+        return match.group(0)
+
+    cleaned_attrs = re.sub(
+        r"\s+type\s*=\s*(['\"])(?:module|text/javascript|application/javascript)\1",
+        "",
+        attrs,
+        flags=re.IGNORECASE,
+    )
+    return f'<script type="text/babel"{cleaned_attrs}>{body}</script>'
+
+
+def _script_body_contains_jsx(body: str) -> bool:
+    return bool(
+        re.search(r"root\.render\(\s*<", body)
+        or re.search(
+            r"<(?:Space|Button|Modal|Form|Table|Card|Tag|Popconfirm|Select|Switch|Input|Row|Col|Divider|Tooltip|Badge|Tabs|Menu|Layout|Typography|App)[\s>/]",
+            body,
+        )
+    )
+
+
+def _html_has_uncompiled_jsx_script(content: str) -> bool:
+    for match in re.finditer(
+        r"<script(?P<attrs>[^>]*)>(?P<body>.*?)</script>",
+        content,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        attrs = match.group("attrs") or ""
+        body = match.group("body") or ""
+        lowered_attrs = attrs.lower()
+        if "src=" in lowered_attrs or "text/babel" in lowered_attrs:
+            continue
+        if _script_body_contains_jsx(body):
+            return True
+    return False
+
+
+def _deployment_inline_script_syntax_check(
+    site_index: Path | None,
+    mode: str,
+    site_ready: bool,
+) -> dict[str, str]:
+    check_name = "前端脚本语法"
+    if mode not in DEPLOYMENT_SITE_MODES:
+        return {
+            "name": check_name,
+            "status": "passed",
+            "message": "当前部署模式不需要静态站点脚本语法检查",
+        }
+    if not site_ready or site_index is None:
+        return {
+            "name": check_name,
+            "status": "failed",
+            "message": "缺少可检查的 index.html",
+        }
+    try:
+        content = site_index.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return {
+            "name": check_name,
+            "status": "failed",
+            "message": "无法读取 index.html",
+        }
+    error = _html_inline_script_syntax_error(content)
+    if error:
+        return {
+            "name": check_name,
+            "status": "failed",
+            "message": f"检测到内联 JavaScript 语法错误：{error}",
+        }
+    return {
+        "name": check_name,
+        "status": "passed",
+        "message": "内联 JavaScript 语法检查通过",
+    }
+
+
+def _html_inline_script_syntax_error(content: str) -> str | None:
+    node = shutil.which("node")
+    if not node:
+        return None
+    scripts: list[tuple[int, str]] = []
+    for index, match in enumerate(
+        re.finditer(
+            r"<script(?P<attrs>[^>]*)>(?P<body>.*?)</script>",
+            content,
+            flags=re.IGNORECASE | re.DOTALL,
+        ),
+        start=1,
+    ):
+        attrs = match.group("attrs") or ""
+        if "src=" in attrs.lower() or "text/babel" in attrs.lower():
+            continue
+        body = (match.group("body") or "").strip()
+        if not body or "window.AGENTHUB_API_BASE_URL" in body:
+            continue
+        scripts.append((index, body))
+    for index, body in scripts:
+        error = _node_check_script_syntax(node, body)
+        if error:
+            return f"script #{index}: {error}"
+    return None
+
+
+def _node_check_script_syntax(node: str, source: str) -> str | None:
+    with tempfile.NamedTemporaryFile(
+        "w",
+        suffix=".js",
+        encoding="utf-8",
+        delete=False,
+    ) as temp:
+        temp.write(source)
+        temp_path = Path(temp.name)
+    try:
+        result = subprocess.run(
+            [node, "--check", str(temp_path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        logger.debug("Node syntax check skipped: %s", exc)
+        return None
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    if result.returncode == 0:
+        return None
+    output = (result.stderr or result.stdout or "").strip()
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    for line in lines:
+        if line.startswith("SyntaxError:"):
+            return line
+    return lines[-1] if lines else "node --check failed"
+
+
+def _html_uses_deployment_api(content: str, deployment_id: str) -> bool:
+    proxy_site = f"/api/v1/deployments/{deployment_id}/site"
+    if f"{proxy_site}/api" in content:
+        return True
+    if proxy_site in content and re.search(r"['\"]/?api/", content):
+        return True
+    relative_api_patterns = (
+        r"\bAPI(?:_BASE)?(?:_URL)?\s*=\s*['\"]/?api['\"]",
+        r"\bfetch\(\s*['\"]/?api/",
+        r"\baxios\.(?:get|post|put|patch|delete)\(\s*['\"]/?api/",
+    )
+    return any(re.search(pattern, content) for pattern in relative_api_patterns)
 
 
 def _ensure_boot_fallback(content: str, deployment: Deployment) -> str:
@@ -426,19 +702,32 @@ def _inject_backend_url_to_site(deployment: Deployment, backend_port: int) -> No
         import re
 
         # 1. 注入后端 API 地址（使用 site 相对路径，走反向代理避免 CORS 问题）
-        proxy_api = f"/api/v1/deployments/{deployment.id}/site/api"
+        proxy_site = f"/api/v1/deployments/{deployment.id}/site"
+        proxy_api = f"{proxy_site}/api"
         pattern = r"(const\s+API(?:_BASE)?(?:_URL)?\s*=\s*['\"])(http://[^'\"]+)(['\"])"
         match = re.search(pattern, content)
         if match:
-            content = content.replace(match.group(0), f"{match.group(1)}{proxy_api}{match.group(3)}")
-            logger.info("已注入后端 API 地址: %s -> %s (走反向代理)", match.group(2), proxy_api)
+            injected_base = _deployment_proxy_base_for_url(match.group(2), proxy_site, proxy_api)
+            content = content.replace(match.group(0), f"{match.group(1)}{injected_base}{match.group(3)}")
+            logger.info("已注入后端 API 地址: %s -> %s (走反向代理)", match.group(2), injected_base)
 
         # 2. 替换所有 localhost:8000 引用（错误提示、硬编码地址等）
+        dynamic_host_pattern = (
+            r"(const\s+API(?:_BASE)?(?:_URL)?\s*=\s*)"
+            r"window\.location\.protocol\s*\+\s*['\"]//['\"]\s*\+\s*"
+            r"window\.location\.hostname\s*\+\s*['\"]:\d+['\"]"
+        )
+        content = re.sub(dynamic_host_pattern, rf"\1'{proxy_site}'", content)
+
         if "localhost:8000" in content:
-            content = content.replace("http://localhost:8000", proxy_api)
+            content = content.replace("http://localhost:8000/api", proxy_api)
+            content = content.replace("http://localhost:8000", proxy_site)
 
         # 3. 修复 axios 健康检测路径
-        content = content.replace("await api.get('/')", "await api.get('/api/')")
+        content = content.replace(f"{proxy_api}/api/", f"{proxy_api}/")
+        content = content.replace(f"{proxy_api}/api'", f"{proxy_api}'")
+        content = content.replace(f'{proxy_api}/api"', f'{proxy_api}"')
+        content = _inject_api_base_global(content, proxy_api)
 
         # 4. 替换不稳定的 CDN（unpkg.com 国内访问差，替换为 cdn.jsdelivr.net）
         if "unpkg.com" in content:
@@ -466,6 +755,21 @@ def _inject_backend_url_to_site(deployment: Deployment, backend_port: int) -> No
         index_file.write_text(content, encoding="utf-8")
     except Exception as e:
         logger.warning("注入后端地址失败: %s", e)
+
+
+def _deployment_proxy_base_for_url(raw_url: str, proxy_site: str, proxy_api: str) -> str:
+    """Choose a proxy base that matches how the generated frontend appends paths."""
+
+    return proxy_api if raw_url.rstrip("/").endswith("/api") else proxy_site
+
+
+def _inject_api_base_global(content: str, proxy_api: str) -> str:
+    if "window.AGENTHUB_API_BASE_URL" in content:
+        return content
+    snippet = f"<script>window.AGENTHUB_API_BASE_URL = {proxy_api!r};</script>\n"
+    if "</head>" in content:
+        return content.replace("</head>", snippet + "</head>", 1)
+    return snippet + content
 
 
 def deployment_backend_port(deployment: Deployment) -> int | None:

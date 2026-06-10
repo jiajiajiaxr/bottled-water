@@ -16,7 +16,8 @@ DENIED_EXECUTABLES = {
 }
 ALLOWED_EXECUTABLES = {
     "python", "python.exe", "py", "py.exe", "node", "node.exe", "npm", "npm.cmd",
-    "pnpm", "pnpm.cmd", "pytest", "pytest.exe", "ruff", "ruff.exe", "uv", "uv.exe",
+    "pnpm", "pnpm.cmd", "pip", "pip.exe", "pip3", "pip3.exe",
+    "pytest", "pytest.exe", "ruff", "ruff.exe", "uv", "uv.exe",
 }
 TEST_EXECUTABLES = {"pytest", "ruff", "npm", "pnpm", "uv"}
 

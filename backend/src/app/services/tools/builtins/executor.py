@@ -173,6 +173,8 @@ def _deploy_preview(db: Session, user: User, arguments: dict[str, Any]) -> dict[
     )
 
     backend_port = deployment.config.get("backend_port") if deployment.config else None
+    backend_ready_path = deployment.config.get("backend_ready_path") if deployment.config else None
+    backend_health_url = deployment.config.get("backend_health_url") if deployment.config else None
     result: dict[str, Any] = {
         "status": "succeeded" if deployment.status == "deployed" else "failed",
         "url": deployment.access_url,
@@ -185,10 +187,18 @@ def _deploy_preview(db: Session, user: User, arguments: dict[str, Any]) -> dict[
             "health": (deployment.extra or {}).get("health"),
             "error_message": deployment.error_message,
         },
+        "verified_claims_instruction": (
+            "Only claim checks explicitly present in deployment.health. "
+            "Do not claim every API endpoint or CRUD flow was verified unless this tool result lists those probes."
+        ),
     }
     if backend_port:
         result["backend_port"] = backend_port
         result["backend_url"] = f"http://localhost:{backend_port}"
+    if backend_ready_path:
+        result["validated_backend_path"] = backend_ready_path
+    if backend_health_url:
+        result["backend_health_url"] = backend_health_url
     return result
 
 

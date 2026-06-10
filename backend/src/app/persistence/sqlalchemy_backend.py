@@ -31,6 +31,10 @@ class SQLAlchemyBackend(PersistenceBackend):
         extra[key] = deepcopy(value)
         conversation.extra = extra
 
+    async def _refresh_extra(self, conversation: Conversation) -> None:
+        """Reload shared conversation metadata before merging one logical key."""
+        await self.db.refresh(conversation, attribute_names=["extra"])
+
     async def create_conversation(self, metadata: dict) -> str:
         """创建会话"""
         conv = Conversation(
@@ -121,6 +125,7 @@ class SQLAlchemyBackend(PersistenceBackend):
             )
             conv = result.scalar_one_or_none()
             if conv:
+                await self._refresh_extra(conv)
                 self._merge_extra(conv, "blackboard", data)
                 await self.db.commit()
         except Exception:
@@ -146,6 +151,7 @@ class SQLAlchemyBackend(PersistenceBackend):
         )
         conv = result.scalar_one_or_none()
         if conv:
+            await self._refresh_extra(conv)
             contexts = dict((conv.extra or {}).get("agent_contexts") or {})
             contexts[agent_id] = deepcopy(frames)
             self._merge_extra(conv, "agent_contexts", contexts)
