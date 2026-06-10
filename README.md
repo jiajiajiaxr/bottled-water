@@ -136,4 +136,3 @@ pnpm exec vitest run --config tests/vitest.config.ts
 ## 说明
 
 - `backend/app-old` 仅作历史参考，不再承载新实现。
-- 当前仓库不再包含独立的 `platform-demo/` 演示页。
