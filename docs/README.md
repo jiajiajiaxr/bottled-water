@@ -12,6 +12,7 @@ This directory contains the current documentation for AgentHub. Historical desig
 - [Event protocol](./event-protocol.md): SSE/WebSocket event names and frontend merge behavior.
 - [Capability and data boundaries](./capability-data-boundaries.md): permissions, data ownership, and runtime safety boundaries.
 - [Current status](./implementation-status.md): what is complete, what is hardened enough for demos, and what remains a roadmap item.
+- [AI collaboration record](./ai-collaboration-record/README.md): Feishu-ready collaboration record, Spec, Rules, Skills, artifact links, and review checklist.
 
 ## Source Of Truth
 
