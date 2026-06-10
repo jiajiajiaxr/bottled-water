@@ -79,7 +79,7 @@ See [docker/README.md](./docker/README.md).
 
 ### Demo
 
-- Online static demo: [https://jiajiajiaxr.github.io/bottled-water/platform-demo/](https://jiajiajiaxr.github.io/bottled-water/platform-demo/)
+- Online static demo: [https://jiajiajiaxr.github.io/bottled-water/platform-demo/](https://jiajiajiaxr.github.io/bottled-water/platform-demo/) (auto-published from `main` via GitHub Actions)
 - Local operational demo:
 
 ```powershell
@@ -219,7 +219,7 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml up --build
 
 ### Demo 演示
 
-- 在线轻量静态 Demo：[https://jiajiajiaxr.github.io/bottled-water/platform-demo/](https://jiajiajiaxr.github.io/bottled-water/platform-demo/)
+- 在线轻量静态 Demo：[https://jiajiajiaxr.github.io/bottled-water/platform-demo/](https://jiajiajiaxr.github.io/bottled-water/platform-demo/)（由 `main` 分支通过 GitHub Actions 自动发布）
 - 本地实操 Demo：
 
 ```powershell

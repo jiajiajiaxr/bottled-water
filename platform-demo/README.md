@@ -4,7 +4,7 @@
 
 ## 静态发布到 GitHub Pages
 
-最简单的发布方式是把 `platform-demo/public` 作为 GitHub Pages 的发布目录。
+仓库已经配置 GitHub Actions，会把 `platform-demo/public` 自动发布到 GitHub Pages 的 `/platform-demo/` 路径下。
 
 可托管内容全部在：
 
@@ -63,12 +63,12 @@ GET  /api/artifacts/latest
 
 页面会自动检测当前是否有本地 Demo API。如果没有 API，就保持纯静态演示模式。
 
-## GitHub Pages 建议
+## GitHub Pages 说明
 
-如果仓库使用 GitHub Pages，可以选择以下任一方式：
+静态 GitHub Pages 不能直接提供后台任务 API。这个 Demo 已经内置浏览器端任务模拟，所以不影响演示。
 
-- 把 `platform-demo/public` 复制到 Pages 分支或发布目录。
-- 在 CI 里上传 `platform-demo/public` 作为 Pages artifact。
-- 后续如果要和主产品发布页合并，可把这个目录挂到 `/platform-demo/` 路由下。
+如果你想本地修改后重新发布，只要推送 `main` 分支，Pages 工作流就会自动把 `platform-demo/public` 重新部署到：
 
-注意：静态 GitHub Pages 不能直接提供后台任务 API。这个 Demo 已经内置浏览器端任务模拟，所以不影响演示。
+```text
+https://jiajiajiaxr.github.io/bottled-water/platform-demo/
+```
