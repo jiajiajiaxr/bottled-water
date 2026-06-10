@@ -1,6 +1,9 @@
 # AgentHub - AI Agent 开发者交流社区
 
-`生产可用` `TypeScript 5.3` `Node.js 20+` `Docker Ready`
+![状态](https://img.shields.io/badge/状态-生产可用-brightgreen)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.3-3178C6?logo=typescript&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
 
 > 面向 AI Agent 开发者、研究者和爱好者的综合性协同平台，把聊天、群协作、智能体配置、模型接入、工具链、工作流编排、文件与成果预览、审计和部署整合在同一产品界面中。
 
