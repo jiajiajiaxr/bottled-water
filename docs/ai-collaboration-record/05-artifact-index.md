@@ -9,7 +9,6 @@
 | 前端源码 | `frontend/src` | IM 工作台、文件系统、工作流画布、预览面板 |
 | 桌面端 | `desktop-client` | 三端补充能力之一 |
 | 移动端 | `mobile-client` | 信息同步与轻量指令入口 |
-| 平台演示 | `platform-demo` | 产品演示素材 |
 
 ## 2. 文档产物
 
