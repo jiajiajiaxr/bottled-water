@@ -5,6 +5,7 @@ This directory contains the current documentation for AgentHub. Historical desig
 ## Start Here
 
 - [Development guide](./development-guide.md): local setup, Docker deployment, tests, and common workflows.
+- [Product design](./product-design.md): product positioning, user scenarios, capability design, runtime flow, acceptance script, and delivery scope.
 - [Feature guide](./functional-guide.md): product capabilities and user-facing flows.
 - [File map](./file-map.md): where the important backend, frontend, test, and deployment files live.
 - [Backend architecture](./backend-architecture.md): FastAPI, persistence, runtime services, tools, skills, MCP, and workflow execution.
