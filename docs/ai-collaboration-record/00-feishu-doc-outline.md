@@ -59,12 +59,13 @@ flowchart LR
 
 ## 6. 规范沉淀
 
-仓库中已沉淀以下 AI 协作资产：
+仓库中已沉淀以下 AI 编程协作资产，既能说明开发过程，也能作为后续继续使用 Codex / Computer Use / Browser 协作开发的复用规范：
 
 - 协作过程：[01-collaboration-log.md](./01-collaboration-log.md)
 - 协作 Spec：[02-ai-collaboration-spec.md](./02-ai-collaboration-spec.md)
 - 协作 Rules：[03-agent-rules.md](./03-agent-rules.md)
-- AI 编程 Skills / Prompts：[04-skills-and-prompts.md](./04-skills-and-prompts.md)
+- AI 编程 Skills / Prompts 方法论：[04-skills-and-prompts.md](./04-skills-and-prompts.md)
+- 可复用 Codex Skill 包：[skills/](./skills/)
 - 产物索引：[05-artifact-index.md](./05-artifact-index.md)
 
 ## 7. 典型案例
